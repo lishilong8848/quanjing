@@ -1,0 +1,316 @@
+.equipment-repair-css-ready {
+  --equipment-repair-css-ready: 1;
+}
+.equipment-repair-dialog {
+  --el-warning: hsl(35 65% 35%);
+  --repair-dialog-width: 72rem;
+  --repair-row-space: 0.5rem;
+  --repair-header-bg: hsl(212 45% 95%);
+  --repair-row-hover: hsl(211 52% 96%);
+}
+.equipment-ledger-dialog.equipment-repair-dialog {
+  width: min(var(--repair-dialog-width), calc(100vw - 2rem));
+  max-width: var(--repair-dialog-width);
+  padding: 1.25rem;
+  gap: 0.75rem;
+}
+.equipment-repair-dialog[data-state='open'] {
+  --tw-enter-opacity: 1;
+  --tw-enter-scale: 1;
+}
+.equipment-repair-card [data-slot='card-header'],
+.equipment-repair-card [data-slot='card-title'] {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+.equipment-repair-card [data-slot='card-header'] {
+  justify-content: space-between;
+}
+.equipment-repair-card svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  color: var(--el-blue);
+}
+.equipment-repair-totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding-block: 0.25rem 0.75rem;
+}
+.equipment-repair-totals .equipment-repair-stat {
+  --repair-tone: var(--el-blue);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.3rem 0.5rem;
+  align-items: center;
+  position: relative;
+  width: 100%;
+  height: auto;
+  padding: 1rem;
+  text-align: left;
+  white-space: normal;
+  border-radius: var(--el-radius);
+  border: 1px solid color-mix(in srgb, var(--repair-tone) 20%, var(--el-border));
+  border-top: 0.1875rem solid
+    color-mix(in srgb, var(--repair-tone) 65%, var(--el-surface));
+  background: color-mix(in srgb, var(--repair-tone) 7%, var(--el-surface));
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.equipment-repair-totals .is-completed {
+  --repair-tone: var(--el-success);
+}
+.equipment-repair-totals .is-pending {
+  --repair-tone: var(--el-warning);
+}
+.equipment-repair-totals .equipment-repair-stat:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--repair-tone) 12%, var(--el-surface));
+  border-color: color-mix(in srgb, var(--repair-tone) 50%, var(--el-border));
+}
+.equipment-repair-totals .equipment-repair-stat:focus-visible {
+  outline: 2px solid var(--repair-tone);
+  outline-offset: 2px;
+}
+.equipment-repair-totals .equipment-repair-stat svg {
+  color: var(--repair-tone);
+}
+.equipment-repair-totals .equipment-repair-stat-arrow {
+  position: absolute;
+  inset-inline-end: 0.75rem;
+  inset-block-end: 0.875rem;
+  opacity: 0.65;
+}
+.equipment-repair-totals span {
+  font-size: 0.8125rem;
+  color: var(--el-muted);
+}
+.equipment-repair-totals strong {
+  grid-column: 1 / -1;
+  font-size: 1.625rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--repair-tone);
+}
+.equipment-repair-totals small {
+  margin-left: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--el-muted);
+}
+.equipment-repair-card p {
+  color: var(--el-muted);
+  font-size: 0.8125rem;
+}
+.equipment-repair-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+.equipment-repair-result-count {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  color: var(--el-muted);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+.equipment-repair-device-list {
+  min-height: 5rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.equipment-repair-dialog .equipment-ledger-dialog-footer {
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.equipment-repair-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-inline-end: auto;
+  color: var(--el-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.equipment-repair-device-list [data-slot='table-container'] {
+  overflow: visible;
+}
+.equipment-repair-table {
+  table-layout: fixed;
+  font-size: 0.8125rem;
+}
+.equipment-repair-table th,
+.equipment-repair-table td {
+  padding: var(--repair-row-space) 0.625rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border-color: var(--el-border);
+}
+.equipment-repair-table tr {
+  border-color: var(--el-border);
+}
+.equipment-repair-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 2.25rem;
+  background: var(--repair-header-bg);
+  color: var(--el-muted);
+  font-size: 0.75rem;
+}
+.equipment-repair-table th:nth-child(1) {
+  width: 23%;
+}
+.equipment-repair-table th:nth-child(2) {
+  width: 12%;
+}
+.equipment-repair-table th:nth-child(3) {
+  width: 17%;
+}
+.equipment-repair-table th:nth-child(4) {
+  width: 11%;
+}
+.equipment-repair-table th:nth-child(5) {
+  width: 26%;
+}
+.equipment-repair-table th:nth-child(6) {
+  width: 11%;
+}
+.equipment-repair-table th:last-child,
+.equipment-repair-table td:last-child {
+  text-align: right;
+}
+.equipment-repair-table tbody tr:hover {
+  background: var(--repair-row-hover);
+}
+.equipment-repair-device-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.375rem;
+  width: 100%;
+  text-align: left;
+  border-radius: var(--el-radius);
+}
+.equipment-repair-device-link:hover strong {
+  color: var(--el-blue);
+  text-decoration: underline;
+}
+.equipment-repair-device-list .equipment-repair-device-link:focus-visible {
+  outline: 2px solid var(--el-blue);
+  outline-offset: 2px;
+}
+.equipment-repair-device-list svg {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  color: var(--el-muted);
+}
+.equipment-repair-device-name,
+.equipment-repair-device-group {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.equipment-repair-device-name > span,
+.equipment-repair-device-group > span {
+  color: var(--el-muted);
+  font-size: 0.75rem;
+}
+.equipment-repair-device-group strong {
+  font-weight: 500;
+  color: var(--el-blue);
+}
+.equipment-repair-mobile-detail,
+.equipment-repair-mobile-detail.equipment-repair-device-fault {
+  display: none;
+}
+.equipment-repair-device-fault {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.equipment-repair-device-status {
+  display: grid;
+  gap: 0.125rem;
+  font-size: 0.75rem;
+  color: var(--el-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.equipment-repair-device-status .is-completed {
+  color: hsl(162 43% 35%);
+}
+.equipment-repair-device-status .is-pending {
+  color: var(--el-warning);
+}
+@media (max-width: 640px) {
+  .equipment-ledger-dialog.equipment-repair-dialog {
+    padding: 1rem;
+  }
+  .equipment-repair-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .equipment-repair-filters > input {
+    grid-column: 1 / -1;
+  }
+  .equipment-repair-table .equipment-repair-desktop-column {
+    display: none;
+  }
+  .equipment-repair-table th:nth-child(1) {
+    width: 57%;
+  }
+  .equipment-repair-table th:nth-child(2) {
+    width: 21%;
+  }
+  .equipment-repair-table th:nth-child(6) {
+    width: 22%;
+  }
+  .equipment-repair-table th,
+  .equipment-repair-table td {
+    padding: var(--repair-row-space) 0.25rem;
+  }
+  .equipment-repair-mobile-detail {
+    display: block;
+    font-size: 0.6875rem;
+    color: var(--el-muted);
+    margin-top: 0.25rem;
+  }
+  .equipment-repair-mobile-detail.equipment-repair-device-fault {
+    display: -webkit-box;
+  }
+  .equipment-repair-device-status {
+    font-size: 0.6875rem;
+  }
+  .equipment-repair-totals {
+    gap: 0.5rem;
+  }
+  .equipment-repair-totals .equipment-repair-stat {
+    padding: 0.75rem 0.625rem;
+    grid-template-columns: 1fr;
+    align-content: start;
+  }
+  .equipment-repair-totals .equipment-repair-stat > svg:first-child {
+    display: none;
+  }
+  .equipment-repair-totals .equipment-repair-stat > span {
+    min-height: 2.5em;
+    line-height: 1.25;
+    padding-inline-end: 0;
+  }
+  .equipment-repair-totals .equipment-repair-stat-arrow {
+    width: 0.75rem;
+    height: 0.75rem;
+    inset-inline-end: 0.5rem;
+  }
+  .equipment-repair-totals strong {
+    font-size: 1.375rem;
+  }
+}

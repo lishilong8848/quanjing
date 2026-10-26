@@ -1,0 +1,18 @@
+{
+  "qq_email": "",
+  "auth_code": "",
+  "recipient": "user-b54e355d@example.com; user-20a3f7b8@example.com",
+  "download_folder": "downloads",
+  "feishu_app_id": "",
+  "feishu_app_secret": "",
+  "feishu_app_token": "",
+  "ali_alarm_source_url": "https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE",
+  "ali_staff_source_url": "https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE",
+  "ali_alarm_template_path": "resources/EA118机房2026年3月告警分析表.xlsx",
+  "ali_power_alert_config_path": "../全景助手/config/power-alert-sync.config.json",
+  "feishu_verification_token": "",
+  "feishu_encrypt_key": "",
+  "listener_target_chat_ids": [
+    "oc_c79f407063dc9ca9f70cc76cb4059895"
+  ]
+}

@@ -1,0 +1,419 @@
+.training-sharing-board {
+  --meeting-chart-blue: hsl(217 92% 62%);
+  --meeting-chart-cyan: hsl(186 78% 47%);
+  --meeting-chart-indigo: hsl(249 86% 70%);
+  --meeting-chart-amber: hsl(35 95% 59%);
+  --meeting-chart-neutral: hsl(215 20% 76%);
+  --meeting-surface: hsl(210 30% 99%);
+  --meeting-border: hsl(213 24% 90%);
+  --meeting-soft: hsl(213 30% 95%);
+  --training-accent: var(--meeting-chart-blue);
+  --meeting-shadow: 0 0.125rem 0.75rem hsl(215 25% 30% / 4%);
+
+  gap: 1.25rem;
+}
+.training-filter-panel {
+  background: var(--meeting-surface);
+  border-color: var(--meeting-border);
+  border-radius: var(--meeting-radius);
+  box-shadow: var(--meeting-shadow);
+}
+.training-filters {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2fr) repeat(6, minmax(0, 1fr)) auto;
+  gap: 0.75rem;
+}
+.training-filters label,
+.training-filters .meeting-source-search {
+  min-width: 0;
+}
+.training-source-warning {
+  color: var(--meeting-muted);
+  font-size: 0.8125rem;
+  padding: 0 1.5rem 1rem;
+}
+.training-metric-button {
+  display: block;
+  text-align: left;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--meeting-radius);
+}
+.training-metric-button > div > svg {
+  width: 1rem;
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--meeting-primary);
+}
+.training-metric-button .meeting-metric-content > div {
+  min-width: 0;
+}
+.training-metric-button strong small {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--meeting-muted);
+  margin-left: 0.35rem;
+}
+.training-metric-button .meeting-metric-content > div > small {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--meeting-muted);
+  font-size: 0.75rem;
+}
+.training-insight-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: stretch;
+}
+.training-timeline-panel,
+.training-ranking-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--meeting-radius);
+  box-shadow: var(--meeting-shadow);
+}
+.training-timeline,
+.training-ranking {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 1.5rem 0;
+  flex: 1;
+}
+.training-timeline h3 {
+  padding: 0.5rem 0 0.375rem;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--meeting-primary);
+}
+.training-timeline-entry {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  text-align: left;
+  gap: 0.75rem;
+  padding: 0.875rem 0;
+  border-bottom: 1px solid var(--meeting-border);
+}
+.training-timeline-entry time {
+  flex-shrink: 0;
+  width: 3.5rem;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--meeting-muted);
+  border-left: 0.1875rem solid var(--meeting-chart-cyan);
+  padding-left: 0.5rem;
+}
+.training-timeline-content {
+  display: grid;
+  gap: 0.375rem;
+  flex: 1;
+  min-width: 0;
+}
+.training-timeline-content strong {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.training-timeline-content > span {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+  flex-wrap: wrap;
+  color: var(--meeting-muted);
+  font-size: 0.75rem;
+}
+.training-timeline-content i {
+  width: 0.2rem;
+  height: 0.2rem;
+  border-radius: 50%;
+  background: var(--meeting-border);
+}
+.training-timeline-facts {
+  display: grid;
+  justify-items: end;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--meeting-muted);
+  flex-shrink: 0;
+}
+.training-timeline-entry > svg {
+  width: 1rem;
+  color: var(--meeting-primary);
+  flex-shrink: 0;
+}
+.training-rank-switch {
+  display: flex;
+  gap: 0.375rem;
+  margin: 0 1.5rem;
+  padding: 0.25rem;
+  border-radius: var(--meeting-radius);
+  background: var(--meeting-soft);
+  width: fit-content;
+}
+.training-rank-switch button {
+  height: 2rem;
+}
+.training-ranking li + li {
+  border-top: 1px solid var(--meeting-border);
+}
+.training-ranking {
+  display: flex;
+  flex-direction: column;
+}
+.training-ranking li {
+  flex: 1;
+  display: flex;
+}
+.training-ranking button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 0;
+  text-align: left;
+}
+.training-rank-number {
+  width: 1.75rem;
+  color: var(--meeting-muted);
+  font-size: 0.875rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.training-rank-first {
+  color: var(--meeting-primary);
+}
+.training-rank-person {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.375rem;
+}
+.training-rank-person > strong {
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.training-rank-person > small,
+.training-rank-value small {
+  font-size: 0.75rem;
+  color: var(--meeting-muted);
+}
+.training-bar {
+  display: block;
+  height: 0.25rem;
+  border-radius: var(--meeting-radius);
+  background: var(--meeting-soft);
+  overflow: hidden;
+}
+.training-bar i {
+  display: block;
+  height: 100%;
+  width: var(--training-width);
+  background: var(--training-accent);
+  border-radius: inherit;
+}
+.training-rank-value {
+  display: grid;
+  gap: 0.125rem;
+  justify-items: end;
+  min-width: 3rem;
+  flex-shrink: 0;
+}
+.training-rank-value strong {
+  font-size: 1.375rem;
+  font-weight: 700;
+}
+.training-ranking li:first-child .training-rank-first ~ .training-rank-value {
+  color: var(--meeting-primary);
+}
+.training-ranking-note {
+  margin: 0;
+  padding: 0 1.5rem 1.25rem;
+  color: var(--meeting-muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.training-sharing-board .meeting-pagination {
+  padding: 1rem 1.5rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.training-specialty-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.875rem;
+  padding: 0.5rem 1.5rem 1.5rem;
+}
+.training-specialty-groups button {
+  display: grid;
+  gap: 0.625rem;
+  padding: 1rem;
+  text-align: left;
+  background: color-mix(
+    in srgb,
+    var(--training-accent) 6%,
+    var(--meeting-surface)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--training-accent) 16%, var(--meeting-border));
+  border-radius: var(--meeting-radius);
+}
+.training-specialty-groups button > span:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+.training-specialty-groups svg {
+  width: 1rem;
+  color: var(--meeting-primary);
+  flex-shrink: 0;
+}
+.training-specialty-value strong {
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+.training-specialty-value small {
+  margin-left: 0.375rem;
+}
+.training-specialty-groups small {
+  font-size: 0.75rem;
+  color: var(--meeting-muted);
+}
+.training-resource-list {
+  padding: 0 1.5rem;
+}
+.training-resource-row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr) minmax(13rem, 0.65fr);
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+  border: 0;
+  border-radius: 0;
+}
+.training-resource-row + .training-resource-row {
+  border-top: 1px solid var(--meeting-border);
+}
+.training-resource-date {
+  display: grid;
+  gap: 0.125rem;
+  justify-items: center;
+  padding: 0.5rem 0;
+  border-radius: var(--meeting-radius);
+  background: var(--meeting-soft);
+  color: var(--meeting-primary);
+}
+.training-resource-date strong {
+  font-size: 1.25rem;
+}
+.training-resource-date small {
+  font-size: 0.625rem;
+}
+.training-resource-content {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.training-resource-content .meeting-source-title {
+  font-size: 0.875rem;
+}
+.training-resource-content .meeting-source-title > svg {
+  display: none;
+}
+.training-resource-content .meeting-training-person strong {
+  overflow-wrap: anywhere;
+}
+.training-resource-actions {
+  display: grid;
+  justify-items: end;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.training-resource-actions .meeting-resource-links {
+  justify-content: end;
+}
+.training-drill-dialog .meeting-pagination {
+  padding: 0;
+}
+.training-sharing-board button:focus-visible {
+  outline: 2px solid var(--meeting-primary);
+  outline-offset: 3px;
+}
+.training-sharing-board .training-metric-button:disabled {
+  cursor: default;
+}
+@media (width <= 1200px) {
+  .training-filters {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .training-filters .meeting-source-search {
+    grid-column: span 2;
+  }
+}
+@media (width <= 960px) {
+  .training-insight-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .training-specialty-groups {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .training-resource-row {
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+  }
+  .training-resource-actions {
+    grid-column: 2;
+    justify-items: start;
+  }
+  .training-resource-actions .meeting-resource-links {
+    justify-content: start;
+  }
+}
+@media (width <= 640px) {
+  .training-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0 1rem 1rem;
+  }
+  .training-filters .meeting-source-search {
+    min-width: 0;
+  }
+  .training-metric-button .meeting-metric-content {
+    gap: 0.5rem;
+    padding: 1rem;
+    flex-wrap: wrap;
+  }
+  .training-timeline,
+  .training-ranking,
+  .training-resource-list {
+    padding-inline: 1rem;
+  }
+  .training-timeline-entry {
+    flex-wrap: wrap;
+  }
+  .training-timeline-facts {
+    margin-left: 4.25rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .training-timeline-entry > svg {
+    margin-left: auto;
+  }
+  .training-timeline-content {
+    flex-basis: calc(100% - 4.25rem);
+  }
+  .training-specialty-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-inline: 1rem;
+  }
+  .training-sharing-board .meeting-pagination {
+    padding-inline: 1rem;
+  }
+  .training-resource-actions {
+    grid-column: 1 / -1;
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "id": "nantong_org_feishu_bitable_crud_3",
+  "pluginKey": "@official-plugins/feishu-bitable",
+  "pluginVersion": "1.0.1",
+  "name": "南通组织架构",
+  "description": "管理飞书多维表格，支持数据的创建、查询、更新、删除",
+  "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/fzgeh7nuhfboznulog/bitable.svg",
+  "paramsSchema": {},
+  "formValue": {
+    "owner": "7310140364520734723",
+    "appToken": "PUBLIC_EXAMPLE_FEISHU_ORG_APP_TOKEN",
+    "tableID": "tbl82d0b2f3ddc70",
+    "fields": [
+      {
+        "readable": true,
+        "writeable": false,
+        "id": "fldEG1Dr1u",
+        "name": "编码",
+        "type": 1005,
+        "bizType": "AutoNumber"
+      },
+      {
+        "enumValues": [
+          "设施运维经理",
+          "设施运维示例人员001",
+          "弱电示例人员001",
+          "电气示例人员001",
+          "暖通示例人员001",
+          "设施运维副经理",
+          "综合管理",
+          "电气工程师",
+          "暖通工程师",
+          "弱电工程师",
+          "安全&消防工程师",
+          "消防工程师",
+          "消防示例人员001",
+          "值班账号"
+        ],
+        "id": "fldBfz4ppb",
+        "name": "职位",
+        "readable": true,
+        "writeable": true,
+        "type": 3,
+        "bizType": "SingleSelect"
+      },
+      {
+        "bizType": "MultiSelect",
+        "enumValues": [
+          "H楼",
+          "A楼",
+          "B楼",
+          "C楼",
+          "D楼",
+          "E楼",
+          "110站",
+          "弱电",
+          "电气",
+          "暖通",
+          "消防",
+          "安全",
+          "综合"
+        ],
+        "id": "fldm9kFWfa",
+        "readable": true,
+        "writeable": true,
+        "name": "楼栋/专业",
+        "type": 4
+      },
+      {
+        "readable": true,
+        "writeable": false,
+        "id": "fldqoMZyRH",
+        "name": "示例人员001",
+        "type": 20,
+        "bizType": "Formula"
+      },
+      {
+        "bizType": "Lookup",
+        "id": "fldG5AyTUu",
+        "name": "示例人员001 副本 2",
+        "readable": false,
+        "writeable": false,
+        "type": 19
+      },
+      {
+        "id": "fldSLjvCQu",
+        "name": "值班账号",
+        "type": 11,
+        "bizType": "User",
+        "readable": true,
+        "writeable": true
+      },
+      {
+        "name": "示例人员001（文本）",
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true,
+        "writeable": false,
+        "id": "fldRM5TGHi"
+      },
+      {
+        "name": "父记录",
+        "type": 18,
+        "bizType": "SingleLink",
+        "readable": false,
+        "writeable": false,
+        "id": "fldt4STCp9"
+      }
+    ]
+  },
+  "createdAt": 1770089501492,
+  "updatedAt": 1770089520562,
+  "createdBy": 7310140364520734723
+}

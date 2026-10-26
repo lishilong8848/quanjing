@@ -1,0 +1,201 @@
+{
+  "client_token": "codex_purchase_process_realtime_20260721_01",
+  "title": "采购流程同步（系统流程→页面字段）",
+  "steps": [
+    {
+      "id": "trigger_legacy_process",
+      "type": "SetRecordTrigger",
+      "title": "系统采购流程变更",
+      "next": "switch_purchase_process",
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "field_watch_info": [
+          {
+            "field_name": "采购流程（勿动！由系统执行）",
+            "operator": "containsAny",
+            "value": [
+              { "value_type": "option", "value": { "name": "未开始（待审批）" } },
+              { "value_type": "option", "value": { "name": "审批通过（待下单）" } },
+              { "value_type": "option", "value": { "name": "下单完成（待签收）" } },
+              { "value_type": "option", "value": { "name": "物品签收（待入库）" } },
+              { "value_type": "option", "value": { "name": "采购已终止" } }
+            ]
+          }
+        ],
+        "trigger_control_list": [
+          "pasteUpdate",
+          "automationBatchUpdate",
+          "appendImport",
+          "openAPIBatchUpdate"
+        ],
+        "condition_list": null
+      }
+    },
+    {
+      "id": "switch_purchase_process",
+      "type": "SwitchBranch",
+      "title": "映射页面采购流程",
+      "next": null,
+      "children": {
+        "links": [
+          { "kind": "case", "to": "set_pending", "label": "pending", "desc": "待审批" },
+          { "kind": "case", "to": "set_approved", "label": "approved", "desc": "待下单" },
+          { "kind": "case", "to": "set_ordered", "label": "ordered", "desc": "待签收" },
+          { "kind": "case", "to": "set_completed", "label": "completed", "desc": "签收后完成入库" },
+          { "kind": "case", "to": "set_rejected", "label": "rejected", "desc": "驳回申请" }
+        ]
+      },
+      "data": {
+        "mode": "exclusive",
+        "no_match_action": "fail",
+        "child_branch_list": [
+          {
+            "name": "待审批",
+            "condition": {
+              "conjunction": "or",
+              "conditions": [
+                {
+                  "conjunction": "and",
+                  "conditions": [
+                    {
+                      "left_value": { "value_type": "ref", "value": "$.trigger_legacy_process.fldIjbjFoK" },
+                      "operator": "is",
+                      "right_value": [{ "value_type": "option", "value": { "name": "未开始（待审批）" } }]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "待下单",
+            "condition": {
+              "conjunction": "or",
+              "conditions": [
+                {
+                  "conjunction": "and",
+                  "conditions": [
+                    {
+                      "left_value": { "value_type": "ref", "value": "$.trigger_legacy_process.fldIjbjFoK" },
+                      "operator": "is",
+                      "right_value": [{ "value_type": "option", "value": { "name": "审批通过（待下单）" } }]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "待签收",
+            "condition": {
+              "conjunction": "or",
+              "conditions": [
+                {
+                  "conjunction": "and",
+                  "conditions": [
+                    {
+                      "left_value": { "value_type": "ref", "value": "$.trigger_legacy_process.fldIjbjFoK" },
+                      "operator": "is",
+                      "right_value": [{ "value_type": "option", "value": { "name": "下单完成（待签收）" } }]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "采购完成",
+            "condition": {
+              "conjunction": "or",
+              "conditions": [
+                {
+                  "conjunction": "and",
+                  "conditions": [
+                    {
+                      "left_value": { "value_type": "ref", "value": "$.trigger_legacy_process.fldIjbjFoK" },
+                      "operator": "is",
+                      "right_value": [{ "value_type": "option", "value": { "name": "物品签收（待入库）" } }]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "驳回申请",
+            "condition": {
+              "conjunction": "or",
+              "conditions": [
+                {
+                  "conjunction": "and",
+                  "conditions": [
+                    {
+                      "left_value": { "value_type": "ref", "value": "$.trigger_legacy_process.fldIjbjFoK" },
+                      "operator": "is",
+                      "right_value": [{ "value_type": "option", "value": { "name": "采购已终止" } }]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "set_pending",
+      "type": "SetRecordAction",
+      "title": "同步为待审批",
+      "next": null,
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "ref_info": { "step_id": "trigger_legacy_process" },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "未开始（待审批）" } }] }]
+      }
+    },
+    {
+      "id": "set_approved",
+      "type": "SetRecordAction",
+      "title": "同步为待下单",
+      "next": null,
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "ref_info": { "step_id": "trigger_legacy_process" },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "审批通过（待下单）" } }] }]
+      }
+    },
+    {
+      "id": "set_ordered",
+      "type": "SetRecordAction",
+      "title": "同步为待签收",
+      "next": null,
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "ref_info": { "step_id": "trigger_legacy_process" },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "下单完成（待签收）" } }] }]
+      }
+    },
+    {
+      "id": "set_completed",
+      "type": "SetRecordAction",
+      "title": "签收后同步为采购完成",
+      "next": null,
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "ref_info": { "step_id": "trigger_legacy_process" },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "采购完成（已入库）" } }] }]
+      }
+    },
+    {
+      "id": "set_rejected",
+      "type": "SetRecordAction",
+      "title": "同步为驳回申请",
+      "next": null,
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "ref_info": { "step_id": "trigger_legacy_process" },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "驳回申请" } }] }]
+      }
+    }
+  ]
+}

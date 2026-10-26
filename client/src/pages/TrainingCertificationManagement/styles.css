@@ -1,0 +1,366 @@
+.training-certification-page,
+.training-certification-page *,
+.training-certification-page *::before,
+.training-certification-page *::after {
+  box-sizing: border-box;
+}
+
+.training-certification-page {
+  min-height: 100vh;
+  background: linear-gradient(
+    180deg,
+    hsl(216 100% 97%) 0%,
+    hsl(210 68% 99%) 48%,
+    hsl(214 100% 97%) 100%
+  );
+  color: hsl(222 47% 11%);
+}
+
+.training-certification-hero {
+  display: flex;
+  min-height: 116px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px clamp(20px, 3vw, 48px);
+  overflow: hidden;
+  border-bottom: 1px solid hsl(215 100% 68% / 0.5);
+  background:
+    linear-gradient(hsl(0 0% 100% / 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(0 0% 100% / 0.055) 1px, transparent 1px),
+    linear-gradient(135deg, #064fc5 0%, #00359b 54%, #012a7d 100%);
+  background-size:
+    36px 36px,
+    36px 36px,
+    auto;
+  box-shadow: 0 18px 42px hsl(219 100% 26% / 0.2);
+  color: white;
+}
+
+.training-certification-hero-copy,
+.training-certification-hero-actions,
+.training-certification-hero-actions p,
+.training-certification-module-card {
+  display: flex;
+  align-items: center;
+}
+
+.training-certification-hero-copy {
+  min-width: 0;
+  gap: 16px;
+}
+
+.training-certification-hero-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid hsl(0 0% 100% / 0.25);
+  border-radius: 16px;
+  background: hsl(0 0% 100% / 0.14);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.18);
+}
+
+.training-certification-hero-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.training-certification-hero-copy p,
+.training-certification-hero-copy h1,
+.training-certification-hero-copy span,
+.training-certification-hero-actions p {
+  margin: 0;
+}
+
+.training-certification-hero-copy p {
+  margin-bottom: 3px;
+  color: hsl(214 100% 89%);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.training-certification-hero-copy h1 {
+  font-size: clamp(25px, 2vw, 34px);
+  font-weight: 700;
+  line-height: 1.08;
+}
+
+.training-certification-hero-copy > div > span {
+  display: block;
+  margin-top: 8px;
+  color: hsl(214 100% 94%);
+  font-size: 14px;
+}
+
+.training-certification-hero-actions {
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+.training-certification-hero-actions p {
+  min-height: 42px;
+  gap: 8px;
+  padding: 0 14px;
+  border: 1px solid hsl(0 0% 100% / 0.2);
+  border-radius: 10px;
+  background: hsl(0 0% 100% / 0.1);
+  color: hsl(214 100% 94%);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.training-certification-hero-actions p svg,
+.training-certification-hero-actions button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.training-certification-hero-actions button {
+  min-height: 42px;
+  border: 1px solid hsl(0 0% 100% / 0.4);
+  border-radius: 10px;
+  background: white;
+  color: hsl(217 91% 43%);
+  font-weight: 700;
+}
+
+.training-certification-hero-actions button:hover {
+  background: hsl(214 100% 97%);
+  color: hsl(218 85% 35%);
+}
+
+.training-certification-content {
+  width: min(1920px, 100%);
+  margin: 0 auto;
+  padding: 20px clamp(16px, 2.3vw, 36px) 32px;
+}
+
+.training-certification-module-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.training-certification-module-card {
+  min-width: 0;
+  min-height: 94px;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid hsl(214 45% 87%);
+  border-radius: 14px;
+  background: hsl(0 0% 100% / 0.92);
+  box-shadow: 0 8px 24px hsl(217 63% 34% / 0.08);
+  color: hsl(222 47% 18%);
+  text-align: left;
+  transition:
+    transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    background 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.training-certification-module-card:hover {
+  transform: translateY(-2px);
+  border-color: hsl(217 91% 72%);
+  box-shadow: 0 12px 28px hsl(217 72% 35% / 0.12);
+}
+
+.training-certification-module-card:focus-visible {
+  outline: 3px solid hsl(217 91% 60% / 0.28);
+  outline-offset: 2px;
+}
+
+.training-certification-module-card.is-active {
+  border-color: hsl(217 91% 60%);
+  background: linear-gradient(
+    135deg,
+    hsl(217 100% 98%) 0%,
+    hsl(211 100% 96%) 100%
+  );
+  box-shadow:
+    0 12px 30px hsl(217 72% 35% / 0.12),
+    inset 4px 0 0 hsl(217 91% 60%);
+}
+
+.training-certification-module-icon {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 13px;
+  background: hsl(217 91% 95%);
+  color: hsl(217 91% 53%);
+}
+
+.training-certification-module-card:nth-child(2)
+  .training-certification-module-icon {
+  background: hsl(197 90% 94%);
+  color: hsl(199 89% 42%);
+}
+
+.training-certification-module-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.training-certification-module-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.training-certification-module-copy small,
+.training-certification-module-copy strong,
+.training-certification-module-copy > span {
+  display: block;
+}
+
+.training-certification-module-copy small {
+  margin-bottom: 2px;
+  color: hsl(217 91% 53%);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.training-certification-module-copy strong {
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.training-certification-module-copy > span {
+  margin-top: 3px;
+  color: hsl(220 17% 43%);
+  font-size: 13px;
+}
+
+.training-certification-module-state {
+  display: grid;
+  min-width: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: hsl(217 91% 53%);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.training-certification-module-state svg {
+  width: 23px;
+  height: 23px;
+}
+
+.training-certification-workspace {
+  min-width: 0;
+  border: 1px solid hsl(214 45% 87%);
+  border-radius: 16px;
+  background: hsl(0 0% 100% / 0.7);
+  box-shadow: 0 12px 36px hsl(217 63% 34% / 0.08);
+  overflow: hidden;
+}
+
+.training-certification-module-panel {
+  min-width: 0;
+  animation: training-certification-panel-in 200ms cubic-bezier(0.4, 0, 0.2, 1)
+    both;
+}
+
+.training-certification-module-heading {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.training-certification-module-heading:focus {
+  outline: none;
+}
+
+.training-certification-loading {
+  display: flex;
+  min-height: 280px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: hsl(217 91% 48%);
+}
+
+.training-certification-loading svg,
+.training-certification-refresh-spinning {
+  animation: training-certification-spin 900ms linear infinite;
+}
+
+@keyframes training-certification-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes training-certification-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 767px) {
+  .training-certification-hero {
+    min-height: 0;
+    align-items: stretch;
+    flex-direction: column;
+    padding: 18px 16px;
+  }
+
+  .training-certification-hero-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .training-certification-hero-copy > div > span {
+    font-size: 12px;
+  }
+
+  .training-certification-hero-actions {
+    justify-content: space-between;
+  }
+
+  .training-certification-hero-actions p {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .training-certification-hero-actions p span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .training-certification-module-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .training-certification-module-card {
+    min-height: 82px;
+    padding: 13px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .training-certification-module-card,
+  .training-certification-module-panel,
+  .training-certification-loading svg,
+  .training-certification-refresh-spinning {
+    animation: none;
+    transition: none;
+  }
+}

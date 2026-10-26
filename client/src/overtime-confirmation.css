@@ -1,0 +1,89 @@
+@import 'tailwindcss' source(none);
+@import 'tw-animate-css';
+
+:root {
+  --background: hsl(0 0% 98%);
+  --foreground: hsl(222 47% 11%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(222 47% 11%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222 47% 11%);
+  --primary: hsl(217 91% 60%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(204 86% 53%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(220 14% 96%);
+  --muted-foreground: hsl(220 9% 46%);
+  --accent: hsl(214 20% 90%);
+  --accent-foreground: hsl(217 91% 60%);
+  --destructive: hsl(354 70% 54%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(142 76% 36%);
+  --border: hsl(214 20% 90%);
+  --input: hsl(214 20% 90%);
+  --ring: hsl(217 91% 60%);
+  --radius: 0.5rem;
+}
+
+@theme static {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --shadow-sm: 0 1px 3px 0 hsl(0 0% 0% / 0.1);
+  --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.1);
+}
+
+@source './overtime-confirmation-entry.tsx';
+@source './pages/OvertimeConfirmation/index.tsx';
+@source './pages/MonthlySchedule/OvertimeConfirmationDialog.tsx';
+@source './pages/MonthlySchedule/OvertimeConfirmationDeepLinkHost.tsx';
+@source './components/ui/button.tsx';
+@source './components/ui/dialog.tsx';
+@source './components/ui/input.tsx';
+@source './components/ui/label.tsx';
+@source './components/ui/select.tsx';
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    min-height: 100%;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+    color: var(--foreground);
+    background: var(--background);
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+}

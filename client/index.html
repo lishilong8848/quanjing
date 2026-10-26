@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="<%= publicPath %>/favicon.svg?v=20260815"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <title>世纪互联-南通基地</title>
+    <script>
+      try {
+        window.__platform__ = JSON.parse('{{{__platform__}}}');
+      } catch (e) {
+        console.error('Failed to parse __platform__', e);
+      }
+      window.__platform__ = {
+        ...(window.__platform__ || {}),
+        appPublished: {
+          ...((window.__platform__ || {}).appPublished || {}),
+          app_info: {
+            ...(((window.__platform__ || {}).appPublished || {}).app_info ||
+              {}),
+            app_name: '世纪互联-南通基地',
+          },
+        },
+        showBadge: false,
+      };
+      window._appInfo = {
+        ...(window._appInfo || {}),
+        name: '世纪互联-南通基地',
+      };
+      window.__platform_data__ = {
+        ...(window.__platform_data__ || {}),
+        showBadge: false,
+      };
+      document.title = '世纪互联-南通基地';
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

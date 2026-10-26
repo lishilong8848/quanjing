@@ -1,0 +1,122 @@
+{
+  "client_token": "codex_purchase_process_historical_20260721_01",
+  "title": "采购流程历史补齐（一次性）",
+  "steps": [
+    {
+      "id": "trigger_once",
+      "type": "TimerTrigger",
+      "title": "执行一次历史补齐",
+      "next": "copy_pending",
+      "data": {
+        "rule": "NO_REPEAT",
+        "start_time": "2026-07-21 11:19",
+        "is_never_end": false
+      }
+    },
+    {
+      "id": "copy_pending",
+      "type": "SetRecordAction",
+      "title": "补齐待审批",
+      "next": "copy_approved",
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "max_set_record_num": 15000,
+        "filter_info": {
+          "conjunction": "and",
+          "conditions": [
+            {
+              "field_name": "采购流程（勿动！由系统执行）",
+              "operator": "is",
+              "value": [{ "value_type": "option", "value": { "name": "未开始（待审批）" } }]
+            }
+          ]
+        },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "未开始（待审批）" } }] }]
+      }
+    },
+    {
+      "id": "copy_approved",
+      "type": "SetRecordAction",
+      "title": "补齐待下单",
+      "next": "copy_ordered",
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "max_set_record_num": 15000,
+        "filter_info": {
+          "conjunction": "and",
+          "conditions": [
+            {
+              "field_name": "采购流程（勿动！由系统执行）",
+              "operator": "is",
+              "value": [{ "value_type": "option", "value": { "name": "审批通过（待下单）" } }]
+            }
+          ]
+        },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "审批通过（待下单）" } }] }]
+      }
+    },
+    {
+      "id": "copy_ordered",
+      "type": "SetRecordAction",
+      "title": "补齐待签收",
+      "next": "copy_completed",
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "max_set_record_num": 15000,
+        "filter_info": {
+          "conjunction": "and",
+          "conditions": [
+            {
+              "field_name": "采购流程（勿动！由系统执行）",
+              "operator": "is",
+              "value": [{ "value_type": "option", "value": { "name": "下单完成（待签收）" } }]
+            }
+          ]
+        },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "下单完成（待签收）" } }] }]
+      }
+    },
+    {
+      "id": "copy_completed",
+      "type": "SetRecordAction",
+      "title": "签收记录改为采购完成",
+      "next": "copy_rejected",
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "max_set_record_num": 15000,
+        "filter_info": {
+          "conjunction": "and",
+          "conditions": [
+            {
+              "field_name": "采购流程（勿动！由系统执行）",
+              "operator": "is",
+              "value": [{ "value_type": "option", "value": { "name": "物品签收（待入库）" } }]
+            }
+          ]
+        },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "采购完成（已入库）" } }] }]
+      }
+    },
+    {
+      "id": "copy_rejected",
+      "type": "SetRecordAction",
+      "title": "补齐驳回申请",
+      "next": null,
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "max_set_record_num": 15000,
+        "filter_info": {
+          "conjunction": "and",
+          "conditions": [
+            {
+              "field_name": "采购流程（勿动！由系统执行）",
+              "operator": "is",
+              "value": [{ "value_type": "option", "value": { "name": "采购已终止" } }]
+            }
+          ]
+        },
+        "field_values": [{ "field_name": "采购流程", "value": [{ "value_type": "option", "value": { "name": "驳回申请" } }] }]
+      }
+    }
+  ]
+}

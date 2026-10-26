@@ -1,0 +1,17 @@
+.config-select {
+  min-height: 2.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 0.5rem 0.75rem;
+  color: var(--foreground);
+  font-size: 0.875rem;
+}
+.config-select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.config-select:disabled { opacity: 0.6; }
+:where(.configuration-page, .configuration-editor) :where(*) { border-color: var(--border); }
+.configuration-editor > button:not([aria-label="关闭"]) { display: none; }
+.configuration-editor { animation-duration: 50ms !important; transition-duration: 50ms !important; }
+@media (prefers-reduced-motion: reduce) {
+  .configuration-page *, .configuration-editor { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

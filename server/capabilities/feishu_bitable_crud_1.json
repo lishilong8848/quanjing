@@ -1,0 +1,67 @@
+{
+  "id": "feishu_bitable_crud_1",
+  "pluginKey": "@official-plugins/feishu-bitable",
+  "pluginVersion": "1.0.1",
+  "name": "封网信息",
+  "description": "管理飞书多维表格，支持数据的创建、查询、更新、删除",
+  "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/fzgeh7nuhfboznulog/bitable.svg",
+  "paramsSchema": {},
+  "formValue": {
+    "owner": "7310140364520734723",
+    "appToken": "PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN",
+    "tableID": "PUBLIC_EXAMPLE_FEISHU_SEALING_TABLE_ID",
+    "fields": [
+      {
+        "writeable": false,
+        "name": "编号",
+        "type": 20,
+        "bizType": "Formula",
+        "id": "fldXvJ4QmV",
+        "readable": true
+      },
+      {
+        "readable": true,
+        "writeable": true,
+        "id": "fldyloi3Wd",
+        "name": "封网信息",
+        "type": 1,
+        "bizType": "Text"
+      },
+      {
+        "bizType": "DateTime",
+        "readable": true,
+        "writeable": true,
+        "id": "fldY3ITpTr",
+        "name": "开始日期",
+        "type": 5
+      },
+      {
+        "readable": true,
+        "writeable": true,
+        "id": "fldHGRu3v7",
+        "name": "结束日期",
+        "type": 5,
+        "bizType": "DateTime"
+      },
+      {
+        "readable": true,
+        "writeable": false,
+        "id": "fldXER5KiA",
+        "name": "判断是否为今日",
+        "type": 20,
+        "bizType": "Formula"
+      },
+      {
+        "type": 1005,
+        "bizType": "AutoNumber",
+        "readable": false,
+        "writeable": false,
+        "id": "flduhH3OdU",
+        "name": "自增编号"
+      }
+    ]
+  },
+  "createdAt": 1770026437662,
+  "updatedAt": 1770026452861,
+  "createdBy": 7310140364520734723
+}

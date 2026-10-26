@@ -1,0 +1,97 @@
+{
+  "id": "feishu_bitable_manage_crud_4",
+  "pluginKey": "@official-plugins/feishu-bitable",
+  "pluginVersion": "1.0.1",
+  "name": "节日&重保排班",
+  "description": "管理飞书多维表格，支持数据的创建、查询、更新、删除",
+  "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/fzgeh7nuhfboznulog/bitable.svg",
+  "paramsSchema": {},
+  "formValue": {
+    "tableID": "tbl48bcc5bf85c44",
+    "fields": [
+      {
+        "name": "值班编号",
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true,
+        "writeable": false,
+        "id": "fldB1kenQn"
+      },
+      {
+        "type": 1005,
+        "bizType": "AutoNumber",
+        "readable": true,
+        "writeable": false,
+        "id": "fldDV2MRvm",
+        "name": "编码"
+      },
+      {
+        "writeable": true,
+        "id": "fldLrsdEpv",
+        "name": "排班日期",
+        "type": 5,
+        "bizType": "DateTime",
+        "readable": true
+      },
+      {
+        "name": "重保类型",
+        "type": 3,
+        "bizType": "SingleSelect",
+        "enumValues": [
+          "春节",
+          "国庆",
+          "其他"
+        ],
+        "id": "fldTl2QqfX",
+        "readable": true,
+        "writeable": true
+      },
+      {
+        "type": 20,
+        "bizType": "Formula",
+        "id": "fldUeKC4Ki",
+        "name": "排班日期（星期）",
+        "readable": true,
+        "writeable": false
+      },
+      {
+        "type": 20,
+        "bizType": "Formula",
+        "id": "fld1rMmyqh",
+        "name": "年度周数",
+        "readable": true,
+        "writeable": false
+      },
+      {
+        "name": "值守机楼",
+        "type": 3,
+        "bizType": "SingleSelect",
+        "enumValues": [
+          "A楼",
+          "B楼",
+          "D楼",
+          "E楼",
+          "H楼",
+          "110站",
+          "C楼"
+        ],
+        "readable": true,
+        "writeable": true,
+        "id": "fldvuTfj3X"
+      },
+      {
+        "bizType": "User",
+        "readable": true,
+        "writeable": true,
+        "id": "fldJ9t028M",
+        "name": "值班人员",
+        "type": 11
+      }
+    ],
+    "owner": "7310140364520734723",
+    "appToken": "PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN"
+  },
+  "createdAt": 1770197542076,
+  "updatedAt": 1770197713273,
+  "createdBy": 7310140364520734723
+}

@@ -1,0 +1,5 @@
+@import 'tailwindcss' source(none);
+@import '../../../client/src/tailwind-theme.css';
+@source '../../../client/src/components/ui';
+@source '../../../client/src/pages/MonthlyOperations';
+body { margin: 0; font-family: Inter, Arial, sans-serif; }

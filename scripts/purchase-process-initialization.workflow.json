@@ -1,0 +1,41 @@
+{
+  "client_token": "codex_purchase_process_initialization_20260721_01",
+  "title": "采购流程初始化（页面字段）",
+  "steps": [
+    {
+      "id": "trigger_execution_created",
+      "type": "AddRecordTrigger",
+      "title": "采购执行记录新增",
+      "next": "set_initial_process",
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "watched_field_name": "采购编码",
+        "trigger_control_list": [
+          "pasteUpdate",
+          "automationBatchUpdate",
+          "appendImport",
+          "openAPIBatchUpdate"
+        ],
+        "condition_list": null
+      }
+    },
+    {
+      "id": "set_initial_process",
+      "type": "SetRecordAction",
+      "title": "初始化为待审批",
+      "next": null,
+      "data": {
+        "table_name": "02-【物品类】采购进行",
+        "ref_info": { "step_id": "trigger_execution_created" },
+        "field_values": [
+          {
+            "field_name": "采购流程",
+            "value": [
+              { "value_type": "option", "value": { "name": "未开始（待审批）" } }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "id": "feishu_bitable_crud_2",
+  "pluginKey": "@official-plugins/feishu-bitable",
+  "pluginVersion": "1.0.1",
+  "name": "南通机房排班基础表",
+  "description": "管理飞书多维表格，支持数据的创建、查询、更新、删除",
+  "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/fzgeh7nuhfboznulog/bitable.svg",
+  "paramsSchema": {},
+  "formValue": {
+    "appToken": "PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN",
+    "tableID": "PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID",
+    "fields": [
+      {
+        "writeable": false,
+        "name": "值班编码",
+        "type": 20,
+        "bizType": "Formula",
+        "id": "fldITqhd37",
+        "readable": true
+      },
+      {
+        "readable": true,
+        "writeable": true,
+        "name": "排班日期",
+        "type": 5,
+        "bizType": "DateTime",
+        "id": "fldZSaDbGf"
+      },
+      {
+        "name": "编码",
+        "type": 1005,
+        "bizType": "AutoNumber",
+        "readable": true,
+        "writeable": false,
+        "id": "fldRAVxqf7"
+      },
+      {
+        "name": "机楼",
+        "type": 3,
+        "readable": true,
+        "writeable": true,
+        "bizType": "SingleSelect",
+        "enumValues": [
+          "A楼",
+          "B楼",
+          "C楼",
+          "D楼",
+          "E楼",
+          "H楼",
+          "110站",
+          "2026/02/09"
+        ],
+        "id": "fldnP4gXMn"
+      },
+      {
+        "id": "fldE9Gwnk7",
+        "name": "班组",
+        "type": 3,
+        "readable": true,
+        "writeable": true,
+        "bizType": "SingleSelect",
+        "enumValues": [
+          "A班",
+          "B班",
+          "C班",
+          "D班",
+          "长白"
+        ]
+      },
+      {
+        "enumValues": [
+          "白",
+          "夜",
+          "长白",
+          "B班",
+          "C班",
+          "A班"
+        ],
+        "readable": true,
+        "writeable": true,
+        "id": "fldqPpOgW5",
+        "name": "班次",
+        "type": 3,
+        "bizType": "SingleSelect"
+      },
+      {
+        "name": "人员（文本）",
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true,
+        "writeable": false,
+        "id": "fldJi5bxBG"
+      },
+      {
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true,
+        "writeable": false,
+        "id": "fldmgjilVC",
+        "name": "应急值班人员（排班）"
+      },
+      {
+        "readable": false,
+        "writeable": false,
+        "id": "flddMP5Au3",
+        "name": "值班人员（对照）",
+        "type": 1,
+        "bizType": "Text"
+      },
+      {
+        "type": 19,
+        "bizType": "Lookup",
+        "id": "fld5JgaSwV",
+        "readable": false,
+        "writeable": false,
+        "name": "人员"
+      },
+      {
+        "type": 1,
+        "readable": true,
+        "writeable": true,
+        "bizType": "Text",
+        "id": "fldgeSx7S1",
+        "name": "值班人员（实际）"
+      },
+      {
+        "type": 1,
+        "bizType": "Text",
+        "readable": true,
+        "writeable": true,
+        "id": "fldQBMKyrd",
+        "name": "请假人员"
+      },
+      {
+        "writeable": false,
+        "id": "fldduEXCmp",
+        "name": "应急值班",
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true
+      },
+      {
+        "writeable": false,
+        "id": "fldUHstSKX",
+        "name": "机楼 (文本）",
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true
+      },
+      {
+        "writeable": false,
+        "id": "fld5x9advB",
+        "name": "班组 (文本）",
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true
+      },
+      {
+        "bizType": "Formula",
+        "id": "fldu67xR8x",
+        "readable": true,
+        "writeable": false,
+        "name": "班次 (文本）",
+        "type": 20
+      },
+      {
+        "bizType": "Text",
+        "id": "fldVhIK9z2",
+        "name": "替班人员",
+        "type": 1,
+        "readable": true,
+        "writeable": true
+      },
+      {
+        "name": "调岗人员",
+        "type": 1,
+        "bizType": "Text",
+        "id": "fldPET3VVn",
+        "readable": true,
+        "writeable": true
+      },
+      {
+        "bizType": "Text",
+        "readable": true,
+        "writeable": true,
+        "id": "fldSpwI1Cw",
+        "name": "替岗人员",
+        "type": 1
+      },
+      {
+        "writeable": false,
+        "type": 1002,
+        "bizType": "ModifiedTime",
+        "id": "fld1VlOSmu",
+        "name": "最新更新时间",
+        "readable": true
+      }
+    ],
+    "owner": "7310140364520734723"
+  },
+  "createdAt": 1770087523301,
+  "updatedAt": 1770087621575,
+  "createdBy": 7310140364520734723
+}

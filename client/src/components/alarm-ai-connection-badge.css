@@ -1,0 +1,111 @@
+.alarm-ai-connection-badge {
+  --ai-tone: hsl(220 9% 46%);
+  --ai-surface: hsl(220 14% 96%);
+  --ai-border: hsl(214 20% 86%);
+  --ai-glow: hsl(220 9% 46% / 0.2);
+  box-sizing: border-box;
+  display: inline-flex;
+  width: max-content;
+  height: 1.625rem;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.4375rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--ai-border);
+  border-radius: 999px;
+  background: var(--ai-surface);
+  box-shadow: 0 1px 2px hsl(222 47% 11% / 0.05);
+  color: var(--ai-tone);
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.alarm-ai-connection-badge-mark {
+  display: block;
+  color: hsl(222 47% 23%);
+  font-size: 0.6875rem;
+  font-weight: 750;
+  letter-spacing: 0.065em;
+}
+
+.alarm-ai-connection-status {
+  color: var(--ai-tone);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.alarm-ai-connection-beacon {
+  position: relative;
+  display: grid;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--ai-border);
+  border-radius: 50%;
+  background: hsl(0 0% 100%);
+}
+
+.alarm-ai-connection-core {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 50%;
+  background: var(--ai-tone);
+  box-shadow: 0 0 0 2px var(--ai-glow);
+}
+
+.alarm-ai-connection-badge[data-state='online'] {
+  width: 3.625rem;
+  justify-content: space-between;
+  --ai-tone: hsl(142 76% 36%);
+  --ai-surface: hsl(143 55% 96%);
+  --ai-border: hsl(142 36% 78%);
+  --ai-glow: hsl(142 76% 36% / 0.18);
+}
+
+.alarm-ai-connection-badge[data-state='connecting'] {
+  --ai-tone: hsl(217 91% 50%);
+  --ai-surface: hsl(217 91% 97%);
+  --ai-border: hsl(217 58% 82%);
+  --ai-glow: hsl(217 91% 50% / 0.18);
+}
+
+.alarm-ai-connection-badge[data-state='error'] {
+  --ai-tone: hsl(354 70% 44%);
+  --ai-surface: hsl(354 70% 97%);
+  --ai-border: hsl(354 50% 82%);
+  --ai-glow: hsl(354 70% 44% / 0.18);
+}
+
+.alarm-ai-connection-badge[data-state='unconfigured'] {
+  --ai-tone: hsl(38 72% 40%);
+  --ai-surface: hsl(38 85% 97%);
+  --ai-border: hsl(38 54% 80%);
+  --ai-glow: hsl(38 72% 40% / 0.18);
+}
+
+.alarm-ai-connection-badge[data-state='online'] .alarm-ai-connection-beacon::before {
+  position: absolute;
+  inset: -0.25rem;
+  border: 1px solid var(--ai-tone);
+  border-radius: 50%;
+  content: '';
+  animation: alarm-ai-beacon-breathe 2.8s ease-in-out infinite;
+}
+
+@keyframes alarm-ai-beacon-breathe {
+  0%, 100% { opacity: 0.08; transform: scale(0.7); }
+  50% { opacity: 0.5; transform: scale(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alarm-ai-connection-badge[data-state='online'] .alarm-ai-connection-beacon::before {
+    animation: none;
+    opacity: 0.35;
+    transform: scale(1);
+  }
+}

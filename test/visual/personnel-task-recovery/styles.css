@@ -1,0 +1,9 @@
+@import 'tailwindcss' source(none);
+@import '@lark-apaas/client-toolkit/lib/override.css';
+@import 'tw-animate-css';
+@import '../../../client/src/tailwind-theme.css';
+@config '../fixture-tailwind.config.ts';
+@source '../../../client/src/components/ui';
+@source '../../../client/src/pages/SystemConfiguration/PersonnelTaskRecoveryPanel.tsx';
+@source './entry.tsx';
+body { margin: 0; font-family: Inter, Arial, sans-serif; color: var(--foreground); background: var(--background); }

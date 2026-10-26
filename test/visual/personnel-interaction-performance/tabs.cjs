@@ -1,0 +1,30 @@
+const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),crypto=require('node:crypto'),assert=require('node:assert/strict');
+const {chromium}=require('playwright-core'),installProbe=require('./probe.cjs');
+const root=path.resolve(__dirname,'../../..'),base=path.join(root,'output/personnel-stage-three-full-20261015'),sourceName=process.argv[2],name=process.argv[3];
+if(![sourceName,name].every(value=>/^[a-z0-9-]+$/.test(value||'')))throw Error('Two unique evidence names required');
+const source=path.join(base,sourceName),output=path.join(base,name);if(fs.existsSync(output))throw Error('Evidence exists');fs.mkdirSync(output,{recursive:true});
+const original=JSON.parse(fs.readFileSync(path.join(source,'proof.json')));assert.deepEqual(original.sourceBefore,original.sourceAfter);
+const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const artifacts=['app.js','app.css'].map(file=>path.join(source,file));for(const file of artifacts)assert(original.sourceAfter.some(entry=>entry.path===file&&entry.sha256===hash(file)));
+const inputs=[__filename,path.join(__dirname,'probe.cjs'),...artifacts,path.join(source,'proof.json'),process.execPath,path.join(root,'package-lock.json'),...Object.keys(require.cache)];
+const capture=()=>[...new Set(inputs)].sort().map(file=>({path:file,sha256:hash(file)}));const before=capture();
+const proof={passed:false,sourceProductionProof:path.join(source,'proof.json'),productionArtifacts:artifacts.map(file=>({path:file,sha256:hash(file)})),samples:[],errors:[],externalRequests:[],limits:'Native trusted pointer events to DOM/RAF visibility proxy, not physical paint; same immutable production fixture artifacts, no rebuild'};
+const started=Date.now();let browser,server;
+async function main(){
+ server=http.createServer((req,res)=>{const send=value=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};
+  if(req.url==='/api/access/configuration')return send({revision:1,appId:'cli_synthetic',accounts:[],cardRules:[],audit:[]});
+  if(req.url==='/api/access/configuration/people')return send({appId:'cli_synthetic',people:[],accounts:[],snapshotAt:Date.now(),personnelOverview:{mode:'preview',directoryVersion:'synthetic',snapshotAt:Date.now(),configurationRevision:1,people:[],duties:[],problems:[],issues:[]}});
+  if(req.url.startsWith('/api/access/configuration/personnel-handover'))return send([]);
+  if(req.url.startsWith('/api/')){proof.errors.push('Unexpected request '+req.url);res.writeHead(404);return res.end();}
+  const file=req.url==='/app.js'?'app.js':req.url==='/app.css'?'app.css':null;if(file){res.writeHead(200,{'Content-Type':file.endsWith('.css')?'text/css':'text/javascript'});return fs.createReadStream(path.join(source,file)).pipe(res);}
+  res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app.css"><body><div id="root"></div><script src="/app.js"></script></body></html>');
+ });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin=`http://127.0.0.1:${server.address().port}`;
+ browser=await chromium.launch({channel:'msedge',headless:true});const page=await browser.newPage();proof.browserVersion=browser.version();await page.addInitScript(installProbe);page.on('pageerror',error=>proof.errors.push(error.stack||error.message));await page.route('**/*',route=>{if(!route.request().url().startsWith(origin)){proof.externalRequests.push(route.request().url());return route.abort();}return route.continue();});await page.goto(origin);await page.getByRole('tab',{name:'岗位交接',exact:true}).waitFor();
+ for(const viewport of ['desktop','mobile']){await page.setViewportSize({width:viewport==='desktop'?1440:390,height:1050});for(const phase of ['warm','formal'])for(let index=0;index<(phase==='warm'?3:viewport==='desktop'?20:10);index++){
+  const selected=await page.getByRole('tab',{name:'岗位交接',exact:true}).getAttribute('aria-selected')==='true';const tab=page.getByRole('tab',{name:selected?'人员与岗位':'岗位交接',exact:true});assert.equal(await tab.getAttribute('aria-selected'),'false');
+  await page.locator('[data-feedback-target]').evaluateAll(nodes=>nodes.forEach(node=>node.removeAttribute('data-feedback-target')));await tab.evaluate(node=>node.setAttribute('data-feedback-target','true'));await page.evaluate(description=>window.__uiFeedback.arm(description),{label:'configuration-tab',phase:`${viewport}-${phase}`,kind:'tab',precondition:'aria-selected=false'});await tab.click();await page.waitForFunction(()=>window.__uiFeedback.rows.at(-1)?.complete);const row=await page.evaluate(()=>window.__uiFeedback.rows.at(-1));proof.samples.push(row);assert(!row.error);assert(row.events.some(event=>event.type==='pointerdown'&&event.trusted)&&row.events.some(event=>event.type==='click'&&event.trusted));
+ }}
+ proof.performance=[];for(const viewport of ['desktop','mobile']){const rows=proof.samples.filter(row=>row.phase===`${viewport}-formal`),sorted=rows.map(row=>row.rafMs).sort((a,b)=>a-b);assert.equal(rows.length,viewport==='desktop'?20:10);const p95=sorted[Math.ceil(sorted.length*.95)-1],max=sorted.at(-1);proof.performance.push({label:'configuration-tab',viewport,count:rows.length,p95,max,limit:100});assert(p95<=100);}
+ assert.deepEqual(proof.errors,[]);assert.deepEqual(before,capture());proof.passed=true;
+}
+main().catch(error=>{proof.errors.push(error.stack);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));proof.sourceBefore=before;proof.sourceAfter=capture();proof.elapsedMs=Date.now()-started;proof.completedAt=new Date().toISOString();fs.writeFileSync(path.join(output,'proof.json'),JSON.stringify(proof,null,2));console.log(JSON.stringify({passed:proof.passed,errors:proof.errors,performance:proof.performance,samples:proof.samples.length,elapsedMs:proof.elapsedMs}));});

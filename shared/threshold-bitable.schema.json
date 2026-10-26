@@ -1,0 +1,30 @@
+{
+  "baseToken": "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_APP_TOKEN",
+  "tables": { "电气": "tbl2969c90955d38", "暖通": "tblae925f9016648" },
+  "fields": {
+    "id": "记录标识",
+    "profession": "专业",
+    "device": "设备",
+    "section": "参数分组",
+    "parameter": "参数名称",
+    "building": "楼栋",
+    "location": "位置",
+    "model": "设备型号",
+    "brand": "品牌",
+    "value": "设定值",
+    "range": "运行范围",
+    "unit": "单位",
+    "kind": "参数类型",
+    "enabled": "告警使能",
+    "note": "备注",
+    "version": "记录版本",
+    "updatedAt": "更新时间",
+    "mutationId": "提交标识",
+    "sheet": "来源工作表",
+    "cell": "来源单元格",
+    "originalValue": "原表值",
+    "parameterCell": "参数名单元格",
+    "rangeCell": "范围单元格",
+    "noteCell": "备注单元格"
+  }
+}

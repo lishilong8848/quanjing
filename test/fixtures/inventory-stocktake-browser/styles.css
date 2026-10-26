@@ -1,0 +1,16 @@
+@import 'tailwindcss' source(none);
+@import '../../../client/src/tailwind-theme.css';
+@source "../../../client/src/components/ui";
+@source "../../../client/src/pages/InventoryManagement";
+@source "../../../client/src/pages/PurchaseInventoryManagement/ManagementHeader.tsx";
+body {
+  margin: 0;
+  background: var(--background);
+  font-family: Inter, Arial, sans-serif;
+}
+.fixture-label {
+  padding: 0.4rem 1.25rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+}

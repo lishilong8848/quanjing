@@ -1,0 +1,26 @@
+.risk-metric-list-dialog.risk-ali-list-dialog { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+.risk-issue-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  padding: .75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+}
+.risk-issue-filterbar > [data-slot="select-trigger"] { width: auto; min-width: 8rem; }
+.risk-issue-filter-count { margin-left: auto; color: var(--muted-foreground); font-size: .875rem; }
+.risk-issue-group-row { background: var(--muted); }
+.risk-issue-group-row button { gap: .5rem; font-weight: 600; }
+.risk-metric-list-dialog .risk-ali-grouped-table :is(th, td):nth-child(3) { width: 5rem; }
+.risk-metric-list-dialog .risk-ali-grouped-table :is(th, td):nth-child(4) { width: 28%; }
+.risk-metric-list-dialog .risk-ali-grouped-table :is(th, td):nth-child(5),
+.risk-metric-list-dialog .risk-ali-grouped-table :is(th, td):nth-child(6),
+.risk-metric-list-dialog .risk-ali-grouped-table :is(th, td):nth-child(7) { width: 6.5rem; }
+.risk-metric-list-dialog .risk-ali-grouped-table :is(th, td):nth-child(8) { width: 7rem; }
+.risk-metric-list-dialog .risk-ali-grouped-table :is(th, td):nth-child(9) { width: 9rem; }
+@media (max-width: 640px) {
+  .risk-issue-filterbar { padding: .75rem; }
+  .risk-issue-filterbar > [data-slot="select-trigger"] { flex: 1 1 40%; min-width: 0; }
+  .risk-issue-filter-count { margin-left: 0; }
+}

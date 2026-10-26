@@ -1,0 +1,11 @@
+@import 'tailwindcss' source(none);
+@import '../../../client/src/tailwind-theme.css';
+@source '../../../client/src/components/ui';
+@source '../../../client/src/components/GlobalNavigation.tsx';
+@source '../../../client/src/pages/EquipmentLedgerManagement';
+@source '../../../client/src/pages/PurchaseInventoryManagement/ManagementHeader.tsx';
+body {
+  margin: 0;
+  background: var(--background);
+  font-family: Inter, Arial, sans-serif;
+}

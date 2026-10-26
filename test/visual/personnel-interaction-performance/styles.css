@@ -1,0 +1,8 @@
+@import 'tailwindcss' source(none);
+@import '@lark-apaas/client-toolkit/lib/override.css';
+@import 'tw-animate-css';
+@import '../../../client/src/tailwind-theme.css';
+@config '../fixture-tailwind.config.ts';
+@source '../../../client/src/components/ui';
+@source '../../../client/src/pages/SystemConfiguration';
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: Inter, Arial, sans-serif; }

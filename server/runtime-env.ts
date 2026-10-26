@@ -1,0 +1,125 @@
+import { config } from 'dotenv';
+
+const NON_EMPTY_DOTENV_FALLBACK_KEYS = [
+  'CONTRACT_ATTACHMENT_ENCRYPTION_KEY',
+  'COS_SECRET_ID',
+  'COS_SECRET_KEY',
+  'COS_SESSION_TOKEN',
+  'TENCENTCLOUD_SECRET_ID',
+  'TENCENTCLOUD_SECRET_KEY',
+  'TENCENTCLOUD_SESSION_TOKEN',
+] as const;
+
+function loadDotenvPreservingNonEmptyCredentials(path: string): void {
+  const nonEmptyValues = new Map<string, string>();
+  for (const key of NON_EMPTY_DOTENV_FALLBACK_KEYS) {
+    const value = process.env[key];
+    if (value?.trim()) {
+      nonEmptyValues.set(key, value);
+    }
+  }
+
+  config({ path, override: true, quiet: true });
+
+  for (const [key, value] of nonEmptyValues) {
+    if (!process.env[key]?.trim()) {
+      process.env[key] = value;
+    }
+  }
+}
+
+const PROCESS_PRIORITY_KEYS = [
+  'NODE_ENV',
+  'FORCE_FRAMEWORK_DISABLE_DATAPASS',
+  'SERVER_HOST',
+  'SERVER_PORT',
+  'SUDA_DATABASE_URL',
+  'PUBLIC_BASE_URL',
+  'LOCAL_ACCESS_DEPLOYMENT_ID',
+  'FORCE_AUTHN_INNERAPI_DOMAIN',
+  'HTTPS_KEY_PATH',
+  'HTTPS_CERT_PATH',
+  'HTTPS_CA_PATH',
+  'COS_CHANGE_INDEX_PATH',
+  'SYSTEM_MONTHLY_REPORT_ARCHIVE_INDEX_PATH',
+  'SYSTEM_MONTHLY_REPORT_RUNTIME_DIR',
+  'ATTENDANCE_AUTOMATION_ENABLED',
+  'ATTENDANCE_AUTOMATION_EFFECTIVE_FROM',
+  'ATTENDANCE_AUTOMATION_STATE_PATH',
+  'ATTENDANCE_AUTOMATION_STATE_DIR',
+  'ATTENDANCE_AUTOMATION_STARTUP_GRACE_MINUTES',
+  'DINGTALK_ATTENDANCE_CLIENT_ID',
+  'DINGTALK_ATTENDANCE_CLIENT_SECRET',
+  'DINGTALK_ATTENDANCE_APP_KEY',
+  'DINGTALK_ATTENDANCE_APP_SECRET',
+  'DINGTALK_ATTENDANCE_DIRECTORY_CACHE_PATH',
+  'DINGTALK_ATTENDANCE_DIRECTORY_CACHE_DIR',
+  'DINGTALK_ATTENDANCE_DIRECTORY_CACHE_TTL_MS',
+  'PURCHASE_WORKFLOW_PROGRAM_ENABLED',
+  'PURCHASE_MANAGER_APPROVAL_CARD_ENABLED',
+  'LEAVE_WORKFLOW_PROGRAM_ENABLED',
+  'LEAVE_WORKFLOW_LEDGER_PATH',
+  'FEISHU_CARD_ACTION_CONSUMER_PROFILE',
+  'FEISHU_CARD_ACTION_TEST_APP_ID',
+  'FEISHU_CARD_ACTION_TEST_APP_SECRET',
+  'FEISHU_WEATHER_WARNING_AUTOMATION_ENABLED',
+  'FEISHU_WEATHER_WARNING_AUTOMATION_STATE_PATH',
+  'FEISHU_WEATHER_WARNING_AUTOMATION_STATE_DIR',
+  'NANTONG_DAILY_PATROL_ENABLED',
+  'NANTONG_DAILY_PATROL_CHAT_ID',
+  'NANTONG_DAILY_PATROL_LEDGER_PATH',
+  'NANTONG_DAILY_PATROL_STARTUP_DELAY_MS',
+  'NANTONG_DAILY_PATROL_RETRY_INTERVAL_MS',
+  'NANTONG_DAILY_PATROL_PUBLIC_BASE_URL',
+  'DAILY_OPERATIONS_FOLLOW_UP_TICKET_SECRET',
+  'NANTONG_HOTFIX_SMOKE_MODE',
+] as const;
+
+const processPriorityValues = new Map<string, string>();
+for (const key of PROCESS_PRIORITY_KEYS) {
+  const value = process.env[key];
+  if (value !== undefined) {
+    processPriorityValues.set(key, value);
+  }
+}
+
+loadDotenvPreservingNonEmptyCredentials('.env');
+loadDotenvPreservingNonEmptyCredentials('.env.local');
+
+for (const [key, value] of processPriorityValues) {
+  process.env[key] = value;
+}
+
+if (/^(?:1|true|on|yes)$/iu.test(process.env.NANTONG_HOTFIX_SMOKE_MODE || '')) {
+  process.env.FEISHU_CARD_ACTION_CONSUMER_PROFILE = 'disabled';
+  for (const key of [
+    'ALI_MONTHLY_REPORT_SCHEDULER_ENABLED',
+    'ATTENDANCE_AUTOMATION_ENABLED',
+    'DUTY_DAILY_REPORT_LOCAL_SCHEDULER_ENABLED',
+    'FEISHU_CARD_ACTION_CONSUMER_ENABLED',
+    'FEISHU_SUPPLY_CHAIN_BACKGROUND_SYNC_ENABLED',
+    'FEISHU_WEATHER_WARNING_AUTOMATION_ENABLED',
+    'LEAVE_WORKFLOW_PROGRAM_ENABLED',
+    'NANTONG_DAILY_PATROL_ENABLED',
+    'OVERTIME_WORKFLOW_PROGRAM_ENABLED',
+    'PURCHASE_WORKFLOW_PROGRAM_ENABLED',
+    'PURCHASE_MANAGER_APPROVAL_CARD_ENABLED',
+    'TODAY_OPERATIONS_ANOMALY_ENABLED',
+    'TODAY_OPERATIONS_ANOMALY_SCHEDULER_ENABLED',
+    'TYPHOON_WARNING_LOCAL_MONITOR_ENABLED',
+  ]) {
+    process.env[key] = 'false';
+  }
+  process.env.LEAVE_WORKFLOW_STARTUP_RECOVERY_CODES = '';
+}
+
+// HTTP bodies can contain access passwords and business data. Keep only the
+// path/status/duration trace fields provided by the platform logger.
+process.env.LOG_REQUEST_BODY = 'false';
+process.env.LOG_RESPONSE_BODY = 'false';
+
+const hasDatabaseUrl = Boolean(process.env.SUDA_DATABASE_URL?.trim());
+
+if (!hasDatabaseUrl) {
+  process.env.FORCE_FRAMEWORK_DISABLE_DATAPASS = 'true';
+}

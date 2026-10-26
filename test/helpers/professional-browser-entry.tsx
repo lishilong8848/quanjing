@@ -1,0 +1,10 @@
+import '../../client/src/polyfills';
+import './professional-browser.css';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AccessProvider } from '../../client/src/access/AccessProvider';
+import { GlobalNavigation } from '../../client/src/components/GlobalNavigation';
+import SystemConfigurationPage from '../../client/src/pages/SystemConfiguration';
+import EquipmentLedgerManagement from '../../client/src/pages/EquipmentLedgerManagement';
+import { Toaster } from '../../client/src/components/ui/sonner';
+createRoot(document.getElementById('root')!).render(<BrowserRouter><AccessProvider><GlobalNavigation /><div className="pt-16"><Routes><Route path="/system-configuration" element={<SystemConfigurationPage />} /><Route path="/equipment-ledger-management" element={<EquipmentLedgerManagement />} /></Routes></div><Toaster /></AccessProvider></BrowserRouter>);

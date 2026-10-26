@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "records": [],
+  "audit": {
+    "publicExport": true
+  },
+  "sourceSha256": "",
+  "sourceIdentityPolicy": "Preserve existing ID by original worksheet/cell; disambiguate intentional shared-cell rows by building"
+}

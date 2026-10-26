@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="VNET">
+  <rect width="64" height="64" rx="14" fill="#1769E0"/>
+  <path d="M12 16h11.5L32 42.2 40.5 16H52L38.6 50H25.4L12 16Z" fill="#FFFFFF"/>
+  <path d="M23.5 16 32 42.2 40.5 16h-6.8L32 25.2 30.3 16h-6.8Z" fill="#DCEBFF" opacity=".82"/>
+  <circle cx="49" cy="14" r="7" fill="#16B88A" stroke="#FFFFFF" stroke-width="3"/>
+</svg>

@@ -1,0 +1,109 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Production builds
+dist/
+*/dist/
+build/
+*/build/
+release/
+
+# Environment files
+.env
+.env.local
+nantong-schedule.private.env
+.env.purchase-local-workflow-backup-*
+.env.*
+!.env.example
+/scripts/p.txt
+
+# Logs
+.codex-logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+/logs/
+
+# Local certificates
+certs/
+
+# Runtime data
+.runtime/
+pids
+*.pid
+*.seed
+*.pid.lock
+data/*
+!data/operations-kb/
+!data/operations-kb/**
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary folders
+tmp/
+temp/
+
+# Lock files (keep package-lock.json for consistent installs)
+yarn.lock
+pnpm-lock.yaml
+
+# Cache files
+.eslintcache
+*.tsbuildinfo
+.deps-ready.json
+.hotfix-receipt-relay/
+.release-receipts/
+browser-profile/
+
+# swc wasm
+.swc
+.agent/
+.superpowers/
+
+# Portable distribution, local verification artifacts and private backups
+/_portable/
+/DEV_BACKUP/
+/output/
+/deliverables/
+/.cache/
+/.playwright-cli/
+/OPEN-DEV-SHELL.cmd
+/RESTORE-CONFIG.cmd
+/README-PORTABLE.md
+/SESSION-STATE.md
+/MEMORY.md
+/findings.md
+/progress.md
+/task_plan.md
+
+# Public-source repository: never publish operational or private material
+/data/
+/docs/internal/
+/client/public/portal/
+/client/public/meeting-templates/
+/tools/*/resources/
+*.key
+*.pem
+*.crt
+*.pfx
+*.p12

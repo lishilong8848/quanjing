@@ -1,0 +1,15 @@
+import '../../client/src/polyfills';
+import './readonly-refresh-browser.css';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import Tools from '../../client/src/pages/OperationsToolsManagement';
+import Contracts from '../../client/src/pages/ContractManagement';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AccessProvider } from '../../client/src/access/AccessProvider';
+import RouteAccessGuard from '../../client/src/access/RouteAccessGuard';
+import { GlobalNavigation } from '../../client/src/components/GlobalNavigation';
+import SystemConfigurationPage from '../../client/src/pages/SystemConfiguration';
+import EquipmentLedgerManagement from '../../client/src/pages/EquipmentLedgerManagement';
+import MonthlySchedule from '../../client/src/pages/MonthlySchedule';
+import { Toaster } from '../../client/src/components/ui/sonner';
+createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient()}><BrowserRouter><AccessProvider><GlobalNavigation /><div className="pt-16"><Routes><Route element={<RouteAccessGuard />}><Route path="/operations-tools-management" element={<Tools />} /><Route path="/contract-management" element={<Contracts />} /><Route path="/system-configuration" element={<SystemConfigurationPage />} /><Route path="/equipment-ledger-management" element={<EquipmentLedgerManagement />} /><Route path="/monthly-schedule" element={<MonthlySchedule />} /><Route path="/nantong-base" element={<div className="p-8">权限验收入口</div>} /><Route path="/today-operations-panorama" element={<div>授权今日航图验收</div>} /><Route path="/monthly-operations" element={<div>授权月览验收</div>} /><Route path="/system-monthly-report" element={<div>授权知识交付验收</div>} /></Route></Routes></div><Toaster /></AccessProvider></BrowserRouter></QueryClientProvider>);

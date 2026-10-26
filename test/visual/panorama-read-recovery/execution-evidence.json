@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "scope": "panorama-rack-and-sealing-read-recovery",
+  "evidenceKind": "retrospective-transcription-of-observed-tool-results",
+  "notOriginalRawExecutionReport": true,
+  "provenanceLimit": "Jest、tsc、真实源读取及浏览器 run-code 当时输出在会话工具结果；未保存独立原始全量执行报告。本文件事后整理，不声称在执行时生成，也不替代最终共享输入类型证明。",
+  "handoff": {
+    "path": "docs/engineering/release-handoff-2026-10-02-panorama-read-recovery.md",
+    "sha256": "b52c5f26991e22b76fca403b914fd23f8639486cf064e5c9fad8e34018f8832e",
+    "businessSourceFingerprints": "See the eight-file table in the unchanged handoff document."
+  },
+  "jest": {
+    "command": "node node_modules/jest/bin/jest.js server/modules/bitable-sync/today-operations-overview.service.spec.ts server/modules/duty-schedule/duty-schedule.sealing-sync.spec.ts test/unit/today-operations-panorama-ui.spec.ts test/unit/monthly-schedule-sealing-refresh.spec.ts --runInBand --silent",
+    "toolOutputChunk": "b30e21",
+    "exitCode": 0,
+    "observedSummary": [
+      "Test Suites: 4 passed, 4 total",
+      "Tests:       98 passed, 98 total",
+      "Snapshots:   0 total",
+      "Time:        27.398 s"
+    ],
+    "warnings": ["Existing ts-jest TS151001 esModuleInterop warning"],
+    "rawStandaloneLog": null
+  },
+  "types": {
+    "serverObservedExitCode": 0,
+    "clientObservedExitCode": 1,
+    "clientErrorsAtExecution": [
+      "InventoryStocktakePage.tsx:58 StocktakeBulkDialog import missing",
+      "InventoryStocktakePage.tsx:691 Map.current missing"
+    ],
+    "rawStandaloneLogs": null,
+    "exactOriginalInvocationNotRetainedHere": true,
+    "reusableAsFinalGlobalProof": false,
+    "finalStableGlobalProofOwner": "01a0f4bb-4ac1-7821-8910-9335d2bbc44a"
+  },
+  "readOnlyLiveSourceObservations": {
+    "standaloneRawReport": null,
+    "provenance": "Observed in project Node service diagnostics in the current task; aggregate-only transcription, no external records written.",
+    "nodeVersion": "v24.14.1",
+    "before": { "rackShiftRows": 3288, "rackShiftReadMs": 14025, "rackDeadlineMs": 10000 },
+    "projectedQuery": {
+      "fields": ["楼栋", "日期", "班次", "修改时间", "本班组上电机柜数（个）", "本班组下电机柜数（个）"],
+      "businessDate": "2026-10-02",
+      "filter": "ExactDate 日期 > 2026-09-20 and 日期 < 2026-10-03, Asia/Shanghai",
+      "rowCount": 106,
+      "readMs": 977,
+      "observedRecordDates": ["2026-09-21", "2026-10-01"]
+    },
+    "afterOverview": {
+      "durationMs": 10043,
+      "rackOnline": 4037,
+      "rackCapacity": 5322,
+      "allFiveBuildingLoadsPresent": true,
+      "sourceStatus": "partial",
+      "remainingIndependentTimeoutSource": "events"
+    },
+    "sealing": { "liveRows": 6, "liveReadMs": 4583, "liveStatus": "fresh", "newServiceOfflinePersistedRows": 6, "newServiceOfflineStatus": "stale" },
+    "production3001Accessible": false,
+    "productionFailureRootCauseFullyProven": false
+  },
+  "browser": {
+    "fixture": "test/visual/panorama-read-recovery/config.cjs",
+    "fixtureUrl": "http://127.0.0.1:39892/",
+    "fixtureOnly": true,
+    "notProductionRenderingProof": true,
+    "viewports": [[1440, 1000], [390, 844]],
+    "resultToolChunks": ["28c2cf", "0bbc75"],
+    "openMs": 115,
+    "extraReadsOnDialogOpen": 0,
+    "virtualClockFiveMinuteCycles": 2,
+    "fixtureReadsAcrossTwoCycles": 4,
+    "offlineResponseStatus": 503,
+    "offlineKeepsExistingRecord": true,
+    "nextSuccessfulCycleAutomaticallyClearsStaleWarning": true,
+    "coldOfflineCardText": "今日封网情况 -- 今日封网 -- 未来7天封网 -- 封网数据暂时不可用",
+    "coldOfflineNoClickableSealingCard": true,
+    "focusAfterDialogHidden": "查看今日封网情况具体清单",
+    "mobileListClientWidth": 340,
+    "mobileListScrollWidth": 340,
+    "timelineRetainsIndependentHorizontalScroll": true,
+    "fixtureStorageCleared": true,
+    "browserClosed": true,
+    "devServerStopped": true,
+    "port39892NoLongerListening": true,
+    "consoleLog": {
+      "path": ".playwright-cli/console-2026-10-02T00-34-55-368Z.log",
+      "sha256": "8e73b3136841fc4589bc0c7930488ca68fd409642ef4caba2de7fd071c9c0cb5",
+      "includesEarlyFixtureAliasErrorAndExpected503AndFavicon404": true,
+      "consoleAloneDoesNotProveAssertions": true
+    }
+  },
+  "postExecutionInputFingerprints": {
+    "captureTiming": "after execution and source freeze, not a pre-execution full closure manifest",
+    "package.json": "ce59bc5f80ac56325996dd0a4604e05d0f8a359702e2d736c3368f7749a87824",
+    "package-lock.json": "05e26878bca521305e56f422abd5e40d92bb889e38a0f94f754ada2a725f8c20",
+    "tsconfig.json": "b4c3ce78872131ed1b53f406266ebae6cac6748daa3ef4c9fe2e46c87d42f15e",
+    "tsconfig.node.json": "2d168e1be21b3fb1039c2298b3aa38c113e84fe338d69359f2a41f69a0f7ea18",
+    "tsconfig.app.json": "ce06d38afb7ff6dabe47dd908faf9ffc0bcd5f72826f05e55629e53b7624ee80",
+    "server/common/feishu/bitable-direct-read.ts": "7ea2993f05f8ac27d83ee3f51d35332ec4bdd51f0bfcf1148ae350016722c118",
+    "server/common/config/external-services.config.ts": "a38cc721b5bc51af4f5069b22d63bd43d50407c8376e39c5a2f14bdc93ab9a40",
+    "shared/today-operations-overview.interface.ts": "3150cbb5244a2ccf78dae6256883e4259ecded57dd3ba791743f03c0a88ab66a",
+    "client/src/pages/TodayOperationsPanorama/overview-model.ts": "bfbcd3b7e0455356f6edcff4c0a6f4920851fc19354fcc298c063d6dd4d51852",
+    "client/src/pages/TodayOperationsPanorama/overview-source-status.ts": "a2a12e0c5307f40b3a7df83639a4a9039ccb9f4fe2c90753d34c9d413afb5979",
+    "client/src/pages/TodayOperationsPanorama/SealingDetailDialog.tsx": "0c1823882651aeb2f242adda7bdfc5f3bd1a770a09bf9fafc7cd4ff880717074",
+    "client/src/pages/TodayOperationsPanorama/sealing-timeline-model.ts": "1f35894f509343a953cefb84f9e26321d6a2a9a9d1b4c38b10f884b8d1d578bd",
+    "shared/api.interface.ts": "b03f39864c8c495d98ccc46db4bd6f1c2148e2071b5dd7d2965248639b01dfce",
+    "client/src/api/index.ts": "f3b877c5e8f141fb63e8f1ef7d10793e73ea9fa52e6f1c50bbcd80ffc62e392f",
+    "node_modules/@lark-apaas/fullstack-presets/lib/simple/tsconfig/tsconfig.app.json": "504a4621108138d79246f044016554f1e0b01cd326f2b823ef181b39fd6f1907",
+    "node_modules/@lark-apaas/fullstack-presets/lib/simple/tsconfig/tsconfig.node.json": "52aa63c26d1661113fa604084ccdc3be2374c78d72dbf8b05cab3f5a7fe74e50",
+    "node_modules/ts-jest/package.json": "302b67b54cee29254f0db2cd7b482e324a54c086d0ce4e3aa24e09a7b874c9ff",
+    "node_modules/jest/package.json": "679fd6f49e8dcb1fd82b7d610c5d555b70204ad2e5e5092e284e9bc10eb9f353",
+    "node_modules/typescript/package.json": "822ef7ca6452205657b6288b066481ecf508bfbf43455d715cf7d3ec457561e6",
+    "dist/client/main.css": "3ad9f787c11dc7d4662592bde88db7f0c6ae5b326cdadd4088b098ab1072105c"
+  },
+  "reuseLimit": "Eight frozen source hashes and observed auxiliary hashes must still match. These auxiliary hashes alone do not prove a complete pre-execution closure. Final global types must come from stable shared input; no package/build/install/production health claims arise from this file."
+}

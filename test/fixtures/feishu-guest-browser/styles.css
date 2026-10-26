@@ -1,0 +1,3 @@
+@import '../feishu-login-browser/styles.css';
+@source '../../../client/src/components/UserNameAvatar.tsx';
+@source './entry.tsx';

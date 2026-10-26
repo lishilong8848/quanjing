@@ -1,0 +1,1564 @@
+.portal-css-integrity-sentinel {
+  display: contents;
+}
+
+.nantong-portal {
+  --portal-blue: #005bff;
+  --portal-blue-hover: #0049d6;
+  --portal-green: #27ab71;
+  --portal-mint: #0ec692;
+  --portal-green-text: #177749;
+  --portal-paper: #fdfefe;
+  --portal-wash: #f2f5fa;
+  --portal-soft: #eaf1ff;
+  --portal-ink: #222b3b;
+  --portal-muted: #647081;
+  --portal-line: #dce4ec;
+  --portal-navy: #0a1933;
+  --portal-navy-soft: #172b49;
+  --portal-light: #f7faff;
+  --portal-radius: 0.5rem;
+  --portal-gutter: clamp(0.75rem, 2vw, 1.5rem);
+  width: 100%;
+  min-width: 0;
+  background: var(--portal-wash);
+  color: var(--portal-ink);
+  font-family: Inter, Arial, sans-serif;
+  line-height: 1.5;
+}
+.nantong-portal .wrap {
+  width: calc(100% - var(--portal-gutter) * 2);
+  max-width: 100rem;
+  margin-inline: auto;
+}
+.nantong-portal button {
+  cursor: pointer;
+}
+.nantong-portal :is(button, a, input):focus-visible {
+  outline: 2px solid var(--portal-blue);
+  outline-offset: 4px;
+}
+.nantong-portal .portal-primary {
+  background: var(--portal-blue);
+  color: var(--portal-light);
+  border-radius: var(--portal-radius);
+  box-shadow: 0 4px 18px #005bff25;
+}
+.nantong-portal .portal-primary:hover {
+  background: var(--portal-blue-hover);
+}
+.nantong-portal .eyebrow {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--portal-blue);
+}
+.nantong-portal .section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+.nantong-portal .section-heading h2 {
+  font-size: 2rem;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  margin: 0.7rem 0 0;
+}
+.nantong-portal .section-heading p {
+  font-size: 0.82rem;
+  color: var(--portal-muted);
+  margin: 0.7rem 0 0;
+}
+.nantong-portal .text-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--portal-muted);
+  font-size: 0.85rem;
+}
+.nantong-portal .text-link svg {
+  width: 1.1rem;
+}
+.nantong-portal .photo-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--portal-navy);
+  color: var(--portal-light);
+  min-height: 34rem;
+  display: flex;
+  align-items: center;
+  margin-block: 1rem 0;
+  border: 1px solid var(--portal-navy-soft);
+  border-radius: var(--portal-radius);
+  box-shadow: 0 1px 3px #0a19331a;
+}
+.nantong-portal .photo-canvas {
+  position: absolute;
+  width: 85%;
+  aspect-ratio: 960 / 488;
+  right: -6%;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: -2;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 17%);
+  mask-image: linear-gradient(90deg, transparent, #000 17%);
+}
+.nantong-portal .photo-canvas svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+  -webkit-mask-image: linear-gradient(
+    0deg,
+    transparent,
+    #000 14%,
+    #000 88%,
+    transparent
+  );
+  mask-image: linear-gradient(
+    0deg,
+    transparent,
+    #000 14%,
+    #000 88%,
+    transparent
+  );
+}
+.nantong-portal .campus-base-photo {
+  filter: brightness(0.55) saturate(0.6);
+}
+.nantong-portal .lit-building-photo {
+  opacity: 0;
+  filter: brightness(1.13) saturate(1.02);
+  transition: opacity 0.45s ease-out;
+}
+.nantong-portal .lit-building-photo.is-lit {
+  opacity: 1;
+}
+.nantong-portal [data-lit-building='E'] {
+  filter: brightness(1.38) saturate(1.06);
+}
+.nantong-portal [data-lit-building='110'] {
+  filter: brightness(1.42) saturate(1.06);
+}
+.nantong-portal [data-tail] {
+  stroke: var(--portal-mint);
+}
+.nantong-portal [data-tail='glow'] {
+  stroke-width: 4;
+  opacity: 0.24;
+}
+.nantong-portal [data-tail='far'] {
+  stroke-width: 1;
+  opacity: 0.14;
+}
+.nantong-portal [data-tail='mid'] {
+  stroke-width: 1.3;
+  opacity: 0.45;
+}
+.nantong-portal [data-tail='near'] {
+  stroke-width: 1.7;
+  opacity: 0.95;
+}
+.nantong-portal .beacon-core {
+  fill: #e7fcff;
+  filter: drop-shadow(0 0 3px var(--portal-mint));
+}
+.nantong-portal .beacon-halo {
+  fill: #72edd32e;
+  stroke: #72edd380;
+  stroke-width: 0.6;
+  opacity: 0.45;
+}
+.nantong-portal .photo-shade {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      var(--portal-navy) 0%,
+      #0a1933f2 16%,
+      #0a19339e 24%,
+      transparent 37%
+    ),
+    linear-gradient(0deg, var(--portal-navy), transparent 24%);
+}
+.nantong-portal .photo-copy {
+  position: relative;
+  z-index: 1;
+  padding-block: 3rem;
+  pointer-events: none;
+}
+.nantong-portal .photo-copy > * {
+  max-width: 32rem;
+}
+.nantong-portal .photo-copy button {
+  pointer-events: auto;
+}
+.nantong-portal .photo-copy .location {
+  font-size: 0.8rem;
+  margin-bottom: 1.8rem;
+  color: #b9c7d8;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.nantong-portal .photo-copy .location::before {
+  content: '';
+  width: 1.8rem;
+  height: 2px;
+  background: var(--portal-green);
+}
+.nantong-portal .photo-copy h1 {
+  font-size: clamp(3.3rem, 4.9vw, 5.2rem);
+  font-weight: 750;
+  letter-spacing: -0.055em;
+  line-height: 1.23;
+  margin: 0 0 1.55rem;
+}
+.nantong-portal .photo-copy h1 span {
+  background: linear-gradient(90deg, #0ec692, #045aff);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.nantong-portal .photo-copy h2 {
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  margin: 0 0 0.7rem;
+}
+.nantong-portal .photo-copy p {
+  font-size: 0.81rem;
+  line-height: 1.9;
+  color: #a0b1c7;
+  margin: 0;
+}
+.nantong-portal .photo-actions {
+  margin-top: 2rem;
+}
+.nantong-portal .photo-actions button {
+  min-height: 3rem;
+  padding: 0.9rem 1.15rem;
+  font-size: 0.78rem;
+  gap: 0.9rem;
+}
+.nantong-portal .photo-values {
+  display: flex;
+  gap: 1.4rem;
+  margin-top: 2rem;
+  color: #a0b1c7;
+  font-size: 0.7rem;
+}
+.nantong-portal .photo-values span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.nantong-portal .photo-values svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--portal-mint);
+}
+.nantong-portal .photo-signature {
+  position: absolute;
+  right: var(--portal-gutter);
+  top: 2rem;
+  font-size: 0.69rem;
+  letter-spacing: 0.16em;
+  line-height: 2;
+  color: #9ec4d5;
+  pointer-events: none;
+}
+.nantong-portal .photo-signature span {
+  font-size: 0.59rem;
+}
+.nantong-portal .photo-building {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  border: 1px solid #75b6cb85;
+  background: #0a1933cc;
+  color: #dcecf6;
+  font-size: 0.65rem;
+  white-space: nowrap;
+  padding: 0.33rem 0.65rem;
+  line-height: 1.25;
+  border-radius: 0.2rem;
+  z-index: 3;
+  box-shadow: 0 3px 12px #00102533;
+  transition:
+    background 0.35s,
+    color 0.35s;
+}
+.nantong-portal .photo-building::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  height: 0.65rem;
+  border-left: 1px solid #92dcebb3;
+}
+.nantong-portal .photo-building[aria-pressed='true'],
+.nantong-portal .photo-building:hover {
+  background: var(--portal-mint);
+  border-color: var(--portal-mint);
+  color: var(--portal-navy);
+}
+.nantong-portal .campus-metrics {
+  padding: 1.6rem 0 2rem;
+  background: var(--portal-paper);
+  border-bottom: 1px solid var(--portal-line);
+}
+.nantong-portal .metrics-caption {
+  margin-bottom: 1.3rem;
+}
+.nantong-portal .metrics-caption h2 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.nantong-portal .metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.nantong-portal .campus-metric {
+  padding-inline: 2rem;
+  border-left: 1px solid var(--portal-line);
+}
+.nantong-portal .campus-metric:first-child {
+  border: 0;
+  padding-left: 0;
+}
+.nantong-portal .metric-value {
+  font-size: 2.6rem;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  font-weight: 600;
+  color: var(--portal-blue);
+  font-variant-numeric: tabular-nums;
+}
+.nantong-portal .metric-value b {
+  font: inherit;
+}
+.nantong-portal .metric-value > span:not(.sr-only) {
+  font-size: 0.85rem;
+  letter-spacing: 0;
+  margin-left: 0.35rem;
+  font-weight: 400;
+}
+.nantong-portal .metric-label {
+  font-size: 0.76rem;
+  margin-top: 0.65rem;
+}
+.nantong-portal .campus-metric small {
+  font-size: 0.59rem;
+  color: var(--portal-muted);
+}
+.nantong-portal .quick-strip {
+  background: var(--portal-paper);
+  border-bottom: 1px solid var(--portal-line);
+}
+.nantong-portal .quick-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  padding-block: 1.5rem;
+}
+.nantong-portal .quick-item {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  text-align: left;
+  border-right: 1px solid var(--portal-line);
+  padding: 0.7rem 1.3rem;
+}
+.nantong-portal .quick-item:first-child {
+  padding-left: 0;
+}
+.nantong-portal .quick-item:last-child {
+  border: 0;
+}
+.nantong-portal .quick-item > svg {
+  width: 1.6rem;
+  height: 1.6rem;
+  color: var(--portal-blue);
+  flex-shrink: 0;
+}
+.nantong-portal .quick-item strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.nantong-portal .quick-item small {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.68rem;
+  color: var(--portal-muted);
+}
+.nantong-portal .workspace {
+  padding-block: 4.5rem;
+}
+.nantong-portal .work-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+.nantong-portal .work-card {
+  overflow: hidden;
+  border: 1px solid var(--portal-line);
+  border-radius: var(--portal-radius);
+  background: var(--portal-paper);
+  box-shadow: none;
+  transition:
+    border-color 0.2s,
+    transform 0.2s;
+}
+.nantong-portal .work-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--portal-blue);
+}
+.nantong-portal .work-card > button {
+  position: relative;
+  padding: 1.7rem;
+  min-height: 14rem;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  text-align: left;
+}
+.nantong-portal .work-icon {
+  display: flex;
+  border-radius: var(--portal-radius);
+  padding: 0.65rem;
+  color: var(--portal-blue);
+  background: var(--portal-soft);
+  margin-bottom: 1rem;
+}
+.nantong-portal .work-icon svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+.nantong-portal .work-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.nantong-portal .work-card p {
+  font-size: 0.82rem;
+  color: var(--portal-muted);
+  line-height: 1.8;
+  margin: 0;
+}
+.nantong-portal .card-label {
+  font-size: 0.64rem;
+  margin-top: auto;
+  padding-top: 1.3rem;
+  color: var(--portal-muted);
+  letter-spacing: 0.13em;
+}
+.nantong-portal .corner-arrow {
+  position: absolute;
+  bottom: 1.7rem;
+  right: 1.7rem;
+  width: 1.2rem;
+  color: var(--portal-blue);
+}
+.nantong-portal .work-card.featured {
+  background: var(--portal-navy-soft);
+  color: var(--portal-light);
+  border-color: var(--portal-navy-soft);
+}
+.nantong-portal .featured .work-icon {
+  background: #75e8d219;
+  color: var(--portal-mint);
+}
+.nantong-portal .featured p,
+.nantong-portal .featured .card-label {
+  color: #b1c5dc;
+}
+.nantong-portal .featured .corner-arrow {
+  color: var(--portal-mint);
+}
+.nantong-portal .photo-systems {
+  padding: 4.5rem 0;
+  border-top: 1px solid var(--portal-line);
+}
+.nantong-portal .photo-system-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--portal-line);
+  margin-bottom: 1.6rem;
+}
+.nantong-portal .photo-system-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 1.15rem 1.3rem;
+  background: transparent;
+  color: var(--portal-muted);
+  text-align: left;
+  border-bottom: 2px solid transparent;
+  transition:
+    background 0.25s,
+    color 0.25s;
+}
+.nantong-portal .photo-system-tabs button[aria-selected='true'] {
+  background: var(--portal-soft);
+  border-color: var(--portal-green);
+  color: var(--portal-blue);
+}
+.nantong-portal .photo-system-tabs svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+.nantong-portal .photo-system-tabs small {
+  display: block;
+  font-size: 0.55rem;
+  letter-spacing: 0.16em;
+  margin-top: 0.25rem;
+}
+.nantong-portal .photo-system-tabs span {
+  font-size: 0.9rem;
+}
+.nantong-portal .photo-system-tabs b {
+  margin-left: auto;
+  font-size: 0.65rem;
+  font-weight: 400;
+}
+.nantong-portal .system-photo-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(16rem, 1fr);
+  min-height: 30rem;
+  background: var(--portal-paper);
+  border: 1px solid var(--portal-line);
+  border-radius: var(--portal-radius);
+  overflow: hidden;
+}
+.nantong-portal .system-photo-frame {
+  position: relative;
+  min-height: 30rem;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--portal-navy);
+}
+.nantong-portal .system-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.94) saturate(0.95);
+  z-index: -3;
+}
+.nantong-portal .system-photo[data-image-state='ready'] {
+  animation: portal-photo-reveal 0.45s ease-out;
+}
+@keyframes portal-photo-reveal {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.nantong-portal .equipment-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, #061225e6, transparent 53%, #06122550);
+  z-index: -2;
+}
+.nantong-portal .equipment-scan {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    #7de7ed12 48%,
+    #7de7ed42 50%,
+    transparent 52%
+  );
+  width: 45%;
+  transform: translateX(-130%);
+  animation: portal-equipment-sweep 9s ease-in-out infinite;
+}
+@keyframes portal-equipment-sweep {
+  0%,
+  15% {
+    transform: translateX(-130%);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.8;
+  }
+  75%,
+  100% {
+    transform: translateX(330%);
+    opacity: 0;
+  }
+}
+.nantong-portal .photo-systems[data-carousel-playing='false'] .equipment-scan {
+  animation-play-state: paused;
+}
+.nantong-portal .equipment-eyebrow {
+  position: absolute;
+  top: 1.35rem;
+  left: 1.5rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.18em;
+  color: var(--portal-light);
+}
+.nantong-portal .equipment-caption {
+  position: absolute;
+  left: 2rem;
+  bottom: 1.7rem;
+  right: 1rem;
+  color: var(--portal-light);
+}
+.nantong-portal .equipment-caption > span {
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
+  color: #92edce;
+}
+.nantong-portal .equipment-caption h3 {
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+  margin: 0.6rem 0 0.4rem;
+  font-weight: 550;
+}
+.nantong-portal .equipment-caption p {
+  font-size: 0.8rem;
+  color: #d2e3f2;
+  margin: 0;
+}
+.nantong-portal .photo-corner {
+  position: absolute;
+  width: 1.2rem;
+  height: 1.2rem;
+  opacity: 0.7;
+  border-color: var(--portal-mint);
+  border-style: solid;
+}
+.nantong-portal .photo-corner.top-left {
+  left: 0.6rem;
+  top: 0.6rem;
+  border-width: 1px 0 0 1px;
+}
+.nantong-portal .photo-corner.bottom-right {
+  right: 0.6rem;
+  bottom: 0.6rem;
+  border-width: 0 1px 1px 0;
+}
+.nantong-portal .system-photo-story {
+  padding: 2rem 1.8rem;
+  display: flex;
+  flex-direction: column;
+}
+.nantong-portal .system-photo-story > .eyebrow {
+  font-size: 0.58rem;
+  color: var(--portal-green-text);
+}
+.nantong-portal .system-photo-story h3 {
+  font-size: 1.8rem;
+  line-height: 1.35;
+  white-space: pre-line;
+  margin: 1.1rem 0 0.8rem;
+  font-weight: 500;
+}
+.nantong-portal .system-photo-story > p {
+  font-size: 0.82rem;
+  line-height: 1.9;
+  color: var(--portal-muted);
+  margin: 0 0 1rem;
+}
+.nantong-portal .system-device-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 1rem;
+}
+.nantong-portal .system-device-list button {
+  width: 100%;
+  padding: 0.65rem 0.3rem;
+  border-bottom: 1px solid var(--portal-line);
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  font-size: 0.78rem;
+  text-align: left;
+  color: var(--portal-muted);
+}
+.nantong-portal .system-device-list button span {
+  font-size: 0.6rem;
+  color: var(--portal-muted);
+  font-variant-numeric: tabular-nums;
+}
+.nantong-portal .system-device-list button svg {
+  width: 0.85rem;
+  margin-left: auto;
+}
+.nantong-portal .system-device-list button[aria-pressed='true'] {
+  color: var(--portal-blue);
+}
+.nantong-portal .system-app-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  padding: 1.1rem 0 0;
+  margin-top: auto;
+  color: var(--portal-blue);
+  font-size: 0.8rem;
+}
+.nantong-portal .system-app-link svg {
+  width: 1rem;
+}
+.nantong-portal .system-photo-thumbnails {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, 12.5rem), 1fr)
+  );
+  gap: 0.8rem;
+  margin-top: 1rem;
+  min-height: 8.5rem;
+}
+.nantong-portal .system-photo-thumbnails button {
+  text-align: left;
+  background: var(--portal-paper);
+  border: 1px solid var(--portal-line);
+  border-radius: 0.25rem;
+  overflow: hidden;
+  color: var(--portal-muted);
+}
+.nantong-portal .system-photo-thumbnails img {
+  width: 100%;
+  height: 6rem;
+  object-fit: cover;
+  display: block;
+  filter: brightness(0.9) saturate(0.75);
+}
+.nantong-portal .system-photo-thumbnails span {
+  display: block;
+  padding: 0.65rem 0.8rem;
+  font-size: 0.72rem;
+}
+.nantong-portal .system-photo-thumbnails button[aria-pressed='true'] {
+  border-color: var(--portal-blue);
+  color: var(--portal-blue);
+}
+.nantong-portal .system-photo-thumbnails button[aria-pressed='true'] img {
+  filter: none;
+}
+.nantong-portal .photo-location {
+  padding: 4.5rem 0;
+  background: var(--portal-paper);
+  border-top: 1px solid var(--portal-line);
+}
+.nantong-portal .location-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 2rem;
+  align-items: stretch;
+}
+.nantong-portal .location-map {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 960 / 704;
+  align-self: center;
+  border: 1px solid var(--portal-line);
+  border-radius: var(--portal-radius);
+  background: var(--portal-wash);
+}
+.nantong-portal .location-map > img {
+  position: absolute;
+  max-width: none;
+  width: 186.5625%;
+  height: 108.0966%;
+  left: -6.5625%;
+  top: -3.9773%;
+}
+.nantong-portal .location-map-pulse {
+  position: absolute;
+  left: 57.3%;
+  top: 60.65%;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid var(--portal-green);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: portal-location-pulse 3s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes portal-location-pulse {
+  0% {
+    opacity: 0.7;
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.4);
+  }
+}
+.nantong-portal .location-facts {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 1.2rem;
+}
+.nantong-portal .location-fact {
+  background: var(--portal-wash);
+  border: 1px solid var(--portal-line);
+  border-radius: var(--portal-radius);
+  box-shadow: none;
+}
+.nantong-portal .location-fact > div {
+  padding: 1.65rem 1.8rem;
+}
+.nantong-portal .location-fact h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+}
+.nantong-portal .location-fact h3 svg {
+  color: var(--portal-blue);
+  width: 1.35rem;
+  height: 1.35rem;
+}
+.nantong-portal .location-fact p {
+  font-size: 0.86rem;
+  line-height: 1.9;
+  color: var(--portal-muted);
+  margin: 0.7rem 0;
+}
+.nantong-portal .location-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.nantong-portal .location-tags span {
+  font-size: 0.68rem;
+  color: var(--portal-green-text);
+  background: #e4f3eb;
+  padding: 0.3rem 0.55rem;
+  border-radius: 0.2rem;
+}
+.nantong-portal .portal-footer {
+  padding: 1.75rem 0;
+  background: var(--portal-paper);
+  border-top: 1px solid var(--portal-line);
+}
+.nantong-portal .portal-footer > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+.nantong-portal .portal-footer strong {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.nantong-portal .portal-footer small {
+  font-size: 0.7rem;
+  color: var(--portal-muted);
+}
+.nantong-portal.portal-dialog {
+  width: calc(100vw - 3rem);
+  max-width: 78rem;
+  max-height: min(90dvh, 60rem);
+  padding: 0;
+  gap: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--portal-paper);
+  border-radius: 0.75rem;
+}
+.nantong-portal .portal-dialog-header {
+  padding: 1.2rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--portal-line);
+  flex-shrink: 0;
+}
+.nantong-portal .portal-dialog-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+.nantong-portal .portal-dialog-body {
+  overflow: auto;
+  min-height: 0;
+}
+.nantong-portal .app-directory {
+  padding: 1.5rem;
+}
+.nantong-portal .app-category-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 1rem 0 1.25rem;
+}
+.nantong-portal .app-category-filters button {
+  font-size: 0.78rem;
+}
+.nantong-portal .app-category-filters button[aria-pressed='true'] {
+  background: var(--portal-soft);
+  color: var(--portal-blue);
+}
+.nantong-portal .app-directory-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+.nantong-portal .app-preview-card {
+  border: 1px solid var(--portal-line);
+  background: var(--portal-paper);
+  border-radius: var(--portal-radius);
+  text-align: left;
+  overflow: hidden;
+}
+.nantong-portal .app-preview-card:hover {
+  border-color: var(--portal-blue);
+}
+.nantong-portal .app-card-visual {
+  height: 7.5rem;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(125deg, #0b594b, #083177);
+  color: #acf5dc;
+}
+.nantong-portal .app-card-visual > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+.nantong-portal .app-card-visual > svg {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+.nantong-portal .app-card-copy {
+  padding: 1rem;
+}
+.nantong-portal .app-card-copy h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+.nantong-portal .app-card-copy p {
+  font-size: 0.8rem;
+  color: var(--portal-muted);
+  min-height: 2.5rem;
+}
+.nantong-portal .app-card-copy > span {
+  font-size: 0.73rem;
+  color: var(--portal-blue);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+.nantong-portal .app-card-copy > span svg {
+  width: 0.9rem;
+}
+.nantong-portal .app-empty,
+.nantong-portal .portal-loading {
+  padding: 3rem;
+  text-align: center;
+  color: var(--portal-muted);
+}
+.nantong-portal .app-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 1fr);
+}
+.nantong-portal .app-detail-media {
+  min-width: 0;
+  background: var(--portal-wash);
+}
+.nantong-portal .app-media-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  min-height: 3.5rem;
+}
+.nantong-portal .app-media-toolbar > span {
+  font-size: 0.75rem;
+  color: var(--portal-muted);
+}
+.nantong-portal .app-media-toolbar button {
+  font-size: 0.75rem;
+  color: var(--portal-blue);
+}
+.nantong-portal .app-snapshot-viewport {
+  position: relative;
+  overflow: auto;
+  max-height: 58dvh;
+  padding: 0 1rem 1rem;
+}
+.nantong-portal .app-snapshot-viewport > img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--portal-line);
+  border-radius: 0.3rem;
+}
+.nantong-portal .app-detail-info {
+  padding: 2rem;
+  border-left: 1px solid var(--portal-line);
+}
+.nantong-portal .app-detail-info > h3 {
+  font-size: 1.75rem;
+  line-height: 1.45;
+  margin: 1rem 0 1.5rem;
+  font-weight: 500;
+}
+.nantong-portal .app-detail-info .eyebrow {
+  color: var(--portal-green-text);
+  font-size: 0.63rem;
+}
+.nantong-portal .app-feature {
+  display: flex;
+  gap: 0.8rem;
+  margin-block: 1rem;
+}
+.nantong-portal .app-feature > span {
+  font-size: 0.65rem;
+  color: var(--portal-green-text);
+  margin-top: 0.25rem;
+}
+.nantong-portal .app-feature h4 {
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+.nantong-portal .app-feature p {
+  font-size: 0.8rem;
+  color: var(--portal-muted);
+  line-height: 1.85;
+  margin: 0;
+}
+.nantong-portal .snapshot-note {
+  font-size: 0.72rem;
+  color: var(--portal-muted);
+  margin: 1.5rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--portal-line);
+}
+.nantong-portal .snapshot-note svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  display: inline;
+  margin-right: 0.3rem;
+}
+.nantong-portal .app-detail-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  background: var(--portal-paper);
+  border-top: 1px solid var(--portal-line);
+  z-index: 2;
+}
+.nantong-portal .snapshot-expanded .app-detail {
+  grid-template-columns: 1fr;
+}
+.nantong-portal .snapshot-expanded .app-detail-info {
+  display: none;
+}
+.nantong-portal .snapshot-expanded .app-snapshot-viewport > img {
+  min-width: 60rem;
+}
+.nantong-portal .app-abstract {
+  min-height: 22rem;
+  padding: 3rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: linear-gradient(125deg, #0b594b, #083177);
+  color: var(--portal-light);
+}
+.nantong-portal .app-abstract > svg {
+  width: 3rem;
+  height: 3rem;
+  margin-bottom: 1.5rem;
+  color: #acf5dc;
+}
+.nantong-portal .app-abstract h3 {
+  font-size: 2rem;
+  font-weight: 600;
+}
+.nantong-portal .app-abstract p {
+  font-size: 0.9rem;
+  line-height: 1.8;
+  margin-top: 0.8rem;
+}
+.nantong-portal .focus-layout {
+  padding: 1.5rem;
+}
+.nantong-portal .focus-layout > h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 1.2rem;
+}
+.nantong-portal .focus-layout-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.nantong-portal .focus-layout-stats > div {
+  background: var(--portal-paper);
+  border: 1px solid var(--portal-line);
+  border-radius: 0.3rem;
+  padding: 0.65rem;
+  font-size: 0.7rem;
+}
+.nantong-portal .focus-layout-stats b {
+  display: block;
+  font-size: 1.5rem;
+  color: var(--portal-blue);
+}
+.nantong-portal .focus-layout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+}
+.nantong-portal .focus-layout-grid > div {
+  padding: 1rem;
+  border: 1px solid var(--portal-line);
+  background: var(--portal-paper);
+  border-radius: 0.3rem;
+}
+.nantong-portal .focus-layout-grid h4 {
+  font-size: 0.8rem;
+  color: var(--portal-blue);
+  margin-bottom: 0.7rem;
+}
+.nantong-portal .focus-layout-grid span,
+.nantong-portal .focus-layout > small {
+  font-size: 0.63rem;
+  color: var(--portal-muted);
+}
+.nantong-portal .focus-layout-grid i {
+  display: block;
+  height: 0.35rem;
+  margin-top: 0.6rem;
+  background: var(--portal-wash);
+  width: 85%;
+}
+.nantong-portal .focus-layout-grid i:last-child {
+  width: 60%;
+}
+.nantong-portal .focus-layout > small {
+  display: block;
+  margin-top: 1rem;
+}
+.nantong-portal .portal-image-loading {
+  position: absolute;
+  top: 1rem;
+  left: auto;
+  right: 1rem;
+  max-width: calc(100% - 2rem);
+  padding: 0.5rem 0.75rem;
+  text-align: center;
+  background: var(--portal-navy);
+  color: var(--portal-light);
+  font-size: 0.8rem;
+  border-radius: var(--portal-radius);
+}
+.nantong-portal .portal-image-error {
+  position: absolute;
+  top: 35%;
+  left: 1rem;
+  right: 1rem;
+  z-index: 3;
+  padding: 1rem;
+  text-align: center;
+  background: var(--portal-paper);
+  color: var(--portal-ink);
+  border-radius: var(--portal-radius);
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+@media (min-width: 1800px) {
+  .nantong-portal .photo-hero {
+    min-height: 38rem;
+  }
+  .nantong-portal .photo-canvas {
+    width: 81%;
+    right: -3%;
+  }
+}
+@media (max-width: 1120px) {
+  .nantong-portal .photo-canvas {
+    width: 95%;
+    right: -8%;
+  }
+  .nantong-portal .photo-copy > * {
+    max-width: 20rem;
+  }
+  .nantong-portal .photo-copy h1 {
+    max-width: 18rem;
+    font-size: 3.7rem;
+  }
+  .nantong-portal .photo-copy p {
+    max-width: 18rem;
+  }
+  .nantong-portal .photo-values {
+    gap: 0.8rem;
+    font-size: 0.61rem;
+  }
+  .nantong-portal .campus-metric {
+    padding-inline: 1.1rem;
+  }
+  .nantong-portal .metric-value {
+    font-size: 2.2rem;
+  }
+  .nantong-portal .quick-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .nantong-portal .quick-item {
+    padding: 1rem !important;
+  }
+  .nantong-portal .quick-item:nth-child(3) {
+    border: 0;
+  }
+  .nantong-portal .system-photo-panel {
+    grid-template-columns: 1.8fr 1fr;
+  }
+  .nantong-portal .system-photo-story {
+    padding: 1.5rem;
+  }
+  .nantong-portal .system-photo-story h3 {
+    font-size: 1.5rem;
+  }
+  .nantong-portal .location-grid {
+    grid-template-columns: 1fr;
+  }
+  .nantong-portal .location-map {
+    width: 100%;
+    max-width: 52rem;
+    justify-self: center;
+  }
+  .nantong-portal .location-facts {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+  }
+}
+@media (max-width: 760px) {
+  .nantong-portal .photo-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 0;
+    padding-bottom: 1.25rem;
+    margin-top: 0.75rem;
+  }
+  .nantong-portal .photo-copy {
+    order: 1;
+    position: relative;
+    z-index: 1;
+    padding: 2rem 0 0;
+  }
+  .nantong-portal .photo-canvas {
+    order: 2;
+    position: relative;
+    width: 100%;
+    right: auto;
+    top: auto;
+    transform: none;
+    margin-top: 1.5rem;
+    z-index: 0;
+  }
+  .nantong-portal .photo-shade,
+  .nantong-portal .photo-signature,
+  .nantong-portal .photo-values {
+    display: none;
+  }
+  .nantong-portal .photo-copy .location {
+    margin-bottom: 1.25rem;
+    font-size: 0.75rem;
+  }
+  .nantong-portal .photo-copy h1 {
+    font-size: 2.6rem;
+    line-height: 1.2;
+    margin-bottom: 0.9rem;
+  }
+  .nantong-portal .photo-copy h2 {
+    font-size: 0.9rem;
+  }
+  .nantong-portal .photo-copy p {
+    font-size: 0.78rem;
+    max-width: none;
+  }
+  .nantong-portal .photo-actions {
+    margin-top: 1.2rem;
+  }
+  .nantong-portal .photo-actions button {
+    font-size: 0.72rem;
+    padding: 0.75rem 0.85rem;
+    min-height: 2.8rem;
+  }
+  .nantong-portal .photo-building {
+    font-size: 0.57rem;
+    padding: 0.26rem 0.4rem;
+  }
+  .nantong-portal .photo-building::after {
+    height: 0.35rem;
+  }
+  .nantong-portal .campus-metrics {
+    padding: 1.2rem 0 1.5rem;
+  }
+  .nantong-portal .metrics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.2rem 0;
+  }
+  .nantong-portal .campus-metric {
+    padding-inline: 0.7rem;
+  }
+  .nantong-portal .campus-metric:nth-child(4) {
+    border: 0;
+    padding-left: 0;
+  }
+  .nantong-portal .metric-value {
+    font-size: 1.8rem;
+  }
+  .nantong-portal .metric-value > span:not(.sr-only) {
+    font-size: 0.65rem;
+  }
+  .nantong-portal .metric-label {
+    font-size: 0.7rem;
+  }
+  .nantong-portal .campus-metric small {
+    font-size: 0.56rem;
+    display: block;
+    margin-top: 0.2rem;
+  }
+  .nantong-portal .quick-grid {
+    padding-block: 0.5rem;
+  }
+  .nantong-portal .quick-item {
+    flex-direction: column;
+    align-items: start;
+    gap: 0.5rem;
+  }
+  .nantong-portal .quick-item strong {
+    font-size: 0.8rem;
+  }
+  .nantong-portal .quick-item small {
+    font-size: 0.6rem;
+  }
+  .nantong-portal .quick-item:nth-child(-n + 3) {
+    border-bottom: 1px solid var(--portal-line);
+  }
+  .nantong-portal .workspace {
+    padding-block: 2.8rem;
+  }
+  .nantong-portal .section-heading {
+    display: block;
+    margin-bottom: 1.2rem;
+  }
+  .nantong-portal .section-heading h2 {
+    font-size: 1.5rem;
+  }
+  .nantong-portal .section-heading .eyebrow {
+    font-size: 0.57rem;
+  }
+  .nantong-portal .section-heading .text-link {
+    margin-top: 1rem;
+    font-size: 0.75rem;
+  }
+  .nantong-portal .work-grid {
+    grid-template-columns: 1fr;
+    gap: 0.8rem;
+  }
+  .nantong-portal .work-card > button {
+    min-height: 0;
+    display: block;
+    padding: 1.2rem 1.2rem 1.2rem 4.6rem;
+  }
+  .nantong-portal .work-icon {
+    position: absolute;
+    left: 1.1rem;
+    top: 1.2rem;
+    padding: 0.6rem;
+  }
+  .nantong-portal .work-card h3 {
+    font-size: 1rem;
+    margin-bottom: 0.35rem;
+  }
+  .nantong-portal .work-card p {
+    font-size: 0.76rem;
+    max-width: calc(100% - 1rem);
+  }
+  .nantong-portal .card-label {
+    font-size: 0.56rem;
+    padding-top: 0.7rem;
+  }
+  .nantong-portal .corner-arrow {
+    bottom: 1.2rem;
+    right: 1rem;
+  }
+  .nantong-portal .photo-systems,
+  .nantong-portal .photo-location {
+    padding: 3rem 0;
+  }
+  .nantong-portal .photo-system-tabs button {
+    padding: 0.85rem 0.35rem;
+    justify-content: center;
+    gap: 0.3rem;
+  }
+  .nantong-portal .photo-system-tabs span {
+    font-size: 0.68rem;
+  }
+  .nantong-portal .photo-system-tabs small {
+    font-size: 0.45rem;
+    letter-spacing: 0.05em;
+  }
+  .nantong-portal .photo-system-tabs svg {
+    width: 0.95rem;
+  }
+  .nantong-portal .photo-system-tabs b {
+    display: none;
+  }
+  .nantong-portal .system-photo-panel {
+    display: block;
+    min-height: 0;
+  }
+  .nantong-portal .system-photo-frame {
+    min-height: 20rem;
+  }
+  .nantong-portal .equipment-caption {
+    left: 1.2rem;
+    bottom: 1.3rem;
+  }
+  .nantong-portal .equipment-caption h3 {
+    font-size: 1.5rem;
+  }
+  .nantong-portal .equipment-caption p {
+    font-size: 0.72rem;
+  }
+  .nantong-portal .system-photo-story h3 {
+    font-size: 1.6rem;
+    margin: 0.7rem 0;
+  }
+  .nantong-portal .system-device-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 1.2rem;
+  }
+  .nantong-portal .system-device-list button {
+    font-size: 0.7rem;
+  }
+  .nantong-portal .system-app-link {
+    margin-top: 1rem;
+  }
+  .nantong-portal .system-photo-thumbnails {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.6rem;
+    min-height: 0;
+  }
+  .nantong-portal .system-photo-thumbnails img {
+    height: 4rem;
+  }
+  .nantong-portal .system-photo-thumbnails span {
+    font-size: 0.63rem;
+    padding: 0.5rem;
+  }
+  .nantong-portal .location-grid {
+    gap: 1.2rem;
+  }
+  .nantong-portal .location-facts {
+    grid-template-columns: 1fr;
+  }
+  .nantong-portal .location-fact > div {
+    padding: 1.4rem;
+  }
+  .nantong-portal .location-fact h3 {
+    font-size: 1.08rem;
+  }
+  .nantong-portal .portal-footer > div {
+    align-items: start;
+    flex-direction: column;
+  }
+  .nantong-portal.portal-dialog {
+    width: calc(100vw - 1rem);
+    max-width: none;
+    max-height: calc(100dvh - 1rem);
+  }
+  .nantong-portal .app-detail {
+    grid-template-columns: 1fr;
+  }
+  .nantong-portal .app-directory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7rem;
+  }
+  .nantong-portal .app-directory {
+    padding: 1rem;
+  }
+  .nantong-portal .app-card-visual {
+    height: 6rem;
+  }
+  .nantong-portal .app-card-copy {
+    padding: 0.8rem;
+  }
+  .nantong-portal .app-card-copy h3 {
+    font-size: 0.9rem;
+  }
+  .nantong-portal .app-card-copy p {
+    font-size: 0.72rem;
+  }
+  .nantong-portal .app-detail-info {
+    padding: 1.5rem;
+    border-left: 0;
+    border-top: 1px solid var(--portal-line);
+  }
+  .nantong-portal .app-detail-info > h3 {
+    font-size: 1.5rem;
+  }
+  .nantong-portal .app-detail-footer {
+    padding: 0.85rem;
+    gap: 0.5rem;
+  }
+  .nantong-portal .app-detail-footer button,
+  .nantong-portal .app-detail-footer a {
+    font-size: 0.72rem;
+    padding-inline: 0.65rem;
+  }
+  .nantong-portal .app-abstract {
+    min-height: 14rem;
+    padding: 2rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nantong-portal *,
+  .nantong-portal *::before,
+  .nantong-portal *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

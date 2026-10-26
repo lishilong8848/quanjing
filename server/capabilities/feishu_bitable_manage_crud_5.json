@@ -1,0 +1,131 @@
+{
+  "id": "feishu_bitable_manage_crud_5",
+  "pluginKey": "@official-plugins/feishu-bitable",
+  "pluginVersion": "1.0.1",
+  "name": "南通机房非值班排班表",
+  "description": "管理飞书多维表格，支持数据的创建、查询、更新、删除",
+  "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/fzgeh7nuhfboznulog/bitable.svg",
+  "paramsSchema": {},
+  "formValue": {
+    "tableID": "PUBLIC_EXAMPLE_FEISHU_NON_DUTY_TABLE_ID",
+    "fields": [
+      {
+        "name": "值班编码",
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true,
+        "writeable": false,
+        "id": "fldITqhd37"
+      },
+      {
+        "type": 5,
+        "bizType": "DateTime",
+        "readable": true,
+        "writeable": true,
+        "id": "fldZSaDbGf",
+        "name": "排班日期"
+      },
+      {
+        "type": 1005,
+        "bizType": "AutoNumber",
+        "readable": true,
+        "writeable": false,
+        "id": "fldRAVxqf7",
+        "name": "编码"
+      },
+      {
+        "writeable": true,
+        "bizType": "SingleSelect",
+        "enumValues": [
+          "A楼",
+          "B楼",
+          "C楼",
+          "D楼",
+          "E楼",
+          "H楼",
+          "110站"
+        ],
+        "id": "fldnP4gXMn",
+        "name": "机楼",
+        "type": 3,
+        "readable": true
+      },
+      {
+        "id": "fldE9Gwnk7",
+        "name": "班组",
+        "type": 3,
+        "bizType": "SingleSelect",
+        "enumValues": [
+          "A班",
+          "B班",
+          "C班",
+          "D班",
+          "长白"
+        ],
+        "readable": true,
+        "writeable": true
+      },
+      {
+        "id": "fldJi5bxBG",
+        "name": "人员（文本）",
+        "type": 20,
+        "bizType": "Formula",
+        "readable": true,
+        "writeable": false
+      },
+      {
+        "id": "fld5JgaSwV",
+        "name": "人员",
+        "type": 19,
+        "bizType": "Lookup",
+        "readable": false,
+        "writeable": false
+      },
+      {
+        "type": 1,
+        "bizType": "Text",
+        "id": "fldd3W5SVZ",
+        "readable": true,
+        "writeable": true,
+        "name": "值班人员（实际）"
+      },
+      {
+        "id": "fldQBMKyrd",
+        "name": "请假人员",
+        "type": 1,
+        "bizType": "Text",
+        "readable": true,
+        "writeable": true
+      },
+      {
+        "bizType": "Lookup",
+        "id": "fld4xMPICY",
+        "readable": false,
+        "writeable": false,
+        "name": "请假人员（请假表）",
+        "type": 19
+      },
+      {
+        "id": "fldVb5Pibm",
+        "name": "替班人员",
+        "type": 19,
+        "bizType": "Lookup",
+        "readable": false,
+        "writeable": false
+      },
+      {
+        "type": 1002,
+        "bizType": "ModifiedTime",
+        "readable": true,
+        "writeable": false,
+        "id": "fld1VlOSmu",
+        "name": "最新更新时间"
+      }
+    ],
+    "owner": "7310140364520734723",
+    "appToken": "PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN"
+  },
+  "createdAt": 1770268823527,
+  "updatedAt": 1770268968511,
+  "createdBy": 7310140364520734723
+}

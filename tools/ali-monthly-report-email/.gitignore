@@ -1,0 +1,14 @@
+config.json
+downloads/
+temp/
+logs/
+run/
+output/
+build/
+dist/
+release/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.log

@@ -1,0 +1,11 @@
+@import 'tailwindcss' source(none);
+@import 'tw-animate-css';
+@import '../../client/src/tailwind-theme.css';
+@import '../../client/src/typography.css';
+@source '../../client/src/components';
+@source '../../client/src/access';
+@source '../../client/src/navigation';
+@source '../../client/src/pages/SystemConfiguration';
+@source '../../client/src/pages/EquipmentLedgerManagement';
+@source '../../client/src/pages/PurchaseInventoryManagement/ManagementHeader.tsx';
+@source './professional-browser-entry.tsx';

@@ -1,0 +1,50 @@
+{
+  "id": "send_feishu_message_duty_overview",
+  "pluginKey": "@official-plugins/send-feishu-message",
+  "pluginVersion": "1.0.14",
+  "name": "发送近期值班概览卡片截图",
+  "description": "将近期值班概览卡片截图发送给当前登录用户",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "string",
+        "description": "消息内容"
+      },
+      "image_urls": {
+        "description": "要发送的截图图片URL列表",
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "format": "plugin-image-url"
+      }
+    },
+    "order": [
+      "content",
+      "image_urls"
+    ],
+    "required": [
+      "content"
+    ]
+  },
+  "formValue": {
+    "sender": "bot",
+    "title": {
+      "title": "近期值班概览",
+      "titleColor": "wathet"
+    },
+    "buttons": [],
+    "image_urls": "{{input.image_urls}}",
+    "content": "{{input.content}}{{input.image_urls}}",
+    "receiverGroupList": [
+      "oc_c79f407063dc9ca9f70cc76cb4059895",
+      "PUBLIC_EXAMPLE_FEISHU_MONTHLY_SCHEDULE_ACCESS_CHAT_ID"
+    ],
+    "receiverUserList": []
+  },
+  "createdAt": 1770083632901,
+  "updatedAt": 1770084347016,
+  "createdBy": 7310140364520734723
+}

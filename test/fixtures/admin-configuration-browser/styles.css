@@ -1,0 +1,10 @@
+@import 'tailwindcss' source(none);
+@import '../../../client/src/tailwind-theme.css';
+@config '../../../tailwind.config.ts';
+@source '../../../client/src/components/ui';
+@source '../../../client/src/components/Layout.tsx';
+@source '../../../client/src/components/GlobalNavigation.tsx';
+@source '../../../client/src/access';
+@source '../../../client/src/pages/SystemConfiguration';
+@source './entry.tsx';
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: Inter, Arial, sans-serif; }

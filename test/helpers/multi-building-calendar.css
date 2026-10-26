@@ -1,0 +1,54 @@
+
+
+.duty-calendar-panel {
+  background: hsl(210 40% 98% / 0.34) !important;
+  border-color: hsl(210 40% 94%) !important;
+  min-width: 0;
+  width: 100%;
+}
+
+.duty-calendar-panel .rdp-month_grid {
+  table-layout: fixed !important;
+  width: 100% !important;
+}
+
+.duty-calendar-panel .rdp-day,
+.duty-calendar-panel .rdp-day_button {
+  aspect-ratio: auto !important;
+  min-width: 0 !important;
+}
+
+.duty-calendar-panel .rdp-day_button {
+  height: 100% !important;
+  min-height: 4.1rem !important;
+  width: 100% !important;
+}
+
+.duty-calendar-panel button {
+  border-color: transparent !important;
+}
+
+.duty-calendar-panel button[class*="border-rose"] {
+  background: hsl(351 100% 97% / 0.62) !important;
+  border-color: hsl(352 83% 91% / 0.78) !important;
+  color: hsl(347 77% 50%) !important;
+}
+
+.duty-calendar-panel button[class*="border-blue"],
+.duty-calendar-panel button[data-selected-single="true"] {
+  background: hsl(214 100% 97% / 0.66) !important;
+  border-color: hsl(217 91% 78% / 0.76) !important;
+  color: hsl(217 91% 60%) !important;
+}
+
+.duty-calendar-panel button[class*="border-red"] {
+  background: hsl(0 86% 97% / 0.78) !important;
+  border-color: hsl(0 84% 60% / 0.9) !important;
+  color: hsl(0 72% 50%) !important;
+}
+
+.duty-calendar-panel button[class*="border-emerald"] {
+  background: hsl(151 81% 96% / 0.48) !important;
+  border-color: hsl(149 80% 88% / 0.64) !important;
+  color: hsl(151 73% 32%) !important;
+}

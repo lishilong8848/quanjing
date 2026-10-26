@@ -1,0 +1,98 @@
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), crypto = require('node:crypto');
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'nt-login-entry-fixture-'));
+process.env.ACCESS_CONFIGURATION_FILE = path.join(temporary, 'configuration.json');
+process.env.FEISHU_LOCAL_CACHE_DIR = temporary;
+process.env.FEISHU_APP_ID = 'cli_0831564613853b26'; process.env.FEISHU_APP_SECRET = 'synthetic-fixture-only';
+process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:43213';
+process.env.LOCAL_ACCESS_SESSION_SECRET = crypto.randomBytes(32).toString('base64');
+require('reflect-metadata');
+require('ts-node').register({ transpileOnly: true, compilerOptions: { module: 'CommonJS', moduleResolution: 'node', esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('tsconfig-paths').register({ baseUrl: path.resolve(__dirname, '../..'), paths: { '@server/*': ['server/*'], '@shared/*': ['shared/*'] } });
+const { UnifiedAccessService, hashAccessPassword } = require('../../server/common/access/unified-access.service');
+process.env.LOCAL_ADMIN_PASSWORD_HASH = hashAccessPassword('synthetic-shared-only');
+const { AccessConfigurationService } = require('../../server/common/access/access-configuration.service');
+const { AccessPersonnelSyncService } = require('../../server/common/access/access-personnel-sync.service');
+const { AccessConfigurationController } = require('../../server/common/access/access-configuration.controller');
+const { UnifiedAccessController } = require('../../server/common/access/unified-access.controller');
+const { AccessLoginRedactionMiddleware } = require('../../server/common/access/access-login-redaction.middleware');
+const { buildExternalEmployeeCredentials } = require('../../server/common/access/external-employee-directory');
+const { UnifiedAccessGuard } = require('../../server/common/access/unified-access.guard');
+const { Reflector } = require('@nestjs/core');
+const { PROFESSIONAL_DEFAULTS } = require('../../server/common/access/access-professional-defaults');
+const bitable = require('../../server/common/feishu/bitable-direct-read');
+const records = ['暖通', '电气', '未维护'].map((specialty, index) => ({ record_id: `recFixture${index}`, fields: { 机楼: ['A楼', 'B楼', 'C楼'][index], 设备编号: `QA${index}`, 设备名称: ['验收暖通设备', '验收电气设备', '验收未维护设备'][index], 系统名称: specialty, 大设备类型: '冷却塔', 数量: 1, 维保截止日期: '2099-01-01' } }));
+bitable.fetchBitableRecords = async () => records; bitable.resolveBitableAppToken = async () => 'fixture'; bitable.readLatestPersistedBitableRecordSnapshot = async () => ({ records: [{ record_id:'recNameQa1', fields:{姓名:'验收员工甲', 密码:'never-return'} }, {record_id:'recNameQa2', fields:{姓名:'验收员工乙'} }], fetchedAt:Date.now(), expiresAt:Date.now()+300000 });
+const { EquipmentLedgerService } = require('../../server/modules/equipment-lifecycle/equipment-ledger.service');
+const { EquipmentLedgerController } = require('../../server/modules/equipment-lifecycle/equipment-ledger.controller');
+const configuration = new AccessConfigurationService(), access = new UnifiedAccessService(configuration);
+const actor = configuration.localTargets().find(item => item.principal.role === 'admin').principal;
+let externalEmployees = [];
+const directory = { read: async () => ({ externalEmployees, appId: process.env.FEISHU_APP_ID, personnelComplete: true, snapshotAt: Date.now(), people: PROFESSIONAL_DEFAULTS.map(person => ({ ...person, source: 'employee' })), employees: PROFESSIONAL_DEFAULTS.map(person => ({ ...person, position: '专业示例人员001', specialties: person.specialties.join('、'), inactive: false })) }), assertKnown: async () => {} };
+const sync = new AccessPersonnelSyncService(configuration, directory);
+const configController = new AccessConfigurationController(configuration, directory, access, {}, sync);
+const accessController = new UnifiedAccessController(access, {});
+const ledger = new EquipmentLedgerController(new EquipmentLedgerService({}, {}), {});
+const guard = new UnifiedAccessGuard(new Reflector(), access);
+const app = require('express')(); app.use(require('express').json());
+let failSync = false, failSave = false;
+const observations = []; app.use((req,res,next) => { if (req.path.startsWith('/api/')) res.on('finish',()=>observations.push({ path:req.path, refresh:req.query.refresh??null, status:res.statusCode })); next(); });
+let failNames = false;
+app.get('/qa/login/error-names',(_,res)=> { failNames=true; res.clearCookie(access.cookieName); res.redirect('/nantong-base'); });
+app.get('/qa/login/report',(_,res)=>res.type('html').send('<h1>登录与游客验收请求</h1><pre>'+JSON.stringify(observations,null,2)+'</pre>'));
+const requests = []; app.use((req, _res, next) => { if (req.path.startsWith('/api/')) requests.push({ path: req.path, method: req.method }); next(); });
+app.get('/qa/request-report', (_req, res) => res.type('text/plain').send(JSON.stringify(requests)));
+app.get('/qa/guest', (_req, res) => { requests.length = 0; res.clearCookie(access.cookieName); res.redirect('/nantong-base'); });
+app.get('/qa/:actor', (req, res) => {
+  if (req.params.actor === 'save-failure') { failSave = true; return res.redirect('/system-configuration'); }
+  if (req.params.actor === 'sync-failure') { failSync = true; return res.redirect('/system-configuration'); }
+  const principal = req.params.actor === 'multi' ? configuration.feishuPrincipal('ou_multi_building_browser_fixture', process.env.FEISHU_APP_ID) : req.params.actor === 'hvac' ? { ...configuration.feishuPrincipal(PROFESSIONAL_DEFAULTS[1].openId, process.env.FEISHU_APP_ID), feishuAppId: process.env.FEISHU_APP_ID } : actor;
+  const token = access.issueTrustedSession(principal);
+  res.cookie(access.cookieName, token.token, { httpOnly: true, sameSite: 'lax' });
+  res.redirect((req.params.actor === 'hvac' || req.params.actor === 'multi') ? '/equipment-ledger-management' : '/system-configuration');
+});
+const route = (method, url, controller, handlerName, operation) => app[method](url, async (req, res) => {
+  try {
+    if (!guard.canActivate({ getClass: () => controller.constructor, getHandler: () => controller[handlerName], switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }) })) return res.status(403).json({ message: '无权访问' });
+    const result = await operation(req, res); if (!res.headersSent) res.json(result);
+  } catch (error) { res.status(error.getStatus?.() || 500).json({ message: error.message }); }
+});
+app.post('/api/access/login', (req, res, next) => new AccessLoginRedactionMiddleware().use(req, res, next));
+route('post','/api/access/login', accessController, 'login', (req,res) => accessController.login(req.body,req,res));
+route('post','/api/access/logout', accessController, 'logout', (req,res) => accessController.logout(req,res));
+route('get','/api/access/session', accessController, 'session', (req,res) => accessController.session(req,res));
+route('get','/api/access/runtime', accessController, 'runtime', (_,res) => accessController.runtime(res));
+route('get','/api/access/configuration', configController, 'read', req => configController.read(req));
+route('get','/api/access/configuration/people', configController, 'people', req => configController.people(req));
+route('post','/api/access/configuration/pages', configController, 'pages', req => { if (failSave) { failSave = false; throw new Error('验收模拟：保存暂时失败'); } return configController.pages(req,req.body); });
+route('post','/api/access/configuration/accounts', configController, 'account', req => { if (failSave) { failSave = false; throw new Error('验收模拟：保存暂时失败'); } return configController.account(req,req.body); });
+route('post','/api/access/configuration/personnel-sync', configController, 'synchronize', req => { if (failSync) { failSync = false; throw new Error('验收模拟：人员表暂时不可用'); } return configController.synchronize(req); });
+route('get','/api/equipment-ledger/dashboard', ledger, 'getDashboard', req => ledger.getDashboard(req,req.query.refresh,req.query.async));
+route('get','/api/equipment-ledger/items', ledger, 'getItems', req => ledger.getItems(req,req.query));
+
+route('get','/api/access/login-names',accessController,'names',(_,res)=> { if(failNames) {throw new Error('验收模拟：姓名目录暂不可用');} return accessController.names(res); });
+const { DutyScheduleController } = require('../../server/modules/duty-schedule/duty-schedule.controller');
+const { BitableSyncController } = require('../../server/modules/bitable-sync/bitable-sync.controller');
+const dates = Array.from({length:31},(_,i)=>`2026-10-${String(i+1).padStart(2,'0')}`);
+const scheduleRecords=dates.flatMap(date=>['white','night','long_white'].map(shift=>({id:`qa-${date}-${shift}`,recordId:`rec-${date}-${shift}`,dutyCode:null,scheduleDate:date,code:null,building:'building_a',team:'甲',shift,personText:'验收值班甲',dutyStaffReference:['验收值班甲'],dutyStaffActual:['验收值班甲'],remark:'private-maintenance',emergencyDuty:'验收应急员',emergencyDutySchedule:'',leaveStaff:[],substituteStaff:[],actualDutyStaff:'验收值班甲',buildingText:'A楼',teamText:'甲',shiftText:shift==='long_white'?'长白班':shift==='white'?'白班':'夜班',createdAt:'',updatedAt:''})));
+const scheduleController = Object.assign(Object.create(DutyScheduleController.prototype), {dutyScheduleService: {getMonthlySchedules:async()=>scheduleRecords,getTravelStaffDetails:async()=>({success:true,total:0,details:[]})}});
+const bitableController=Object.assign(Object.create(BitableSyncController.prototype),{bitableSyncService:{getTodayLeaveStaff:async(date)=>({date,buildings:[{building:'A',buildingName:'A楼',leaveStaff:['验收请假员'],substituteStaff:['验收替班员']}],totalLeaveCount:1})}});
+route('get','/api/monthly-schedules/:year/:month',scheduleController,'getMonthlySchedules',req=>scheduleController.getMonthlySchedules(req.params.year,req.params.month,req.query.refresh,req));
+route('get','/api/duty-schedules/travel-staff',scheduleController,'getTravelStaffDetails',req=>scheduleController.getTravelStaffDetails(req.query.startDate,req.query.endDate,req.query.staffName,req.query.refresh));
+route('get','/api/bitable/today-leave-staff',bitableController,'getTodayLeaveStaff',req=>bitableController.getTodayLeaveStaff(req.query.date,req.query.refresh));
+const now = new Date().toISOString();
+app.get('/api/bitable/weather/now',(_,res)=>res.json({code:'200',updateTime:now,fxLink:'',now:{obsTime:now,temp:'26',feelsLike:'26',icon:'101',text:'多云',wind360:'90',windDir:'东风',windScale:'2',windSpeed:'5',humidity:'78',precip:'0',pressure:'1013',vis:'10',cloud:'20',dew:'18'}}));
+app.get('/api/bitable/weather/hourly',(_,res)=>res.json({code:'200',updateTime:now,fxLink:'',hourly:Array.from({length:24},(_,i)=>({fxTime:new Date(Date.now()+i*3600000).toISOString(),temp:'26',icon:'101',text:'多云',wind360:'90',windDir:'东风',windScale:'2',windSpeed:'5',humidity:'78',precip:'0',pop:'0',pressure:'1013',cloud:'20',dew:'18'}))}));
+app.get('/api/weather-warning/snapshot',(_,res)=>res.json({status:'clear',sourceState:'fresh',snapshotAt:now,guardLevel:null,matchedWarnings:[],unmatchedWarnings:[],actions:[],weather:null,checkSummary:{total:0,completed:0,pending:0,abnormal:0,notStarted:0,notRequired:0},canSendTest:false,features:{registrationEnabled:false}}));
+app.get('/api/bitable/person-profiles',(_,res)=>res.json({organizations:[],changeRequestSubmitters:[]}));
+app.get('/api/duty-schedules/emergency-duty',(_,res)=>res.json({schedules:[]}));
+app.get('/api/duty-schedules/work-calendar',(_,res)=>res.json({days:[],revision:'qa'}));
+app.get('/api/bitable/schedule-snapshot-revision',(_,res)=>res.json({revision:'qa'}));
+app.get('/api/bitable/festival-schedules',(_,res)=>res.json({schedules:[]}));
+app.get('/api/bitable/holiday-schedules',(_,res)=>res.json({schedules:[]}));
+app.get('/api/sealing-info/:year',(_,res)=>res.json({year:2026,sealingInfos:[],sealings:[]}));
+app.get('/api/change-info/:year',(_,res)=>res.json({year:2026,changes:[]}));
+
+app.use('/api',(_,res)=>res.status(503).json({ message: '隔离验收未配置该模块' }));
+let server;
+(async () => { externalEmployees = await buildExternalEmployeeCredentials([{ record_id: 'recExternalBrowser', fields: { 姓名: '验收员工甲', 密码: 'synthetic-browser-only', '离职/异动情况': false } }], process.env.FEISHU_APP_ID, 'synthetic-base', 'tblSynthetic'); await configuration.onModuleInit(); await configuration.synchronizePersonnel(await directory.read()); await configuration.saveAccount({ clientMutationId: 'multi-building-browser-fixture-init', expectedRevision: configuration.snapshot().revision, kind: 'feishu', openId: 'ou_multi_building_browser_fixture', name: '楼栋多选验收', role: 'building_admin', building: 'A楼', buildings: ['A楼', 'B楼'], enabled: true, external: true }, actor); server = app.listen(43214, '127.0.0.1', () => console.log('multi-building fixture ready on 43214; synthetic local data only')); })().catch(error => { console.error(error.message); process.exitCode=1; });
+const stop = () => server?.close(() => { fs.rmSync(temporary,{ recursive:true,force:true }); process.exit(0); }); process.once('SIGINT',stop); process.once('SIGTERM',stop);

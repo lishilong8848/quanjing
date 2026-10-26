@@ -1,0 +1,1983 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>阿里月度报告邮件自动化同步</title>
+    <style>
+        :root {
+            --bg: #f4f8fd;
+            --surface: #ffffff;
+            --surface-soft: #f8fbff;
+            --primary: #0b72f0;
+            --primary-dark: #075bd5;
+            --primary-soft: #eaf3ff;
+            --success: #19953a;
+            --success-dark: #147c30;
+            --warning: #f07a2a;
+            --text: #162033;
+            --muted: #637083;
+            --border: #d9e4f2;
+            --border-strong: #c6d4e5;
+            --shadow: 0 10px 32px rgba(24, 64, 111, 0.08);
+            --shadow-soft: 0 2px 10px rgba(24, 64, 111, 0.06);
+            --radius: 10px;
+            --radius-sm: 8px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow-x: hidden;
+        }
+
+        button,
+        input,
+        select {
+            font: inherit;
+        }
+
+        /* 顶部标题栏 */
+        .header {
+            position: relative;
+            min-height: 86px;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 78% -90%, rgba(255, 255, 255, 0.28), transparent 46%),
+                linear-gradient(135deg, #0753d8 0%, #0879f4 58%, #1183ff 100%);
+            color: #ffffff;
+            padding: 18px 32px 17px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(17, 67, 140, 0.22);
+        }
+
+        .header::after {
+            content: "";
+            position: absolute;
+            inset: -96px -180px auto auto;
+            width: 840px;
+            height: 260px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 50%;
+            transform: rotate(-10deg);
+        }
+
+        .header > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            line-height: 1.2;
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        .header .subtitle {
+            margin-top: 5px;
+            color: rgba(255, 255, 255, 0.72);
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        .config-btn {
+            min-width: 88px;
+            min-height: 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.58);
+            color: #ffffff;
+            padding: 0 14px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 700;
+            transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+        }
+
+        .config-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 18px rgba(3, 38, 98, 0.18);
+            transform: translateY(-1px);
+        }
+
+        .config-btn:focus-visible,
+        .btn:focus-visible,
+        .btn-browse:focus-visible,
+        .close-btn:focus-visible,
+        input:focus-visible,
+        select:focus-visible {
+            outline: 3px solid rgba(11, 114, 240, 0.22);
+            outline-offset: 2px;
+        }
+
+        /* 主容器 */
+        .main-container {
+            display: grid;
+            grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+            gap: 18px;
+            min-height: calc(100vh - 86px);
+            padding: 18px 24px 20px;
+        }
+
+        /* 左侧任务面板 */
+        .left-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 22px 22px 24px;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--primary);
+            font-size: 18px;
+            font-weight: 800;
+            line-height: 1.25;
+            margin-bottom: 18px;
+        }
+
+        .panel-icon {
+            color: var(--primary);
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        .target-month {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 18px;
+        }
+
+        .target-month strong {
+            color: var(--primary);
+            font-size: 15px;
+            font-weight: 800;
+        }
+
+        .panel-divider {
+            height: 1px;
+            background: var(--border);
+            margin: 2px 0 18px;
+        }
+
+        .task-list {
+            display: grid;
+            gap: 20px;
+            margin-bottom: 26px;
+        }
+
+        .task-item {
+            display: grid;
+            grid-template-columns: 48px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .task-icon {
+            width: 48px;
+            height: 48px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        .task-icon.report {
+            color: var(--primary);
+            background: var(--primary-soft);
+        }
+
+        .task-icon.file {
+            color: var(--success);
+            background: #e9f7ec;
+        }
+
+        .task-icon.mail {
+            color: var(--warning);
+            background: #fff1df;
+        }
+
+        .task-name {
+            color: var(--text);
+            font-size: 15px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .task-badge {
+            min-width: 60px;
+            padding: 5px 8px;
+            border-radius: var(--radius-sm);
+            text-align: center;
+            font-size: 13px;
+            font-weight: 700;
+            white-space: nowrap;
+            border: 1px solid transparent;
+        }
+
+        .task-badge.pending {
+            color: var(--primary);
+            background: var(--primary-soft);
+            border-color: #c9ddff;
+        }
+
+        .task-badge.idle {
+            color: #6c7480;
+            background: #f5f7fa;
+            border-color: #d8dfe8;
+        }
+
+        .task-badge.warning {
+            color: #f05b1f;
+            background: #fff0e7;
+            border-color: #ffd5c1;
+        }
+
+        .quick-actions {
+            margin-top: 0;
+            padding-top: 22px;
+            border-top: 1px solid var(--border);
+        }
+
+        .quick-actions-title,
+        .quick-actions-meta {
+            display: none;
+        }
+
+        .quick-actions .btn {
+            width: 100%;
+            margin-top: 0;
+        }
+
+        .quick-actions .btn + .btn {
+            margin-top: 16px;
+        }
+
+        .quick-result-action {
+            width: auto;
+            min-height: 34px;
+            margin-top: 8px;
+            padding: 0 12px;
+            font-size: 13px;
+        }
+
+        .quick-result-toolbar {
+            margin: 10px 0;
+        }
+
+        .quick-result-folder,
+        .quick-result-zip {
+            margin-top: 6px;
+            line-height: 1.5;
+            word-break: break-all;
+        }
+
+        .quick-result-folder {
+            font-weight: 700;
+        }
+
+        /* 右侧邮件功能区 */
+        .right-panel {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-soft);
+            padding: 20px 26px 22px;
+        }
+
+        .step-card {
+            position: relative;
+        }
+
+        .card-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text);
+            font-size: 18px;
+            font-weight: 800;
+            line-height: 1.25;
+            margin-bottom: 18px;
+        }
+
+        .step-index {
+            width: 34px;
+            height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), #075ee8);
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: 800;
+            box-shadow: 0 5px 12px rgba(11, 114, 240, 0.24);
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .card .form-group {
+            margin-bottom: 0;
+        }
+
+        .form-group label,
+        .file-row-label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text);
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1.35;
+        }
+
+        .form-group select,
+        .form-group input,
+        .file-input-wrapper input[type="text"] {
+            width: 100%;
+            height: 42px;
+            padding: 0 12px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            background: #ffffff;
+            color: var(--text);
+            font-size: 14px;
+            transition: border-color 160ms ease, box-shadow 160ms ease;
+        }
+
+        .file-input-wrapper input[type="text"] {
+            background: #ffffff;
+            color: var(--muted);
+        }
+
+        .form-group select:focus,
+        .form-group input:focus,
+        .file-input-wrapper input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(11, 114, 240, 0.12);
+        }
+
+        .report-form-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(150px, 1fr));
+            gap: 18px 30px;
+            align-items: end;
+        }
+
+        .generate-actions {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 180px;
+            align-items: center;
+            gap: 16px;
+            margin-top: 18px;
+        }
+
+        .checkbox-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.35;
+        }
+
+        .checkbox-label input {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+        }
+
+        .file-select-row {
+            display: grid;
+            grid-template-columns: 124px minmax(0, 1fr);
+            align-items: end;
+            gap: 14px;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 92px;
+            gap: 10px;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            display: none;
+        }
+
+        .mail-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+            gap: 24px;
+            margin-top: 18px;
+        }
+
+        .btn-group {
+            display: flex;
+            justify-content: flex-end;
+            gap: 16px;
+            margin-top: 22px;
+        }
+
+        .btn-group .btn {
+            flex: 0 0 180px;
+            margin-top: 0;
+        }
+
+        .btn,
+        .btn-browse {
+            min-height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            border: 1px solid transparent;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 800;
+            line-height: 1.2;
+            transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+        }
+
+        .btn {
+            padding: 0 14px;
+            margin-top: 0;
+        }
+
+        .btn:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-primary,
+        .btn-info {
+            background: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 6px 14px rgba(11, 114, 240, 0.18);
+        }
+
+        .btn-primary:hover,
+        .btn-info:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(11, 114, 240, 0.24);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: #ffffff;
+            box-shadow: 0 6px 14px rgba(25, 149, 58, 0.16);
+        }
+
+        .btn-success:hover {
+            background: var(--success-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(25, 149, 58, 0.22);
+        }
+
+        .btn-secondary,
+        .btn-outline,
+        .btn-browse {
+            background: #ffffff;
+            color: var(--primary);
+            border-color: var(--border-strong);
+        }
+
+        .btn-secondary:hover,
+        .btn-outline:hover,
+        .btn-browse:hover {
+            background: var(--primary-soft);
+            border-color: #a8c8f8;
+        }
+
+        .btn-browse {
+            width: 92px;
+            padding: 0 12px;
+            color: var(--text);
+            font-weight: 700;
+            box-shadow: none;
+        }
+
+        .button-icon {
+            font-size: 15px;
+            line-height: 1;
+        }
+
+        /* 日志区域 */
+        .log-card {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .log-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .log-title-row .card-title {
+            margin-bottom: 0;
+        }
+
+        .system-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border: 1px solid #cfded3;
+            border-radius: var(--radius-sm);
+            background: #eef7f1;
+            color: #25372a;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 0 3px rgba(25, 149, 58, 0.12);
+        }
+
+        .log-container {
+            flex: 1;
+            min-height: 96px;
+            max-height: 176px;
+            background: linear-gradient(135deg, #151a23 0%, #222733 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-sm);
+            padding: 16px 18px;
+            overflow-y: auto;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 12px;
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+        }
+
+        .log-entry {
+            display: block;
+            margin-bottom: 8px;
+            line-height: 1.65;
+        }
+
+        .log-entry:last-child {
+            margin-bottom: 0;
+        }
+
+        .log-time {
+            color: #8ef4dd;
+            white-space: nowrap;
+        }
+
+        .log-success {
+            color: #6ee7a4;
+        }
+
+        .log-error {
+            color: #ff7b7b;
+        }
+
+        .log-info {
+            color: #e5e9f0;
+        }
+
+        .log-warning {
+            color: #ffd380;
+        }
+
+        /* 配置弹窗 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(11, 22, 40, 0.52);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            width: 560px;
+            max-width: 100%;
+            max-height: 86vh;
+            overflow-y: auto;
+            background: var(--surface);
+            border-radius: var(--radius);
+            box-shadow: 0 24px 70px rgba(9, 32, 68, 0.24);
+            padding: 30px;
+        }
+
+        .modal-content .form-group {
+            margin-bottom: 18px;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .modal-header h2 {
+            color: var(--text);
+            font-size: 22px;
+        }
+
+        .close-btn {
+            width: 38px;
+            height: 38px;
+            background: var(--surface-soft);
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            cursor: pointer;
+            color: var(--muted);
+            font-size: 26px;
+            line-height: 1;
+        }
+
+        .close-btn:hover {
+            color: var(--text);
+            background: #eef4fb;
+        }
+
+        /* 状态栏 */
+        .status-bar {
+            background: var(--primary-dark);
+            color: #ffffff;
+            padding: 8px 20px;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        /* 下载结果 */
+        .download-result {
+            margin-top: 12px;
+            padding: 10px 12px;
+            background: var(--surface-soft);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-size: 12px;
+            line-height: 1.55;
+        }
+
+        .download-result.success {
+            background: #ecf8f0;
+            border-color: #bee3c8;
+            color: #145b29;
+        }
+
+        .download-result.error {
+            background: #fff0f0;
+            border-color: #f3c5c5;
+            color: #8c2222;
+        }
+
+        .file-list {
+            margin-top: 8px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-item-name {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .file-item-actions {
+            display: inline-flex;
+            flex: 0 0 auto;
+            gap: 6px;
+        }
+
+        .file-item-action {
+            min-height: 28px;
+            padding: 4px 9px;
+            border: 1px solid #bfd2ed;
+            border-radius: 5px;
+            background: #ffffff;
+            color: var(--primary-dark);
+            font-size: 12px;
+            line-height: 1.2;
+            cursor: pointer;
+        }
+
+        .file-item-action:hover {
+            border-color: var(--primary);
+            background: #eef5ff;
+        }
+
+        .file-item-action:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+
+        .file-item-action:disabled {
+            cursor: not-allowed;
+            opacity: 0.65;
+        }
+
+        @media (max-width: 1280px) {
+            .main-container {
+                grid-template-columns: 336px minmax(0, 1fr);
+            }
+
+            .report-form-grid {
+                grid-template-columns: repeat(2, minmax(180px, 1fr));
+            }
+        }
+
+        @media (max-width: 980px) {
+            .main-container {
+                grid-template-columns: 1fr;
+                padding: 20px;
+            }
+
+            .left-panel {
+                min-height: auto;
+            }
+
+            .task-list {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 14px;
+            }
+
+            .task-item {
+                grid-template-columns: 48px minmax(0, 1fr);
+                gap: 12px;
+            }
+
+            .task-badge {
+                grid-column: 2;
+                justify-self: start;
+            }
+
+            .task-icon {
+                width: 48px;
+                height: 48px;
+                font-size: 21px;
+            }
+
+            .file-select-row,
+            .mail-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .header {
+                min-height: auto;
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 18px;
+                padding: 22px;
+            }
+
+            .header h1 {
+                font-size: 23px;
+            }
+
+            .config-btn {
+                width: 100%;
+            }
+
+            .main-container {
+                padding: 16px;
+            }
+
+            .left-panel,
+            .card {
+                padding: 22px;
+            }
+
+            .task-list,
+            .report-form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .generate-actions {
+                grid-template-columns: 1fr;
+            }
+
+            .generate-actions .btn,
+            .btn-group .btn {
+                width: 100%;
+                flex-basis: auto;
+            }
+
+            .btn-group {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .file-input-wrapper {
+                grid-template-columns: 1fr;
+            }
+
+            .btn-browse {
+                width: 100%;
+            }
+
+            .log-title-row {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                transition-duration: 0.01ms !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 顶部标题栏 -->
+    <div class="header">
+        <div>
+            <h1>阿里月度报告邮件自动化同步</h1>
+            <div class="subtitle">Alibaba Monthly Report Email Automation</div>
+        </div>
+        <button class="config-btn" onclick="openConfig()"><span aria-hidden="true">⚙</span> 配置</button>
+    </div>
+    
+    <!-- 主容器 -->
+    <div class="main-container">
+        <!-- 左侧：任务面板 -->
+        <div class="left-panel">
+            <div class="panel-title">
+                <span class="panel-icon" aria-hidden="true">☰</span>
+                <span>任务面板</span>
+            </div>
+            <div class="target-month">
+                <span>目标月份：</span>
+                <strong id="previousMonthHint">自动按上月处理</strong>
+            </div>
+            <div class="panel-divider"></div>
+            <div class="task-list" aria-label="任务状态">
+                <div class="task-item">
+                    <span class="task-icon report" aria-hidden="true">▤</span>
+                    <span class="task-name">月报生成</span>
+                    <span class="task-badge pending">待执行</span>
+                </div>
+                <div class="task-item">
+                    <span class="task-icon file" aria-hidden="true">▰</span>
+                    <span class="task-name">文件选择</span>
+                    <span class="task-badge idle">未上传</span>
+                </div>
+                <div class="task-item">
+                    <span class="task-icon mail" aria-hidden="true">✉</span>
+                    <span class="task-name">邮件发送</span>
+                    <span class="task-badge warning">待发送</span>
+                </div>
+            </div>
+            <div class="quick-actions">
+                <div class="quick-actions-title">上月快捷操作</div>
+                <div class="quick-actions-meta">自动按上月处理</div>
+                <button class="btn btn-info" id="bundlePreviousBtn" onclick="exportPreviousBundle()">
+                    <span class="button-icon" aria-hidden="true">▣</span>
+                    打包导出四项月报
+                </button>
+                <button class="btn btn-success" id="sendPreviousAlarmBtn" onclick="sendPreviousAlarmEmail()">
+                    <span class="button-icon" aria-hidden="true">✈</span>
+                    发送超功耗邮件
+                </button>
+                <div id="previousQuickResult" class="download-result" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <!-- 右侧：邮件功能区 -->
+        <div class="right-panel">
+            <!-- 阿里月报生成 -->
+            <div class="card step-card">
+                <div class="card-title">
+                    <span class="step-index">01</span>
+                    <span>阿里月报生成</span>
+                </div>
+                <div class="date-grid report-form-grid">
+                    <div class="form-group">
+                        <label>月报类型</label>
+                        <select id="aliReportType">
+                            <option value="alarm_analysis">月度告警分析</option>
+                            <option value="over_power">月度超功耗</option>
+                            <option value="high_power_top5">月度高功率TOP5</option>
+                            <option value="staff_roster">在职人员导出</option>
+                            <option value="batch_without_top5">一键生成三项月报（不含TOP5）</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>选择年份</label>
+                        <select id="year">
+                            <option value="2026">2026年</option>
+                            <option value="2025">2025年</option>
+                            <option value="2024">2024年</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>选择月份</label>
+                        <select id="month">
+                            <option value="1月">1月</option>
+                            <option value="2月">2月</option>
+                            <option value="3月" selected>3月</option>
+                            <option value="4月">4月</option>
+                            <option value="5月">5月</option>
+                            <option value="6月">6月</option>
+                            <option value="7月">7月</option>
+                            <option value="8月">8月</option>
+                            <option value="9月">9月</option>
+                            <option value="10月">10月</option>
+                            <option value="11月">11月</option>
+                            <option value="12月">12月</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>选择日期</label>
+                        <select id="day">
+                            <option value="month" selected>月度</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="generate-actions">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="aliForceNewRecord">
+                        同年月已存在时仍新增记录
+                    </label>
+                    <button class="btn btn-primary" id="aliGenerateBtn" onclick="generateAliReport()">
+                        生成月报
+                    </button>
+                </div>
+                <div id="aliReportResult" class="download-result" style="display: none;"></div>
+            </div>
+
+            <!-- 文件选择 -->
+            <div class="card step-card">
+                <div class="card-title">
+                    <span class="step-index">02</span>
+                    <span>文件与邮件</span>
+                </div>
+                <div class="file-select-row">
+                    <span class="file-row-label">选择要Excel文件</span>
+                    <div class="file-input-wrapper">
+                        <input type="text" id="filePath" placeholder="请选择Excel文件..." readonly>
+                        <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="selectFile(this)">
+                        <button class="btn-browse" onclick="browseServerFile()">
+                            浏览...
+                        </button>
+                    </div>
+                </div>
+                <div class="mail-grid">
+                    <div class="form-group">
+                        <label>邮件主题</label>
+                        <input type="text" id="subject" placeholder="机柜容量及列头柜容量超电风险【待选择文件后自动填充】">
+                    </div>
+                    <div class="form-group">
+                        <label>收件人邮箱（多个邮箱可用逗号或分号分隔）</label>
+                        <input type="text" id="recipient" placeholder="默认发送给示例人员020、刘小杏，可填写多个邮箱">
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-outline" onclick="previewData()">
+                        <span class="button-icon" aria-hidden="true">▤</span>
+                        预览数据
+                    </button>
+                    <button class="btn btn-info" onclick="sendEmail()">
+                        <span class="button-icon" aria-hidden="true">✈</span>
+                        发送邮件
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 执行日志 -->
+            <div class="card step-card log-card">
+                <div class="log-title-row">
+                    <div class="card-title">
+                        <span class="step-index">03</span>
+                        <span>执行日志</span>
+                    </div>
+                    <div class="system-status">
+                        <span class="status-dot" aria-hidden="true"></span>
+                        系统就绪
+                    </div>
+                </div>
+                <div class="log-container" id="logContainer">
+                    <div class="log-entry">
+                        <span class="log-time">[系统]</span>
+                        <span class="log-info"> 系统已就绪，等待操作...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 配置弹窗 -->
+    <div class="modal" id="configModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚙️ 系统配置</h2>
+                <button class="close-btn" onclick="closeConfig()">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>QQ邮箱</label>
+                <input type="text" id="configEmail">
+            </div>
+            <div class="form-group">
+                <label>授权码</label>
+                <input type="password" id="configAuthCode" placeholder="********">
+            </div>
+            <div class="form-group">
+                <label>默认收件人</label>
+                <input type="text" id="configRecipient" placeholder="默认发送给示例人员020、刘小杏，可填写多个邮箱">
+            </div>
+            <div class="form-group">
+                <label>下载目录</label>
+                <input type="text" id="configDownloadFolder">
+            </div>
+            <div class="form-group">
+                <label>监听群 Chat ID</label>
+                <input type="text" id="configListenerChatIds" placeholder="oc_c79f407063dc9ca9f70cc76cb4059895">
+            </div>
+            <div class="form-group">
+                <label>飞书 App ID</label>
+                <input type="text" id="configFeishuAppId">
+            </div>
+            <div class="form-group">
+                <label>飞书 App Secret</label>
+                <input type="password" id="configFeishuSecret" placeholder="********">
+            </div>
+            <div class="form-group">
+                <label>飞书 App Token</label>
+                <input type="password" id="configFeishuToken" placeholder="********">
+            </div>
+            <div class="form-group">
+                <label>阿里告警源多维表 URL</label>
+                <input type="text" id="configAliAlarmSourceUrl">
+            </div>
+            <div class="form-group">
+                <label>阿里在职人员多维表 URL</label>
+                <input type="text" id="configAliStaffSourceUrl">
+            </div>
+            <div class="form-group">
+                <label>阿里告警分析模板路径</label>
+                <input type="text" id="configAliAlarmTemplatePath">
+            </div>
+            <div class="form-group">
+                <label>阿里超功率多维表配置路径</label>
+                <input type="text" id="configAliPowerAlertConfigPath">
+            </div>
+            <div class="form-group">
+                <label>飞书 Verification Token</label>
+                <input type="password" id="configFeishuVerificationToken" placeholder="********">
+            </div>
+            <div class="form-group">
+                <label>飞书 Encrypt Key</label>
+                <input type="password" id="configFeishuEncryptKey" placeholder="********">
+            </div>
+            <button class="btn btn-primary" onclick="saveConfig()" style="margin-top: 20px;">
+                💾 保存配置
+            </button>
+        </div>
+    </div>
+    
+    <script>
+        let currentFilePath = '';
+        let logRefreshInterval = null;
+        let lastAutoSubject = '';
+        let renderedLogCount = 0;
+        let shownConfigWarning = false;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            populateYearOptions();
+            populateDayOptions();
+            bindAutoSubjectEvents();
+            updatePreviousMonthHint();
+            updateSubject(true);
+            loadConfig();
+            startLogRefresh();
+        });
+
+        function populateYearOptions() {
+            const yearSelect = document.getElementById('year');
+            const currentYear = new Date().getFullYear();
+            const selectedYear = yearSelect.value || String(currentYear);
+            yearSelect.innerHTML = '';
+
+            for (let year = currentYear + 1; year >= currentYear - 4; year--) {
+                const option = document.createElement('option');
+                option.value = String(year);
+                option.textContent = `${year}年`;
+                if (String(year) === selectedYear) {
+                    option.selected = true;
+                }
+                yearSelect.appendChild(option);
+            }
+        }
+
+        function getSelectedMonthNumber() {
+            const monthValue = document.getElementById('month').value;
+            const monthMatch = monthValue.match(/\d{1,2}/);
+            return monthMatch ? Number(monthMatch[0]) : new Date().getMonth() + 1;
+        }
+
+        function populateDayOptions() {
+            const year = Number(document.getElementById('year').value) || new Date().getFullYear();
+            const month = getSelectedMonthNumber();
+            const daySelect = document.getElementById('day');
+            const selectedDay = daySelect.value || 'month';
+            const daysInMonth = new Date(year, month, 0).getDate();
+
+            daySelect.innerHTML = '';
+            const monthlyOption = document.createElement('option');
+            monthlyOption.value = 'month';
+            monthlyOption.textContent = '月度';
+            monthlyOption.selected = selectedDay === 'month';
+            daySelect.appendChild(monthlyOption);
+
+            const selectedDayNumber = Number(selectedDay);
+            const nextSelectedDay = Number.isFinite(selectedDayNumber) ? Math.min(selectedDayNumber, daysInMonth) : 0;
+            for (let day = 1; day <= daysInMonth; day++) {
+                const option = document.createElement('option');
+                option.value = String(day);
+                option.textContent = `${day}日`;
+                if (nextSelectedDay && day === nextSelectedDay) {
+                    option.selected = true;
+                }
+                daySelect.appendChild(option);
+            }
+        }
+
+        function bindAutoSubjectEvents() {
+            document.getElementById('year').addEventListener('change', () => {
+                populateDayOptions();
+                updateSubject();
+            });
+            document.getElementById('month').addEventListener('change', () => {
+                populateDayOptions();
+                updateSubject();
+            });
+        }
+
+        function populateTableOptions(tables = []) {
+            const tableSelect = document.getElementById('tableName');
+            if (!tableSelect) {
+                return;
+            }
+            const selected = tableSelect.value;
+            const data = tables.length ? tables : [
+                {name: '高功率TOP5报表'},
+                {name: '告警分析报告'}
+            ];
+
+            tableSelect.innerHTML = '';
+            data.forEach((table, index) => {
+                const option = document.createElement('option');
+                option.value = table.name;
+                option.textContent = table.name;
+                if (table.name === selected || (!selected && index === 0)) {
+                    option.selected = true;
+                }
+                tableSelect.appendChild(option);
+            });
+        }
+
+        function populateAliReportTypes(types = []) {
+            const typeSelect = document.getElementById('aliReportType');
+            const selected = typeSelect.value;
+            const data = types.length ? types : [
+                {key: 'alarm_analysis', name: '月度告警分析'},
+                {key: 'over_power', name: '月度超功耗'},
+                {key: 'high_power_top5', name: '月度高功率TOP5'},
+                {key: 'staff_roster', name: '在职人员导出'},
+                {key: 'batch_without_top5', name: '一键生成三项月报（不含TOP5）'}
+            ];
+
+            typeSelect.innerHTML = '';
+            data.forEach((type, index) => {
+                const option = document.createElement('option');
+                option.value = type.key;
+                option.textContent = type.name;
+                if (type.key === selected || (!selected && index === 0)) {
+                    option.selected = true;
+                }
+                typeSelect.appendChild(option);
+            });
+        }
+
+        function buildSubject() {
+            const year = document.getElementById('year').value;
+            const month = document.getElementById('month').value;
+            return `机柜容量及列头柜容量超电风险【${year}年${month}】`;
+        }
+
+        function updateSubject(force = false) {
+            const subjectInput = document.getElementById('subject');
+            const nextSubject = buildSubject();
+
+            if (force || !subjectInput.value || subjectInput.value === lastAutoSubject) {
+                subjectInput.value = nextSubject;
+            }
+            lastAutoSubject = nextSubject;
+        }
+
+        function getPreviousMonthInfo() {
+            const now = new Date();
+            const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            return {
+                year: String(previous.getFullYear()),
+                month: previous.getMonth() + 1,
+                monthLabel: `${previous.getMonth() + 1}月`
+            };
+        }
+
+        function updatePreviousMonthHint() {
+            const info = getPreviousMonthInfo();
+            document.getElementById('previousMonthHint').textContent = `${info.year}年${info.monthLabel}`;
+        }
+
+        function setQuickActionBusy(active, activeButtonId = '') {
+            const buttons = [
+                document.getElementById('bundlePreviousBtn'),
+                document.getElementById('sendPreviousAlarmBtn')
+            ];
+            buttons.forEach(button => {
+                if (button) {
+                    button.disabled = active;
+                }
+            });
+
+            if (active && activeButtonId) {
+                const button = document.getElementById(activeButtonId);
+                if (button) {
+                    button.dataset.originalText = button.textContent;
+                    button.textContent = '处理中...';
+                }
+            } else {
+                buttons.forEach(button => {
+                    if (button && button.dataset.originalText) {
+                        button.textContent = button.dataset.originalText;
+                        delete button.dataset.originalText;
+                    }
+                });
+            }
+        }
+
+        function showPreviousQuickResult(type, html) {
+            const resultDiv = document.getElementById('previousQuickResult');
+            resultDiv.className = `download-result ${type}`;
+            resultDiv.innerHTML = html;
+            resultDiv.style.display = 'block';
+        }
+
+        const generatedFileActionInFlight = new Set();
+
+        function renderFileList(files = []) {
+            if (!files.length) {
+                return '';
+            }
+
+            let html = '<div class="file-list">';
+            files.forEach(file => {
+                const category = file.category ? `${escapeHtml(file.category)}：` : '';
+                const fileName = String(file.name || '');
+                const fileNameArgument = escapeHtml(JSON.stringify(fileName));
+                const actions = fileName
+                    ? `<span class="file-item-actions">
+                        <button type="button" class="file-item-action" onclick="openGeneratedFile(this, ${fileNameArgument})">打开文件</button>
+                        <button type="button" class="file-item-action" onclick="revealGeneratedFile(this, ${fileNameArgument})">定位文件</button>
+                    </span>`
+                    : '';
+                html += `<div class="file-item"><span class="file-item-name">📄 ${category}${escapeHtml(fileName)} (${escapeHtml(file.size || '')})</span>${actions}</div>`;
+            });
+            html += '</div>';
+            return html;
+        }
+
+        async function runGeneratedFileAction(button, action, fileName) {
+            const actionName = action === 'open' ? '打开文件' : '定位文件';
+            const actionKey = `${action}:${fileName}`;
+            if (generatedFileActionInFlight.has(actionKey)) {
+                return;
+            }
+
+            generatedFileActionInFlight.add(actionKey);
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = action === 'open' ? '正在打开...' : '正在定位...';
+            addLog(`${actionName}请求已发出: ${fileName}`, 'info');
+
+            try {
+                const response = await fetch(`/api/local_file/${action}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({file_name: fileName})
+                });
+                const result = await response.json();
+                if (result.status !== 'ok') {
+                    throw new Error(result.message || `${actionName}失败`);
+                }
+                addLog(result.message || `${actionName}: ${fileName}`, 'success');
+            } catch (error) {
+                const message = error.message || `${actionName}失败`;
+                addLog(`${actionName}失败: ${message}`, 'error');
+                alert(`${actionName}失败: ${message}`);
+            } finally {
+                generatedFileActionInFlight.delete(actionKey);
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+
+        function openGeneratedFile(button, fileName) {
+            return runGeneratedFileAction(button, 'open', fileName);
+        }
+
+        function revealGeneratedFile(button, fileName) {
+            return runGeneratedFileAction(button, 'reveal', fileName);
+        }
+
+        function renderAliBatchResults(results = []) {
+            if (!results.length) {
+                return '';
+            }
+
+            let html = '<div class="file-list">';
+            results.forEach(item => {
+                const reportName = escapeHtml(item.report_name || item.report_type || '月报');
+                const message = escapeHtml(item.message || '处理完成');
+                html += `<div class="file-item"><strong>${reportName}</strong>：${message}</div>`;
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function buildRecordLinkHtml(record) {
+            const recordId = escapeHtml(record?.record_id || '未命名记录');
+            const recordUrl = String(record?.record_url || '').trim();
+            if (!recordUrl) {
+                return recordId;
+            }
+            return `<a href="${escapeHtml(recordUrl)}" target="_blank" rel="noopener noreferrer">${recordId}</a>`;
+        }
+
+        async function loadConfig() {
+            try {
+                const resp = await fetch('/api/config');
+                const config = await resp.json();
+
+                populateTableOptions(config.tables || []);
+                populateAliReportTypes(config.ali_report_types || []);
+                document.getElementById('configEmail').value = config.qq_email || '';
+                document.getElementById('configAuthCode').value = config.auth_code || '';
+                document.getElementById('configRecipient').value = config.recipient || '';
+                document.getElementById('configDownloadFolder').value = config.download_folder || '';
+                document.getElementById('configListenerChatIds').value = (config.listener_target_chat_ids || []).join(', ');
+                document.getElementById('configFeishuAppId').value = config.feishu_app_id || '';
+                document.getElementById('configFeishuSecret').value = config.feishu_app_secret || '';
+                document.getElementById('configFeishuToken').value = config.feishu_app_token || '';
+                document.getElementById('configAliAlarmSourceUrl').value = config.ali_alarm_source_url || '';
+                document.getElementById('configAliStaffSourceUrl').value = config.ali_staff_source_url || '';
+                document.getElementById('configAliAlarmTemplatePath').value = config.ali_alarm_template_path || '';
+                document.getElementById('configAliPowerAlertConfigPath').value = config.ali_power_alert_config_path || '';
+                document.getElementById('configFeishuVerificationToken').value = config.feishu_verification_token || '';
+                document.getElementById('configFeishuEncryptKey').value = config.feishu_encrypt_key || '';
+                document.getElementById('recipient').value = config.recipient || '';
+                updateSubject(true);
+
+                const missingFeishu = config.missing_feishu_config || [];
+                if (missingFeishu.length) {
+                    addLog(`请先在配置中填写: ${missingFeishu.join('、')}`, 'error');
+                    if (!shownConfigWarning) {
+                        shownConfigWarning = true;
+                        alert(`飞书下载未配置完整。\n请先在“配置”中填写：${missingFeishu.join('、')}`);
+                    }
+                }
+            } catch (e) {
+                addLog('加载配置失败: ' + e.message, 'error');
+            }
+        }
+
+        async function saveConfig() {
+            try {
+                const data = {
+                    qq_email: document.getElementById('configEmail').value,
+                    auth_code: document.getElementById('configAuthCode').value,
+                    recipient: document.getElementById('configRecipient').value,
+                    download_folder: document.getElementById('configDownloadFolder').value,
+                    listener_target_chat_ids: document.getElementById('configListenerChatIds').value,
+                    feishu_app_id: document.getElementById('configFeishuAppId').value,
+                    feishu_app_secret: document.getElementById('configFeishuSecret').value,
+                    feishu_app_token: document.getElementById('configFeishuToken').value,
+                    ali_alarm_source_url: document.getElementById('configAliAlarmSourceUrl').value,
+                    ali_staff_source_url: document.getElementById('configAliStaffSourceUrl').value,
+                    ali_alarm_template_path: document.getElementById('configAliAlarmTemplatePath').value,
+                    ali_power_alert_config_path: document.getElementById('configAliPowerAlertConfigPath').value,
+                    feishu_verification_token: document.getElementById('configFeishuVerificationToken').value,
+                    feishu_encrypt_key: document.getElementById('configFeishuEncryptKey').value
+                };
+
+                const resp = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+
+                const result = await resp.json();
+                if (result.status === 'ok') {
+                    alert('✅ 配置保存成功！');
+                    closeConfig();
+                    document.getElementById('recipient').value = data.recipient;
+                } else {
+                    alert('❌ 保存失败: ' + result.message);
+                }
+            } catch (e) {
+                alert('❌ 保存失败: ' + e.message);
+            }
+        }
+
+        function openConfig() {
+            document.getElementById('configModal').classList.add('active');
+        }
+
+        function closeConfig() {
+            document.getElementById('configModal').classList.remove('active');
+        }
+
+        function applySelectedFile(filePath, displayName) {
+            currentFilePath = filePath;
+            document.getElementById('filePath').value = displayName;
+
+            const filename = displayName;
+            const yearMatch = filename.match(/(20\d{2})/);
+            if (yearMatch) {
+                const yearSelect = document.getElementById('year');
+                const yearValue = yearMatch[1];
+                if ([...yearSelect.options].some(option => option.value === yearValue)) {
+                    yearSelect.value = yearValue;
+                }
+            }
+
+            for (let i = 1; i <= 12; i++) {
+                if (filename.includes(`${i}月`) || filename.includes(`${String(i).padStart(2, '0')}月`)) {
+                    document.getElementById('month').value = `${i}月`;
+                    break;
+                }
+            }
+
+            populateDayOptions();
+            updateSubject(true);
+            addLog(`已选择文件: ${displayName}`, 'success');
+        }
+
+        async function browseServerFile() {
+            try {
+                const resp = await fetch('/api/browse_file', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                const result = await resp.json();
+
+                if (result.status === 'cancelled') {
+                    addLog('已取消选择文件', 'info');
+                    return;
+                }
+
+                if (result.status !== 'ok') {
+                    addLog('浏览文件失败: ' + result.message, 'error');
+                    alert('浏览文件失败: ' + result.message);
+                    return;
+                }
+
+                applySelectedFile(result.file_path, result.file_name);
+            } catch (e) {
+                addLog('浏览文件失败: ' + e.message, 'error');
+                alert('浏览文件失败: ' + e.message);
+            }
+        }
+
+        async function selectFile(input) {
+            if (!input.files.length) {
+                return;
+            }
+
+            const file = input.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const resp = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await resp.json();
+
+                if (result.status !== 'ok') {
+                    addLog('文件上传失败: ' + result.message, 'error');
+                    alert('文件上传失败: ' + result.message);
+                    return;
+                }
+
+                applySelectedFile(result.file_path, file.name);
+            } catch (e) {
+                addLog('文件上传失败: ' + e.message, 'error');
+                alert('文件上传失败: ' + e.message);
+            }
+        }
+
+        async function previewData() {
+            if (!currentFilePath) {
+                alert('请先选择Excel文件！');
+                return;
+            }
+
+            addLog('开始预览数据...', 'info');
+
+            try {
+                const year = document.getElementById('year').value;
+                const month = document.getElementById('month').value;
+                const resp = await fetch('/api/preview', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        file_path: currentFilePath,
+                        subject: document.getElementById('subject').value,
+                        year,
+                        month
+                    })
+                });
+
+                const result = await resp.json();
+                if (result.status === 'ok') {
+                    const stats = result.stats;
+                    let msg = '数据预览成功！\n\n';
+                    for (const [key, value] of Object.entries(stats)) {
+                        msg += `${key}: ${value}\n`;
+                    }
+                    alert(msg);
+                } else {
+                    addLog('预览失败: ' + result.message, 'error');
+                    alert('预览失败: ' + result.message);
+                }
+            } catch (e) {
+                addLog('预览失败: ' + e.message, 'error');
+                alert('预览失败: ' + e.message);
+            }
+        }
+
+        async function sendEmail() {
+            if (!currentFilePath) {
+                alert('请先选择Excel文件！');
+                return;
+            }
+
+            const recipient = document.getElementById('recipient').value;
+            if (!recipient) {
+                alert('请输入收件人邮箱！');
+                return;
+            }
+
+            if (!confirm(`确认发送邮件到 ${recipient}？`)) {
+                return;
+            }
+
+            addLog('开始发送邮件...', 'info');
+
+            try {
+                const year = document.getElementById('year').value;
+                const month = document.getElementById('month').value;
+                const resp = await fetch('/api/send_email', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        file_path: currentFilePath,
+                        subject: document.getElementById('subject').value,
+                        recipient,
+                        year,
+                        month
+                    })
+                });
+
+                const result = await resp.json();
+                if (result.status === 'ok') {
+                    addLog('✅ ' + result.message, 'success');
+                    alert('✅ ' + result.message);
+                } else {
+                    addLog('发送失败: ' + result.message, 'error');
+                    alert('❌ 发送失败: ' + result.message);
+                }
+            } catch (e) {
+                addLog('发送失败: ' + e.message, 'error');
+                alert('❌ 发送失败: ' + e.message);
+            }
+        }
+
+        async function exportPreviousBundle() {
+            const info = getPreviousMonthInfo();
+            if (!confirm(`确认打包导出 ${info.year}年${info.monthLabel} 的告警分析、超功耗、TOP5、在职人员信息？`)) {
+                return;
+            }
+
+            setQuickActionBusy(true, 'bundlePreviousBtn');
+            document.getElementById('previousQuickResult').style.display = 'none';
+            addLog(`开始打包导出 ${info.year}年${info.monthLabel} 四项月报...`, 'info');
+
+            try {
+                const resp = await fetch('/api/ali_report/export_previous_bundle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                const result = await resp.json();
+                if (result.status !== 'ok') {
+                    showPreviousQuickResult('error', `❌ ${escapeHtml(result.message)}`);
+                    addLog('上月月报打包导出失败: ' + result.message, 'error');
+                    alert('❌ 打包失败: ' + result.message);
+                    return;
+                }
+
+                let html = `<strong>✅ ${escapeHtml(result.message || '打包导出完成')}</strong>`;
+                if (result.folder) {
+                    html += `<div class="quick-result-folder">导出目录：${escapeHtml(result.folder)}</div>`;
+                }
+                html += '<div class="quick-result-toolbar"><button class="btn btn-secondary quick-result-action" onclick="openFolder()">📁 打开导出文件夹</button></div>';
+                if (result.zip_file) {
+                    html += `<div class="quick-result-zip">压缩包：${escapeHtml(result.zip_file.name)} (${escapeHtml(result.zip_file.size || '')})</div>`;
+                }
+                html += renderFileList(result.files || []);
+                showPreviousQuickResult('success', html);
+                addLog(`上月四项月报打包导出完成，目录：${result.folder || '默认下载目录'}`, 'success');
+            } catch (e) {
+                showPreviousQuickResult('error', `❌ ${escapeHtml(e.message)}`);
+                addLog('上月月报打包导出失败: ' + e.message, 'error');
+                alert('❌ 打包失败: ' + e.message);
+            } finally {
+                setQuickActionBusy(false);
+            }
+        }
+
+        async function sendPreviousAlarmEmail() {
+            const info = getPreviousMonthInfo();
+            const recipient = document.getElementById('recipient').value;
+            if (!recipient) {
+                alert('请输入收件人邮箱！');
+                return;
+            }
+
+            if (!confirm(`确认发送 ${info.year}年${info.monthLabel} 超功耗邮件到 ${recipient}？`)) {
+                return;
+            }
+
+            setQuickActionBusy(true, 'sendPreviousAlarmBtn');
+            document.getElementById('previousQuickResult').style.display = 'none';
+            addLog(`开始发送 ${info.year}年${info.monthLabel} 超功耗邮件...`, 'info');
+
+            try {
+                const resp = await fetch('/api/ali_report/send_previous_alarm_email', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({recipient})
+                });
+                const result = await resp.json();
+                if (result.status !== 'ok') {
+                    showPreviousQuickResult('error', `❌ ${escapeHtml(result.message)}`);
+                    addLog('上月超功耗邮件发送失败: ' + result.message, 'error');
+                    alert('❌ 发送失败: ' + result.message);
+                    return;
+                }
+
+                let html = `<strong>✅ ${escapeHtml(result.message || '邮件发送完成')}</strong><br>`;
+                const resultFiles = [];
+                if (result.file) {
+                    resultFiles.push({...result.file, category: '超功耗'});
+                }
+                html += renderFileList(resultFiles);
+                showPreviousQuickResult('success', html);
+                addLog('上月超功耗邮件发送完成', 'success');
+                alert('✅ ' + (result.message || '邮件发送完成'));
+            } catch (e) {
+                showPreviousQuickResult('error', `❌ ${escapeHtml(e.message)}`);
+                addLog('上月超功耗邮件发送失败: ' + e.message, 'error');
+                alert('❌ 发送失败: ' + e.message);
+            } finally {
+                setQuickActionBusy(false);
+            }
+        }
+
+        async function generateAliReport() {
+            const reportType = document.getElementById('aliReportType').value;
+            const reportTypeText = document.getElementById('aliReportType').selectedOptions[0]?.textContent || reportType;
+            const year = document.getElementById('year').value;
+            const month = document.getElementById('month').value;
+            const day = document.getElementById('day').value;
+            const dateText = day === 'month' ? `${year}年${month}` : `${year}年${month}${day}日`;
+            const forceNewRecord = document.getElementById('aliForceNewRecord').checked;
+            const button = document.getElementById('aliGenerateBtn');
+            const resultDiv = document.getElementById('aliReportResult');
+            const isBatch = reportType === 'batch_without_top5';
+
+            if (!confirm(isBatch ? `确认一键生成 ${dateText} 三项月报（不含TOP5）？` : `确认生成 ${dateText} ${reportTypeText}？`)) {
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = '处理中...';
+            resultDiv.style.display = 'none';
+            addLog(`开始处理 ${dateText} ${reportTypeText}...`, 'info');
+
+            try {
+                const resp = await fetch('/api/ali_report/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        report_type: reportType,
+                        year,
+                        month,
+                        day,
+                        force_new_record: forceNewRecord
+                    })
+                });
+
+                const result = await resp.json();
+                if (result.status !== 'ok') {
+                    resultDiv.className = 'download-result error';
+                    resultDiv.innerHTML = `❌ ${escapeHtml(result.message)}`;
+                    resultDiv.style.display = 'block';
+                    addLog('阿里月报生成失败: ' + result.message, 'error');
+                    alert('❌ 生成失败: ' + result.message);
+                    return;
+                }
+
+                const files = result.files || [];
+                let html = `<strong>✅ ${escapeHtml(result.message || '处理完成')}</strong><br>`;
+                if (result.results && result.results.length) {
+                    html += renderAliBatchResults(result.results);
+                }
+                if (result.uploaded && result.uploaded.record_id) {
+                    html += `已上传记录: ${buildRecordLinkHtml(result.uploaded)}<br>`;
+                }
+                if (result.updated_records && result.updated_records.length) {
+                    const updatedLinks = result.updated_records.map(record => buildRecordLinkHtml(record)).join('、');
+                    html += `已覆盖记录: ${updatedLinks}<br>`;
+                } else if (result.updated && result.updated.record_id) {
+                    html += `已覆盖记录: ${buildRecordLinkHtml(result.updated)}<br>`;
+                }
+                if (result.existing_records && result.existing_records.length) {
+                    const recordLinks = result.existing_records.map(record => buildRecordLinkHtml(record)).join('、');
+                    html += `已存在记录: ${recordLinks}<br>`;
+                }
+                if (result.notification) {
+                    if (result.notification.sent) {
+                        html += `已通过飞书私聊发送给: ${escapeHtml(result.notification.recipient || '')}<br>`;
+                    } else if (result.notification.error) {
+                        html += `飞书私聊发送多维记录链接失败: ${escapeHtml(result.notification.error)}<br>`;
+                    }
+                }
+                if (files.length > 0) {
+                    html += renderFileList(files);
+                    applySelectedFile(files[0].path, files[0].name);
+                }
+
+                resultDiv.className = 'download-result success';
+                resultDiv.innerHTML = html;
+                resultDiv.style.display = 'block';
+                addLog(`${reportTypeText}处理完成`, 'success');
+            } catch (e) {
+                resultDiv.className = 'download-result error';
+                resultDiv.innerHTML = `❌ ${escapeHtml(e.message)}`;
+                resultDiv.style.display = 'block';
+                addLog('阿里月报生成失败: ' + e.message, 'error');
+                alert('❌ 生成失败: ' + e.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = '生成月报';
+            }
+        }
+
+        async function downloadFeishu() {
+            const tableName = document.getElementById('tableName').value;
+            const year = document.getElementById('year').value;
+            const month = document.getElementById('month').value;
+
+            addLog(`开始从【${tableName}】下载 ${year}年${month} 的附件...`, 'info');
+
+            const resultDiv = document.getElementById('downloadResult');
+            resultDiv.style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/feishu/download', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        table_name: tableName,
+                        year,
+                        month
+                    })
+                });
+
+                const result = await resp.json();
+                if (result.status === 'ok') {
+                    const downloaded = result.downloaded || [];
+                    const errors = result.errors || [];
+
+                    let html = `<strong>✅ 下载完成！</strong><br>`;
+                    html += `成功: ${downloaded.length} 个，失败: ${errors.length} 个<br>`;
+                    if (downloaded.length > 0) {
+                        html += '<div class="file-list">';
+                        downloaded.forEach(f => {
+                            html += `<div class="file-item">📄 ${f.name} (${f.size})</div>`;
+                        });
+                        html += '</div>';
+                    }
+
+                    resultDiv.className = 'download-result success';
+                    resultDiv.innerHTML = html;
+                    resultDiv.style.display = 'block';
+                    addLog(`下载完成！成功 ${downloaded.length} 个文件`, 'success');
+                } else {
+                    resultDiv.className = 'download-result error';
+                    resultDiv.innerHTML = `❌ ${result.message}`;
+                    resultDiv.style.display = 'block';
+                    addLog('下载失败: ' + result.message, 'error');
+                }
+            } catch (e) {
+                resultDiv.className = 'download-result error';
+                resultDiv.innerHTML = `❌ ${e.message}`;
+                resultDiv.style.display = 'block';
+                addLog('下载失败: ' + e.message, 'error');
+            }
+        }
+
+        async function openFolder() {
+            try {
+                const resp = await fetch('/api/open_folder');
+                const result = await resp.json();
+                if (result.status === 'ok') {
+                    addLog('已打开下载目录: ' + result.folder, 'success');
+                } else {
+                    alert('打开文件夹失败: ' + result.message);
+                }
+            } catch (e) {
+                alert('打开文件夹失败: ' + e.message);
+            }
+        }
+
+        function appendLogEntry(time, message, level = 'info') {
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${level}">${message}</span>`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addLog(message, level = 'info') {
+            const time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
+            appendLogEntry(time, message, level);
+        }
+
+        function startLogRefresh() {
+            if (logRefreshInterval) {
+                clearInterval(logRefreshInterval);
+            }
+
+            logRefreshInterval = setInterval(async () => {
+                try {
+                    const resp = await fetch('/api/logs');
+                    const logs = await resp.json();
+                    const container = document.getElementById('logContainer');
+
+                    if (logs.length < renderedLogCount) {
+                        container.innerHTML = '';
+                        renderedLogCount = 0;
+                    }
+
+                    for (let i = renderedLogCount; i < logs.length; i++) {
+                        const log = logs[i];
+                        appendLogEntry(log.time, log.message, log.level);
+                    }
+                    renderedLogCount = logs.length;
+                } catch (e) {
+                    // 静默失败
+                }
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
