@@ -45,13 +45,13 @@ try {
   if (sendSelfTest) {
     try {
       selfTest = await service.sendSelfTestSuccess(
-        '示例人员020',
+        '马进宇',
         stableKey(`certificate-self-test:${shanghaiDateKey(new Date())}`),
       );
     } catch (error) {
       selfTest = {
         success: false,
-        name: '示例人员020',
+        name: '马进宇',
         error: safeErrorMessage(error),
       };
     }
@@ -140,7 +140,7 @@ function buildDirectoryDiagnostics(members, expiryNames) {
           .length,
     ),
     selfTestNameMatchCount: names.filter(
-      (candidate) => candidate === normalizePersonName('示例人员020'),
+      (candidate) => candidate === normalizePersonName('马进宇'),
     ).length,
   };
 }

@@ -71,8 +71,8 @@ describe('today attendance task selection', () => {
   it('deduplicates entries by the stable expectation key', () => {
     const entries = [
       {
-        key: '2026-08-31:building_a:white:OnDuty:示例人员008',
-        name: '示例人员008',
+        key: '2026-08-31:building_a:white:OnDuty:张三',
+        name: '张三',
         building: 'A楼',
         shiftLabel: '白班',
         direction: 'OnDuty' as const,
@@ -81,8 +81,8 @@ describe('today attendance task selection', () => {
         reason: '未查询到有效打卡',
       },
       {
-        key: '2026-08-31:building_a:white:OnDuty:示例人员008',
-        name: '示例人员008',
+        key: '2026-08-31:building_a:white:OnDuty:张三',
+        name: '张三',
         building: 'A楼',
         shiftLabel: '白班',
         direction: 'OnDuty' as const,

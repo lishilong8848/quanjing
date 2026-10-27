@@ -15,7 +15,7 @@ describe('InventoryOutboundApprovalGateway', () => {
     process.env.FEISHU_APP_ID = 'cli_inventory_outbound';
     process.env.FEISHU_APP_SECRET = 'inventory-outbound-secret';
     process.env.FEISHU_WAREHOUSE_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/warehouse_app_token?table=tbl_source_only';
     process.env.FEISHU_WAREHOUSE_APP_TOKEN = 'warehouse_app_token';
     process.env.FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID = 'tbl_outbound_approval';
     delete process.env.FEISHU_OUTBOUND_TABLE_ID;
@@ -433,7 +433,7 @@ describe('InventoryOutboundApprovalGateway', () => {
       ...previous,
       version: 2,
       policyVersion: 'inventory-outbound-responsible-v2',
-      approvers: [{ openId: 'ou_current_responsible', name: '当前示例人员019' }],
+      approvers: [{ openId: 'ou_current_responsible', name: '当前责任人' }],
     };
     const post = jest.fn().mockResolvedValue(tokenResponse());
     const put = jest.fn().mockResolvedValue({ data: { code: 0 } });
@@ -485,7 +485,7 @@ describe('InventoryOutboundApprovalGateway', () => {
       ...previous,
       version: 2,
       policyVersion: 'inventory-outbound-responsible-v2',
-      approvers: [{ openId: 'ou_current_responsible', name: '当前示例人员019' }],
+      approvers: [{ openId: 'ou_current_responsible', name: '当前责任人' }],
     };
     const post = jest.fn().mockResolvedValue(tokenResponse());
     const put = jest.fn();
@@ -519,7 +519,7 @@ describe('InventoryOutboundApprovalGateway', () => {
         ...previous,
         version: 2,
         policyVersion: 'inventory-outbound-responsible-v2',
-        approvers: [{ openId: 'ou_current_responsible', name: '当前示例人员019' }],
+        approvers: [{ openId: 'ou_current_responsible', name: '当前责任人' }],
       };
       const post = jest.fn().mockResolvedValue(tokenResponse());
       const put = jest.fn();

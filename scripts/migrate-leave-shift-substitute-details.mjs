@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 
 const OPENAPI_BASE_URL = 'https://open.feishu.cn/open-apis';
-const LEAVE_TABLE_ID = 'tblf1bbd02a2b049';
+const LEAVE_TABLE_ID = 'tblpCzmTT3EapaUY';
 const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/u;
 let tenantToken = '';
 

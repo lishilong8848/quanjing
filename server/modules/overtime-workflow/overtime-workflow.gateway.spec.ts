@@ -15,7 +15,7 @@ describe('OvertimeWorkflowGateway', () => {
     process.env.FEISHU_APP_ID = 'cli_app';
     process.env.FEISHU_APP_SECRET = 'app-secret';
     process.env.FEISHU_MAIN_APP_TOKEN = 'main_app_token';
-    process.env.FEISHU_OVERTIME_TABLE_ID = 'tblf1bbd02a2b049';
+    process.env.FEISHU_OVERTIME_TABLE_ID = 'tblpCzmTT3EapaUY';
   });
 
   afterEach(() => {
@@ -43,7 +43,7 @@ describe('OvertimeWorkflowGateway', () => {
       data: {
         code: 0,
         data: {
-          record: { record_id: 'rec_1', fields: { 加班人员姓名: '示例人员008' } },
+          record: { record_id: 'rec_1', fields: { 加班人员姓名: '张三' } },
         },
       },
     });
@@ -66,7 +66,7 @@ describe('OvertimeWorkflowGateway', () => {
     await gateway.patchInteractiveCard('om_card_1', { schema: '2.0' });
     await expect(gateway.readOvertimeRecord('rec_1')).resolves.toEqual({
       recordId: 'rec_1',
-      fields: { 加班人员姓名: '示例人员008' },
+      fields: { 加班人员姓名: '张三' },
     });
     await gateway.updateOvertimeRecord('rec_1', { 加班流程进展: '已审批' });
     expect(put).toHaveBeenCalledWith(
@@ -159,11 +159,11 @@ describe('OvertimeWorkflowGateway', () => {
       {
         record_id: 'rec_org_1',
         fields: {
-          值班账号: [{ id: 'ou_supervisor', name: '示例人员009' }],
-          职位: '设施运维示例人员001',
+          值班账号: [{ id: 'ou_supervisor', name: '施小东' }],
+          职位: '设施运维主管',
           '楼栋/专业': ['A楼'],
-          示例人员001: [{ id: 'ou_supervisor', name: '示例人员009' }],
-          '示例人员001（文本）': '示例人员009',
+          主管: [{ id: 'ou_supervisor', name: '施小东' }],
+          '主管（文本）': '施小东',
         },
       },
     ]);
@@ -176,19 +176,19 @@ describe('OvertimeWorkflowGateway', () => {
     const second = await gateway.fetchOrganizationRoutingRecords();
     expect(first).toEqual([
       {
-        name: '示例人员009',
+        name: '施小东',
         openId: 'ou_supervisor',
-        position: '设施运维示例人员001',
+        position: '设施运维主管',
         buildings: ['A楼'],
-        supervisorNames: ['示例人员009'],
+        supervisorNames: ['施小东'],
       },
     ]);
     expect(second).toEqual(first);
     expect(reader).toHaveBeenCalledTimes(1);
     expect(reader.mock.calls[0][1]).toEqual(
       expect.objectContaining({
-        appToken: 'PUBLIC_EXAMPLE_FEISHU_ORG_APP_TOKEN',
-        tableId: 'tbl82d0b2f3ddc70',
+        appToken: 'F9lDbA5XKaLmyasoARRcZFpKnZd',
+        tableId: 'tblZipVFGY4D65tw',
         viewId: 'vewkJ9WMUS',
         allowStale: true,
       }),
@@ -235,7 +235,7 @@ describe('overtime confirmation ticket', () => {
 
   it('uses a mobile-safe lightweight confirmation route', () => {
     const url = buildOvertimeConfirmationUrl(
-      'https://example.com:3001/',
+      'https://www.sm.sjhl.online:3001/',
       'rec_1',
       'ticket-value',
     );

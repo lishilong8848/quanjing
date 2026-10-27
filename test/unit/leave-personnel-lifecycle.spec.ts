@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { LeaveWorkflowService } from '../../server/modules/leave-workflow/leave-workflow.service';
 import { LeaveWorkflowStore } from '../../server/modules/leave-workflow/leave-workflow.store';
 import { feishuIdentityFingerprint } from '../../server/common/access/feishu-access-approved-grants';
-const actor={name:'合成前任',openId:'ou_synthetic_retired',position:'设施示例人员001',buildings:['C楼']};
+const actor={name:'合成前任',openId:'ou_synthetic_retired',position:'设施主管',buildings:['C楼']};
 const action=()=>({eventId:'synthetic-action-001',recordId:'rec_synthetic_leave',stageKey:'supervisor' as const,stageVersion:1,actorOpenId:actor.openId,actorName:actor.name,messageId:'om_synthetic_lifecycle',action:'reject' as const,rejectionReason:'合成验收'});
 describe('请休假卡片生命周期门禁（合成端口）',()=>{
   let directory:string,temporaryRoot:string,owner:string,file:string,store:LeaveWorkflowStore,originalApp:string|undefined,originalEnabled:string|undefined;

@@ -70,7 +70,7 @@ function getField(token, fieldId) {
     '--base-token',
     token,
     '--table-id',
-    'tblf1bbd02a2b049',
+    'tblpCzmTT3EapaUY',
     '--field-id',
     fieldId,
     '--as',

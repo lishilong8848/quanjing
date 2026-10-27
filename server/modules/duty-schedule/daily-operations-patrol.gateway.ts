@@ -11,7 +11,7 @@ import {
 } from '../../common/config/external-services.config';
 import type { AttendancePeriodicSummaryRun } from './attendance-periodic-summary.scheduler';
 
-const DEFAULT_CHAT_ID = 'oc_eaf9c57f7995587b43342558d1f49730';
+const DEFAULT_CHAT_ID = 'oc_3bc648b9b761f24a65366a9b04b32eb2';
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]{3,124}$/u;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]{3,252}$/u;
 const REQUEST_TIMEOUT_MS = 15_000;

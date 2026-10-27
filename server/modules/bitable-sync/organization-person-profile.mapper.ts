@@ -142,7 +142,7 @@ export function mapOrganizationPersonProfileRecord(
     ]),
     team: readNullableText(fields, ['班组', '组别']),
     shift: readNullableText(fields, ['班次', '班别']),
-    supervisorName: readNullableText(fields, ['示例人员001', '直接示例人员001']),
+    supervisorName: readNullableText(fields, ['主管', '直接主管']),
     phone: readNullableText(fields, ['联系方式', '电话', '手机号']),
     email: readNullableText(fields, ['电子邮箱', '邮箱']),
     idCardMasked: maskOrganizationPersonIdCard(

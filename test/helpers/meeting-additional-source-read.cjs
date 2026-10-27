@@ -24,15 +24,15 @@ const {
 const sources = [
   {
     source: 'training',
-    appToken: 'PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_APP_TOKEN',
-    tableId: 'tbl00349d6675ac8',
+    appToken: 'MliKbC3fXa8PXrsndKscmxjdn1g',
+    tableId: 'tblsWOglzcniGFwu',
     viewId: 'vew5BJWcH2',
     tableName: '培训分享会',
   },
   {
     source: 'ali-meeting',
-    appToken: 'PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_APP_TOKEN',
-    tableId: 'tbl1e190ddc55baa',
+    appToken: 'MliKbC3fXa8PXrsndKscmxjdn1g',
+    tableId: 'tblssaUZfDuqW5PQ',
     viewId: 'vewae6upeP',
     tableName: '阿里会议',
   },

@@ -64,7 +64,7 @@ describe('person profile source selection', () => {
     const { resolvePersonProfileReadPlan } = requireSourceModule();
 
     expect(resolvePersonProfileReadPlan('leave')).toEqual({
-      tableId: 'tblf9cb8328bad8b',
+      tableId: 'tblATnYxuleJpyVl',
       viewId: undefined,
       tableName: '请休假人员资料',
       fieldNames: ['姓名', '员工姓名', '机楼/专业', '班组', '岗位', '班次'],

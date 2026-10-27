@@ -12,6 +12,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { readEnv } from '../../common/config/external-services.config';
 import { resolveLeaveWorkflowLedgerPath } from '../../common/feishu/leave-local-projection';
 import { assertLeaveApplicationCoverage } from '../../common/access/personnel-handover.coverage';
@@ -49,6 +50,7 @@ const MAX_RETRY_MS = 30 * 60 * 1_000;
 const MAX_ERROR_LENGTH = 500;
 const NORMALIZATION_CACHE_ENTRIES = 256;
 const NORMALIZATION_CACHE_CHARACTERS = 16 * 1024 * 1024;
+const LEDGER_READ_CACHE_BYTES = 16 * 1024 * 1024;
 const PRIMARY_TASK_BURST = 4;
 
 export type LeaveWorkflowStatus =
@@ -244,9 +246,14 @@ export class LeaveWorkflowStore {
   private readonly logger = new Logger(LeaveWorkflowStore.name);
   private readonly ledgerPath: string;
   private readonly legacyLedgerPath: string;
-  private operation: Promise<unknown> = Promise.resolve();
+  private readonly operations: Array<() => Promise<void>> = [];
+  private readonly cardOperations: Array<() => Promise<void>> = [];
+  private drainingOperations = false;
+  private cardOperationBurst = 0;
   private readonly normalizedApplications = new Map<string, { source: string; value: LeaveWorkflowApplicationEntry }>();
   private normalizationCacheCharacters = 0;
+  private ledgerReadCache: { path: string; source: Buffer; parsed: Partial<Ledger> } | null = null;
+  private readonly serializedApplications = new WeakMap<LeaveWorkflowApplicationEntry, string>();
   private primaryTaskBurst = 0;
 
   constructor(
@@ -363,7 +370,7 @@ export class LeaveWorkflowStore {
   ): Promise<LeaveWorkflowApplicationEntry | null> {
     const normalizedRecordId = requireRecordId(recordId);
     return this.enqueue(async () => {
-      const entry = (await this.read()).applications.find(
+      const entry = (await this.readPath(this.ledgerPath, normalizedRecordId)).ledger.applications.find(
         (candidate) => candidate.recordId === normalizedRecordId,
       );
       return entry ? clone(entry) : null;
@@ -371,7 +378,7 @@ export class LeaveWorkflowStore {
   }
 
   async listApplications(): Promise<LeaveWorkflowApplicationEntry[]> {
-    return this.enqueue(async () => clone((await this.read()).applications));
+    return this.enqueue(async () => clone((await this.read()).applications), false);
   }
   async acceptPersonnelHandover(input: LeavePersonnelHandoverInput, notificationsManaged?: () => boolean): Promise<LeavePersonnelHandoverReceipt> {
     const recordId=requireRecordId(input?.recordId),expectedStage=normalizeStage(input?.expectedStage);
@@ -435,7 +442,7 @@ export class LeaveWorkflowStore {
       const managerAction=ledger.actions.find(action=>action.recordId===recordId&&action.stageKey==='manager'&&action.stageVersion===expectedCurrentStage.version+1);
       if(['approved','rejected','rejected_syncing'].includes(entry.status)||managerAction||supervisorAction?.action==='reject')return {status:'already_completed',revision:entry.revision,taskBusinessKey:null,...(managerAction?{stage:{key:'manager' as const,version:managerAction.stageVersion,approverOpenIds:entry.approvalPlan!.stages[1].approvers.map(person=>person.openId)}}:supervisorAction?.action==='reject'?{stage:expectedCurrentStage}:{})};
       const promoted=entry.status==='manager_pending'&&entry.currentStage?.key==='manager'&&entry.currentStage.version===expectedCurrentStage.version+1&&supervisorAction?.action==='approve';
-      if(!promoted&&supervisorAction)throw new ConflictException('原示例人员001审批正在同步，请待阶段更新后重试原交接');
+      if(!promoted&&supervisorAction)throw new ConflictException('原主管审批正在同步，请待阶段更新后重试原交接');
       if(!promoted&&(entry.revision!==input.expectedRevision||entry.status!=='supervisor_pending'||!entry.currentStage||!sameStage(entry.currentStage,expectedCurrentStage)))throw new ConflictException('原审批版本已变化，请重新核对未来交接');
       if(promoted&&(entry.revision<input.expectedRevision||JSON.stringify([...entry.currentStage!.approverOpenIds].sort())!==JSON.stringify(entry.approvalPlan!.stages[1].approvers.map(person=>person.openId).sort())))throw new ConflictException('经理阶段与原计划不一致');
       if(promoted&&ledger.actions.some(action=>action.recordId===recordId&&action.stageKey==='manager'&&action.stageVersion===entry.currentStage!.version))return {status:'already_completed',revision:entry.revision,taskBusinessKey:null};
@@ -1265,7 +1272,7 @@ export class LeaveWorkflowStore {
       if (taskPriority(current) > 0) this.primaryTaskBurst = 0;
       else if (taskPriority(current) === 0) this.primaryTaskBurst = Math.min(PRIMARY_TASK_BURST, this.primaryTaskBurst + 1);
       return clone(task);
-    });
+    }, false);
   }
 
   async recordStageActionCardPatched(key: string, claimToken: string, messageId: string): Promise<void> {
@@ -1287,7 +1294,7 @@ export class LeaveWorkflowStore {
       const ledger = await this.read();
       enqueueTask(ledger, input);
       await this.write(ledger);
-    });
+    }, false);
   }
 
   async completeTask(
@@ -1350,7 +1357,7 @@ export class LeaveWorkflowStore {
   }
 
   async listTasks(): Promise<LeaveWorkflowTaskEntry[]> {
-    return this.enqueue(async () => clone((await this.read()).tasks));
+    return this.enqueue(async () => clone((await this.read()).tasks), false);
   }
   async personnelHandoverSnapshot(): Promise<{applications:LeaveWorkflowApplicationEntry[];tasks:LeaveWorkflowTaskEntry[]}> {
     return this.enqueue(async()=>{const ledger=await this.read();return clone({applications:ledger.applications,tasks:ledger.tasks});});
@@ -1376,7 +1383,7 @@ export class LeaveWorkflowStore {
       }
       if (awakened > 0) await this.write(ledger);
       return awakened;
-    });
+    }, false);
   }
 
   private async updateClaimedTask(
@@ -1395,16 +1402,35 @@ export class LeaveWorkflowStore {
       if (index < 0) return;
       ledger.tasks[index] = update(ledger.tasks[index]);
       await this.write(ledger);
+    }, false);
+  }
+
+  private enqueue<T>(operation: () => Promise<T>, cardAction = true): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const queue = cardAction ? this.cardOperations : this.operations;
+      queue.push(async () => {
+        try { resolve(await operation()); }
+        catch (error) { reject(error); }
+      });
+      if (!this.drainingOperations) void this.drainOperations();
     });
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.operation.then(operation, operation);
-    this.operation = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+  private async drainOperations(): Promise<void> {
+    this.drainingOperations = true;
+    try {
+      while (this.cardOperations.length || this.operations.length) {
+        // Business mutations stay FIFO; only queued outbox bookkeeping yields to card work.
+        const card = this.cardOperations.length > 0 &&
+          (this.operations.length === 0 || this.cardOperationBurst < 4);
+        this.cardOperationBurst = card ? this.cardOperationBurst + 1 : 0;
+        await (card ? this.cardOperations : this.operations).shift()!();
+        if (card) await yieldToEventLoop();
+      }
+    } finally {
+      this.cardOperationBurst = 0;
+      this.drainingOperations = false;
+    }
   }
 
   private async read(): Promise<Ledger> {
@@ -1413,11 +1439,24 @@ export class LeaveWorkflowStore {
 
   private async readPath(
     ledgerPath: string,
+    applicationRecordId?: string,
   ): Promise<{ exists: boolean; ledger: Ledger }> {
     try {
-      const parsed = JSON.parse(
-        await readFile(ledgerPath, 'utf8'),
-      ) as Partial<Ledger>;
+      const source = await readFile(ledgerPath);
+      const cached = this.ledgerReadCache;
+      const persisted = cached?.path === ledgerPath && cached.source.equals(source)
+        ? cached.parsed
+        : JSON.parse(source.toString('utf8')) as Partial<Ledger>;
+      this.rememberLedgerRead(ledgerPath, source, persisted);
+      // Applications are immutable; task leases must remain private to this operation.
+      const parsed = { ...persisted, tasks: clone(persisted.tasks || []) };
+      // Single-record reads need not normalize every historical candidate list.
+      // Mutations still read and validate the complete ledger before committing.
+      if (applicationRecordId && Array.isArray(parsed.applications)) {
+        parsed.applications = parsed.applications.filter(
+          entry => isApplication(entry) && entry.recordId === applicationRecordId,
+        );
+      }
       return {
         exists: true,
         ledger: normalizeLedger(parsed, value => this.normalizeApplicationForRead(value)),
@@ -1435,8 +1474,9 @@ export class LeaveWorkflowStore {
   private normalizeApplicationForRead(value: LeaveWorkflowApplicationEntry): LeaveWorkflowApplicationEntry {
     // 比较完整输入而非mtime；每次读取仍可见外部修改，缓存不持有可变业务对象。
     if (!value.createdAt || !value.updatedAt) return normalizeApplication(value);
-    const source = JSON.stringify(value);
     const cached = this.normalizedApplications.get(value.recordId);
+    if (cached?.value === value) return value;
+    const source = JSON.stringify(value);
     if (cached?.source === source) return cached.value;
     const normalized = normalizeApplication(value);
     if (cached) {
@@ -1451,6 +1491,15 @@ export class LeaveWorkflowStore {
       this.normalizationCacheCharacters += source.length;
     }
     return normalized;
+  }
+
+  private rememberLedgerRead(path: string, source: Buffer, parsed: Partial<Ledger>): void {
+    if (source.byteLength > LEDGER_READ_CACHE_BYTES) {
+      this.ledgerReadCache = null;
+      return;
+    }
+    freezeApplicationRead(parsed);
+    this.ledgerReadCache = { path, source, parsed };
   }
 
   private async mergeLegacyLedger(): Promise<void> {
@@ -1470,7 +1519,17 @@ export class LeaveWorkflowStore {
     await mkdir(dirname(this.ledgerPath), { recursive: true });
     const temporaryPath = `${this.ledgerPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
     try {
-      await writeFile(temporaryPath, JSON.stringify(ledger), {
+      // Reuse only immutable application JSON; mutable bookkeeping is encoded afresh.
+      const { applications, ...fields } = ledger;
+      const encodedApplications = applications.map(application => {
+        const cached = this.serializedApplications.get(application);
+        if (cached !== undefined) return cached;
+        const encoded = JSON.stringify(application);
+        if (Object.isFrozen(application)) this.serializedApplications.set(application, encoded);
+        return encoded;
+      });
+      const source = Buffer.from(`{"applications":[${encodedApplications.join(',')}],${JSON.stringify(fields).slice(1)}`);
+      await writeFile(temporaryPath, source, {
         encoding: 'utf8',
         mode: 0o600,
         flag: 'wx',
@@ -1484,6 +1543,8 @@ export class LeaveWorkflowStore {
           await new Promise(resolveDelay => setTimeout(resolveDelay, 25 * 2 ** attempt));
         }
       }
+      // Publish a snapshot only after the atomic replacement succeeds.
+      this.rememberLedgerRead(this.ledgerPath, source, ledger);
     } catch (error) {
       try { await rm(temporaryPath, { force: true }); }
       catch (cleanupError) { this.logger.warn(`请休假台账临时文件清理失败：${sanitizeError(cleanupError)}`); }

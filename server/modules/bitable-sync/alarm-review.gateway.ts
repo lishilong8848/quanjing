@@ -13,7 +13,7 @@ export class AlarmReviewGateway {
   constructor(private readonly http: HttpService) {}
   // 同应用复用在职快照 Open ID；跨应用时转换为租户 User ID，避免误写人员。
   async resolveResponsibleUserId(openId: string): Promise<string> {
-    if (!/^ou_[A-Za-z0-9]+$/.test(openId)) throw new ServiceUnavailableException('示例人员019飞书身份不可用');
+    if (!/^ou_[A-Za-z0-9]+$/.test(openId)) throw new ServiceUnavailableException('责任人飞书身份不可用');
     const sourceAuth = resolveTodayOperationsAlarmAuth();
     if (!sourceAuth || sourceAuth.appId === getEffectiveFeishuAppCredentials().appId) return openId;
     try {
@@ -22,13 +22,13 @@ export class AlarmReviewGateway {
         headers: { Authorization: `Bearer ${token}` }, params: { user_id_type: 'open_id' }, timeout: 8000,
       });
       const userId = data?.data?.user?.user_id;
-      if (data?.code !== 0) throw new ServiceUnavailableException(`示例人员019身份核对失败（飞书代码 ${Number(data?.code) || '未知'}），请检查通讯录访问权限`);
-      if (typeof userId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(userId)) throw new ServiceUnavailableException('跨应用示例人员019关联需要主应用具有获取用户 User ID 的权限');
+      if (data?.code !== 0) throw new ServiceUnavailableException(`责任人身份核对失败（飞书代码 ${Number(data?.code) || '未知'}），请检查通讯录访问权限`);
+      if (typeof userId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(userId)) throw new ServiceUnavailableException('跨应用责任人关联需要主应用具有获取用户 User ID 的权限');
       return userId;
     } catch (error) {
       if (error instanceof ServiceUnavailableException) throw error;
       const code = Number((error as { response?: { data?: { code?: unknown } } })?.response?.data?.code);
-      throw new ServiceUnavailableException(`示例人员019飞书身份核对失败${Number.isFinite(code) ? `（飞书代码 ${code}）` : ''}，请检查通讯录权限；未以姓名替代人员关联`);
+      throw new ServiceUnavailableException(`责任人飞书身份核对失败${Number.isFinite(code) ? `（飞书代码 ${code}）` : ''}，请检查通讯录权限；未以姓名替代人员关联`);
     }
   }
   async preflight(): Promise<void> { await this.target(); }

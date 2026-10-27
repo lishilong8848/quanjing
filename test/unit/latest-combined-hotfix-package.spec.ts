@@ -1301,7 +1301,7 @@ describe('latest combined hotfix package', () => {
     expect(source).toContain('下载重保检查单');
     expect(source).toContain('提交戒备登记');
     expect(source).toContain(
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/Hs4fwlplAijAgskmBnkcEDMvnKc',
     );
     for (const documentation of [source, deployReadme]) {
       expect(documentation).toContain('PUBLIC_BASE_URL');

@@ -78,18 +78,18 @@ class AliMonthlyReportEmailTests(unittest.TestCase):
                 patch.object(
                     self.legacy_app,
                     "send_report_email",
-                    return_value="user-b54e355d@example.com",
+                    return_value="ma.jinyu@vnet.com",
                 ) as send_mock,
             ):
                 result = self.legacy_app.send_previous_month_alarm_email(
                     config,
-                    "user-b54e355d@example.com",
+                    "ma.jinyu@vnet.com",
                 )
 
         send_mock.assert_called_once_with(
             temp_power_file,
             self.legacy_app.build_email_subject("2026", 7),
-            "user-b54e355d@example.com",
+            "ma.jinyu@vnet.com",
             "2026",
             7,
             config=config,
@@ -102,20 +102,20 @@ class AliMonthlyReportEmailTests(unittest.TestCase):
         opening_html = self.legacy_app.build_email_opening_html()
 
         self.assertIn("抄送:", opening_html)
-        self.assertIn("user-7e80d4ec@example.com", opening_html)
-        self.assertNotIn("user-7e80d4ec@example.com", self.legacy_app.DEFAULT_RECIPIENT)
+        self.assertIn("mei.bingbing@vnet.com", opening_html)
+        self.assertNotIn("mei.bingbing@vnet.com", self.legacy_app.DEFAULT_RECIPIENT)
 
     def test_recipient_parser_removes_mei_from_legacy_or_manual_delivery_lists(self) -> None:
         recipients = self.legacy_app.parse_recipients(
-            "user-b54e355d@example.com; user-adb19fdd@example.com; user-20a3f7b8@example.com"
+            "ma.jinyu@vnet.com; MEI.BINGBING@vnet.com; liu.xiaoxing2-wb@sne.vnet.com"
         )
 
         self.assertEqual(
             recipients,
-            ["user-b54e355d@example.com", "user-20a3f7b8@example.com"],
+            ["ma.jinyu@vnet.com", "liu.xiaoxing2-wb@sne.vnet.com"],
         )
         with self.assertRaisesRegex(ValueError, "有效的收件人"):
-            self.legacy_app.parse_recipients("user-7e80d4ec@example.com")
+            self.legacy_app.parse_recipients("mei.bingbing@vnet.com")
 
     def test_power_email_mime_keeps_mei_out_of_delivery_and_attaches_the_power_workbook(self) -> None:
         sent: dict[str, object] = {}
@@ -162,12 +162,12 @@ class AliMonthlyReportEmailTests(unittest.TestCase):
                     power_file,
                     self.legacy_app.build_email_subject("2026", 7),
                     (
-                        "user-b54e355d@example.com; user-7e80d4ec@example.com; "
-                        "user-20a3f7b8@example.com"
+                        "ma.jinyu@vnet.com; mei.bingbing@vnet.com; "
+                        "liu.xiaoxing2-wb@sne.vnet.com"
                     ),
                     "2026",
                     7,
-                    config={"qq_email": "user-2005162e@example.com", "auth_code": "test-auth"},
+                    config={"qq_email": "sender@example.test", "auth_code": "test-auth"},
                 )
 
         message = sent["message"]
@@ -186,14 +186,14 @@ class AliMonthlyReportEmailTests(unittest.TestCase):
 
         self.assertEqual(
             recipient_text,
-            "user-b54e355d@example.com, user-20a3f7b8@example.com",
+            "ma.jinyu@vnet.com, liu.xiaoxing2-wb@sne.vnet.com",
         )
         self.assertEqual(
             sent["to_addrs"],
-            ["user-b54e355d@example.com", "user-20a3f7b8@example.com"],
+            ["ma.jinyu@vnet.com", "liu.xiaoxing2-wb@sne.vnet.com"],
         )
         self.assertIsNone(message.get("Cc"))
-        self.assertIn("user-7e80d4ec@example.com", "\n".join(html_parts))
+        self.assertIn("mei.bingbing@vnet.com", "\n".join(html_parts))
         self.assertEqual(len(attachments), 1)
         self.assertEqual(
             attachments[0].get_filename(),

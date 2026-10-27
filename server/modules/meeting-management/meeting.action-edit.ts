@@ -55,12 +55,12 @@ export function prepareActionEdit(
   if (assignee) {
     const name = assignee.kind === 'unassigned' ? '待明确' : assignee.name;
     const explicit =
-      /((?:示例人员019|负责人|示例人员019员|责任部门)[:：]\s*)([^\s，,。；;（）()]+)/g;
+      /((?:责任人|负责人|责任人员|责任部门)[:：]\s*)([^\s，,。；;（）()]+)/g;
     if (explicit.test(content))
       content = content.replace(explicit, (_all, label) => `${label}${name}`);
     else if (/由[\u4e00-\u9fa5]{2,4}负责/.test(content))
       content = content.replace(/由[\u4e00-\u9fa5]{2,4}负责/g, `由${name}负责`);
-    else if (assignee.kind !== 'unassigned') content += `（示例人员019：${name}）`;
+    else if (assignee.kind !== 'unassigned') content += `（责任人：${name}）`;
   }
   const lines = original.split(/\r?\n/);
   const prefix = lines[item.start].match(ACTION_MARKER)?.[0] || '';

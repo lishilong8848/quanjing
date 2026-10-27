@@ -6,10 +6,10 @@ import {
 } from '../server/modules/purchase-inventory/purchase-batch-fulfillment-card';
 import { PurchaseWorkflowGateway } from '../server/modules/purchase-inventory/purchase-workflow.gateway';
 
-export const DIAGNOSTIC_RECEIPT_RECIPIENT_NAME = '示例人员020';
+export const DIAGNOSTIC_RECEIPT_RECIPIENT_NAME = '马进宇';
 export const DIAGNOSTIC_RECEIPT_RECIPIENT_OPEN_ID =
-  'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID';
-const DIAGNOSTIC_RECEIPT_APP_ID = 'cli_0831564613853b26';
+  'ou_a6644e62a43b916c6bc26148cf74f208';
+const DIAGNOSTIC_RECEIPT_APP_ID = 'cli_a9d1c9fe9d381cee';
 
 type DiagnosticReceiptMode = 'dry-run' | 'live-send';
 

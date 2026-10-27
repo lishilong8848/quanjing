@@ -620,7 +620,7 @@ export function WeeklyWorkbench({
                   </Badge>
                   <strong>{todo.content}</strong>
                   <span className="weekly-owner">
-                    示例人员019：{todo.ownerName || '待明确'}
+                    责任人：{todo.ownerName || '待明确'}
                   </span>
                   <span>截止：{todo.dueDate || '未设置'}</span>
                   <Button

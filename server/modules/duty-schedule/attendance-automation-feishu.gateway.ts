@@ -51,14 +51,14 @@ import type {
 import { AttendanceCorrectionEvidenceStorageService } from './attendance-correction-evidence-storage.service';
 import { excludesApprovedLeave } from './attendance-approved-leave';
 
-const DEFAULT_ATTENDANCE_APP_TOKEN = 'PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN';
-const DEFAULT_ATTENDANCE_TABLE_ID = 'tbl01cda9acd2f8f';
-const DEFAULT_PERSONNEL_APP_TOKEN = 'PUBLIC_EXAMPLE_FEISHU_ORG_APP_TOKEN';
-const DEFAULT_PERSONNEL_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID';
+const DEFAULT_ATTENDANCE_APP_TOKEN = 'KdCZbSL5CaTErKsFwFucddA5nYd';
+const DEFAULT_ATTENDANCE_TABLE_ID = 'tblsunmofUPOYGL9';
+const DEFAULT_PERSONNEL_APP_TOKEN = 'F9lDbA5XKaLmyasoARRcZFpKnZd';
+const DEFAULT_PERSONNEL_TABLE_ID = 'tblOu75UtJTDNHIM';
 const FEISHU_BASE_URL = 'https://open.feishu.cn/open-apis';
 const MAX_CORRECTION_IMAGE_BYTES = 10 * 1024 * 1024;
-const CONFIRMED_MANAGER_APP_ID = 'cli_0831564613853b26';
-const CONFIRMED_MANAGER_OPEN_ID = 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID';
+const CONFIRMED_MANAGER_APP_ID = 'cli_a9d1c9fe9d381cee';
+const CONFIRMED_MANAGER_OPEN_ID = 'ou_a6644e62a43b916c6bc26148cf74f208';
 
 export interface AttendanceSyncFailureAlert {
   task: AttendanceAutomationTask;
@@ -508,7 +508,7 @@ export class AttendanceAutomationFeishuGateway {
     );
 
     if (hasCampusBuilding) {
-      const managerName = readEnv('FEISHU_ATTENDANCE_MANAGER_NAME') || '示例人员020';
+      const managerName = readEnv('FEISHU_ATTENDANCE_MANAGER_NAME') || '马进宇';
       people
         .filter((person) => person.name === managerName)
         .forEach((person) =>
@@ -520,7 +520,7 @@ export class AttendanceAutomationFeishuGateway {
 
     if (normalizedBuildings.has('110站')) {
       const stationName =
-        readEnv('FEISHU_ATTENDANCE_STATION_SUPERVISOR_NAME') || '示例人员006';
+        readEnv('FEISHU_ATTENDANCE_STATION_SUPERVISOR_NAME') || '周海祥';
       people
         .filter((person) => person.name === stationName)
         .forEach((person) =>
@@ -543,7 +543,7 @@ export class AttendanceAutomationFeishuGateway {
     people
       .filter(
         (person) =>
-          person.position.includes('示例人员001') &&
+          person.position.includes('主管') &&
           supervisorBuildings.has(person.building),
       )
       .forEach((person) =>
@@ -997,12 +997,12 @@ export class AttendanceAutomationFeishuGateway {
       const openIds = [
         ...new Set(
           managers
-            .filter((person) => person.name === '示例人员020')
+            .filter((person) => person.name === '马进宇')
             .flatMap((person) => person.openIds),
         ),
       ];
       if (openIds.length !== 1) {
-        throw new Error('示例人员020在当前飞书应用下的 Open ID 未能唯一确认');
+        throw new Error('马进宇在当前飞书应用下的 Open ID 未能唯一确认');
       }
       openId = openIds[0];
     }

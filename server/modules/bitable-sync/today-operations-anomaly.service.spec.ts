@@ -461,7 +461,7 @@ function createService() {
   };
   const gateway = {
     recipientOpenId: jest.fn(() => `ou_${'a'.repeat(20)}`),
-    recipientName: jest.fn(() => '示例人员020'),
+    recipientName: jest.fn(() => '马进宇'),
     patchInteractiveCard: jest.fn().mockResolvedValue(undefined),
   };
   const service = new TodayOperationsAnomalyService(

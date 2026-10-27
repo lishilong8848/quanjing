@@ -175,6 +175,23 @@ function currentMonthFormatter(): (now?: Date) => string {
 }
 
 describe('campus training dashboard model', () => {
+  it('accepts refreshing before the first successful sync and rejects unknown source states', () => {
+    const response = minimalDashboardResponse();
+    expect(
+      responseValidator()({
+        ...response,
+        sourceStatus: 'refreshing',
+        syncedAt: '',
+      }),
+    ).toBe(true);
+    expect(responseValidator()({ ...response, sourceStatus: 'stale' })).toBe(
+      true,
+    );
+    expect(responseValidator()({ ...response, sourceStatus: 'pending' })).toBe(
+      false,
+    );
+  });
+
   it('validates and formats strict training months', () => {
     expect(isTrainingMonth('2026-07')).toBe(true);
     expect(isTrainingMonth('2026-01')).toBe(true);
@@ -281,7 +298,7 @@ describe('campus training dashboard model', () => {
       participants: [
         {
           id: 'person-a',
-          name: '示例人员008',
+          name: '张三',
           building: 'A楼',
           totalCourses: 2,
           passedCourses: 1,
@@ -310,7 +327,7 @@ describe('campus training dashboard model', () => {
       newHires: [
         {
           id: 'new-hire-a',
-          name: '示例人员017',
+          name: '王五',
           building: 'A楼',
           joinedAt: '2026-07-03',
           assessmentDueAt: '2026-09-30',
@@ -362,7 +379,7 @@ describe('campus training dashboard model', () => {
     const response = minimalDashboardResponse();
     const participant: TestTrainingParticipantDetail = {
       id: 'person-a',
-      name: '示例人员008',
+      name: '张三',
       building: 'A楼',
       totalCourses: 1,
       passedCourses: 0,

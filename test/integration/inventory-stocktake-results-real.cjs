@@ -49,7 +49,7 @@ const inputs =
     'test/integration/inventory-stocktake-results-real.cjs',
   ]);
 (async () => {
-  if (getEffectiveFeishuAppCredentials().appId !== 'cli_0831564613853b26')
+  if (getEffectiveFeishuAppCredentials().appId !== 'cli_a9d1c9fe9d381cee')
     throw new Error('当前运行应用与已确认人员 Open ID 所属应用不同，未写入');
   const http = new HttpService();
   const inventory = new InventoryWorkflowGateway(http);
@@ -90,8 +90,8 @@ const inputs =
   );
   const person = {
     recordId: 'verified-test-person',
-    name: '示例人员020',
-    openId: 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID',
+    name: '马进宇',
+    openId: 'ou_a6644e62a43b916c6bc26148cf74f208',
     employeeNo: 'TEST-ONLY',
     building: 'A楼',
     position: '',

@@ -478,8 +478,8 @@ describe('阿里月报生成文件本机操作', () => {
     expect(pageSource).toContain('最近一次成功结果（本次操作失败）');
   });
 
-  it('四项打包成功提示会话群和示例人员020且投递标签区分群与个人', () => {
-    expect(pageSource).toContain('已发送会话群和示例人员020');
+  it('四项打包成功提示会话群和马进宇且投递标签区分群与个人', () => {
+    expect(pageSource).toContain('已发送会话群和马进宇');
     expect(pageSource).toContain("recipientType === 'user'");
     expect(pageSource).toContain("recipientType === 'chat'");
     expect(pageSource).toContain('recipientName');

@@ -27,7 +27,7 @@ const publicRecord = (overrides: Partial<ChangeInfo> = {}): ChangeInfo => ({
   buildings: ['H楼'],
   riskSummary: '旧风险',
   isKey: false,
-  recordUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+  recordUrl: 'https://vnet.feishu.cn/base/example',
   createdAt: '2026-08-08T00:00:00.000Z',
   updatedAt: '2026-08-09T00:00:00.000Z',
   ...overrides,
@@ -69,9 +69,9 @@ const baseRecord = (overrides: Record<string, unknown> = {}) => ({
     申请提交人: [
       {
         id: 'ou_private_open_id',
-        name: '示例人员020',
-        email: 'user-f0b5dcef@example.com',
-        mobile: '13800009626',
+        name: '马进宇',
+        email: 'private@example.test',
+        mobile: '13800000000',
         avatar_url: 'https://private.example.test/avatar.png',
       },
     ],
@@ -222,7 +222,7 @@ describe('change adjustment record mapper', () => {
 
   it('fails closed with a mapping error for deeply nested workflow and submitter values', async () => {
     let workflowValue: unknown = '审批通过';
-    let submitterValue: unknown = { name: '示例人员020' };
+    let submitterValue: unknown = { name: '马进宇' };
     for (let depth = 0; depth < 20_000; depth += 1) {
       workflowValue = [workflowValue];
       submitterValue = [submitterValue];
@@ -369,15 +369,15 @@ describe('change adjustment record mapper', () => {
       actualEndDate: null,
       plannedDelayStartDate: '2026-08-10T02:00:00.000Z',
       plannedDelayEndDate: '2026-08-10T12:00:00.000Z',
-      submitterName: '示例人员020',
+      submitterName: '马进宇',
       scheduleStatus: null,
       delayReason: '上游窗口延后',
       updatedAt: '2026-08-09T01:30:00.000Z',
     });
     const serialized = JSON.stringify(snapshot?.publicRecord);
     expect(serialized).not.toContain('ou_private_open_id');
-    expect(serialized).not.toContain('user-f0b5dcef@example.com');
-    expect(serialized).not.toContain('13800009626');
+    expect(serialized).not.toContain('private@example.test');
+    expect(serialized).not.toContain('13800000000');
     expect(serialized).not.toContain('avatar.png');
   });
 

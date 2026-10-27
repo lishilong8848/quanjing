@@ -3,8 +3,8 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const root = path.resolve(__dirname, '../..'), output = path.join(root, 'output/release-next-after-20261005-182903');
 const owned = path.join(output, 'alarm-review-live-owned-20261006-f9b9836f'), ledger = path.join(owned, 'ledger.json');
 const title = 'TEST-异常复核-20261006-f9b9836f', recordId = 'recvxgGL0OOod9';
-const base = 'JeMdbI3JjawMj1s1YGSc3MoBn7c', table = 'tbld976fa6fc1832';
-const personId = 'recuSBqPEuWsww', openId = 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID', principal = 'TEST-alarm-review-20261006-f9b9836f';
+const base = 'JeMdbI3JjawMj1s1YGSc3MoBn7c', table = 'tblD7hi70s6U6rlU';
+const personId = 'recuSBqPEuWsww', openId = 'ou_a6644e62a43b916c6bc26148cf74f208', principal = 'TEST-alarm-review-20261006-f9b9836f';
 const presetId = 'alarm-review-task-aa77889c-ebf6-4da2-8c0e-388394bcec89', mutation = 'alarm-review-live20261006-f9b9836f-preset';
 const manifestSha = '071c677e832fc03f94ab37bb17bbd85bb9c6e9eb6876f804772adb4ea05e773b';
 const beforeSha = '280a46d3a64fe9d8414bbeb7a10827c82b4057574d49ab25b6cb392bf342fabe';
@@ -26,7 +26,7 @@ async function main() {
   assert.equal(savedPreset.request.expectedVersions[recordId], 'unreviewed'); assert.equal(fs.existsSync(snapshot), false, 'No continuation rerun');
   stage = 'credential-source';
   const project = require('dotenv').parse(fs.readFileSync(path.join(root, '.env')));
-  assert.equal(project.FEISHU_APP_ID?.trim(), 'cli_0831564613853b26'); assert.ok(project.FEISHU_APP_SECRET?.trim());
+  assert.equal(project.FEISHU_APP_ID?.trim(), 'cli_a9d1c9fe9d381cee'); assert.ok(project.FEISHU_APP_SECRET?.trim());
   process.env.FEISHU_APP_ID = project.FEISHU_APP_ID; process.env.FEISHU_APP_SECRET = project.FEISHU_APP_SECRET;
   assert.ok(!process.env.FEISHU_CARD_ACTION_CONSUMER_PROFILE); assert.ok(!process.env.TODAY_OPERATIONS_ALARM_BITABLE_URL);
   for (const key of ['TODAY_OPERATIONS_ALARM_FEISHU_APP_ID', 'FEISHU_RISK_INSPECTION_APP_ID', 'ALI_MONTHLY_REPORT_FEISHU_APP_ID']) assert.ok(!process.env[key]);
@@ -52,14 +52,14 @@ async function main() {
   client.interceptors.request.use(config => {
     const method = (config.method || 'get').toLowerCase(), kind = requestPhase(config);
     requests.push({ phase: kind, method });
-    if (method === 'post' && kind === 'auth') { assert.equal(config.data.app_id, 'cli_0831564613853b26'); return config; }
+    if (method === 'post' && kind === 'auth') { assert.equal(config.data.app_id, 'cli_a9d1c9fe9d381cee'); return config; }
     if (method === 'get' && kind === 'wiki') { assert.equal(config.params.token, 'SOwsw315aiBJjgkl48ccoxIPntc'); return config; }
     if (method === 'get' && kind === 'fields') return config;
     assert.equal(kind, 'owned-record', 'Only owned record may be accessed');
     if (method === 'get') { if (phase === 'custom-fail' && !injected) { injected = true; throw new Error('TEST transport failure before sending record GET'); } gets++; return config; }
     assert.equal(method, 'put'); assert.equal(ownershipRead, true);
-    assert.deepEqual(Object.keys(config.data.fields).sort(), ['人工复核结果', '复核回复', '复核示例人员019'].sort());
-    assert.deepEqual(config.data.fields.复核示例人员019, [{ id: openId }]); puts++; return config;
+    assert.deepEqual(Object.keys(config.data.fields).sort(), ['人工复核结果', '复核回复', '复核责任人'].sort());
+    assert.deepEqual(config.data.fields.复核责任人, [{ id: openId }]); puts++; return config;
   });
   client.interceptors.response.use(response => {
     const apiCode = Number(response.data?.code); observations.push({ requestPhase: requestPhase(response.config), httpStatus: response.status, apiCode: Number.isFinite(apiCode) ? apiCode : null });
@@ -73,7 +73,7 @@ async function main() {
     const apiCode = Number(error?.response?.data?.code);
     observations.push({ requestPhase: error?.config ? requestPhase(error.config) : 'before-send-or-unknown', exceptionClass: error?.constructor?.name || 'unknown', httpStatus: Number.isInteger(error?.response?.status) ? error.response.status : null, apiCode: Number.isFinite(apiCode) ? apiCode : null, networkCode }); throw error;
   });
-  const people = { getCachedActivePersonnelDirectory: async () => ({ personnel: [{ recordId: personId, openId, name: '示例人员020', position: '', buildings: [] }] }) };
+  const people = { getCachedActivePersonnelDirectory: async () => ({ personnel: [{ recordId: personId, openId, name: '马进宇', position: '', buildings: [] }] }) };
   const alarms = { patchHumanReview: (id, value) => { assert.equal(id, recordId); fields = value; } };
   const fresh = () => { const store = new AlarmReviewStore(ledger); service = new AlarmReviewService(store, new AlarmReviewGateway(new HttpService(client)), people, alarms); return store; };
   assert.equal(sha(fs.readFileSync(ledger)), beforeSha); fs.writeFileSync(snapshot, originalBytes, { flag: 'wx' }); assert.equal(sha(fs.readFileSync(snapshot)), beforeSha);

@@ -143,10 +143,10 @@ function assignment(
     buildings: [...group.buildings],
     teams: [...group.teams],
     substitutePersonRecordId: isZhang ? 'rec_zhang' : 'rec_li',
-    substituteName: isZhang ? '示例人员008' : '示例人员013',
+    substituteName: isZhang ? '张三' : '李四',
     substituteOpenId: isZhang ? 'ou_zhang' : 'ou_li',
     updatedByOpenId: 'ou_supervisor',
-    updatedByName: '示例人员001',
+    updatedByName: '主管',
     updatedAt: '2026-08-25T10:00:00.000Z',
   };
 }

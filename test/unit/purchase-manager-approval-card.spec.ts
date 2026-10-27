@@ -342,7 +342,7 @@ describe('purchase manager approval Card 2.0', () => {
     (choice, choiceLabel, headerTemplate) => {
       const card = buildResolvedPurchaseManagerApprovalCard(baseInput, {
         choice,
-        actorName: '示例人员020',
+        actorName: '马进宇',
         processedAt: '2026-07-31 10:00',
         rejectionReason: '预算不符合要求',
       });
@@ -358,7 +358,7 @@ describe('purchase manager approval Card 2.0', () => {
       expect(content).toContain('处理结果');
       expect(content).toContain(choiceLabel);
       expect(content).toContain('处理人');
-      expect(content).toContain('示例人员020');
+      expect(content).toContain('马进宇');
       expect(content).toContain('处理时间');
       expect(content).toContain('2026&#45;07&#45;31 10&#58;00');
       if (choice === 'reject') {

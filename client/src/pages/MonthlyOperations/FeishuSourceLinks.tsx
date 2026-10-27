@@ -1,124 +1,124 @@
 import { ExternalLink } from 'lucide-react';
 import { useAccess } from '@/access/AccessProvider';
 
-const BASE = 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
-const WIKI = 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+const BASE = 'https://vnet.feishu.cn/base/';
+const WIKI = 'https://vnet.feishu.cn/wiki/';
 
 export const FEISHU_SOURCE_LINKS = {
   overview: [
     {
       label: '机柜月表',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl55d9d0575047d&view=vew26whHSY`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblDYQYihJ0CgepE&view=vew26whHSY`,
     },
     {
       label: '电耗与 PUE',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl32bf112724ed6&view=vewUBXgM67`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblqSskJvBnx9UJj&view=vewUBXgM67`,
     },
     {
       label: '用水量',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl85eb2123a63c8&view=vewrekh8YI`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblz4TkZqrUJB90y&view=vewrekh8YI`,
     },
   ],
   racks: [
     {
       label: '机柜月表',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl55d9d0575047d&view=vew26whHSY`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblDYQYihJ0CgepE&view=vew26whHSY`,
     },
     {
       label: '机柜上下电',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl38b1b0b822bf2&view=vewX77mW48`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblz8rjxdtRRlYmS&view=vewX77mW48`,
     },
   ],
   load: [
     {
       label: 'IT 负载率',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl35e641004a831&view=vewTUyPs7E`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblBgaPzuVj7V9Q6&view=vewTUyPs7E`,
     },
   ],
   electricity: [
     {
       label: '电耗与 PUE',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl32bf112724ed6&view=vewUBXgM67`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblqSskJvBnx9UJj&view=vewUBXgM67`,
     },
     {
       label: '湿球温度',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl38b1b0b822bf2&view=vewX77mW48`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblz8rjxdtRRlYmS&view=vewX77mW48`,
     },
   ],
   water: [
     {
       label: '用水量',
-      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tbl85eb2123a63c8&view=vewrekh8YI`,
+      href: `${BASE}ASLxbfESPahdTKs0A9NccgbrnXc?table=tblz4TkZqrUJB90y&view=vewrekh8YI`,
     },
   ],
   events: [
     {
       label: '事件月表',
-      href: `${WIKI}D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tbl72e6608772279&view=vew0qiJFzK`,
+      href: `${WIKI}D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tblj9XJLq5QzTAqX&view=vew0qiJFzK`,
     },
     {
       label: '重点事件',
-      href: `${WIKI}G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tbl8c53fd40c1f50&view=vewtj0ZiJJ`,
+      href: `${WIKI}G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tbl07kaaLGodiTqQ&view=vewtj0ZiJJ`,
     },
   ],
   changes: [
     {
       label: '变更月表',
-      href: `${WIKI}JhiVwgfoIimAqEk8YwEc09sknGd?table=tbl8f743982e48e1&view=vewew3vfZT`,
+      href: `${WIKI}JhiVwgfoIimAqEk8YwEc09sknGd?table=tblBvg6wCYSX3hcg&view=vewew3vfZT`,
     },
     {
       label: '智航变更进展',
-      href: `${WIKI}JhiVwgfoIimAqEk8YwEc09sknGd?table=tbl74dea197c9c1b&view=vewpHqbHoP`,
+      href: `${WIKI}JhiVwgfoIimAqEk8YwEc09sknGd?table=tbl2cJuTBqRdIm8Z&view=vewpHqbHoP`,
     },
   ],
   planned: [
     {
       label: '计划性维护',
-      href: `${BASE}HU38bc1vnamMK9sCeOgclUvXnFc?table=tbldd9a6f0224dfc&view=vewVRb8ODO`,
+      href: `${BASE}HU38bc1vnamMK9sCeOgclUvXnFc?table=tblzk7WrXxNWQy6V&view=vewVRb8ODO`,
     },
   ],
   unplanned: [
     {
       label: '非计划性维护',
-      href: `${BASE}HU38bc1vnamMK9sCeOgclUvXnFc?table=tblf5773e339e8e1&view=vewi5Clkm5`,
+      href: `${BASE}HU38bc1vnamMK9sCeOgclUvXnFc?table=tbl4Yh8Uye8bjLls&view=vewi5Clkm5`,
     },
   ],
   alarms: [
     {
       label: '告警月表',
-      href: `${WIKI}SOwsw315aiBJjgkl48ccoxIPntc?table=tbld976fa6fc1832&view=vewScMMh5S`,
+      href: `${WIKI}SOwsw315aiBJjgkl48ccoxIPntc?table=tblD7hi70s6U6rlU&view=vewScMMh5S`,
     },
   ],
   risk: [
     {
       label: 'OPEN 风险项',
-      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tbl07ee68bd218ee&view=vew7yV6HbG`,
+      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tblviRG8ZDfY7AnF&view=vew7yV6HbG`,
     },
     {
       label: '排查明细',
-      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tbl64acce602916f`,
+      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tblNddknaoXp2ASG`,
     },
     {
       label: '风险排查',
-      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tbl863dea72c2e81&view=vewG4XuaPu`,
+      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tblkSEwsxqGKQDIw&view=vewG4XuaPu`,
     },
   ],
   drill: [
     {
       label: '智航演练',
-      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tbl3c13aafddd198&view=vew0UNl8ZR`,
+      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tbleCzxRd2yF7lT7&view=vew0UNl8ZR`,
     },
   ],
   event: [
     {
       label: '智航事件',
-      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tbl3a6abd79ebe36&view=vew0xMcHto`,
+      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tbl06hMoUMdGVEvn&view=vew0xMcHto`,
     },
   ],
   inspection: [
     {
       label: '现场巡检',
-      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tblf51376b595c94&view=vewgfEzEZl`,
+      href: `${BASE}IrIibPkUOa6udGsMhu2cbOqhnWg?table=tblTXHrDH4Mv0971&view=vewgfEzEZl`,
     },
   ],
 } as const;

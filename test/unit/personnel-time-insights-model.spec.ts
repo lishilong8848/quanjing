@@ -14,7 +14,7 @@ function overtimeApplication(
     phase: 'confirmed',
     snapshot: {
       recordId,
-      applicantName: '示例人员008',
+      applicantName: '张三',
       applicantOpenId: 'ou_zhangsan',
       building: 'H楼',
       position: '运维值班员',
@@ -47,7 +47,7 @@ function leaveApplication(
     recordId,
     status: 'approved',
     snapshot: {
-      applicantName: '示例人员008',
+      applicantName: '张三',
       applicantOpenId: 'ou_zhangsan',
       applicantPersonRecordId: 'rec_person_zhangsan',
       applicantNotificationOpenIds: ['ou_zhangsan'],
@@ -199,10 +199,10 @@ describe('personnel time insights model', () => {
       leaveHours: 16,
       travelHours: 8,
     });
-    expect(result.pendingOvertime).toEqual({ count: 1, people: ['示例人员008'] });
+    expect(result.pendingOvertime).toEqual({ count: 1, people: ['张三'] });
     expect(result.quality.legacyDefaultedCompensatoryCount).toBe(1);
     expect(result.people[0]).toMatchObject({
-      name: '示例人员008',
+      name: '张三',
       building: 'H楼',
       overtimeHours: 27,
       overtimePayHours: 8,

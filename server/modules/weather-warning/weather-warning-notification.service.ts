@@ -705,9 +705,9 @@ function getConfiguredRecipientName(
     const displayName = cleanString(
       service.getRuntimeConfig()?.testRecipient?.displayName,
     );
-    return displayName || '示例人员020';
+    return displayName || '马进宇';
   } catch {
-    return '示例人员020';
+    return '马进宇';
   }
 }
 

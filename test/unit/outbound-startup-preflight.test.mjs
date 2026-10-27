@@ -70,7 +70,7 @@ async function fixture(t, handler) {
     FEISHU_APP_ID: 'cli_fixture_app',
     FEISHU_APP_SECRET: 'fixture-secret',
     FEISHU_WAREHOUSE_APP_TOKEN: 'fixture-base',
-    FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID: 'tblf193d86c22a1056',
+    FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID: 'tblFixtureOutbound',
     LARK_OPENAPI_BASE_URL: `http://127.0.0.1:${server.address().port}/open-apis`,
   };
   // No real configuration, proxy, application state or preload reaches the child.
@@ -121,7 +121,7 @@ async function run(script, args, env, executable = process.execPath) {
 
 function fieldReads(calls) {
   return calls.filter((call) =>
-    call.path.includes('/tblf193d86c22a1056/fields'),
+    call.path.includes('/tblFixtureOutbound/fields'),
   );
 }
 function assertReadOnly(calls) {
@@ -172,9 +172,9 @@ test('ready outbound gate passes full activation without changing environment or
     send(res, 200, {
       code: 0,
       data: {
-        items: req.url.includes('/tblf193d86c22a1056/fields')
+        items: req.url.includes('/tblFixtureOutbound/fields')
           ? fields
-          : ['楼栋', '库房示例人员019员', '库房管理人'].map((field_name) => ({
+          : ['楼栋', '库房责任人员', '库房管理人'].map((field_name) => ({
               field_name,
               type: 1,
             })),
@@ -195,17 +195,17 @@ test('ready outbound gate passes full activation without changing environment or
         'FEISHU_INVENTORY_LEDGER_TABLE_ID',
         'FEISHU_INBOUND_TABLE_ID',
         'FEISHU_OUTBOUND_TABLE_ID',
-      ].map((key) => [key, 'tble3a9d2db4eecf8086']),
+      ].map((key) => [key, 'tblConfiguredFixture']),
     ),
     PURCHASE_MANAGER_APPROVER_OPEN_ID: 'ou_fixture_manager',
-    FEISHU_PURCHASE_ORGANIZATION_TABLE_ID: 'tbl70a37a14162e0978006',
+    FEISHU_PURCHASE_ORGANIZATION_TABLE_ID: 'tblFixtureOrganization',
     PURCHASE_WORKFLOW_APPROVER_OPEN_IDS: 'ou_fixture_first,ou_fixture_second',
     PURCHASE_WORKFLOW_PURCHASE_ADMIN_OPEN_ID: 'ou_fixture_admin',
     FEISHU_PURCHASE_CARD_VERIFICATION_TOKEN: 'fixture-verification',
     FEISHU_PURCHASE_CARD_ENCRYPT_KEY: 'fixture-encryption',
     PUBLIC_BASE_URL: 'https://ops.example.com',
     FEISHU_WAREHOUSE_MANAGER_APP_TOKEN: 'fixture-manager-base',
-    FEISHU_WAREHOUSE_MANAGER_TABLE_ID: 'tbl49cc42318f7ed4',
+    FEISHU_WAREHOUSE_MANAGER_TABLE_ID: 'tblFixtureManager',
   };
   const original =
     Object.entries(environment)
@@ -314,7 +314,7 @@ test('permission failure is not retried and echoed secrets are redacted', async 
   const f = await fixture(t, (req, res) =>
     send(res, 403, {
       code: 99991672,
-      msg: 'fixture-secret test-tenant-secret cli_fixture_app fixture-base tblf193d86c22a1056 forbidden',
+      msg: 'fixture-secret test-tenant-secret cli_fixture_app fixture-base tblFixtureOutbound forbidden',
     }),
   );
   const result = await run(checker, ['--dry-run', '--require-ready'], f.env);
@@ -326,7 +326,7 @@ test('permission failure is not retried and echoed secrets are redacted', async 
     'test-tenant-secret',
     'cli_fixture_app',
     'fixture-base',
-    'tblf193d86c22a1056',
+    'tblFixtureOutbound',
   ])
     assert.ok(!result.stderr.includes(secret));
 });
@@ -499,7 +499,7 @@ test('candidate staged checker is used instead of old installed checker and .env
   );
   await writeFile(
     join(app, '.env.local'),
-    'FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID="tblf193d86c22a1056" # local override\n',
+    'FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID="tblFixtureOutbound" # local override\n',
   );
   const result = await run(
     join(scripts, 'ensure-purchase-inventory-config.mjs'),

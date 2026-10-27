@@ -13,7 +13,7 @@ describe('leave workflow cards', () => {
     applicationKey: 'leave:rec_leave_1',
     stageKey: 'supervisor' as const,
     stageVersion: 1,
-    applicantName: '示例人员008',
+    applicantName: '张三',
     building: 'A楼',
     position: '运维值班员',
     leaveType: '年假',
@@ -28,7 +28,7 @@ describe('leave workflow cards', () => {
     const card = buildLeaveApprovalCard(context);
     const serialized = JSON.stringify(card);
 
-    expect(serialized).toContain('请休假申请 · 待示例人员001审批');
+    expect(serialized).toContain('请休假申请 · 待主管审批');
     expect(serialized).not.toContain('wide_screen_mode');
     expect(card).toEqual(
       expect.objectContaining({
@@ -55,7 +55,7 @@ describe('leave workflow cards', () => {
       buildLeaveApprovalCard({ ...context, leaveType: '差旅' }),
     );
 
-    expect(serialized).toContain('差旅申请 · 待示例人员001审批');
+    expect(serialized).toContain('差旅申请 · 待主管审批');
     expect(serialized).toContain('**申请概览**');
     expect(serialized).toContain('类型');
     expect(serialized).toContain('原因');
@@ -113,7 +113,7 @@ describe('leave workflow cards', () => {
       substituteCandidates: [
         {
           personRecordId: 'rec_substitute',
-          name: '示例人员013',
+          name: '李四',
           openId: '',
           position: '实习生（备岗）',
           buildings: ['D楼'],
@@ -125,7 +125,7 @@ describe('leave workflow cards', () => {
     expect(serialized).toContain('select_static');
     expect(serialized).toContain('leave_substitute_person_record_id');
     expect(serialized).toContain('rec_substitute');
-    expect(serialized).toContain('示例人员013');
+    expect(serialized).toContain('李四');
     expect(serialized).toContain('form_action_type');
     expect(serialized).toContain(
       'leave_approve_submit:rec_leave_1:supervisor:1',
@@ -163,7 +163,7 @@ describe('leave workflow cards', () => {
     ];
     const card = buildLeaveApprovalCard({
       ...context,
-      applicantName: '示例人员012',
+      applicantName: '曹雷',
       substituteRequired: true,
       shiftGroups,
       candidateSets: [
@@ -172,7 +172,7 @@ describe('leave workflow cards', () => {
           candidates: [
             {
               personRecordId: 'rec_zhang',
-              name: '示例人员008',
+              name: '张三',
               openId: 'ou_zhang',
               position: '运维值班员',
               buildings: ['A楼'],
@@ -184,7 +184,7 @@ describe('leave workflow cards', () => {
           candidates: [
             {
               personRecordId: 'rec_li',
-              name: '示例人员013',
+              name: '李四',
               openId: 'ou_li',
               position: '运维值班员',
               buildings: ['B楼'],
@@ -202,9 +202,9 @@ describe('leave workflow cards', () => {
     );
     expect(serialized).toContain('2026-08-26');
     expect(serialized).toContain('2026-08-27');
-    expect(serialized).toContain('示例人员012');
-    expect(serialized).toContain('示例人员008');
-    expect(serialized).toContain('示例人员013');
+    expect(serialized).toContain('曹雷');
+    expect(serialized).toContain('张三');
+    expect(serialized).toContain('李四');
     expect(serialized.match(/"required":true/gu)).toHaveLength(2);
     expect(serialized).toContain(
       'leave_approve_submit:rec_leave_1:supervisor:1:g2:r1',
@@ -228,7 +228,7 @@ describe('leave workflow cards', () => {
     ];
     const card = buildLeaveApprovalCard({
       ...context,
-      applicantName: '示例人员012',
+      applicantName: '曹雷',
       substituteDecisionRequired: true,
       shiftGroups,
       candidateSets: [
@@ -237,7 +237,7 @@ describe('leave workflow cards', () => {
           candidates: [
             {
               personRecordId: 'rec_zhang',
-              name: '示例人员008',
+              name: '张三',
               openId: 'ou_zhang',
               position: '长白',
               buildings: ['E楼'],
@@ -301,7 +301,7 @@ describe('leave workflow cards', () => {
             candidates: [
               {
                 personRecordId: 'rec_zhang',
-                name: '示例人员008',
+                name: '张三',
                 openId: 'ou_zhang',
                 position: '长白',
                 buildings: ['E楼'],
@@ -373,7 +373,7 @@ describe('leave workflow cards', () => {
         substituteCandidates: [
           {
             personRecordId: 'rec_liaoxu',
-            name: '示例人员007',
+            name: '廖栩',
             openId: '',
             position: '实习生（备岗）',
             buildings: ['E楼'],
@@ -405,8 +405,8 @@ describe('leave workflow cards', () => {
       screenshotImageKeys: ['img_v3_leave_evidence_1'],
       screenshotStatus: 'ready',
       outcome: 'approved',
-      actorName: '示例人员009',
-      message: '示例人员001已同意，待经理审批',
+      actorName: '施小东',
+      message: '主管已同意，待经理审批',
     });
     const serialized = JSON.stringify(card);
     const elements = (card.body as { elements: Array<Record<string, unknown>> })
@@ -417,7 +417,7 @@ describe('leave workflow cards', () => {
     );
 
     expect(serialized).not.toContain('callback');
-    expect(serialized).toContain('示例人员001已同意，待经理审批');
+    expect(serialized).toContain('主管已同意，待经理审批');
     expect(serialized).toContain('处理结果');
     expect(serialized).toContain('已处理');
     expect(serialized).toContain('"disabled":true');
@@ -431,7 +431,7 @@ describe('leave workflow cards', () => {
       buildLeaveTerminalCard({
         ...context,
         outcome: 'rejected',
-        actorName: '示例人员009',
+        actorName: '施小东',
         message: '请休假申请已驳回',
         rejectionReason: '当日值守力量不足',
       }),
@@ -464,12 +464,12 @@ describe('leave workflow cards', () => {
       buildLeaveSubstituteAdjustmentCard(
         {
           ...context,
-          substituteName: '示例人员013',
+          substituteName: '李四',
           substituteRequired: true,
           substituteCandidates: [
             {
               personRecordId: 'rec_substitute_new',
-              name: '示例人员017',
+              name: '王五',
               openId: '',
               position: '实习生（备岗）',
               buildings: ['E楼'],
@@ -482,7 +482,7 @@ describe('leave workflow cards', () => {
 
     expect(serialized).toContain('替班调整');
     expect(serialized).toContain('当前替班');
-    expect(serialized).toContain('示例人员013');
+    expect(serialized).toContain('李四');
     expect(serialized).toContain('rec_substitute_new');
     expect(serialized).toContain(
       'leave_substitute_update_submit:rec_leave_1:2',
@@ -492,13 +492,13 @@ describe('leave workflow cards', () => {
   it('terminalizes a substitute adjustment card without any callback', () => {
     const serialized = JSON.stringify(
       buildLeaveSubstituteAdjustmentTerminalCard(
-        { ...context, substituteName: '示例人员017' },
-        '示例人员009',
+        { ...context, substituteName: '王五' },
+        '施小东',
       ),
     );
 
     expect(serialized).toContain('替班调整已提交');
-    expect(serialized).toContain('示例人员017');
+    expect(serialized).toContain('王五');
     expect(serialized).not.toContain('callback');
     expect(serialized).not.toContain('form_action_type');
   });
@@ -512,11 +512,11 @@ describe('leave workflow cards', () => {
     (audience, title, message) => {
       const serialized = JSON.stringify(
         buildLeaveSubstituteChangeNotificationCard(
-          { ...context, substituteName: '示例人员017' },
+          { ...context, substituteName: '王五' },
           {
             audience,
-            previousSubstituteName: '示例人员013',
-            substituteName: '示例人员017',
+            previousSubstituteName: '李四',
+            substituteName: '王五',
             actorName: '陶必亮',
           },
         ),
@@ -524,8 +524,8 @@ describe('leave workflow cards', () => {
 
       expect(serialized).toContain(title);
       expect(serialized).toContain(message);
-      expect(serialized).toContain('示例人员013');
-      expect(serialized).toContain('示例人员017');
+      expect(serialized).toContain('李四');
+      expect(serialized).toContain('王五');
       expect(serialized).toContain('陶必亮');
       expect(serialized).not.toContain('callback');
       expect(serialized).not.toContain('form_action_type');

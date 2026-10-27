@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const OVERTIME_TABLE_ID = 'tblf1bbd02a2b049';
+const OVERTIME_TABLE_ID = 'tblpCzmTT3EapaUY';
 const DEFAULT_OVERTIME_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E';
 const HOUR_MS = 60 * 60 * 1000;
 const SHANGHAI_OFFSET_MS = 8 * HOUR_MS;
 const RECORD_ID_PATTERN = /^rec[A-Za-z0-9_-]+$/u;

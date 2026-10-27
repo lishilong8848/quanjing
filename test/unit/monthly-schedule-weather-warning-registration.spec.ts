@@ -1002,7 +1002,7 @@ describe('monthly schedule weather guard registration', () => {
       const candidates = [
         {
           key: 'candidate-checker-a',
-          name: '示例人员008',
+          name: '张三',
           position: '设施运维工程师',
           buildings: ['A楼' as const],
         },

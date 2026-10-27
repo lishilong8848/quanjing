@@ -40,7 +40,7 @@ describe('real access module × alarm review HTTP ownership', () => {
     preflight: async () => {}, resolveResponsibleUserId: async () => 'syntheticUser123',
     syncRecord: async (_id: string, outcome: string, _user: string, _version: string, reply?: string) => {
       if (failSync) throw new BadRequestException('合成同步失败');
-      return { 人工复核结果: outcome, 复核回复: reply || '', 复核示例人员019: [{ id: 'syntheticUser123', name: '合成示例人员019' }] };
+      return { 人工复核结果: outcome, 复核回复: reply || '', 复核责任人: [{ id: 'syntheticUser123', name: '合成责任人' }] };
     },
   };
   function note(value: object): void {
@@ -115,7 +115,7 @@ describe('real access module × alarm review HTTP ownership', () => {
     const module = await Test.createTestingModule({ imports: [UnifiedAccessModule], controllers: [AlarmReviewController], providers: [
       AlarmReviewService, AlarmReviewStore, { provide: ALARM_REVIEW_LEDGER_PATH, useValue: join(directory, 'ledger.json') },
       { provide: AlarmReviewGateway, useValue: gateway },
-      { provide: BitableSyncService, useValue: { getCachedActivePersonnelDirectory: async () => ({ personnel: [{ recordId: 'recSyntheticPerson', name: '合成示例人员019', openId: 'ou_synthetic123', buildings: ['A'], position: '合成工程师' }] }) } },
+      { provide: BitableSyncService, useValue: { getCachedActivePersonnelDirectory: async () => ({ personnel: [{ recordId: 'recSyntheticPerson', name: '合成责任人', openId: 'ou_synthetic123', buildings: ['A'], position: '合成工程师' }] }) } },
       { provide: TodayOperationsAlarmService, useValue: { patchHumanReview: () => {} } },
     ] }).overrideProvider(AccessConfigurationDirectory).useValue({ read: async () => ({ appId: 'cli_synthetic_runtime', people: [], snapshotAt: Date.now() }), assertKnown: async () => {} })
       .overrideProvider(AccessConfigurationCardDirectory).useValue({ read: async () => ({ members: [] }) }).compile();

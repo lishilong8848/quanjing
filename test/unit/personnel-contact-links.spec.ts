@@ -2,7 +2,7 @@ import { buildTelephoneHref } from '../../client/src/pages/MonthlySchedule/perso
 
 describe('personnel contact links', () => {
   it.each([
-    ['199 5944-1925', 'tel:13800003494'],
+    ['199 5944-1925', 'tel:19959441925'],
     ['+86 (159) 5130-1358', 'tel:+8615951301358'],
     ['0513-12345678', 'tel:051312345678'],
   ])('normalizes a callable telephone number without changing its display value', (value, expected) => {
@@ -13,7 +13,7 @@ describe('personnel contact links', () => {
     '',
     '1234',
     'javascript:alert(1)',
-    '13800003494#123',
+    '19959441925#123',
     '++8615951301358',
   ])('rejects an unsafe or non-callable telephone value: %s', (value) => {
     expect(buildTelephoneHref(value)).toBeNull();

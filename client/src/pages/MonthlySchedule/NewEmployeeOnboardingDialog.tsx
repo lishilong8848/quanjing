@@ -839,7 +839,7 @@ export function NewEmployeeOnboardingDialog({
                   </div>
                   <div className="grid gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3 sm:grid-cols-[104px_minmax(0,1fr)] sm:items-center">
                     <img
-                      src="/assets/employee-onboarding-id-photo-example.svg"
+                      src="/assets/employee-onboarding-blue-id-photo-example.jpg"
                       alt="蓝底半身照示例"
                       className="h-32 w-24 rounded-lg border border-blue-100 bg-blue-100 object-cover object-top shadow-sm"
                     />

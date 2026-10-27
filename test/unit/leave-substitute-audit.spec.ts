@@ -118,9 +118,9 @@ describe('leave substitute audit', () => {
       inferTemporarySubstituteStaff({
         plannedStaff: ['章富权'],
         leaveStaff: [],
-        actualStaff: ['章富权', '示例人员012'],
+        actualStaff: ['章富权', '曹雷'],
       }),
-    ).toEqual(['示例人员012']);
+    ).toEqual(['曹雷']);
   });
 
   it('ignores 2025 records even when they are mismatched', () => {

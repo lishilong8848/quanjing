@@ -791,7 +791,7 @@ export class InventoryWorkflowGateway {
 
   recordLink(appToken: string, tableId: string, recordId: string): string {
     const query = new URLSearchParams({ table: tableId, record: recordId });
-    return `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE)}`;
+    return `https://vnet.feishu.cn/base/${appToken}?${query.toString()}`;
   }
 
   private async getTenantAccessToken(): Promise<string> {

@@ -31,7 +31,7 @@ const cli =
     'Programs/nodejs/node_modules/@larksuite/cli/scripts/run.js',
   );
 const base = 'RR4Sbm81xaII07sW0kacCb9xnih',
-  table = 'tblfaa7c2608349c';
+  table = 'tblschT48zXwigUG';
 const input = path.resolve(
   root,
   'output/equipment-history-card-planning/full-audit-2026-10-02',
@@ -171,7 +171,7 @@ async function main() {
   )
     throw new Error('Invalid audit input');
   const liveLedger = (await metadata('WMcQbPn71aXwoGsNv0vcnzz2n6c')).find(
-    (t) => t.id === 'tbld39d3db603982',
+    (t) => t.id === 'tblPIgIZ5fyEeQnY',
   );
   if (
     !liveLedger ||
@@ -472,7 +472,7 @@ async function main() {
     written,
     businessFieldsUnchanged: true,
     viewId,
-    url: `https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE`,
+    url: `https://vnet.feishu.cn/wiki/AnEBwJlvGiJfDdkOB32cUPuknzg?table=${table}&view=${viewId}`,
     snapshotHash: sha(verified),
   };
   write('source-mutation-proof', proof);

@@ -56,7 +56,7 @@ async function start() {
   process.env.FEISHU_ACCESS_ADMIN_OPEN_IDS='ou_fixture_admin';
   const extra = process.argv.includes('--large') ? Array.from({length:3000},(_,index)=>({openId:`ou_fixture_large_${index}`,name:`合成人员${String(index).padStart(4,'0')}`})) : [];
   process.env.FEISHU_ACCESS_EDITOR_OPEN_IDS=extra.map(person=>person.openId).join(',');
-  const people=[{openId:'ou_fixture_admin',name:'配置验收管理员'},{openId:'ou_fixture_person_a',name:'合成示例人员003'},{openId:'ou_fixture_person_b',name:'合成人员乙'},...extra];
+  const people=[{openId:'ou_fixture_admin',name:'配置验收管理员'},{openId:'ou_fixture_person_a',name:'合成人员甲'},{openId:'ou_fixture_person_b',name:'合成人员乙'},...extra];
   const directory={ read:async()=>({ appId:process.env.FEISHU_APP_ID,people,snapshotAt:Date.now() }), assertKnown:async(ids)=>{ if(ids.some(id=>!people.some(person=>person.openId===id))) throw new (require('@nestjs/common').BadRequestException)('所选身份未在隔离目录中匹配'); } };
   const module=await require('@nestjs/testing').Test.createTestingModule({imports:[UnifiedAccessModule]}).overrideProvider(AccessConfigurationDirectory).useValue(directory)
     .overrideProvider(AccessConfigurationCardDirectory).useValue({read:async()=>({members:[people[0]]})}).compile();

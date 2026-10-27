@@ -7,9 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { delimiter, dirname, join, relative } from 'node:path';
 
 const SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
-const SOURCE_TABLE_ID = 'tbl2dc861b191a7f';
-const TARGET_TABLE_ID = 'tblf929a5033c904';
+  'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblCGU1ry3tanQ20&view=vewX0MdewN';
+const SOURCE_TABLE_ID = 'tblMK8wzLlFKbTlP';
+const TARGET_TABLE_ID = 'tblCGU1ry3tanQ20';
 const targetFieldTypes = new Map([
   ['日期', 5],
   ['异常项', 1],

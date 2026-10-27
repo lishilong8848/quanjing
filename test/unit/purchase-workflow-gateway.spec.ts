@@ -311,7 +311,7 @@ describe('PurchaseWorkflowGateway', () => {
                 {
                   record_id: 'rec_org_1',
                   fields: {
-                    示例人员001: [{ id: 'ou_manager', name: '经理' }],
+                    主管: [{ id: 'ou_manager', name: '经理' }],
                     职位: '设施运维经理',
                     '楼栋/专业': ['H楼'],
                   },
@@ -483,7 +483,7 @@ describe('PurchaseWorkflowGateway', () => {
 
   it('resolves manager display metadata by the configured open id', async () => {
     process.env.PURCHASE_MANAGER_APPROVER_OPEN_ID = 'ou_manager_01';
-    process.env.PURCHASE_MANAGER_APPROVER_NAME = '示例人员020';
+    process.env.PURCHASE_MANAGER_APPROVER_NAME = '马进宇';
     const axiosRef = {
       post: jest.fn().mockResolvedValue({
         data: { code: 0, tenant_access_token: 'tenant-token', expire: 7200 },
@@ -496,7 +496,7 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_org_manager',
                 fields: {
-                  示例人员001: [{ id: 'ou_manager_01', name: '马经理' }],
+                  主管: [{ id: 'ou_manager_01', name: '马经理' }],
                   职位: '设施运维经理',
                   '楼栋/专业': ['H楼'],
                 },
@@ -974,7 +974,7 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_org_manager',
                 fields: {
-                  示例人员001: [{ id: 'ou_manager_01' }],
+                  主管: [{ id: 'ou_manager_01' }],
                   职位: '设施运维经理',
                 },
               },
@@ -990,7 +990,7 @@ describe('PurchaseWorkflowGateway', () => {
       gateway.resolvePurchaseManagerApproverAsApp(),
     ).resolves.toEqual({
       openId: 'ou_manager_01',
-      name: '示例人员020',
+      name: '马进宇',
       positions: ['设施运维经理'],
       buildings: [],
     });
@@ -1011,7 +1011,7 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_org_1',
                 fields: {
-                  示例人员001: [{ id: 'ou_approver1', name: '审批人甲' }],
+                  主管: [{ id: 'ou_approver1', name: '审批人甲' }],
                   职位: ['采购审批人'],
                   '楼栋/专业': ['A楼'],
                 },
@@ -1168,8 +1168,8 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_org_supervisor',
                 fields: {
-                  姓名: [{ openId: 'ou_supervisor_a', name: 'A楼示例人员001' }],
-                  职位: ['设施运维示例人员001'],
+                  姓名: [{ openId: 'ou_supervisor_a', name: 'A楼主管' }],
+                  职位: ['设施运维主管'],
                   '楼栋/专业': ['A楼'],
                 },
               },
@@ -1294,15 +1294,15 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_supervisor_1',
                 fields: {
-                  示例人员001: [{ id: 'ou_supervisor1', name: 'A楼示例人员001' }],
-                  职位: ['设施运维示例人员001'],
+                  主管: [{ id: 'ou_supervisor1', name: 'A楼主管' }],
+                  职位: ['设施运维主管'],
                   '楼栋/专业': ['A栋'],
                 },
               },
               {
                 record_id: 'rec_supervisor_2',
                 fields: {
-                  人员: [{ id: 'ou_supervisor1', name: 'A楼示例人员001' }],
+                  人员: [{ id: 'ou_supervisor1', name: 'A楼主管' }],
                   职位: ['安全协调'],
                   '楼栋/专业': ['A楼'],
                 },
@@ -1310,24 +1310,24 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_cross_building',
                 fields: {
-                  示例人员001: [{ id: 'ou_cross1', name: 'B楼示例人员001' }],
-                  职位: ['楼栋示例人员001'],
+                  主管: [{ id: 'ou_cross1', name: 'B楼主管' }],
+                  职位: ['楼栋主管'],
                   '楼栋/专业': ['B楼'],
                 },
               },
               {
                 record_id: 'rec_imprecise_position',
                 fields: {
-                  示例人员001: [{ id: 'ou_imprecise1', name: '示例人员001助理' }],
-                  职位: ['楼栋示例人员001助理'],
+                  主管: [{ id: 'ou_imprecise1', name: '主管助理' }],
+                  职位: ['楼栋主管助理'],
                   '楼栋/专业': ['A楼'],
                 },
               },
               {
                 record_id: 'rec_other_manager',
                 fields: {
-                  示例人员001: [{ id: 'ou_manager1', name: '运维示例人员001' }],
-                  职位: ['设施运维示例人员001助理'],
+                  主管: [{ id: 'ou_manager1', name: '运维主管' }],
+                  职位: ['设施运维主管助理'],
                   '楼栋/专业': ['A楼'],
                 },
               },
@@ -1352,8 +1352,8 @@ describe('PurchaseWorkflowGateway', () => {
       gateway.resolveBuildingSupervisorAsApp(' A '),
     ).resolves.toEqual({
       openId: 'ou_supervisor1',
-      name: 'A楼示例人员001',
-      positions: ['设施运维示例人员001', '安全协调'],
+      name: 'A楼主管',
+      positions: ['设施运维主管', '安全协调'],
       buildings: ['A栋', 'A楼'],
     });
   });
@@ -1371,15 +1371,15 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_b_supervisor',
                 fields: {
-                  示例人员001: [{ id: 'ou_supervisor1', name: '跨楼栋人员' }],
-                  职位: ['楼栋示例人员001'],
+                  主管: [{ id: 'ou_supervisor1', name: '跨楼栋人员' }],
+                  职位: ['楼栋主管'],
                   '楼栋/专业': ['B楼'],
                 },
               },
               {
                 record_id: 'rec_a_safety',
                 fields: {
-                  示例人员001: [{ id: 'ou_supervisor1', name: '跨楼栋人员' }],
+                  主管: [{ id: 'ou_supervisor1', name: '跨楼栋人员' }],
                   职位: ['安全协调'],
                   '楼栋/专业': ['A楼'],
                 },
@@ -1418,14 +1418,14 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_nested_supervisor',
                 fields: {
-                  示例人员001: {
+                  主管: {
                     id: 'user_invalid',
                     value: {
                       open_id: 'ou_nested-user_1',
-                      name: '嵌套示例人员001',
+                      name: '嵌套主管',
                     },
                   },
-                  职位: ['楼栋示例人员001'],
+                  职位: ['楼栋主管'],
                   '楼栋/专业': ['A楼'],
                 },
               },
@@ -1442,7 +1442,7 @@ describe('PurchaseWorkflowGateway', () => {
     ).resolves.toEqual(
       expect.objectContaining({
         openId: 'ou_nested-user_1',
-        name: '嵌套示例人员001',
+        name: '嵌套主管',
       }),
     );
   });
@@ -1460,16 +1460,16 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_other_building',
                 fields: {
-                  示例人员001: [{ id: 'ou_supervisor1', name: 'A楼示例人员001' }],
-                  职位: ['楼栋示例人员001'],
+                  主管: [{ id: 'ou_supervisor1', name: 'A楼主管' }],
+                  职位: ['楼栋主管'],
                   '楼栋/专业': ['A楼'],
                 },
               },
               {
                 record_id: 'rec_other_position',
                 fields: {
-                  示例人员001: [{ id: 'ou_manager1', name: 'H楼经理' }],
-                  职位: ['设施示例人员001'],
+                  主管: [{ id: 'ou_manager1', name: 'H楼经理' }],
+                  职位: ['设施主管'],
                   '楼栋/专业': ['H楼'],
                 },
               },
@@ -1513,16 +1513,16 @@ describe('PurchaseWorkflowGateway', () => {
               {
                 record_id: 'rec_supervisor_1',
                 fields: {
-                  示例人员001: [{ id: 'ou_supervisor1', name: 'A楼示例人员001甲' }],
-                  职位: ['楼栋示例人员001'],
+                  主管: [{ id: 'ou_supervisor1', name: 'A楼主管甲' }],
+                  职位: ['楼栋主管'],
                   '楼栋/专业': ['A楼'],
                 },
               },
               {
                 record_id: 'rec_supervisor_2',
                 fields: {
-                  示例人员001: [{ id: 'ou_supervisor2', name: 'A楼示例人员001乙' }],
-                  职位: ['楼栋示例人员001'],
+                  主管: [{ id: 'ou_supervisor2', name: 'A楼主管乙' }],
+                  职位: ['楼栋主管'],
                   '楼栋/专业': ['A栋'],
                 },
               },
@@ -1568,7 +1568,7 @@ describe('PurchaseWorkflowGateway', () => {
                 fields: {
                   楼栋: ['A楼'],
                   库房管理人: [{ id: 'ou_warehouse1', name: '库管甲' }],
-                  库房示例人员019员: {
+                  库房责任人员: {
                     value: [
                       { open_id: 'ou_warehouse2', name: '库管乙' },
                       { id: 'ou_warehouse1', name: '库管甲' },
@@ -1725,8 +1725,8 @@ describe('PurchaseWorkflowGateway', () => {
                 record_id: 'rec_d_supervisor',
                 fields: {
                   楼栋: 'D楼',
-                  职位: '示例人员001',
-                  示例人员001: [{ id: 'ou_supervisor', name: '普通示例人员001' }],
+                  职位: '主管',
+                  主管: [{ id: 'ou_supervisor', name: '普通主管' }],
                 },
               },
               {
@@ -1734,14 +1734,14 @@ describe('PurchaseWorkflowGateway', () => {
                 fields: {
                   楼栋: 'D楼',
                   职位: '楼内仓管',
-                  示例人员001: [{ id: 'ou_warehouse', name: '楼内仓管' }],
+                  主管: [{ id: 'ou_warehouse', name: '楼内仓管' }],
                 },
               },
               {
                 record_id: 'rec_d_shift',
                 fields: {
                   楼栋: 'D楼',
-                  示例人员001: [{ id: 'ou_shift', name: 'D楼值班' }],
+                  主管: [{ id: 'ou_shift', name: 'D楼值班' }],
                 },
               },
               {
@@ -1749,7 +1749,7 @@ describe('PurchaseWorkflowGateway', () => {
                 fields: {
                   楼栋: 'C楼',
                   职位: '楼内仓管',
-                  示例人员001: [{ id: 'ou_other', name: '其他楼仓管' }],
+                  主管: [{ id: 'ou_other', name: '其他楼仓管' }],
                 },
               },
             ],
@@ -1931,11 +1931,11 @@ describe('PurchaseWorkflowGateway', () => {
                 record_id: 'rec_a_responsible_1',
                 fields: {
                   楼栋: ['A楼'],
-                  示例人员001: [{ id: 'ou_supervisor', name: '示例人员001不得收到' }],
-                  库房示例人员019员: {
+                  主管: [{ id: 'ou_supervisor', name: '主管不得收到' }],
+                  库房责任人员: {
                     value: [
-                      { id: 'ou_responsible_1', name: '示例人员019甲' },
-                      { open_id: 'ou_responsible_2', name: '示例人员019乙' },
+                      { id: 'ou_responsible_1', name: '责任人甲' },
+                      { open_id: 'ou_responsible_2', name: '责任人乙' },
                     ],
                   },
                   '类别号管理人员（负责人最好为1人）': [
@@ -1950,10 +1950,10 @@ describe('PurchaseWorkflowGateway', () => {
                 record_id: 'rec_a_responsible_2',
                 fields: {
                   '楼栋/专业': ['A栋'],
-                  库房示例人员019员: {
+                  库房责任人员: {
                     users: [
-                      { openId: 'ou_responsible_1', text: '示例人员019甲重复项' },
-                      { openId: 'ou_responsible_3', text: '示例人员019丙' },
+                      { openId: 'ou_responsible_1', text: '责任人甲重复项' },
+                      { openId: 'ou_responsible_3', text: '责任人丙' },
                     ],
                   },
                 },
@@ -1962,8 +1962,8 @@ describe('PurchaseWorkflowGateway', () => {
                 record_id: 'rec_b_responsible',
                 fields: {
                   楼栋: ['B楼'],
-                  库房示例人员019员: [
-                    { id: 'ou_other_building', name: '其他楼示例人员019' },
+                  库房责任人员: [
+                    { id: 'ou_other_building', name: '其他楼责任人' },
                   ],
                 },
               },
@@ -1991,19 +1991,19 @@ describe('PurchaseWorkflowGateway', () => {
     ).resolves.toEqual([
       {
         openId: 'ou_responsible_1',
-        name: '示例人员019甲',
+        name: '责任人甲',
         positions: [],
         buildings: ['A楼', 'A栋'],
       },
       {
         openId: 'ou_responsible_2',
-        name: '示例人员019乙',
+        name: '责任人乙',
         positions: [],
         buildings: ['A楼'],
       },
       {
         openId: 'ou_responsible_3',
-        name: '示例人员019丙',
+        name: '责任人丙',
         positions: [],
         buildings: ['A栋'],
       },
@@ -2033,7 +2033,7 @@ describe('PurchaseWorkflowGateway', () => {
                   record_id: 'rec_h',
                   fields: {
                     楼栋: 'H楼',
-                    库房示例人员019员: [{ id: 'ou_responsible', name: '示例人员019' }],
+                    库房责任人员: [{ id: 'ou_responsible', name: '责任人' }],
                     库房管理人: [{ id: 'ou_manager', name: '管理人' }],
                   },
                 },
@@ -2089,7 +2089,7 @@ describe('PurchaseWorkflowGateway', () => {
   it('uses the supplied warehouse manager view when that table has no configured view', async () => {
     process.env.FEISHU_WAREHOUSE_MANAGER_APP_TOKEN =
       'QmxAbhXNJaA9YKsbfZyclzhGnSd';
-    process.env.FEISHU_WAREHOUSE_MANAGER_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_MANAGER_TABLE_ID';
+    process.env.FEISHU_WAREHOUSE_MANAGER_TABLE_ID = 'tblWg8gr341c0HzF';
     jest
       .mocked(resolveBitableAppToken)
       .mockResolvedValue('QmxAbhXNJaA9YKsbfZyclzhGnSd');
@@ -2106,7 +2106,7 @@ describe('PurchaseWorkflowGateway', () => {
                 record_id: 'rec_h',
                 fields: {
                   楼栋: 'H楼',
-                  库房示例人员019员: [{ id: 'ou_responsible', name: '示例人员019' }],
+                  库房责任人员: [{ id: 'ou_responsible', name: '责任人' }],
                 },
               },
             ],
@@ -2120,7 +2120,7 @@ describe('PurchaseWorkflowGateway', () => {
     await gateway.resolveInboundResponsibleUsersAsApp('H楼');
 
     expect(axiosRef.get).toHaveBeenCalledWith(
-      expect.stringContaining('/tables/PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_MANAGER_TABLE_ID/records'),
+      expect.stringContaining('/tables/tblWg8gr341c0HzF/records'),
       expect.objectContaining({
         params: expect.objectContaining({ view_id: 'vew0gRV4Jr' }),
       }),
@@ -2144,17 +2144,17 @@ describe('PurchaseWorkflowGateway', () => {
                 record_id: 'rec_a_manager_1',
                 fields: {
                   楼栋: ['A楼'],
-                  示例人员001: [{ id: 'ou_supervisor', name: '示例人员001不得收到' }],
+                  主管: [{ id: 'ou_supervisor', name: '主管不得收到' }],
                   库房管理人: {
                     value: [
                       { id: 'ou_manager_1', name: '管理人甲' },
                       { open_id: 'ou_manager_2', name: '管理人乙' },
                     ],
                   },
-                  库房示例人员019员: [
+                  库房责任人员: [
                     {
                       id: 'ou_responsible',
-                      name: '示例人员019员不得作为管理人返回',
+                      name: '责任人员不得作为管理人返回',
                     },
                   ],
                 },
@@ -2243,7 +2243,7 @@ describe('PurchaseWorkflowGateway', () => {
                 record_id: 'rec_h_responsible',
                 fields: {
                   楼栋: 'H楼',
-                  库房示例人员019员: [{ id: 'ou_h_responsible', name: '示例人员019' }],
+                  库房责任人员: [{ id: 'ou_h_responsible', name: '责任人' }],
                   库房管理人: [],
                 },
               },
@@ -2287,9 +2287,9 @@ describe('PurchaseWorkflowGateway', () => {
                 record_id: 'rec_a_without_responsible',
                 fields: {
                   楼栋: ['A楼'],
-                  示例人员001: [{ id: 'ou_supervisor', name: '示例人员001' }],
-                  库房示例人员019员: [
-                    { id: 'invalid responsible id', name: '无效示例人员019' },
+                  主管: [{ id: 'ou_supervisor', name: '主管' }],
+                  库房责任人员: [
+                    { id: 'invalid responsible id', name: '无效责任人' },
                   ],
                   '类别号管理人员（负责人最好为1人）': [
                     { openId: 'ou_category_admin', name: '类别号管理员' },

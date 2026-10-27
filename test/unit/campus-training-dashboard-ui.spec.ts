@@ -176,7 +176,7 @@ describe('campus training dashboard UI', () => {
     expect(usesRequestSequence || usesRequestCancellation).toBe(true);
   });
 
-  it('silently polls a stale snapshot until the background synchronization becomes fresh', () => {
+  it('polls only an active background refresh with a bounded serial scheduler', () => {
     const pageSource = readSource(
       'client/src/pages/CampusTrainingDashboard/index.tsx',
     );
@@ -189,14 +189,33 @@ describe('campus training dashboard UI', () => {
     expect(loadDashboardSource).toMatch(
       /forceRefresh\s*=\s*false,\s*silent\s*=\s*false/,
     );
-    expect(pageSource).toContain("dashboardSourceStatus !== 'stale'");
-    expect(pageSource).toContain('window.setInterval');
+    expect(pageSource).toContain("dashboardSourceStatus !== 'refreshing'");
+    expect(pageSource).toContain('return startTrainingRefreshPolling(');
+    expect(pageSource).not.toContain('window.setInterval');
     expect(pageSource).toMatch(
       /loadDashboard\(\s*dashboardMonth\s*,\s*false\s*,\s*true\s*\)/,
     );
-    expect(pageSource).toContain('stalePollAttemptsRef.current >= 20');
-    expect(pageSource).toContain('window.clearInterval');
+    expect(pageSource).toContain('已暂停自动查询');
+    expect(pageSource).toContain('刷新重试');
     expect(loadDashboardSource).toMatch(/if\s*\(\s*!silent\s*\)/);
+  });
+
+  it('keeps embedded synchronization feedback before the content in normal flow', () => {
+    const pageSource = readSource(
+      'client/src/pages/CampusTrainingDashboard/index.tsx',
+    );
+    const styles = readSource(
+      'client/src/pages/CampusTrainingDashboard/styles.css',
+    );
+    expect(
+      pageSource.indexOf("dashboard?.sourceStatus === 'refreshing'"),
+    ).toBeLessThan(pageSource.indexOf('{!dashboard ? ('));
+    expect(
+      pageSource.indexOf("dashboard?.sourceStatus === 'stale'"),
+    ).toBeLessThan(pageSource.indexOf('{!dashboard ? ('));
+    expect(styles).toMatch(
+      /\.campus-training-dashboard-embedded \.training-dashboard-state-banner\s*\{[^}]*position:\s*relative;[^}]*inset:\s*auto;[^}]*width:\s*100%;[^}]*transform:\s*none;/s,
+    );
   });
 
   it('does not let silent polling invalidate a visible refresh request', () => {

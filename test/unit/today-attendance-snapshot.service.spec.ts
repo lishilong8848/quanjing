@@ -610,9 +610,9 @@ describe('TodayAttendanceSnapshotService', () => {
             generatedAt: '2026-09-05T01:30:10.000Z',
             expectedKeys: [
               '2026-09-05:building_h:white:OnDuty:支佳伟',
-              '2026-09-05:building_h:white:OnDuty:示例人员015',
+              '2026-09-05:building_h:white:OnDuty:正常人员',
             ],
-            normalKeys: ['2026-09-05:building_h:white:OnDuty:示例人员015'],
+            normalKeys: ['2026-09-05:building_h:white:OnDuty:正常人员'],
             excludedKeys: [],
             anomalies: [
               {

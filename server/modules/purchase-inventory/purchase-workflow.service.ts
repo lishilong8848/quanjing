@@ -1556,7 +1556,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     );
     if (!inboundRecipients.responsibleOpenIds.length) {
       throw new ServiceUnavailableException(
-        '目标楼栋未解析到有效的库房示例人员019员',
+        '目标楼栋未解析到有效的库房责任人员',
       );
     }
     const completed =

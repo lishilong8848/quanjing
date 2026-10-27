@@ -39,8 +39,8 @@
     "image_urls": "{{input.image_urls}}",
     "content": "{{input.content}}{{input.image_urls}}",
     "receiverGroupList": [
-      "oc_c79f407063dc9ca9f70cc76cb4059895",
-      "PUBLIC_EXAMPLE_FEISHU_MONTHLY_SCHEDULE_ACCESS_CHAT_ID"
+      "oc_9961bb057de8bd715447559c5e63c4f2",
+      "oc_afb27caf36b3bfeea2de20bd6f955d21"
     ],
     "receiverUserList": []
   },

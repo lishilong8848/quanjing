@@ -5,8 +5,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { delimiter, dirname, join, relative } from 'node:path';
 
-const FIXED_TABLE_ID = 'tbl01cda9acd2f8f';
-const DEFAULT_APP_TOKEN = 'PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN';
+const FIXED_TABLE_ID = 'tblsunmofUPOYGL9';
+const DEFAULT_APP_TOKEN = 'KdCZbSL5CaTErKsFwFucddA5nYd';
 
 const requiredFields = [
   selectField('班次', ['白班', '夜班', '长白班', '未识别班次']),

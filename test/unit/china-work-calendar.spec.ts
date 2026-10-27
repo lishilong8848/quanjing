@@ -120,7 +120,7 @@ describe('China work-calendar snapshots', () => {
     'https://www.gov.cn.example.com/zhengce/content_2099.htm',
     'https://gov.cn/zhengce/content_2099.htm',
     'https://www.gov.cn/other/content_2099.htm',
-    'https://user-8551b540@example.com/zhengce/content_2099.htm',
+    'https://user@www.gov.cn/zhengce/content_2099.htm',
   ])('rejects a non-official source URL: %s', (sourceUrl) => {
     const input = create2099Snapshot();
     input.years[0].sourceUrl = sourceUrl;

@@ -462,7 +462,7 @@ Assert-FileContains `
   -Markers @(
     '实习生及备岗',
     '本月新增人员姓名',
-    '示例人员004员'
+    '其他人员'
   )
 Assert-FileContains `
   -RelativePath 'tools/ali-monthly-report-email/app.py' `
@@ -535,7 +535,7 @@ try {
     '- Base app token 在 Python 成功结果中仅供内存解析，生成真实可点击记录链接，不再出现 `/base/***`。',
     '- TOP5 从高功率目标表按年月直接获取；目标告警记录使用服务端过滤，减少全表扫描。',
     '- 在职人员基础表继续只保留正式岗。',
-    '- 本月人员变动按“实习生及备岗 / 示例人员004员”分区，并补充新增、离职岗位。',
+    '- 本月人员变动按“实习生及备岗 / 其他人员”分区，并补充新增、离职岗位。',
     '- 集成页和独立版页面增加“打开文件 / 定位文件”。',
     '- 集成页在生成或一键打包成功后自动定位到生成结果，直接展示文件操作入口。',
     '- 文件操作具备即时反馈、防重复点击、失败恢复、管理员限制、真实路径校验和扩展名限制。',
@@ -544,7 +544,7 @@ try {
     '- TOP5 和四项打包继续发送 72 小时 HMAC 签名下载链接；三类多维表报表禁止回退服务器本地链接。',
     '- 一键打包四项改用标准库轻量下载器，并发读取和下载四类多维表附件；不再执行月报 Python 依赖预检，也不再因 pip/PyPI 超时阻塞。',
     '- 飞书附件短暂返回 `Data not ready` 时按 1/2/4 秒有限退避重试，仍受单文件 90 秒总上限保护。',
-    '- “文件与邮件”默认收件人固定为 user-b54e355d@example.com，服务器未配置本地配置文件时与本地页面保持一致；环境变量仍可覆盖。',
+    '- “文件与邮件”默认收件人固定为 ma.jinyu@vnet.com，服务器未配置本地配置文件时与本地页面保持一致；环境变量仍可覆盖。',
     '- 每月 3 日 09:00（Asia/Shanghai）自动生成上月告警分析、超功率和人员变动；三项并行处理后发送一次成功、部分失败或失败汇总。',
     '- 失败项每小时重试；相同失败摘要不重复刷群，成功项不会重复生成。',
     '- 自动任务状态在生产环境写入发布目录同级 nantong-schedule-state，覆盖热包和重启后继续复用。',
@@ -573,7 +573,7 @@ try {
     '本次业务代码没有新增 Python 依赖，但服务器必须满足随包两份 requirements。部署前确认现有环境配置包含：',
     '',
     '- ALI_MONTHLY_REPORT_PUBLIC_BASE_URL（或 PUBLIC_BASE_URL）：TOP5 和四项打包下载通知使用的外部 HTTPS 应用基址。',
-    '- ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_EMAIL：可选；未设置时默认 user-b54e355d@example.com。',
+    '- ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_EMAIL：可选；未设置时默认 ma.jinyu@vnet.com。',
     '- ALI_MONTHLY_REPORT_FEISHU_CHAT_IDS：手动成功互动卡片的群 ID 列表，使用逗号、分号或空白分隔；旧 ALI_MONTHLY_REPORT_FEISHU_CHAT_ID 仍兼容。',
     '- ALI_MONTHLY_REPORT_AUTOMATION_CHAT_ID：每月自动任务汇总卡片的唯一目标群。',
     '- ALI_MONTHLY_REPORT_FEISHU_APP_ID、ALI_MONTHLY_REPORT_FEISHU_APP_SECRET。',

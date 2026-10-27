@@ -47,11 +47,11 @@ describe('overtime request real-data self-test', () => {
 
   it('selects a future whole-hour candidate for a real scheduled person without overlap', () => {
     const result = runScenario(`
-      const people = [{ supervisorText: '示例人员008' }];
+      const people = [{ supervisorText: '张三' }];
       const schedules = [{
         recordId: 'recSchedule',
         scheduleDate: '2026-08-08',
-        dutyStaffActual: ['示例人员008'],
+        dutyStaffActual: ['张三'],
         building: 'building_h',
         buildingText: 'H楼',
         team: 'shift_a',
@@ -80,7 +80,7 @@ describe('overtime request real-data self-test', () => {
     `);
 
     expect(result).toMatchObject({
-      staffName: '示例人员008',
+      staffName: '张三',
       startAt: '2026-08-08T12:00:00+08:00',
       endAt: '2026-08-08T13:00:00+08:00',
     });
@@ -89,10 +89,10 @@ describe('overtime request real-data self-test', () => {
   it('always selects an hour strictly later than now when now is already on an exact hour', () => {
     const result = runScenario(`
       const candidate = subject.selectOvertimeCandidate({
-        people: [{ supervisorText: '示例人员008' }],
+        people: [{ supervisorText: '张三' }],
         schedules: [{
           recordId: 'recSchedule', scheduleDate: '2026-08-08',
-          dutyStaffActual: ['示例人员008'], building: 'building_h',
+          dutyStaffActual: ['张三'], building: 'building_h',
           buildingText: 'H楼', team: 'shift_a', teamText: 'A班',
           shift: 'white', shiftText: '白班',
         }],
@@ -115,10 +115,10 @@ describe('overtime request real-data self-test', () => {
     const result = runScenario(`
       const staffShifts = [];
       const candidate = subject.selectOvertimeCandidate({
-        people: [{ supervisorText: '示例人员008', shift: '长白' }],
+        people: [{ supervisorText: '张三', shift: '长白' }],
         schedules: [{
           recordId: 'recSchedule', scheduleDate: '2026-08-08',
-          dutyStaffActual: ['示例人员008'], building: 'building_h',
+          dutyStaffActual: ['张三'], building: 'building_h',
           buildingText: 'H楼', team: 'long_white', teamText: '长白',
           shift: 'white', shiftText: '白班',
         }],
@@ -135,7 +135,7 @@ describe('overtime request real-data self-test', () => {
     `);
 
     expect(result).toMatchObject({
-      candidate: { staffName: '示例人员008' },
+      candidate: { staffName: '张三' },
       staffShifts: ['长白'],
     });
   });
@@ -230,17 +230,17 @@ describe('overtime request real-data self-test', () => {
           '加班时长': impact.payableHours,
           '加班原因': state.reasonMarker,
           '加班举证': [{ file_token: 'box_test' }],
-          '加班审批（示例人员001）': '',
+          '加班审批（主管）': '',
           '加班审批（经理）': '',
         },
       });
       const deps = {
         now: () => new Date('2026-08-08T08:15:00+08:00'),
         randomUUID: () => '123e4567-e89b-42d3-a456-426614174000',
-        fetchLocalPeople: async () => [{ supervisorText: '示例人员008' }],
+        fetchLocalPeople: async () => [{ supervisorText: '张三' }],
         fetchLocalSchedules: async () => [{
           recordId: 'recSchedule', scheduleDate: '2026-08-08',
-          dutyStaffActual: ['示例人员008'], building: 'building_h',
+          dutyStaffActual: ['张三'], building: 'building_h',
           buildingText: 'H楼', team: 'shift_a', teamText: 'A班',
           shift: 'white', shiftText: '白班',
         }],
@@ -369,10 +369,10 @@ describe('overtime request real-data self-test', () => {
           {
             now: () => new Date('2026-08-08T18:15:00+08:00'),
             randomUUID: () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-            fetchLocalPeople: async () => [{ supervisorText: '示例人员008' }],
+            fetchLocalPeople: async () => [{ supervisorText: '张三' }],
             fetchLocalSchedules: async () => [{
               recordId: 'recSchedule', scheduleDate: '2026-08-08',
-              dutyStaffActual: ['示例人员008'], building: 'building_h',
+              dutyStaffActual: ['张三'], building: 'building_h',
               buildingText: 'H楼', team: 'shift_a', teamText: 'A班',
               shift: 'white', shiftText: '白班',
             }],
@@ -494,7 +494,7 @@ describe('overtime request real-data self-test', () => {
           '请求唯一ID': state.requestUniqueId,
           '请求指纹': state.fingerprint,
           '加班原因': state.reasonMarker,
-          '加班审批（示例人员001）': '同意',
+          '加班审批（主管）': '同意',
         },
       };
       const value = await subject.cleanupOvertimeRequestState(state, {
@@ -886,9 +886,9 @@ describe('overtime request real-data self-test', () => {
     expect(source).toContain(
       "'output/diagnostics/overtime-request-real-self-test-state.json'",
     );
-    expect(source).toContain("const OVERTIME_TABLE_ID = 'tblf1bbd02a2b049'");
+    expect(source).toContain("const OVERTIME_TABLE_ID = 'tblpCzmTT3EapaUY'");
     expect(source).toContain(
-      "const DEFAULT_OVERTIME_SOURCE_URL = 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE'",
+      "const DEFAULT_OVERTIME_SOURCE_URL = 'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E'",
     );
     expect(source).toContain(']) || DEFAULT_OVERTIME_SOURCE_URL');
     expect(source).toContain('deleteBaseRecordById(recordId)');

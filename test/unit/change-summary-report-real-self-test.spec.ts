@@ -87,9 +87,9 @@ describe('change summary report real-data self-test', () => {
   it('targets only the formal APIs and fixed main/closing tables without embedded credentials', () => {
     const value = source();
 
-    expect(value).toContain("const CHANGE_TABLE_ID = 'tbl8f743982e48e1'");
+    expect(value).toContain("const CHANGE_TABLE_ID = 'tblBvg6wCYSX3hcg'");
     expect(value).toContain(
-      "const CHANGE_SUMMARY_REPORT_TABLE_ID = 'tbl73b701bc3e2a1'",
+      "const CHANGE_SUMMARY_REPORT_TABLE_ID = 'tblZZHIJCY3f551K'",
     );
     expect(value).toContain('/api/duty-schedules/change-request');
     expect(value).toContain('/api/duty-schedules/change-request-sync/');
@@ -855,7 +855,7 @@ describe('change summary report real-data self-test', () => {
       const closing = { record_id: state.summaryReportRecordId, fields: {
         '变更关联': [{
           record_ids: [state.changeRecordId],
-          table_id: 'tbl4a140b7731177',
+          table_id: 'tblChangeSummary',
           text: 'self-test change',
           text_arr: ['self-test change'],
           type: 'text',

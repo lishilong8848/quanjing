@@ -77,4 +77,43 @@ describe('leave card schedule validation stays on persisted snapshots', () => {
     expect(persisted).not.toHaveBeenCalled();
     expect(cloudRecords).not.toHaveBeenCalled();
   });
+
+  it('projects approval state only onto the requested dates, not the historical roster', async () => {
+    const approval = require('../../server/common/feishu/leave-approval-source');
+    const enrich = jest.spyOn(approval, 'enrichScheduleRecordsWithLeaveApproval');
+    const historic = Array.from({ length: 10_000 }, (_, i) => ({
+      record_id: `rec_history_${i}`, fields: { 排班日期: '2025-10-28', 班次: '白班', 楼栋: 'C楼' },
+    }));
+    const current = { record_id: 'rec_current', fields: {
+      排班日期: '2026-10-28', 班次: '白班', 楼栋: 'C楼', '值班人员（实际）程序修改': 'TEST',
+    } };
+    persisted.mockImplementation(async options => ({
+      fetchedAt: Date.now(), expiresAt: Date.now() + 60_000,
+      records: options.tableId === 'tbl_schedule' ? [...historic, current] : historic,
+    }));
+    try {
+      const rows = await service.getCachedLeaveRequestImpactSchedules('2026-10-28', '2026-10-28');
+      expect(rows.map(row => row.recordId)).toEqual(['rec_current']);
+      expect(enrich.mock.calls.map(([records]) => records.length)).toEqual([0, 1]);
+    } finally { enrich.mockRestore(); }
+  });
+
+  it('retains both adjacent boundary days, timestamp aliases and the next fresh personnel change', async () => {
+    let name = 'TEST';
+    persisted.mockImplementation(async options => ({
+      fetchedAt: Date.now(), expiresAt: Date.now() + 60_000,
+      records: options.tableId === 'tbl_schedule' ? [
+        { record_id: 'rec_before', fields: { 日期: '2026-10-14', 班次: '夜班', 楼栋: 'C楼' } },
+        { record_id: 'rec_start', fields: { fldZSaDbGf: Date.parse('2026-10-15T00:00:00+08:00'), 班次: '夜班', 楼栋: 'C楼', '值班人员（实际）程序修改': name } },
+        { record_id: 'rec_end', fields: { 日期: '2026-10-17', 班次: '白班', 楼栋: 'C楼', '值班人员（实际）程序修改': name } },
+        { record_id: 'rec_after', fields: { 日期: '2026-10-18', 班次: '白班', 楼栋: 'C楼' } },
+      ] : [{ record_id: 'rec_white', fields: { schedule_date: '2026-10-16', 班次: '长白', 楼栋: 'C楼', '值班人员（实际）程序修改': name } }],
+    }));
+    const first = await service.getCachedLeaveRequestImpactSchedules('2026-10-15', '2026-10-17');
+    expect(first.map(row => row.recordId)).toEqual(['rec_start', 'rec_white', 'rec_end']);
+    expect(first.every(row => row.dutyStaffActual.includes('TEST'))).toBe(true);
+    name = 'CHANGED';
+    const next = await service.getCachedLeaveRequestImpactSchedules('2026-10-15', '2026-10-17');
+    expect(next.every(row => row.dutyStaffActual.includes('CHANGED'))).toBe(true);
+  });
 });

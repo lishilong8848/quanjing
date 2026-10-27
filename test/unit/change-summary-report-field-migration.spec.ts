@@ -9,7 +9,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 
-const FIXED_TABLE_ID = 'tbl73b701bc3e2a1';
+const FIXED_TABLE_ID = 'tblZZHIJCY3f551K';
 const REQUIRED_FIELDS = [
   { name: '变更总结请求唯一ID', type: 'text' },
   { name: '变更总结请求指纹', type: 'text' },
@@ -275,7 +275,7 @@ describe('change summary report Base field migration', () => {
 
   it('redacts source identifiers and extended cloud/token credential values from stderr', () => {
     const sourceUrl =
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/wiki/wikiSourceToken987?app_token=sourceUrlBaseToken987&table=tblSourceSecret';
     const secrets = {
       FEISHU_CHANGE_APP_TOKEN: 'secret-base-token-value-987',
       COS_SECRET_ID: 'secret-cos-id-value-987',
@@ -351,7 +351,7 @@ function cliEnvironment(
     FEISHU_APP_ID: TEST_FEISHU_APP_ID,
     FEISHU_APP_SECRET: TEST_FEISHU_APP_SECRET,
     FEISHU_CALENDAR_CHANGE_SOURCE_URL:
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/testMigrationWikiToken?table=tblSource',
     FEISHU_CHANGE_SUMMARY_REPORT_TABLE_ID: FIXED_TABLE_ID,
     FEISHU_CHANGE_DRILL_REPORT_TABLE_ID: FIXED_TABLE_ID,
     ...overrides,

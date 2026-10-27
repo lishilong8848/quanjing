@@ -14,14 +14,14 @@ describe('exception follow-up helpers', () => {
       type: 'schedule',
       abnormalLabel: '风险',
       date: '2026-05-20',
-      detail: '示例人员008 夜班后接白班',
+      detail: '张三 夜班后接白班',
       handling: '已安排替班并通知值班长',
     });
 
     expect(result.fields).toMatchObject({
       日期: new Date('2026-05-20T00:00:00+08:00').getTime(),
-      异常项: '风险：示例人员008 夜班后接白班',
-      异常说明: '风险：示例人员008 夜班后接白班',
+      异常项: '风险：张三 夜班后接白班',
+      异常说明: '风险：张三 夜班后接白班',
       异常类型: '排班异常',
       来源: '人工登记',
       楼栋: '园区',
@@ -65,7 +65,7 @@ describe('exception follow-up helpers', () => {
         type: 'schedule',
         abnormalLabel: '风险',
         date: '2026-05-20',
-        detail: '示例人员008连班',
+        detail: '张三连班',
         handling: '',
       }),
     ).toThrow('处理方式不能为空');
@@ -144,9 +144,9 @@ describe('exception follow-up helpers', () => {
       ),
       'utf8',
     );
-    expect(source).toContain('tblf929a5033c904');
+    expect(source).toContain('tblCGU1ry3tanQ20');
     expect(source).toContain('vewX0MdewN');
-    expect(source).toContain("configured.tableId !== 'tbl2dc861b191a7f'");
+    expect(source).toContain("configured.tableId !== 'tblMK8wzLlFKbTlP'");
     expect(source).toContain('异常跟进已保存');
   });
 });

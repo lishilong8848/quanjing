@@ -28,7 +28,7 @@ describe('weekly durable workflow', () => {
           id: 'todo-1',
           content: '检查漏水',
           ownerOpenId: 'ou_12345678901',
-          ownerName: '示例人员016',
+          ownerName: '测试人员',
           dueDate: '2026-10-09',
           status: 'pending',
         },
@@ -59,8 +59,8 @@ describe('weekly durable workflow', () => {
     store.accept('generate', input, 'actor');
     store.completeGeneration(
       input.clientMutationId,
-      { documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' },
-      'oc_a584b9f72f95d94e665e51af321e516c',
+      { documentUrl: 'https://vnet.feishu.cn/docx/Example' },
+      'oc_ba4172984f3293d75bbe7e268d51ef40',
     );
     const restarted = new WeeklyStore(store.path);
     expect(restarted.notifications()).toHaveLength(1);
@@ -71,8 +71,8 @@ describe('weekly durable workflow', () => {
     );
     store.completeGeneration(
       'notify-other-12345678',
-      { documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' },
-      'oc_a584b9f72f95d94e665e51af321e516c',
+      { documentUrl: 'https://vnet.feishu.cn/docx/Example' },
+      'oc_ba4172984f3293d75bbe7e268d51ef40',
     );
     expect(store.notifications()).toHaveLength(1);
     expect(store.get('notify-other-12345678').job.notification).toBeUndefined();
@@ -127,7 +127,7 @@ describe('weekly durable workflow', () => {
       );
       store.completeGeneration(
         'report-12345678',
-        { documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' },
+        { documentUrl: 'https://vnet.feishu.cn/docx/Example' },
         chatId,
       );
       expect(store.notifications()).toHaveLength(1);
@@ -152,7 +152,7 @@ describe('weekly durable workflow', () => {
       {
         status: 'success',
         stage: 'done',
-        documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+        documentUrl: 'https://vnet.feishu.cn/docx/Example',
         notification: {
           status: 'success',
           chatId,
@@ -169,7 +169,7 @@ describe('weekly durable workflow', () => {
     );
     store.completeGeneration(
       'new-report-12345678',
-      { documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' },
+      { documentUrl: 'https://vnet.feishu.cn/docx/Example' },
       chatId,
     );
     expect(store.get('new-report-12345678').job.notification).toBeUndefined();
@@ -459,7 +459,7 @@ describe('weekly durable workflow', () => {
       {},
       {
         status: 'uncertain',
-        documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+        documentUrl: 'https://vnet.feishu.cn/docx/Existing',
       },
     );
     expect(() =>

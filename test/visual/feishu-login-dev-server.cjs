@@ -157,7 +157,7 @@ function start() {
             data: {
               code: 0,
               data: { open_id: fixtureIdentities[Number(match[1])],
-                name: Number(match[1]) === 0 ? '示例人员020' : '测试长姓名'.repeat(24) },
+                name: Number(match[1]) === 0 ? '马进宇' : '测试长姓名'.repeat(24) },
             },
           };
         },

@@ -262,8 +262,8 @@ describe('purchase workflow rules', () => {
     });
     const buildingSupervisor: PurchaseWorkflowUser = {
       openId: 'ou_building_supervisor',
-      name: 'A楼示例人员001',
-      positions: ['楼栋示例人员001'],
+      name: 'A楼主管',
+      positions: ['楼栋主管'],
       buildings: ['A楼'],
     };
     expect(
@@ -321,8 +321,8 @@ describe('purchase workflow rules', () => {
   it('allows building supervisors to start only same-building self purchases across building formats', () => {
     const supervisor: PurchaseWorkflowUser = {
       openId: 'ou_supervisor',
-      name: 'A楼示例人员001',
-      positions: ['楼栋示例人员001'],
+      name: 'A楼主管',
+      positions: ['楼栋主管'],
       buildings: ['A'],
     };
     const comprehensivePurchaser: PurchaseWorkflowUser = {
@@ -363,8 +363,8 @@ describe('purchase workflow rules', () => {
   it('does not let a building supervisor start comprehensive purchasing or bypass it with an override', () => {
     const supervisor: PurchaseWorkflowUser = {
       openId: 'ou_supervisor',
-      name: 'A楼示例人员001',
-      positions: ['楼栋示例人员001'],
+      name: 'A楼主管',
+      positions: ['楼栋主管'],
       buildings: ['A楼'],
     };
     const comprehensivePurchaser: PurchaseWorkflowUser = {
@@ -418,14 +418,14 @@ describe('purchase workflow rules', () => {
     });
     const managerSupervisor: PurchaseWorkflowUser = {
       openId: 'ou_manager_supervisor',
-      name: '经理兼楼栋示例人员001',
-      positions: ['楼栋示例人员001', '设施运维经理'],
+      name: '经理兼楼栋主管',
+      positions: ['楼栋主管', '设施运维经理'],
       buildings: ['A楼'],
     };
     const comprehensiveSupervisor: PurchaseWorkflowUser = {
       openId: 'ou_comprehensive_supervisor',
-      name: '综合管理兼楼栋示例人员001',
-      positions: ['楼栋示例人员001', '综合管理'],
+      name: '综合管理兼楼栋主管',
+      positions: ['楼栋主管', '综合管理'],
       buildings: ['A楼'],
     };
 

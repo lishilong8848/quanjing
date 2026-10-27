@@ -32,7 +32,7 @@ describe('system monthly report person scope', () => {
 
   it('lets Shi Xiaodong submit Nantong-A and only see the rooms related to him', () => {
     const scope = buildSystemMonthlyReportScope(
-      personSubject('person-shi', 'ou_shi', '示例人员009'),
+      personSubject('person-shi', 'ou_shi', '施小东'),
       dashboard,
     );
     const projected = projectSystemMonthlyReportDashboard(dashboard, scope);
@@ -53,7 +53,7 @@ describe('system monthly report person scope', () => {
 
   it('adds an assigned Kunshan recheck without granting other review rounds', () => {
     const scope = buildSystemMonthlyReportScope(
-      personSubject('person-shi', 'ou_shi', '示例人员009'),
+      personSubject('person-shi', 'ou_shi', '施小东'),
       {
         ...dashboard,
         schedule: [
@@ -63,7 +63,7 @@ describe('system monthly report person scope', () => {
             '昆山',
             'recheck',
             'ou_shi',
-            '示例人员009',
+            '施小东',
           ),
         ],
       },
@@ -81,7 +81,7 @@ describe('system monthly report person scope', () => {
 
   it('lets Nantong leaders view and submit A-E without exposing unrelated rooms', () => {
     const scope = buildSystemMonthlyReportScope(
-      personSubject('person-ma', 'ou_ma', '示例人员020'),
+      personSubject('person-ma', 'ou_ma', '马进宇'),
       dashboard,
     );
     const projected = projectSystemMonthlyReportDashboard(dashboard, scope);
@@ -137,7 +137,7 @@ describe('system monthly report person scope', () => {
 
   it('recomputes historical totals after filtering and never exposes Open IDs', () => {
     const scope = buildSystemMonthlyReportScope(
-      personSubject('person-shi', 'ou_shi', '示例人员009'),
+      personSubject('person-shi', 'ou_shi', '施小东'),
       dashboard,
     );
     const projected = projectSystemMonthlyReportDashboard(dashboard, scope);
@@ -208,7 +208,7 @@ function schedule(
 
 function buildDashboard(): SystemMonthlyReportDashboard {
   const rooms = [
-    room('南通-A', 'ou_shi', '示例人员009', ['ou_ma', 'ou_mei']),
+    room('南通-A', 'ou_shi', '施小东', ['ou_ma', 'ou_mei']),
     room('南通-B', 'ou_chen', '陈继猛', ['ou_ma', 'ou_mei']),
     room('南通-C', 'ou_sun', '孙婷婷', ['ou_ma', 'ou_mei']),
     room('南通-D', 'ou_tao', '陶必亮', ['ou_ma', 'ou_mei']),
@@ -320,7 +320,7 @@ function room(
   const leaders = leaderOpenIds.map((openId) => ({
     openId,
     name:
-      openId === 'ou_ma' ? '示例人员020' : openId === 'ou_mei' ? '示例人员014' : '十夫长',
+      openId === 'ou_ma' ? '马进宇' : openId === 'ou_mei' ? '梅冰冰' : '十夫长',
   }));
   return {
     recordId: `record-${roomName}`,

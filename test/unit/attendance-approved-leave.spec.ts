@@ -11,7 +11,7 @@ import { ModuleKind, transpileModule } from 'typescript';
 
 const request: ApprovedLeaveRequest = {
   recordId: 'leave-test',
-  leaveStaff: ['示例人员009'],
+  leaveStaff: ['施小东'],
   substituteStaff: [],
   startAt: '2026-09-07T09:00:00+08:00',
   endAt: '2026-09-07T18:00:00+08:00',
@@ -21,7 +21,7 @@ const request: ApprovedLeaveRequest = {
   impactedScheduleRecordIds: [],
 };
 const event = {
-  name: '示例人员009',
+  name: '施小东',
   building: 'A楼',
   expectedAt: '2026-09-07 09:00:00',
   direction: 'OnDuty' as const,
@@ -42,9 +42,9 @@ it('restores the uncovered half-day punch before precise leave filtering and lim
         building: 'building_a',
         shift: 'white',
         team: 'team_a',
-        dutyStaffReference: ['示例人员009'],
+        dutyStaffReference: ['施小东'],
         dutyStaffActual: ['测试替班'],
-        leaveStaff: ['示例人员009'],
+        leaveStaff: ['施小东'],
         substituteStaff: ['测试替班'],
       },
     ] as never,
@@ -56,7 +56,7 @@ it('restores the uncovered half-day punch before precise leave filtering and lim
       !excludesInactiveSubstitute(item, [halfDay]),
   );
   expect(included.map((item) => [item.name, item.direction])).toEqual([
-    ['示例人员009', 'OnDuty'],
+    ['施小东', 'OnDuty'],
     ['测试替班', 'OffDuty'],
   ]);
 });

@@ -49,29 +49,29 @@ export function buildSystemMonthlyReportClientToken(value: string): string {
 const TABLES = {
   current: {
     id:
-      process.env.SYSTEM_MONTHLY_REPORT_CURRENT_TABLE_ID || 'tbl58a476ce44568',
+      process.env.SYSTEM_MONTHLY_REPORT_CURRENT_TABLE_ID || 'tblAPu5QzTfgzveu',
     name: '华东1部分机房月报（每月重置）',
   },
   collection: {
     id:
       process.env.SYSTEM_MONTHLY_REPORT_COLLECTION_TABLE_ID ||
-      'tbl6d8113872958f',
+      'tblLIBwoSBUiXxES',
     name: '华东1部分机房月报收集表',
   },
   schedule: {
     id:
-      process.env.SYSTEM_MONTHLY_REPORT_SCHEDULE_TABLE_ID || 'tbl7d257f9747775',
+      process.env.SYSTEM_MONTHLY_REPORT_SCHEDULE_TABLE_ID || 'tbljuVHHAnB633E8',
     name: '月报审核排班表（一维）',
   },
   personnel: {
     id:
       process.env.SYSTEM_MONTHLY_REPORT_PERSONNEL_TABLE_ID ||
-      'tblb8c2a26e7e02b',
+      'tblxyWYcjC34qbyB',
     name: '人员矩阵',
   },
   standard: {
     id:
-      process.env.SYSTEM_MONTHLY_REPORT_STANDARD_TABLE_ID || 'tblb6a0391b0935e',
+      process.env.SYSTEM_MONTHLY_REPORT_STANDARD_TABLE_ID || 'tbl24eruZB6URBFp',
     name: '月报审核标准及要求',
   },
 } as const;

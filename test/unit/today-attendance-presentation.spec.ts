@@ -30,7 +30,7 @@ describe('today attendance anomaly presentation', () => {
     expect(
       formatTodayAttendanceAnomaly({
         key: 'c-cao-off',
-        name: '示例人员011',
+        name: '曹毅',
         building: 'C楼',
         shiftLabel: '白班',
         direction: 'OffDuty',

@@ -11,7 +11,7 @@ import {fileURLToPath} from 'node:url';
 const moduleUrl = new URL('../../scripts/deliver-hotfix-feishu.mjs', import.meta.url);
 const load = () => import(moduleUrl);
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-const appId = 'cli_0831564613853b26';
+const appId = 'cli_a9d1c9fe9d381cee';
 const auth = {appId, verified:true, identities:{bot:{available:true, verified:true}}};
 function fixture(t) {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'nt-file-delivery-'));

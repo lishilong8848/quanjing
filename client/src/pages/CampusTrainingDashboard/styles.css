@@ -1959,6 +1959,27 @@
   padding: 12px;
 }
 
+.campus-training-dashboard-embedded .training-dashboard-state-banner {
+  position: relative;
+  inset: auto;
+  display: flex;
+  width: 100%;
+  max-width: none;
+  margin-bottom: 12px;
+  transform: none;
+  text-align: left;
+}
+
+.campus-training-dashboard-embedded .training-dashboard-state-banner > span {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.campus-training-dashboard-embedded .training-dashboard-state-banner > button {
+  flex: none;
+}
+
 .campus-training-dashboard-embedded .training-dashboard-header {
   min-height: 52px;
   justify-content: flex-end;

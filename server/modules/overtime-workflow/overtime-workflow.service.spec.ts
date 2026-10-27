@@ -18,7 +18,7 @@ import {
 
 const SNAPSHOT = {
   recordId: 'rec_overtime_1',
-  applicantName: '示例人员008',
+  applicantName: '张三',
   applicantOpenId: 'ou_applicant',
   building: 'A楼',
   position: '运维值班员',
@@ -43,14 +43,14 @@ const orgRecords = [
     openId: 'ou_duty_account',
     position: '值班账号',
     buildings: ['A楼'],
-    supervisorNames: ['示例人员009'],
+    supervisorNames: ['施小东'],
   },
   {
     name: '设施运维经理岗',
     openId: 'ou_manager_duty',
     position: '设施运维经理',
     buildings: [],
-    supervisorNames: ['示例人员014', '示例人员020'],
+    supervisorNames: ['梅冰冰', '马进宇'],
   },
 ];
 
@@ -58,7 +58,7 @@ const activeDirectory: ActivePersonnelDirectory = {
   personnel: [
     {
       recordId: 'p1',
-      name: '示例人员008',
+      name: '张三',
       openId: 'ou_applicant',
       employeeNo: '001',
       position: '运维值班员',
@@ -67,16 +67,16 @@ const activeDirectory: ActivePersonnelDirectory = {
     },
     {
       recordId: 'p2',
-      name: '示例人员009',
+      name: '施小东',
       openId: 'ou_supervisor',
       employeeNo: '002',
-      position: '设施运维示例人员001',
+      position: '设施运维主管',
       systemPosition: '',
       buildings: ['A'],
     },
     {
       recordId: 'p3',
-      name: '示例人员014',
+      name: '梅冰冰',
       openId: 'ou_manager_1',
       employeeNo: '003',
       position: '设施运维经理',
@@ -85,7 +85,7 @@ const activeDirectory: ActivePersonnelDirectory = {
     },
     {
       recordId: 'p4',
-      name: '示例人员020',
+      name: '马进宇',
       openId: 'ou_manager_2',
       employeeNo: '004',
       position: '设施运维副经理',
@@ -179,7 +179,7 @@ describe('OvertimeWorkflowService', () => {
     const result = await service.acceptApplication({
       request: {
         clientMutationId: 'overtime-request-1',
-        staffName: '示例人员008',
+        staffName: '张三',
         startAt: SNAPSHOT.plannedStartAt,
         endAt: SNAPSHOT.plannedEndAt,
         reason: SNAPSHOT.reason,
@@ -213,7 +213,7 @@ describe('OvertimeWorkflowService', () => {
 
     const application = await store.getApplication(SNAPSHOT.recordId);
     expect(application?.approvers).toEqual([
-      expect.objectContaining({ name: '示例人员009', openId: 'ou_supervisor' }),
+      expect.objectContaining({ name: '施小东', openId: 'ou_supervisor' }),
     ]);
     expect(application?.managerRecipients.map((entry) => entry.openId)).toEqual(
       ['ou_manager_1', 'ou_manager_2'],
@@ -277,9 +277,9 @@ describe('OvertimeWorkflowService', () => {
     const professional = {
       ...activeDirectory.personnel[1],
       recordId: 'p_professional',
-      name: '示例人员006',
+      name: '周海祥',
       openId: leadId,
-      position: `${discipline}专业示例人员001`,
+      position: `${discipline}专业主管`,
       buildings: ['H'],
     };
     personnel.getCachedActivePersonnelDirectory.mockResolvedValue({
@@ -293,7 +293,7 @@ describe('OvertimeWorkflowService', () => {
         {
           ...professional,
           openId: 'ou_other_discipline',
-          position: discipline === '电气' ? '暖通示例人员001' : '电气示例人员001',
+          position: discipline === '电气' ? '暖通主管' : '电气主管',
         },
       ],
     });
@@ -313,7 +313,7 @@ describe('OvertimeWorkflowService', () => {
       expect(application?.approvers.map((p) => p.name)).toEqual(['陶必亮']);
       expect(application).toMatchObject({
         professionalRecipients: [
-          { openId: 'ou_professional', position: `${discipline}专业示例人员001` },
+          { openId: 'ou_professional', position: `${discipline}专业主管` },
         ],
       });
       expect(
@@ -431,7 +431,7 @@ describe('OvertimeWorkflowService', () => {
     await service.runPendingTasks(new Date('2026-08-20T00:00:00Z'));
     expect(
       (await store.getApplication(SNAPSHOT.recordId))?.lastError,
-    ).toContain('电气专业示例人员001');
+    ).toContain('电气专业主管');
     expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
   });
 
@@ -440,9 +440,9 @@ describe('OvertimeWorkflowService', () => {
     await store.patchApplication(SNAPSHOT.recordId, {
       professionalRecipients: [
         {
-          name: '示例人员009',
+          name: '施小东',
           openId: 'ou_supervisor',
-          position: '电气示例人员001',
+          position: '电气主管',
           buildings: ['A楼'],
         },
       ],
@@ -522,10 +522,10 @@ describe('OvertimeWorkflowService', () => {
     const managerCard = gateway.sendInteractiveCard.mock.calls.find(
       ([recipient]) => recipient === 'ou_manager_1',
     )?.[1];
-    expect(JSON.stringify(managerCard)).toContain('示例人员009');
+    expect(JSON.stringify(managerCard)).toContain('施小东');
     expect(
       (await store.getApplication(SNAPSHOT.recordId))?.actualApproverName,
-    ).toBe('示例人员009');
+    ).toBe('施小东');
     expect(
       gateway.patchInteractiveCard.mock.calls.filter(
         ([messageId]) => messageId === 'om_approval_1',
@@ -768,7 +768,7 @@ describe('OvertimeWorkflowService', () => {
       approvers: [
         ...(await store.getApplication(SNAPSHOT.recordId))!.approvers,
         {
-          name: '示例人员014',
+          name: '梅冰冰',
           openId: 'ou_manager_1',
           position: '设施运维经理',
           buildings: [],
@@ -1188,7 +1188,7 @@ describe('OvertimeWorkflowService', () => {
       expect.objectContaining({
         phase: 'awaiting_confirmation',
         actualApproverOpenId: 'ou_supervisor',
-        actualApproverName: '示例人员009',
+        actualApproverName: '施小东',
       }),
     );
     await expect(store.listTasks()).resolves.toEqual([]);
@@ -1199,7 +1199,7 @@ describe('OvertimeWorkflowService', () => {
     gateway.readOvertimeRecord.mockResolvedValueOnce({
       recordId: SNAPSHOT.recordId,
       fields: approvedOvertimeBaseFields({
-        加班审批人: [{ id: 'ou_manager_1', name: '示例人员014' }],
+        加班审批人: [{ id: 'ou_manager_1', name: '梅冰冰' }],
       }),
     });
     await expect(
@@ -1356,27 +1356,27 @@ describe('OvertimeWorkflowService', () => {
     await store.patchApplication(SNAPSHOT.recordId, {
       professionalRecipients: [
         {
-          name: '示例人员006',
+          name: '周海祥',
           openId: 'ou_professional',
-          position: '电气示例人员001',
+          position: '电气主管',
           buildings: ['H楼'],
         },
         {
-          name: '示例人员014',
+          name: '梅冰冰',
           openId: 'ou_manager_1',
-          position: '电气示例人员001',
+          position: '电气主管',
           buildings: [],
         },
       ],
       approvers: [
         {
-          name: '示例人员009',
+          name: '施小东',
           openId: 'ou_supervisor',
-          position: '设施运维示例人员001',
+          position: '设施运维主管',
           buildings: ['A楼'],
         },
         {
-          name: '示例人员014',
+          name: '梅冰冰',
           openId: 'ou_manager_1',
           position: '设施运维经理',
           buildings: [],
@@ -1437,7 +1437,7 @@ describe('OvertimeWorkflowService', () => {
     ]);
     expect(
       JSON.stringify(gateway.sendInteractiveCard.mock.calls[0][1]),
-    ).toContain('示例人员009');
+    ).toContain('施小东');
   });
 
   it('retries partial result delivery without rewriting Base or resending successful recipients', async () => {
@@ -1771,7 +1771,7 @@ describe('OvertimeWorkflowService', () => {
         service.acceptApplication({
           request: {
             clientMutationId: 'overtime-request-disabled',
-            staffName: '示例人员008',
+            staffName: '张三',
             startAt: SNAPSHOT.plannedStartAt,
             endAt: SNAPSHOT.plannedEndAt,
             reason: SNAPSHOT.reason,
@@ -1811,9 +1811,9 @@ async function seedApprovalPending(store: OvertimeWorkflowStore) {
     phase: 'approval_pending',
     approvers: [
       {
-        name: '示例人员009',
+        name: '施小东',
         openId: 'ou_supervisor',
-        position: '设施运维示例人员001',
+        position: '设施运维主管',
         buildings: ['A楼'],
       },
     ],
@@ -1838,7 +1838,7 @@ async function seedAwaitingConfirmation(store: OvertimeWorkflowStore) {
   await store.patchApplication(SNAPSHOT.recordId, {
     phase: 'awaiting_confirmation',
     actualApproverOpenId: 'ou_supervisor',
-    actualApproverName: '示例人员009',
+    actualApproverName: '施小东',
     approvedAt: '2026-08-12T00:00:00.000Z',
   });
 }
@@ -1856,7 +1856,7 @@ function approvedOvertimeBaseFields(
     加班审批: '同意',
     加班流程进展: '已审批',
     加班工作流状态: '待确认',
-    加班审批人: [{ id: 'ou_supervisor', name: '示例人员009' }],
+    加班审批人: [{ id: 'ou_supervisor', name: '施小东' }],
     加班审批时间: Date.parse('2026-08-12T00:00:00.000Z'),
     ...overrides,
   };

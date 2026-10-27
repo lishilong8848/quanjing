@@ -427,7 +427,7 @@ describe('purchase batch fulfillment cards', () => {
       {
         selectedRecordId: 'rec-1',
         paymentAttachmentUrl:
-          'https://example.com:3001/purchase-card-attachments?t=signed',
+          'https://www.sm.sjhl.online:3001/purchase-card-attachments?t=signed',
       },
     );
     const text = JSON.stringify(card);

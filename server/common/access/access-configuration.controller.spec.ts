@@ -21,7 +21,7 @@ describe('configuration HTTP authorization', () => {
     process.env.FEISHU_APP_SECRET = ''; // Keep this HTTP fixture independent of background personnel sync.
     process.env.FEISHU_ACCESS_APPROVED_GRANTS_ENABLED = 'false';
     const module = await Test.createTestingModule({ imports: [UnifiedAccessModule] })
-      .overrideProvider(AccessConfigurationDirectory).useValue({ read: async () => ({ appId: process.env.FEISHU_APP_ID, people: [{ name: '示例人员016', openId: 'ou_configuration_test' }], snapshotAt: Date.now() }), assertKnown: async (ids: string[]) => { if (ids.some(id => id !== 'ou_configuration_test')) throw new BadRequestException('身份不可识别'); } }).compile();
+      .overrideProvider(AccessConfigurationDirectory).useValue({ read: async () => ({ appId: process.env.FEISHU_APP_ID, people: [{ name: '测试人员', openId: 'ou_configuration_test' }], snapshotAt: Date.now() }), assertKnown: async (ids: string[]) => { if (ids.some(id => id !== 'ou_configuration_test')) throw new BadRequestException('身份不可识别'); } }).compile();
     app = module.createNestApplication({ logger: false });
     await app.listen(0, '127.0.0.1');
     url = await app.getUrl();
@@ -74,6 +74,6 @@ describe('configuration HTTP authorization', () => {
     const response = await fetch(url + '/api/access/configuration/accounts', { method: 'POST', headers: { cookie, origin: url, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(response.status).toBe(201);
     const result = await response.json();
-    expect(result.accounts.find((account: { openId?: string }) => account.openId === body.openId)).toMatchObject({ name: '示例人员016', role: 'editor' });
+    expect(result.accounts.find((account: { openId?: string }) => account.openId === body.openId)).toMatchObject({ name: '测试人员', role: 'editor' });
   });
 });

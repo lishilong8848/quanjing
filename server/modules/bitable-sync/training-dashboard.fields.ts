@@ -38,8 +38,10 @@ const ACTIVE_STATS_FIELDS = [
   '累计-已完成培训数量',
 ] as const;
 
+export const TRAINING_ACTIVE_EMPLOYEE_TEXT_FIELD = '员工 （文本）';
+
 const ACTIVE_SCORE_FIELDS = [
-  '员工',
+  TRAINING_ACTIVE_EMPLOYEE_TEXT_FIELD,
   '课程',
   '考试分数',
   '签到',
@@ -123,7 +125,7 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'activeStats',
     envKey: 'FEISHU_TRAINING_ACTIVE_STATS_TABLE_ID',
-    defaultTableId: 'tbl1cf275220ef6f',
+    defaultTableId: 'tblACdnEXt1FVcPV',
     tableName: '在岗员工-培训情况统计表',
     fieldNames: ACTIVE_STATS_FIELDS,
     qualityFieldGroups: [['年份', '月份', '楼栋']],
@@ -132,10 +134,12 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'activeScores',
     envKey: 'FEISHU_TRAINING_ACTIVE_SCORES_TABLE_ID',
-    defaultTableId: 'tblfdf51edb6466a',
+    defaultTableId: 'tblvFrkTTUvyRaYT',
     tableName: '在岗员工成绩表',
     fieldNames: ACTIVE_SCORE_FIELDS,
     qualityFieldGroups: [
+      [TRAINING_ACTIVE_EMPLOYEE_TEXT_FIELD, '楼栋', '月份（计划）'],
+      [TRAINING_ACTIVE_EMPLOYEE_TEXT_FIELD, '楼栋', '月份'],
       ['员工', '楼栋', '月份（计划）'],
       ['员工', '楼栋', '月份'],
     ],
@@ -144,7 +148,7 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'activePlans',
     envKey: 'FEISHU_TRAINING_ACTIVE_PLANS_TABLE_ID',
-    defaultTableId: 'tbld850ab1b20ff0',
+    defaultTableId: 'tbla7aC5nOPj883v',
     tableName: '在岗员工-培训考核计划',
     fieldNames: ACTIVE_PLAN_FIELDS,
     qualityFieldGroups: [['培训课程名称', '培训年份', '培训月份']],
@@ -153,7 +157,7 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'newHireScores',
     envKey: 'FEISHU_TRAINING_NEW_HIRE_SCORES_TABLE_ID',
-    defaultTableId: 'tbl34323b3206cf6',
+    defaultTableId: 'tblRY4ltGUfJCvk2',
     tableName: '新员工培训情况成绩表',
     fieldNames: NEW_HIRE_SCORE_FIELDS,
     qualityFieldGroups: [
@@ -166,7 +170,7 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'newHireCourses',
     envKey: 'FEISHU_TRAINING_NEW_HIRE_COURSES_TABLE_ID',
-    defaultTableId: 'tbl17386849dd95c',
+    defaultTableId: 'tbluLOjtntNXxNvI',
     tableName: '新员工课程配置表',
     fieldNames: NEW_HIRE_COURSE_FIELDS,
     qualityFieldGroups: [['培训课程名称']],
@@ -175,7 +179,7 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'newHirePlans',
     envKey: 'FEISHU_TRAINING_NEW_HIRE_PLANS_TABLE_ID',
-    defaultTableId: 'tbl94bd80a843445',
+    defaultTableId: 'tbl4gx4y0Z29qj2H',
     tableName: '新员工-培训考核计划表',
     fieldNames: NEW_HIRE_PLAN_FIELDS,
     qualityFieldGroups: [
@@ -192,7 +196,7 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'sharingSessions',
     envKey: 'FEISHU_TRAINING_SHARING_SESSIONS_TABLE_ID',
-    defaultTableId: 'tbl44fa42b488188',
+    defaultTableId: 'tblXZ7YNmy1AxvTA',
     tableName: '分享表详情',
     fieldNames: SHARING_SESSION_FIELDS,
     qualityFieldGroups: [
@@ -204,7 +208,7 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'sharingScores',
     envKey: 'FEISHU_TRAINING_SHARING_SCORES_TABLE_ID',
-    defaultTableId: 'tbl193152b05e392',
+    defaultTableId: 'tblrqnf99IJCBUEa',
     tableName: '分享会评分详情',
     fieldNames: SHARING_SCORE_FIELDS,
     qualityFieldGroups: [['主题名', '评分']],
@@ -213,7 +217,7 @@ export const TRAINING_TABLE_CONFIGS: readonly TrainingTableConfig[] = [
   {
     key: 'sharingInterests',
     envKey: 'FEISHU_TRAINING_SHARING_INTERESTS_TABLE_ID',
-    defaultTableId: 'tbl200ef757db3fa',
+    defaultTableId: 'tblr2WJWFccRdZIm',
     tableName: '分享会兴趣盘',
     fieldNames: SHARING_INTEREST_FIELDS,
     qualityFieldGroups: [['兴趣板块']],

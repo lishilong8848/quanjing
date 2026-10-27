@@ -46,7 +46,7 @@ describe('employee onboarding real self-test', () => {
         clientMutationId:
           'employee-onboarding-123e4567-e89b-42d3-a456-426614174000',
         identityNumber: '110101199001010015',
-        phone: '13800007889',
+        phone: '19900001234',
         entryDate: '2026-08-16',
         graduationDate: '2026-06-30',
         vehiclePlate: '苏FTEST1',
@@ -99,7 +99,7 @@ describe('employee onboarding real self-test', () => {
     );
     expect(result.rejected).toEqual([true, true, true, true, true]);
     expect(JSON.stringify(result.state)).not.toContain('110101199001010015');
-    expect(JSON.stringify(result.state)).not.toContain('13800007889');
+    expect(JSON.stringify(result.state)).not.toContain('19900001234');
   });
 
   it('strictly verifies every business field and the one required ID photo', () => {
@@ -113,7 +113,7 @@ describe('employee onboarding real self-test', () => {
       let mismatchSafe = false;
       try {
         subject.assertEmployeeOnboardingRecord(
-          { ...fields, '联系方式': '13800003294' },
+          { ...fields, '联系方式': '18800000000' },
           fixture,
         );
       } catch (error) {

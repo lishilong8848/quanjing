@@ -106,7 +106,8 @@ describe('training dashboard embedded mode', () => {
     expect(pageSource).toContain('onHeaderStateChange?:');
     expect(pageSource).toContain('campus-training-dashboard-embedded');
     expect(pageSource).toContain('useResponsiveStage(!embedded)');
-    expect(pageSource).toContain('sourceUpdatedAt || dashboard.syncedAt');
+    expect(pageSource).toContain('formatTrainingTimestamp(dashboard.syncedAt)');
+    expect(pageSource).not.toContain('sourceUpdatedAt || dashboard.syncedAt');
     expect(pageSource).toContain('onHeaderStateChange?.({');
     expect(styles).toContain('.campus-training-dashboard-embedded');
     expect(styles).toMatch(

@@ -16,8 +16,8 @@ source = Path('D:/ai/codex/随心记/.superpowers/brainstorm/nantong-weekly-temp
 out = root / 'output/weekly-template-type-validation-20261009'
 out.mkdir(parents=True, exist_ok=True)
 data = report.NantongWeeklyData(title='南通运维周报 · v3模拟验收', start_date='2026-10-01', end_date='2026-10-07', week_number=41,
-    ali_meeting_todos=['模拟：跟进UPS整改（示例人员019：示例人员020；期限：2026-10-14）'],
-    meeting_todos=['模拟：复核冷机维保安排（示例人员019：张工）'],
+    ali_meeting_todos=['模拟：跟进UPS整改（责任人：马进宇；期限：2026-10-14）'],
+    meeting_todos=['模拟：复核冷机维保安排（责任人：张工）'],
     professional_line='电气专业线\n- 模拟：复核母联开关\n暖通专业线\n- 模拟：核对冷机水温\n弱电专业线\n- 模拟：检查动环采集\nEHS&消防专业线\n- 模拟：复核消防整改',
     operation_line='成本支出：模拟维保费用审批\n模拟：跟进采购审批',
     sources={'drill_source_enabled': True},
@@ -34,7 +34,7 @@ headings = [''.join(node.itertext()) for node in tree.iter() if re.fullmatch('h[
 for value in ['一、本周待办', '二、本周周会内容', '三、专业线', '四、运营线']:
     assert value in headings
 assert headings.count('二、效率（变更、维护、演练）') == 6
-assert '示例人员020' in xml and '2026-10-14' in xml
+assert '马进宇' in xml and '2026-10-14' in xml
 assert '本月已完成1/3项' in xml and '其中待审批1项' in xml
 assert '演练楼栋待核对：1项' in xml
 assert xml.count('<column width-ratio="0.5">') == 4
@@ -87,7 +87,7 @@ proof = {'checkedAt': datetime.now(timezone.utc).isoformat(), 'passed': True, 't
     'rendererSha256': hashlib.sha256((root / 'scripts/weekly-report/nantong_weekly_report.py').read_bytes()).hexdigest(),
     'typographySha256': hashlib.sha256(typography_path.read_bytes()).hexdigest(),
     'generatedXmlSha256': hashlib.sha256(xml.encode()).hexdigest(), 'toolSha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-    'scope': 'v3四章/各楼栋效率演练/三行演练进展/四专业分组/成本/示例人员019及期限/未知楼栋不猜测',
+    'scope': 'v3四章/各楼栋效率演练/三行演练进展/四专业分组/成本/责任人及期限/未知楼栋不猜测',
     'limitations': ['本地代表性渲染，无飞书真实写入', 'HTML折叠和打印交互是预览能力；飞书以原生标题、分栏和待办呈现']}
 (out / 'template-proof.json').write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps({'passed': True, 'templateSha256': proof['templateSha256']}, ensure_ascii=False))

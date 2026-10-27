@@ -27,12 +27,12 @@ const common = [
 ];
 export const MAINTENANCE_SOURCES = {
   planned: {
-    tableId: 'tbldd9a6f0224dfc',
+    tableId: 'tblzk7WrXxNWQy6V',
     tableName: '计划性维护推进',
     fieldNames: [...common, '维护编号', '维护实施状态', '维护实施状态（新）'],
   },
   unplanned: {
-    tableId: 'tblf5773e339e8e1',
+    tableId: 'tbl4Yh8Uye8bjLls',
     tableName: '非计划性维护推进',
     fieldNames: [...common, '维护状态'],
   },

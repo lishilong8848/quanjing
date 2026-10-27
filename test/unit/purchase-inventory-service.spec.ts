@@ -40,17 +40,17 @@ describe('PurchaseInventoryService', () => {
     (resolveBitableAppToken as jest.Mock).mockResolvedValue('app-token');
     (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
     process.env.FEISHU_PURCHASE_INVENTORY_SOURCE_URL =
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
-    process.env.FEISHU_PURCHASE_SUBMISSION_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID';
-    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID';
-    process.env.FEISHU_ITEM_CATEGORY_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_ITEM_CATEGORY_TABLE_ID';
-    process.env.FEISHU_INVENTORY_LEDGER_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_INVENTORY_LEDGER_TABLE_ID';
-    process.env.FEISHU_INBOUND_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_INBOUND_TABLE_ID';
-    process.env.FEISHU_OUTBOUND_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_OUTBOUND_TABLE_ID';
+      'https://vnet.feishu.cn/wiki/SiW9wuy9DiIsykkTkNUcM0HfnSb';
+    process.env.FEISHU_PURCHASE_SUBMISSION_TABLE_ID = 'tblIfmOB4VTUMmMh';
+    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'tblKmajonrdwW7Z0';
+    process.env.FEISHU_ITEM_CATEGORY_TABLE_ID = 'tblhdbfhazvxIlmX';
+    process.env.FEISHU_INVENTORY_LEDGER_TABLE_ID = 'tblXXobhAGwvQc4r';
+    process.env.FEISHU_INBOUND_TABLE_ID = 'tblSAt65HQJUthlY';
+    process.env.FEISHU_OUTBOUND_TABLE_ID = 'tble4MtOm1QD4sUG';
     process.env.FEISHU_ACTIVE_EMPLOYEE_SOURCE_URL =
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
-    process.env.FEISHU_ACTIVE_EMPLOYEE_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID';
-    process.env.FEISHU_ACTIVE_EMPLOYEE_VIEW_ID = 'PUBLIC_EXAMPLE_FEISHU_ORG_VIEW_ID';
+      'https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg';
+    process.env.FEISHU_ACTIVE_EMPLOYEE_TABLE_ID = 'tblOu75UtJTDNHIM';
+    process.env.FEISHU_ACTIVE_EMPLOYEE_VIEW_ID = 'vewrQcypV4';
   });
 
   afterAll(() => {
@@ -68,7 +68,7 @@ describe('PurchaseInventoryService', () => {
     expect(fetchBitableRecords).toHaveBeenCalledTimes(6);
     expect(fetchBitableRecords).not.toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ tableId: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID' }),
+      expect.objectContaining({ tableId: 'tblIfmOB4VTUMmMh' }),
     );
     expect(
       (fetchBitableRecords as jest.Mock).mock.calls.map(
@@ -76,19 +76,19 @@ describe('PurchaseInventoryService', () => {
       ),
     ).toEqual(
       expect.arrayContaining([
-        'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID',
-        'PUBLIC_EXAMPLE_FEISHU_ITEM_CATEGORY_TABLE_ID',
-        'PUBLIC_EXAMPLE_FEISHU_INVENTORY_LEDGER_TABLE_ID',
-        'PUBLIC_EXAMPLE_FEISHU_INBOUND_TABLE_ID',
-        'PUBLIC_EXAMPLE_FEISHU_OUTBOUND_TABLE_ID',
-        'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID',
+        'tblKmajonrdwW7Z0',
+        'tblhdbfhazvxIlmX',
+        'tblXXobhAGwvQc4r',
+        'tblSAt65HQJUthlY',
+        'tble4MtOm1QD4sUG',
+        'tblOu75UtJTDNHIM',
       ]),
     );
     expect(fetchBitableRecords).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        tableId: 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID',
-        viewId: 'PUBLIC_EXAMPLE_FEISHU_ORG_VIEW_ID',
+        tableId: 'tblOu75UtJTDNHIM',
+        viewId: 'vewrQcypV4',
         tableName: '在职人员',
         forceRefresh: true,
       }),
@@ -130,7 +130,7 @@ describe('PurchaseInventoryService', () => {
         calls += 1;
         const staleBatch = calls <= 6;
         if (staleBatch) await staleGate.promise;
-        if (options.tableId !== 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID') return [];
+        if (options.tableId !== 'tblKmajonrdwW7Z0') return [];
         return [
           executionRecord(
             staleBatch ? 'stale-execution' : 'fresh-execution',
@@ -162,7 +162,7 @@ describe('PurchaseInventoryService', () => {
     const activeAfter = executionRecord('active-after', '未开始（待审批）');
     (fetchBitableRecords as jest.Mock).mockImplementation(
       async (_httpService, options: { tableId: string; filter?: unknown }) => {
-        if (options.tableId !== 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID') return [];
+        if (options.tableId !== 'tblKmajonrdwW7Z0') return [];
         return options.filter ? [activeAfter] : [activeBefore, completed];
       },
     );
@@ -175,7 +175,7 @@ describe('PurchaseInventoryService', () => {
     expect(fetchBitableRecords).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.objectContaining({
-        tableId: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID',
+        tableId: 'tblKmajonrdwW7Z0',
         cacheTtlMs: 10_000,
         filter: {
           conjunction: 'and',
@@ -216,7 +216,7 @@ describe('PurchaseInventoryService', () => {
             cacheTtlMs?: number;
           },
         ) => {
-          if (options.tableId !== 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID' || !options.filter) {
+          if (options.tableId !== 'tblKmajonrdwW7Z0' || !options.filter) {
             return [];
           }
           if (activeCacheExpiresAt > now) return activeCacheRecords;
@@ -260,14 +260,14 @@ describe('PurchaseInventoryService', () => {
     const existing = executionRecord('existing-active', '未开始（待审批）');
     (fetchBitableRecords as jest.Mock).mockImplementation(
       async (_httpService, options: { tableId: string }) =>
-        options.tableId === 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID' ? [existing] : [],
+        options.tableId === 'tblKmajonrdwW7Z0' ? [existing] : [],
     );
     const service = new PurchaseInventoryService({ axiosRef: {} } as never);
     const first = await service.getDashboard(false);
 
     (fetchBitableRecords as jest.Mock).mockImplementation(
       async (_httpService, options: { tableId: string }) => {
-        if (options.tableId === 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID') {
+        if (options.tableId === 'tblKmajonrdwW7Z0') {
           throw new Error('temporary Feishu read failure');
         }
         return [];
@@ -323,7 +323,7 @@ describe('PurchaseInventoryService', () => {
     await service.getDashboard(false);
     (fetchBitableRecords as jest.Mock).mockImplementation(
       async (_httpService, options: { tableId: string }) => {
-        if (options.tableId === 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID') {
+        if (options.tableId === 'tblOu75UtJTDNHIM') {
           throw new Error('temporary employee read failure');
         }
         return [];
@@ -353,7 +353,7 @@ describe('PurchaseInventoryService', () => {
             forceRefresh?: boolean;
           },
         ) => {
-          if (options.tableId !== 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID') return [];
+          if (options.tableId !== 'tblOu75UtJTDNHIM') return [];
           if (
             !options.forceRefresh &&
             employeeCachePresent &&
@@ -385,7 +385,7 @@ describe('PurchaseInventoryService', () => {
       const employeeCalls = (
         fetchBitableRecords as jest.Mock
       ).mock.calls.filter(([, options]) =>
-        String(options.tableId).includes('PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID'),
+        String(options.tableId).includes('tblOu75UtJTDNHIM'),
       );
       expect(employeeCalls.at(-1)?.[1]).toEqual(
         expect.objectContaining({ forceRefresh: true }),

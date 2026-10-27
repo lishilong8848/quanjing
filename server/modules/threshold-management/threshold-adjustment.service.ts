@@ -213,7 +213,7 @@ export class ThresholdAdjustmentService
     const building = uniquePerson(
       context.roles.filter(
         (r) =>
-          ['设施运维示例人员001', 'H楼值班示例人员001'].includes(r.position) &&
+          ['设施运维主管', 'H楼值班主管'].includes(r.position) &&
           r.buildings.includes(before.building),
       ),
       '楼长',
@@ -222,12 +222,12 @@ export class ThresholdAdjustmentService
       context.roles.filter(
         (r) =>
           [
-            `${before.profession}示例人员001`,
-            `${before.profession}专业示例人员001`,
-            `${before.profession}示例人员001工程师`,
+            `${before.profession}主管`,
+            `${before.profession}专业主管`,
+            `${before.profession}主管工程师`,
           ].includes(r.position) && r.professions.includes(before.profession),
       ),
-      '专业示例人员001',
+      '专业主管',
     );
     if ([building.openId, professional.openId].includes(applicant.openId))
       throw new ForbiddenException('申请人不能审批本人的阈值调整');

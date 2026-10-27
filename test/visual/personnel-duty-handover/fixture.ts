@@ -1,8 +1,8 @@
 import type { PersonnelOverview } from '../../../shared/personnel-preview.interface';
 import type { HandoverPreviewRequest, PersonnelHandoverPreview } from '../../../shared/personnel-handover.interface';
 
-const person={id:'synthetic-old',recordId:'recOld',name:'合成前任',openId:'ou_old',active:true,type:'employee' as const,position:'C楼示例人员001',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:[]};
-export const overview={mode:'preview',directoryVersion:'synthetic',snapshotAt:Date.now(),configurationRevision:1,people:[person,{...person,id:'synthetic-new',recordId:'recNew',name:'合成接任',openId:'ou_new'}].map(person=>({person,accounts:[],archives:[],duties:[]})),duties:[{recordId:'recDuty',name:'C楼示例人员001',kind:'building_supervisor',personnelIds:['synthetic-old'],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}],problems:[],issues:[]} as PersonnelOverview;
+const person={id:'synthetic-old',recordId:'recOld',name:'合成前任',openId:'ou_old',active:true,type:'employee' as const,position:'C楼主管',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:[]};
+export const overview={mode:'preview',directoryVersion:'synthetic',snapshotAt:Date.now(),configurationRevision:1,people:[person,{...person,id:'synthetic-new',recordId:'recNew',name:'合成接任',openId:'ou_new'}].map(person=>({person,accounts:[],archives:[],duties:[]})),duties:[{recordId:'recDuty',name:'C楼主管',kind:'building_supervisor',personnelIds:['synthetic-old'],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}],problems:[],issues:[]} as PersonnelOverview;
 const source={role:'building_admin' as const,building:'C楼' as const,buildings:['C楼' as const],pagePaths:[],sourceVersion:1,personalRules:[{id:'other-H',effect:'allow' as const,module:'inventory' as const,actions:['read' as const,'confirm' as const],buildings:['H楼' as const],specialties:null}]};
 export function preview(request:HandoverPreviewRequest):PersonnelHandoverPreview {
   const complete=request.ownership?.length===2&&request.ownership.every(row=>row.grants.length===2);

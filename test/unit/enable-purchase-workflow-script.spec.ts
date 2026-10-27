@@ -83,11 +83,11 @@ describe('deploy/enable-purchase-workflow.ps1', () => {
       PURCHASE_MANAGER_APPROVAL_CARD_ENABLED: 'true',
       PURCHASE_MANAGER_APPROVER_OPEN_ID: 'ou_manager_primary',
       PURCHASE_WORKFLOW_APPROVER_OPEN_IDS:
-        'PUBLIC_EXAMPLE_PURCHASE_WORKFLOW_APPROVER_OPEN_IDS',
+        'ou_a6644e62a43b916c6bc26148cf74f208,ou_6e607320c167d816366acba893b339b1',
       PURCHASE_WORKFLOW_PURCHASE_ADMIN_OPEN_ID:
-        'PUBLIC_EXAMPLE_PURCHASE_WORKFLOW_PURCHASE_ADMIN_OPEN_ID',
-      FEISHU_PURCHASE_ORGANIZATION_TABLE_ID: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_ORGANIZATION_TABLE_ID',
-      PUBLIC_BASE_URL: 'https://example.com:3001',
+        'ou_86e0b9a248f9d7e7bada9ecbd1ea62a9',
+      FEISHU_PURCHASE_ORGANIZATION_TABLE_ID: 'tblRtv0XGQVTihw7',
+      PUBLIC_BASE_URL: 'https://www.sm.sjhl.online:3001',
       PURCHASE_WORKFLOW_LEDGER_PATH:
         '.runtime/purchase-workflow-ledger.json',
       FEISHU_WAREHOUSE_MANAGER_SOURCE_URL:
@@ -120,7 +120,7 @@ describe('deploy/enable-purchase-workflow.ps1', () => {
       PURCHASE_MANAGER_APPROVAL_CARD_ENABLED: 'true',
       PURCHASE_MANAGER_APPROVER_OPEN_ID: 'ou_manager_primary',
       PURCHASE_WORKFLOW_APPROVER_OPEN_IDS:
-        'PUBLIC_EXAMPLE_PURCHASE_WORKFLOW_APPROVER_OPEN_IDS',
+        'ou_a6644e62a43b916c6bc26148cf74f208,ou_6e607320c167d816366acba893b339b1',
     });
     expect(
       readdirSync(root).some((name) =>
@@ -193,7 +193,7 @@ describe('deploy/enable-purchase-workflow.ps1', () => {
     const script = readFileSync(SCRIPT, 'utf8');
 
     expect(script).not.toContain('SiW9wuy9DiIsykkTkNUcM0HfnSb');
-    expect(script).not.toContain('tbl6932027f0ab7f');
+    expect(script).not.toContain('tblA67nLWVPQ5DQL');
     expect(script).toMatch(
       /\$configCheckPath\s+'--root'\s+\$appRoot\s+'--activate-workflow'/u,
     );

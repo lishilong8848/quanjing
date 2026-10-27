@@ -146,7 +146,7 @@ const baixiaoshengWorkspaces: BaixiaoshengWorkspace[] = [
     icon: BellRing,
     accent: 'cyan',
     bullets: [
-      '面向机房经理&示例人员001',
+      '面向机房经理&主管',
       '数据提取与结构化汇总',
       '异常识别与风险提示',
       '重点问题跟踪建议',

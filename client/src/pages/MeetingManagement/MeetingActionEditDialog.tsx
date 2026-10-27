@@ -102,7 +102,7 @@ export function MeetingActionEditDialog({
         <DialogHeader>
           <DialogTitle>修改待办</DialogTitle>
           <DialogDescription className="sr-only">
-            修改事宜内容及示例人员019
+            修改事宜内容及责任人
           </DialogDescription>
         </DialogHeader>
         <div className="meeting-action-edit-source">
@@ -125,7 +125,7 @@ export function MeetingActionEditDialog({
             </label>
             <div className="meeting-owner-picker">
               <strong>
-                示例人员019：
+                责任人：
                 {owner?.kind === 'unassigned'
                   ? '未分配'
                   : owner && 'name' in owner
@@ -155,7 +155,7 @@ export function MeetingActionEditDialog({
                   disabled={disabled}
                   onClick={() => changeOwner({ kind: 'unassigned' })}
                 >
-                  清除示例人员019
+                  清除责任人
                 </Button>
               </div>
               {mode === 'employee' ? (
@@ -220,7 +220,7 @@ export function MeetingActionEditDialog({
                 </>
               ) : (
                 <Input
-                  aria-label="自定义示例人员019"
+                  aria-label="自定义责任人"
                   placeholder="填写人员姓名"
                   value={owner?.kind === 'custom' ? owner.name : ''}
                   disabled={disabled}

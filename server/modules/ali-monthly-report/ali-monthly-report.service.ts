@@ -54,11 +54,11 @@ const DEFAULT_TEMPLATE_PATH = join(
   'EA118机房2026年3月告警分析表.xlsx',
 );
 const DEFAULT_HIGH_POWER_SOURCE_URL =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/base/MliKbC3fXa8PXrsndKscmxjdn1g?table=tblkh6YCMYtS8nHa&view=vewrHJHl3v';
 const DEFAULT_ALARM_ATTACHMENT_SOURCE_URL =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
-const DEFAULT_STAFF_REPORT_TABLE_ID = 'tblf5fc5e5730d03';
-const DEFAULT_STAFF_REPORT_VIEW_ID = 'PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID';
+  'https://vnet.feishu.cn/base/MliKbC3fXa8PXrsndKscmxjdn1g?table=tblAGQeQ7tpV8tWt&view=vewrHJHl3v';
+const DEFAULT_STAFF_REPORT_TABLE_ID = 'tbl3KED5CdvNSCwT';
+const DEFAULT_STAFF_REPORT_VIEW_ID = 'vewrHJHl3v';
 const DEFAULT_OUTPUT_DIR = join(process.cwd(), 'output', 'ali-monthly-report');
 const GENERATE_TIMEOUT_MS = 10 * 60 * 1000;
 const FOUR_ITEM_BUNDLE_TIMEOUT_MS = 4 * 60 * 1000;
@@ -68,12 +68,12 @@ const DOWNLOAD_LINK_TTL_SECONDS = 72 * 60 * 60;
 const BUNDLE_REQUEST_CACHE_TTL_MS = 15 * 60 * 1000;
 const MAX_FEISHU_FILE_SIZE_BYTES = 30 * 1024 * 1024;
 const LOCAL_FILE_ACTION_EXTENSIONS = new Set(['.xlsx', '.zip']);
-const DEFAULT_FEISHU_CHAT_ID = 'oc_c79f407063dc9ca9f70cc76cb4059895';
-const DEFAULT_ADDITIONAL_FEISHU_CHAT_ID = 'oc_eaf9c57f7995587b43342558d1f49730';
-const DEFAULT_FEISHU_USER_EMAIL = 'user-b54e355d@example.com';
+const DEFAULT_FEISHU_CHAT_ID = 'oc_9961bb057de8bd715447559c5e63c4f2';
+const DEFAULT_ADDITIONAL_FEISHU_CHAT_ID = 'oc_3bc648b9b761f24a65366a9b04b32eb2';
+const DEFAULT_FEISHU_USER_EMAIL = 'ma.jinyu@vnet.com';
 const DEFAULT_EMAIL_RECIPIENT =
-  'user-b54e355d@example.com; user-20a3f7b8@example.com';
-const VISIBLE_ONLY_EMAIL_RECIPIENT = 'user-7e80d4ec@example.com';
+  'ma.jinyu@vnet.com; liu.xiaoxing2-wb@sne.vnet.com';
+const VISIBLE_ONLY_EMAIL_RECIPIENT = 'mei.bingbing@vnet.com';
 const BUNDLED_PYTHON_PACKAGES_DIR = join(
   process.cwd(),
   'python',
@@ -1462,11 +1462,11 @@ export class AliMonthlyReportService {
 
       const userOpenId = String(runtime.feishuUserOpenId || '').trim();
       const userEmail = String(runtime.feishuUserEmail || '').trim();
-      const userName = String(runtime.feishuUserName || '示例人员020').trim();
+      const userName = String(runtime.feishuUserName || '马进宇').trim();
       let userTarget: FeishuBundleDeliveryTarget;
       if (userOpenId) {
         if (!/^ou_[A-Za-z0-9]+$/u.test(userOpenId)) {
-          throw new Error('示例人员020飞书 open_id 配置格式无效');
+          throw new Error('马进宇飞书 open_id 配置格式无效');
         }
         userTarget = {
           receiveId: userOpenId,
@@ -1476,7 +1476,7 @@ export class AliMonthlyReportService {
         };
       } else {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(userEmail)) {
-          throw new Error('缺少有效的示例人员020飞书邮箱或 open_id');
+          throw new Error('缺少有效的马进宇飞书邮箱或 open_id');
         }
         userTarget = {
           receiveId: userEmail,
@@ -1545,7 +1545,7 @@ export class AliMonthlyReportService {
         ...response,
         message: `${response.message}，${
           allSent
-            ? `已发送 ${chatIds.length} 个会话群和示例人员020`
+            ? `已发送 ${chatIds.length} 个会话群和马进宇`
             : `飞书文件部分发送失败（${successes.length}/${deliveries.length}）`
         }`,
         logs: [
@@ -1863,7 +1863,7 @@ export class AliMonthlyReportService {
       feishuUserOpenId,
       feishuUserEmail,
       feishuUserName:
-        readEnv('ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_NAME') || '示例人员020',
+        readEnv('ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_NAME') || '马进宇',
       defaultEmailRecipient: this.mergeDefaultEmailRecipients(
         configuredEmailRecipient || fileEmailRecipient,
       ),

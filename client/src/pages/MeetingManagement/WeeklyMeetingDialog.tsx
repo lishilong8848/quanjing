@@ -223,7 +223,7 @@ export function WeeklyMeetingDialog({
             {kind === 'ali' ? '阿里会议待办' : '属地周会待办'}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            填写待办内容、示例人员019及附件
+            填写待办内容、责任人及附件
           </DialogDescription>
         </DialogHeader>
         <div className="weekly-target">
@@ -319,9 +319,9 @@ export function WeeklyMeetingDialog({
                   />
                 </label>
                 <label>
-                  示例人员019
+                  责任人
                   <NativeSelect
-                    aria-label="示例人员019"
+                    aria-label="责任人"
                     value={todo.ownerOpenId}
                     disabled={state === 'submitting' || !!baseJob.current}
                     onChange={(e) => {
@@ -345,7 +345,7 @@ export function WeeklyMeetingDialog({
                     {todo.ownerOpenId &&
                       !people.some((p) => p.openId === todo.ownerOpenId) && (
                         <NativeSelectOption value={todo.ownerOpenId}>
-                          {todo.ownerName}（原示例人员019）
+                          {todo.ownerName}（原责任人）
                         </NativeSelectOption>
                       )}
                     {people.map((p) => (

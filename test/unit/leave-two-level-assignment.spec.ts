@@ -6,7 +6,7 @@ import type { LeaveSubstituteCandidate } from '../../server/modules/leave-workfl
 const person = (id: string, name: string): LeaveSubstituteCandidate => ({ personRecordId: id, name, openId: `ou_${id}`, position: '运维值班员', buildings: ['C楼'] });
 const applicant = person('rec_liang', '梁煊晨');
 const wu = person('rec_wu', '吴亚兵');
-const free = person('rec_free', '示例人员008');
+const free = person('rec_free', '张三');
 const group: LeaveRequestShiftGroup = {
   shiftKey: '2026-10-16T09:00__2026-10-16T18:00', scheduleDate: '2026-10-16', startAt: '2026-10-16T09:00', endAt: '2026-10-16T18:00', kind: 'white', shift: '白班', buildings: ['D楼'], teams: ['A班'], scheduleRecordIds: ['rec_schedule_d'], leaveHours: 9,
 };

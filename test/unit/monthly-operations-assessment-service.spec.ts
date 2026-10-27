@@ -31,7 +31,7 @@ describe('智航四源只读边界', () => {
       const options = jest.mocked(fetchBitableRecords).mock.calls.at(-1)![1];
       if (kind === 'inspection') expect(options.fieldNames).toBeUndefined();
       expect(options.fieldNames?.join() ?? '').not.toMatch(
-        /账号|人员|负责人|示例人员001|附件|创建人/,
+        /账号|人员|负责人|主管|附件|创建人/,
       );
       expect(options).toMatchObject({ allowStale: true, strict: true });
     }
@@ -94,12 +94,12 @@ describe('智航四源只读边界', () => {
   });
   it('汇总为空或排查明细失败时仍保留 OPEN 风险清单', async () => {
     jest.mocked(fetchBitableRecords).mockImplementation(async (_http, options) => {
-      if (options.tableId === 'tbl07ee68bd218ee')
+      if (options.tableId === 'tblviRG8ZDfY7AnF')
         return [{ record_id: 'open-1', fields: {
           楼栋名称: '南通A楼', 风险项编号: 'JS-JZ-FS-3', 风险等级: '低',
           检查项_描述: '检查消防通道',
         } }];
-      if (options.tableId === 'tbl64acce602916f') throw Error('inspection unavailable');
+      if (options.tableId === 'tblNddknaoXp2ASG') throw Error('inspection unavailable');
       return [];
     });
     const data = await new MonthlyOperationsAssessmentService(new HttpService()).get(

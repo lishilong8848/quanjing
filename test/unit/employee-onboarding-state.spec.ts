@@ -37,7 +37,7 @@ function validDraft(
     companyName: '南通承宏云计算有限公司',
     position: '运维实习生',
     identityNumber: ` ${VALID_IDENTITY_NUMBER} `,
-    phone: '13800007889',
+    phone: '19900001234',
     entryDate: '2026-08-18',
     education: '本科',
     graduateSchool: ' 测试大学 ',
@@ -318,7 +318,7 @@ describe('employee onboarding submission coordinator', () => {
     expect(raw).toBeDefined();
     expect(raw).not.toContain('自动化测试员工');
     expect(raw).not.toContain(VALID_IDENTITY_NUMBER);
-    expect(raw).not.toContain('13800007889');
+    expect(raw).not.toContain('19900001234');
     expect(raw).not.toContain('portrait.png');
     expect(Object.keys(JSON.parse(raw!)).sort()).toEqual([
       'clientMutationId',
@@ -950,7 +950,7 @@ describe('employee onboarding API', () => {
       ...validDraft({
         name: '敏感姓名',
         identityNumber: VALID_IDENTITY_NUMBER,
-        phone: '13800007889',
+        phone: '19900001234',
       }),
       clientMutationId:
         'employee-onboarding-123e4567-e89b-42d3-a456-426614174000',
@@ -970,7 +970,7 @@ describe('employee onboarding API', () => {
       expect(error.message).toBe('新员工入职结果待确认');
       expect(error.message).not.toContain('敏感姓名');
       expect(error.message).not.toContain(VALID_IDENTITY_NUMBER);
-      expect(error.message).not.toContain('13800007889');
+      expect(error.message).not.toContain('19900001234');
     }
     expect(axiosForBackend).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();

@@ -39,7 +39,7 @@ const INTERNAL_FIELDS: Record<ContractCreateKind, ReadonlySet<string>> = {
     '父记录',
     '父记录 2',
     '关联框架合同',
-    '专业示例人员001',
+    '专业主管',
     '框架引用',
     '合同到期处置',
     '付款与合同差异核验时间',

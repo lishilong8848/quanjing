@@ -104,8 +104,8 @@ export interface TyphoonPathScreenshotResult {
 }
 
 const DEFAULT_FEISHU_CHAT_IDS = [
-  'oc_c79f407063dc9ca9f70cc76cb4059895',
-  'PUBLIC_EXAMPLE_FEISHU_MONTHLY_SCHEDULE_ACCESS_CHAT_ID',
+  'oc_9961bb057de8bd715447559c5e63c4f2',
+  'oc_afb27caf36b3bfeea2de20bd6f955d21',
 ];
 const SCREENSHOT_TARGET_SELECTOR = '[data-screenshot-target="duty-overview"]';
 const CAMPUS_OPERATIONS_SCREENSHOT_TARGET_SELECTOR = '[data-screenshot-target="campus-operations-dashboard"]';

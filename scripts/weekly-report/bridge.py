@@ -149,7 +149,7 @@ def run_action(payload: dict, api: NativeFeishu | None) -> dict:
                 'operations': data.operation_line_archive or data.operation_line, 'title': data.title}
     if action == 'create':
         url, token, result = report.create_report_doc(payload['xml'], config)
-        url = url or f'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE'
+        url = url or f'https://vnet.feishu.cn/docx/{token}'
         try:
             require_complete_write(result)
             verify_document(url, payload['xml'], str(config.get('doc_identity') or 'bot'))

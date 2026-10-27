@@ -27,7 +27,7 @@ describe('实际配置交接事务',()=>{
     originalApp=process.env.FEISHU_APP_ID;process.env.FEISHU_APP_ID=appId;
     root=realpathSync(tmpdir());folder=mkdtempSync(join(root,'nt-handover-permissions-'));owner=randomUUID();writeFileSync(join(folder,'.test-owner'),owner,{flag:'wx'});file=join(folder,'configuration.json');
     store=new stores.AccessConfigurationStore(file);jest.spyOn(stores,'getAccessConfigurationStore').mockReturnValue(store);jest.spyOn(defaults,'defaultAccessAccounts').mockReturnValue({});
-    from={id:'local-external-'+ 'a'.repeat(64),recordId:'recOld',name:'合成前任',openId:'ou_old',active:false,type:'employee',position:'C楼示例人员001',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:[]};
+    from={id:'local-external-'+ 'a'.repeat(64),recordId:'recOld',name:'合成前任',openId:'ou_old',active:false,type:'employee',position:'C楼主管',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:[]};
     to={...from,id:'local-external-'+ 'b'.repeat(64),recordId:'recNew',name:'合成接任',openId:'ou_new',active:true};
     const account=(person:AuthorityPerson):stores.StoredAccount=>({id:'feishu-'+feishuIdentityFingerprint(appId,person.openId!),kind:'feishu',appId,name:person.name,openId:person.openId,role:'site_member',building:null,version:1,enabled:true,deleted:false,source:'configuration',personnelIdentity:person.id,identityHash:feishuIdentityFingerprint(appId,person.openId!)});
     source={...account(from),role:'building_admin',building:'C楼',buildings:['C楼']};target=account(to);
@@ -37,7 +37,7 @@ describe('实际配置交接事务',()=>{
       state.personnelEmployment={appId,snapshotAt:Date.now(),inactive:{[source.id]:true,[from.id]:true,[target.id]:false,[to.id]:false}};
     });
     service=new AccessConfigurationService();
-    directory={appId,people:[],employees:[],snapshotAt:Date.now(),personnelComplete:true,employmentState:{complete:true,entries:[{personnelIdentity:from.id,openId:from.openId,inactive:true},{personnelIdentity:to.id,openId:to.openId,inactive:false}]},personnelAuthority:{mode:'shadow',version:'c'.repeat(64),snapshotAt:Date.now(),source:{appId,appToken:'fixture',tableId:'tblPeople'},people:[from,to],duties:[{recordId:'recDuty',name:'C楼请休假示例人员001',kind:'leave_supervisor',personnelIds:[to.id],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}],problems:[],issues:[]}};
+    directory={appId,people:[],employees:[],snapshotAt:Date.now(),personnelComplete:true,employmentState:{complete:true,entries:[{personnelIdentity:from.id,openId:from.openId,inactive:true},{personnelIdentity:to.id,openId:to.openId,inactive:false}]},personnelAuthority:{mode:'shadow',version:'c'.repeat(64),snapshotAt:Date.now(),source:{appId,appToken:'fixture',tableId:'tblPeople'},people:[from,to],duties:[{recordId:'recDuty',name:'C楼请休假主管',kind:'leave_supervisor',personnelIds:[to.id],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}],problems:[],issues:[]}};
     const {content}=buildHandoverAuthoritySnapshot(directory,service.snapshot(),service.permissionArchives(),{fromPersonId:from.id,toPersonId:to.id,dutyRecordIds:['recDuty'],mode:'offboarding'});
     batch=await new PersonnelHandoverStore(join(folder,'handover.json')).accept(0,{clientMutationId:'synthetic-confirm-001',actorId:'local-fixture-admin',actorName:'合成管理员',preview:{...content,fingerprint:handoverFingerprint(content),createdAt:new Date().toISOString()}});
   });
@@ -49,7 +49,7 @@ describe('实际配置交接事务',()=>{
     rmSync(folder,{recursive:true,force:false});
   });
   const apply=(service:AccessConfigurationService,batch:HandoverBatch,mutation=handoverItemMutationId(batch.id,'permissions'))=>service.applyPersonnelHandoverPermissions(batch,mutation);
-  it('已受理批次按选定职责恢复，示例人员004员资料更新不阻断；重新确认仍核全局版本',async()=>{
+  it('已受理批次按选定职责恢复，其他人员资料更新不阻断；重新确认仍核全局版本',async()=>{
     const authority=new PersonnelHandoverAuthority(service,{read:async()=>structuredClone(directory)});
     directory.personnelAuthority!.version='d'.repeat(64);
     await expect(authority.restoreContext(batch.preview,batch)).resolves.toMatchObject({from:{id:from.id},to:{id:to.id}});

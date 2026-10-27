@@ -212,7 +212,7 @@ describe('risk inspection data mapper', () => {
 
   test('links exact personnel mentions by stable record id and disambiguates duplicate names by building', () => {
     const directory = personnelDirectory([
-      { recordId: 'person-zhang', name: '示例人员008', buildings: ['A'] },
+      { recordId: 'person-zhang', name: '张三', buildings: ['A'] },
       { recordId: 'person-wang-a', name: '王伟', buildings: ['A'] },
       { recordId: 'person-wang-b', name: '王伟', buildings: ['B'] },
     ]);
@@ -222,7 +222,7 @@ describe('risk inspection data mapper', () => {
           月份: '7月',
           检查项目: '值班纪律',
           楼栋: 'A楼',
-          问题: '示例人员008睡岗，王伟未按规定巡检',
+          问题: '张三睡岗，王伟未按规定巡检',
         }),
         record('quality-e-ambiguous', {
           月份: '7月',
@@ -239,7 +239,7 @@ describe('risk inspection data mapper', () => {
 
     expect(result.issues[0]).toMatchObject({
       responsiblePersons: [
-        { recordId: 'person-zhang', name: '示例人员008' },
+        { recordId: 'person-zhang', name: '张三' },
         { recordId: 'person-wang-a', name: '王伟' },
       ],
       personMatchStatus: 'matched',
@@ -291,7 +291,7 @@ describe('risk inspection data mapper', () => {
           风险等级: '中',
           风险状态: '已完成',
           '风险&问题内容描述': '配电柜隐患已完成整改',
-          现场跟进人: '示例人员008',
+          现场跟进人: '张三',
           截止日期: '2026-07-05',
           实际关闭日期: '2026-07-04',
           最后更新日期: '2026-07-04T01:00:00.000Z',
@@ -304,7 +304,7 @@ describe('risk inspection data mapper', () => {
           风险等级: '低',
           风险状态: '整改中',
           '风险&问题内容描述': '消防通道堆物',
-          '跟进人（飞书）': [{ name: '示例人员013', open_id: 'sensitive-open-id' }],
+          '跟进人（飞书）': [{ name: '李四', open_id: 'sensitive-open-id' }],
           截止日期: '2026-07-10',
         }),
         record('ali-suspended-june', {
@@ -314,7 +314,7 @@ describe('risk inspection data mapper', () => {
           风险等级: '超低',
           风险状态: '已挂起',
           '风险&问题内容描述': '待外部条件具备后处理',
-          阿里跟进人: '示例人员017',
+          阿里跟进人: '王五',
           截止日期: '2026-07-20',
         }),
         record('ali-completed-june', {
@@ -448,7 +448,7 @@ describe('risk inspection data mapper', () => {
           类型: '其他',
           检查范围: '通道管理',
           问题: '历史问题已完成整改',
-          问题提交人: [{ name: '示例人员008' }],
+          问题提交人: [{ name: '张三' }],
           整改情况: '已更新',
         }),
         record('cross-c-july-open', {

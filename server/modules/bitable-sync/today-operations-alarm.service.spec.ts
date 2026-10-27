@@ -207,7 +207,7 @@ describe('TodayOperationsAlarmService', () => {
       httpService,
       expect.objectContaining({
         appToken: 'resolved-alarm-app-token',
-        tableId: 'tbld976fa6fc1832',
+        tableId: 'tblD7hi70s6U6rlU',
         tableName: '今日全景告警信息',
         cacheTtlMs: 300_000,
         forceRefresh: false,
@@ -219,7 +219,7 @@ describe('TodayOperationsAlarmService', () => {
           '等级',
           '产生时间',
           '预期外/预期内',
-          '人工复核结果', '复核回复', '复核示例人员019',
+          '人工复核结果', '复核回复', '复核责任人',
         ]),
         filter: buildTodayOperationsAlarmSourceFilter({
           timeZone: 'Asia/Shanghai',
@@ -234,12 +234,12 @@ describe('TodayOperationsAlarmService', () => {
 
   it('preserves the custom reply when mapping and patching the current alarm cache', async () => {
     mockedFetch.mockResolvedValueOnce([alarmRecord('recCustom', '2026-07-19T10:00:00', {
-      人工复核结果: '自定义回复', 复核回复: [{ type: 'text', text: '已核对，' }, { type: 'text', text: '待复查。\n重复重复' }], 复核示例人员019: [{ id: 'ou_test', name: '示例人员019' }],
+      人工复核结果: '自定义回复', 复核回复: [{ type: 'text', text: '已核对，' }, { type: 'text', text: '待复查。\n重复重复' }], 复核责任人: [{ id: 'ou_test', name: '责任人' }],
     })]);
     const service = new TodayOperationsAlarmService(httpService);
     const initial = await service.getDashboard({});
     expect(initial.page.items[0].humanReview?.customReply).toBe('已核对，待复查。\n重复重复');
-    service.patchHumanReview('recCustom', { 人工复核结果: '自定义回复', 复核回复: '已安排处理，待复核\n重复重复', 复核示例人员019: [{ id: 'ou_test', name: '示例人员019' }] });
+    service.patchHumanReview('recCustom', { 人工复核结果: '自定义回复', 复核回复: '已安排处理，待复核\n重复重复', 复核责任人: [{ id: 'ou_test', name: '责任人' }] });
     const updated = await service.getDashboard({});
     expect(updated.page.items[0].humanReview?.customReply).toBe('已安排处理，待复核\n重复重复');
     expect(updated.page.items[0].humanReview?.version).not.toBe(initial.page.items[0].humanReview?.version);
@@ -663,7 +663,7 @@ describe('TodayOperationsAlarmService', () => {
 
   it('uses the source URL and credentials override without changing the default route data source', async () => {
     process.env.TODAY_OPERATIONS_ALARM_BITABLE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/appOverride?table=tblOverride&view=vewOverride';
     process.env.TODAY_OPERATIONS_ALARM_FEISHU_APP_ID = 'alarm-app-id';
     process.env.TODAY_OPERATIONS_ALARM_FEISHU_APP_SECRET = 'alarm-app-secret';
     const service = new TodayOperationsAlarmService(httpService);
@@ -744,7 +744,7 @@ describe('TodayOperationsAlarmService', () => {
     expect(stale.summary.sevenDayTotal).toBe(6);
     expect(mockedPersistedSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
-        tableId: 'tbld976fa6fc1832',
+        tableId: 'tblD7hi70s6U6rlU',
         tableName: '今日全景告警信息',
         filter: buildTodayOperationsAlarmSourceFilter(stale.window),
         sort: [{ field_name: '产生时间', desc: true }],

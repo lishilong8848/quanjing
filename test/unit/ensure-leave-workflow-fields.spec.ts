@@ -13,7 +13,7 @@ const script = resolve(
   process.cwd(),
   'scripts/ensure-leave-workflow-fields.mjs',
 );
-const tableId = 'tblf1bbd02a2b049';
+const tableId = 'tblpCzmTT3EapaUY';
 const requiredFields = [
   { name: '\u5ba1\u6279\u6765\u6e90', type: 'select', multiple: false },
   {

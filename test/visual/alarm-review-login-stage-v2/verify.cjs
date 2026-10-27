@@ -306,7 +306,7 @@ async function browserCases(browser, control, artifact, observations, partialPro
     else await page.getByRole('button', { name: '异常跟进', exact: true }).first().click();
     const dialog = form(page); await dialog.getByText('自定义回复', { exact: true }).click();
     await dialog.getByLabel('回复内容').fill('合成复核结论：已经核查，待现场确认。');
-    const search = dialog.getByRole('combobox', { name: '搜索示例人员019' }); await search.fill('李 明');
+    const search = dialog.getByRole('combobox', { name: '搜索责任人' }); await search.fill('李 明');
     await dialog.getByRole('option', { name: /合成李明/ }).first().waitFor();
     await search.press('ArrowDown'); await search.press('Enter');
     await waitFor(async () => await dialog.locator('.alarm-review-person-selected').count() === 1, 'PERSON_STABLE_SELECTION_MISSING');

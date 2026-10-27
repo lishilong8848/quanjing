@@ -28,9 +28,9 @@ describe('多来源独立缓存和周报隔离', () => {
     jest
       .mocked(fetchBitableRecords)
       .mockImplementation(async (_, options) =>
-        options.tableId === 'tbl00349d6675ac8'
+        options.tableId === 'tblsWOglzcniGFwu'
           ? [training]
-          : options.tableId === 'tbl1e190ddc55baa'
+          : options.tableId === 'tblssaUZfDuqW5PQ'
             ? [ali]
             : [weekly],
       );
@@ -81,8 +81,8 @@ describe('多来源独立缓存和周报隔离', () => {
   });
   it('属地表失败仍可查看培训和阿里', async () => {
     jest.mocked(fetchBitableRecords).mockImplementation(async (_, options) => {
-      if (options.tableId === 'tbl96c6dccf01af4') throw new Error('offline');
-      return options.tableId === 'tbl00349d6675ac8' ? [training] : [ali];
+      if (options.tableId === 'tbl9GlPjdwTHIKSp') throw new Error('offline');
+      return options.tableId === 'tblsWOglzcniGFwu' ? [training] : [ali];
     });
     const snapshot = await new MeetingService(
       http,

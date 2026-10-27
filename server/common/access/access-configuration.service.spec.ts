@@ -95,7 +95,7 @@ describe('managed access authorization', () => {
     await expect(configuration.saveAccount(update({ expectedRevision: 1, clientMutationId: 'service-mutation-002' }), actor)).rejects.toThrow('管理权限已变化');
   });
   it('binds Feishu grants to the application and persists explicit denial', async () => {
-    const grant = update({ id: undefined, kind: 'feishu', openId: 'ou_example', name: '示例人员016', role: 'purchase_admin' });
+    const grant = update({ id: undefined, kind: 'feishu', openId: 'ou_example', name: '测试人员', role: 'purchase_admin' });
     await configuration.saveAccount(grant, actor);
     expect(configuration.feishuPrincipal('ou_example', 'cli_access_test')?.role).toBe('purchase_admin');
     expect(configuration.feishuPrincipal('ou_example', 'cli_another')).toBeNull();
@@ -115,8 +115,8 @@ describe('managed access authorization', () => {
   it('rejects a missing person name, wrong card scope and cross-application card routing', async () => {
     const request = { clientMutationId: 'card-invalid-mutation-01', expectedRevision: 0, code: 'purchase_manager' as const, building: null, members: [{ openId: 'ou_example' }] };
     await expect(configuration.saveCardRule(request as never, actor)).rejects.toThrow('人数无效');
-    await expect(configuration.saveCardRule({ ...request, building: 'A楼', members: [{ openId: 'ou_example', name: '示例人员016' }] }, actor)).rejects.toThrow('人数无效');
-    await configuration.saveCardRule({ ...request, members: [{ openId: 'ou_example', name: '示例人员016' }] }, actor);
+    await expect(configuration.saveCardRule({ ...request, building: 'A楼', members: [{ openId: 'ou_example', name: '测试人员' }] }, actor)).rejects.toThrow('人数无效');
+    await configuration.saveCardRule({ ...request, members: [{ openId: 'ou_example', name: '测试人员' }] }, actor);
     process.env.FEISHU_APP_ID = 'cli_other_application';
     expect(() => configuration.cardMembers('purchase_manager', null)).toThrow('其他飞书应用');
   });

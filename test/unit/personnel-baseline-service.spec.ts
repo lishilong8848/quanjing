@@ -37,7 +37,7 @@ describe('首次基线原配置事务与独立激活',()=>{
   afterEach(()=>{jest.restoreAllMocks();process.env=previous;if(resolve(dirname(folder)).toLowerCase()!==resolve(root).toLowerCase()||realpathSync(folder)!==folder||lstatSync(folder).isSymbolicLink()||readFileSync(join(folder,'.test-owner'),'utf8')!==owner)throw Error('测试目录归属异常');rmSync(folder,{recursive:true});});
   const input=(preview:{configurationRevision:number;previewFingerprint:string})=>({clientMutationId:randomUUID(),expectedRevision:preview.configurationRevision,expectedFingerprint:preview.previewFingerprint});
   it('空额外职责表的主表岗位经一次确认落盘，重试不重复写，单独启用后重启保留同一来源',async()=>{
-    const member={...person,position:'设施运维示例人员001',dutyRecordIds:[]},source={appId,appToken:'syntheticBase',tableId:'tblPeople',kind:'personnel_positions' as const};
+    const member={...person,position:'设施运维主管',dutyRecordIds:[]},source={appId,appToken:'syntheticBase',tableId:'tblPeople',kind:'personnel_positions' as const};
     current=directory();current.personnelAuthority!.source=source;current.personnelAuthority!.people=[member];current.personnelAuthority!.duties=buildAuthorityDuties([],[member],source).duties;
     prior=Object.fromEntries(current.personnelAuthority!.duties.map(duty=>[duty.recordId,{source:'合成现行路由已核对',members:[{openId:member.openId,name:member.name}],observedAt:Date.now()}]));
     readPrior.mockImplementation(async()=>Object.fromEntries(Object.entries(prior).map(([id,value])=>[id,{...structuredClone(value),observedAt:Date.now()}])));

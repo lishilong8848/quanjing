@@ -29,7 +29,7 @@ const executionContract = {
   amount: 20_000,
   status: 'active' as const,
   supplier: '南通设备服务有限公司',
-  owner: '示例人员008',
+  owner: '张三',
   endDate: '2026-11-30',
 };
 

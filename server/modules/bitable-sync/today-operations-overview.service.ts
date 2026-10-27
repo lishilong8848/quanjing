@@ -49,19 +49,19 @@ const REQUIRED_BUILDINGS = ['A楼', 'B楼', 'C楼', 'D楼', 'E楼'] as const;
 
 const DEFAULT_SOURCE_URLS = {
   rackLoad:
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/base/ASLxbfESPahdTKs0A9NccgbrnXc?table=tblBgaPzuVj7V9Q6&view=vewTUyPs7E',
   rackShift:
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/base/ASLxbfESPahdTKs0A9NccgbrnXc?table=tblz8rjxdtRRlYmS&view=vewX77mW48',
   rackMonthly:
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/base/ASLxbfESPahdTKs0A9NccgbrnXc?table=tblDYQYihJ0CgepE&view=vew26whHSY',
   events:
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/wiki/D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tblj9XJLq5QzTAqX&view=vew0qiJFzK',
   changes:
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/wiki/D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tblYodlEKeWzqogu&view=vew0HRfTuS',
   maintenance:
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/wiki/D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tblk7QuEsiE4p3nZ&view=vewJoQQzSc',
   inspection:
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/wiki/D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tblpaHktT0mn0hwg&view=vewCwJvtXN',
 } as const;
 
 type SourceKey = keyof typeof DEFAULT_SOURCE_URLS;
@@ -1406,7 +1406,7 @@ function mapChangeDetail(record: BitableRecordItem): TodayOperationsWorkItem {
     level,
     riskLevel,
     status: actualEndTime ? '已结束' : '进行中',
-    owner: textOrNull(fields['示例人员001']),
+    owner: textOrNull(fields['主管']),
     startTime: extractDateTimeIso(fields['变更开始时间']),
     endTime:
       actualEndTime ||

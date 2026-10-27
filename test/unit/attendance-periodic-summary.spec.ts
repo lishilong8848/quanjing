@@ -112,10 +112,10 @@ describe('attendance periodic summary card', () => {
       followUpUrl:
         'https://sm.example.com/attendance-anomaly-follow-up?ticket=abc.DEF',
       anomalies: [
-        anomaly('c-late-1', '示例人员008', 'C楼', '迟到', '2026-09-02 09:00:00'),
-        anomaly('c-late-2', '示例人员008', 'C楼', '迟到', '2026-09-04 09:00:00'),
-        anomaly('a-early-off', '示例人员013', 'A楼', '早退', '2026-09-03 18:00:00'),
-        anomaly('h-missing', '示例人员017', 'H楼', '未打卡', '2026-09-05 09:00:00'),
+        anomaly('c-late-1', '张三', 'C楼', '迟到', '2026-09-02 09:00:00'),
+        anomaly('c-late-2', '张三', 'C楼', '迟到', '2026-09-04 09:00:00'),
+        anomaly('a-early-off', '李四', 'A楼', '早退', '2026-09-03 18:00:00'),
+        anomaly('h-missing', '王五', 'H楼', '未打卡', '2026-09-05 09:00:00'),
         anomaly(
           'station-missing',
           '赵六',
@@ -142,7 +142,7 @@ describe('attendance periodic summary card', () => {
     expect(text).toContain('未打卡且未补卡 2');
     expect(text).toContain('其他待核验 1');
     expect(text).toContain('C楼');
-    expect(text).toContain('示例人员008×2');
+    expect(text).toContain('张三×2');
     expect(text).toContain('110站');
     expect(text).toContain('已补卡并转为正常的记录不计入');
     expect(text).toContain('异常跟进');

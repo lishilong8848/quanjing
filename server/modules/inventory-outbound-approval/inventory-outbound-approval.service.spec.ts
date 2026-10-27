@@ -208,7 +208,7 @@ describe('InventoryOutboundApprovalService', () => {
       await gate;
       return snapshot({
         availableStock: 0,
-        approvers: [{ openId: 'ou_new', name: '新示例人员019' }],
+        approvers: [{ openId: 'ou_new', name: '新责任人' }],
       });
     });
     const late = second.ensurePendingForRequest(
@@ -880,7 +880,7 @@ describe('InventoryOutboundApprovalService', () => {
       resolveApprovers: jest
         .fn()
         .mockResolvedValue([
-          { openId: 'ou_current_responsible', name: '当前示例人员019' },
+          { openId: 'ou_current_responsible', name: '当前责任人' },
         ]),
       resolveNotificationRecipients: jest
         .fn()
@@ -915,7 +915,7 @@ describe('InventoryOutboundApprovalService', () => {
       expect.objectContaining({ eventId: 'evt_finalized_approve' }),
       expect.objectContaining({
         version: 2,
-        approvers: [{ openId: 'ou_current_responsible', name: '当前示例人员019' }],
+        approvers: [{ openId: 'ou_current_responsible', name: '当前责任人' }],
         managerRecipients: [
           { openId: 'ou_current_manager', name: '当前管理人' },
         ],
@@ -965,7 +965,7 @@ describe('InventoryOutboundApprovalService', () => {
       resolveApprovers: jest
         .fn()
         .mockResolvedValue([
-          { openId: 'ou_current_responsible', name: '当前示例人员019' },
+          { openId: 'ou_current_responsible', name: '当前责任人' },
         ]),
       resolveNotificationRecipients: jest.fn().mockResolvedValue([]),
     };
@@ -992,7 +992,7 @@ describe('InventoryOutboundApprovalService', () => {
       expect.objectContaining({ eventId: 'evt_finalized_approve' }),
       expect.objectContaining({
         version: 2,
-        approvers: [{ openId: 'ou_current_responsible', name: '当前示例人员019' }],
+        approvers: [{ openId: 'ou_current_responsible', name: '当前责任人' }],
         managerRecipients: [],
       }),
     );

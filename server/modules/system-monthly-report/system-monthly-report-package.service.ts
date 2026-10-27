@@ -186,7 +186,7 @@ export class SystemMonthlyReportPackageService {
         task: {
           ...entry.task,
           status: 'notifying',
-          message: '压缩包已生成，正在推送示例人员020',
+          message: '压缩包已生成，正在推送马进宇',
           missingRooms,
           packageReady: true,
         },
@@ -230,7 +230,7 @@ export class SystemMonthlyReportPackageService {
           status: missingRooms.length ? 'partial' : 'success',
           message: missingRooms.length
             ? `打包完成，缺少 ${missingRooms.join('、')}`
-            : '全部机房终版已打包并推送示例人员020',
+            : '全部机房终版已打包并推送马进宇',
           missingRooms,
           packageReady: true,
           notified: true,
@@ -274,9 +274,9 @@ function validateRequest(
   if (!rooms.length) throw new BadRequestException('所选月份没有机房数据');
   if (
     !/^ou_[A-Za-z0-9]+$/u.test(recipient.openId || '') ||
-    recipient.name !== '示例人员020'
+    recipient.name !== '马进宇'
   )
-    throw new BadRequestException('示例人员020稳定飞书身份未找到');
+    throw new BadRequestException('马进宇稳定飞书身份未找到');
   if (principal.length < 8) throw new BadRequestException('当前打包会话无效');
 }
 function sha256(value: string): string {

@@ -14856,7 +14856,7 @@ function getLifecycleStageDetailRows(
         label: '审批进度',
         value: `${approvalProgress.completed}/${approvalProgress.total} 节点`,
       },
-      { label: '示例人员001审批', value: item.approval.supervisor || '待确认' },
+      { label: '主管审批', value: item.approval.supervisor || '待确认' },
       { label: '知会EHS工程师', value: getEhsNotifiedStatus(item) || '待知会' },
       {
         label: '审批材料提交',
@@ -16029,15 +16029,15 @@ function getApprovalFlowSteps(
         getConstructionApplicantName(item) === '未配置' ? 'pending' : 'done',
     },
     {
-      title: '楼栋示例人员001审批',
-      owner: item.managers.supervisor || '楼栋示例人员001（多维表生成）',
+      title: '楼栋主管审批',
+      owner: item.managers.supervisor || '楼栋主管（多维表生成）',
       status: item.approval.supervisor || '待审批',
       tone: getApprovalTone(item.approval.supervisor),
     },
     {
       title: '知会EHS工程师',
       owner: item.managers.safety || 'EHS工程师',
-      status: ehsNotifiedStatus || (supervisorPassed ? '待知会' : '待示例人员001审批'),
+      status: ehsNotifiedStatus || (supervisorPassed ? '待知会' : '待主管审批'),
       tone: getApprovalTone(
         ehsNotifiedStatus,
         supervisorPassed ? 'active' : 'pending',

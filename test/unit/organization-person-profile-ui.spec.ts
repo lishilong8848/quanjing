@@ -103,12 +103,12 @@ describe('organization person profile UI contract', () => {
   const summary = {
     source: 'organization' as const,
     recordId: 'rec-audit-person',
-    name: '档案示例人员016',
+    name: '档案测试人员',
     position: '运维工程师',
     buildings: ['B楼'],
     shift: '长白',
     photoUrl: '/api/person-photo/audit-person',
-    email: 'user-8e0f1b20@example.com',
+    email: 'profile@example.test',
     phone: '139****7788',
   };
 

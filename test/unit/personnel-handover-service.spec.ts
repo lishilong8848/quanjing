@@ -11,12 +11,12 @@ import { PERSONNEL_HANDOVER_SCOPE } from '../../shared/personnel-handover-scope'
 const modules:HandoverModule[]=['purchase','inventory','contracts','leave','overtime'];
 const actor={ id:'synthetic-admin',name:'合成管理员' };
 const request:HandoverPreviewRequest={ fromPersonId:'old',toPersonId:'new',dutyRecordIds:['synthetic-duty'],mode:'offboarding' };
-const person=(id:string,active:boolean)=>({ id,recordId:`rec-${id}`,name:`合成-${id}`,openId:`ou_synthetic_${id}`,active,type:'employee' as const,position:'设施示例人员001',systemPosition:'',buildings:['C楼' as const],specialties:[],permissionTags:[],dutyRecordIds:['synthetic-duty'] });
+const person=(id:string,active:boolean)=>({ id,recordId:`rec-${id}`,name:`合成-${id}`,openId:`ou_synthetic_${id}`,active,type:'employee' as const,position:'设施主管',systemPosition:'',buildings:['C楼' as const],specialties:[],permissionTags:[],dutyRecordIds:['synthetic-duty'] });
 function fixture() {
   const source=accountPermissionTemplate({ id:'old-account',kind:'feishu',name:'合成前任',role:'building_admin',building:'C楼',enabled:false,deleted:false,version:3,source:'configuration' });
   const before=accountPermissionTemplate({ id:'new-account',kind:'feishu',name:'合成接任',role:'site_member',building:null,enabled:true,deleted:false,version:2,source:'configuration' });
   const from=person('old',false),to=person('new',true);
-  const context:HandoverContext={ from,to,directoryVersion:'a'.repeat(64),duties:[{ recordId:'synthetic-duty',name:'合成C楼示例人员001',kind:'building_supervisor',personnelIds:['old'],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:4 }] };
+  const context:HandoverContext={ from,to,directoryVersion:'a'.repeat(64),duties:[{ recordId:'synthetic-duty',name:'合成C楼主管',kind:'building_supervisor',personnelIds:['old'],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:4 }] };
   const content:PreviewContent={ requested:request,baseline:{ configurationRevision:8,directoryVersion:context.directoryVersion,accounts:[{ id:'old-account',version:3 },{ id:'new-account',version:2 }],duties:[{ recordId:'synthetic-duty',version:4 }],pending:[] },from,to,permissions:[{ ...previewPermissionInheritance(source,before),sourceAccountId:'old-account',targetAccountId:'new-account' }],pending:[],excluded:[],conflicts:[],warnings:[] };
   const authority:HandoverAuthorityPort={ assertAdministrator:jest.fn().mockResolvedValue(undefined),snapshot:jest.fn().mockResolvedValue({ ready:true,content,context }),restoreContext:jest.fn().mockResolvedValue(context),applyPermissions:jest.fn().mockResolvedValue(undefined) };
   const item:PendingDuty={ key:'leave:synthetic-item',module:'leave',recordId:'synthetic-item',title:'合成请休假',dutyRecordId:'synthetic-duty',phase:'approval',status:'pending',stageKey:'supervisor',version:'stage-2',recipients:[{ name:from.name,openId:from.openId }] };

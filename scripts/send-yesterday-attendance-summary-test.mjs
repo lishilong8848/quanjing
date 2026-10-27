@@ -33,7 +33,7 @@ async function main() {
   const businessDate =
     readDateArgument(process.argv.slice(2)) || yesterdayInShanghai();
   const managerName =
-    process.env.FEISHU_ATTENDANCE_MANAGER_NAME?.trim() || '示例人员020';
+    process.env.FEISHU_ATTENDANCE_MANAGER_NAME?.trim() || '马进宇';
   const gateway = new AttendanceAutomationFeishuGateway(new HttpService());
   const summary = await gateway.readArchivedAttendanceSummary(businessDate);
   const managerAnomalies = summary.anomalies.filter(

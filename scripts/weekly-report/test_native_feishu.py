@@ -64,22 +64,22 @@ class NativeFeishuTests(unittest.TestCase):
         api = native_feishu.NativeFeishu('qa-token')
         api.request = Mock(side_effect=[
             {'items': [{'field_id': 'fldLink', 'field_name': '链接', 'type': 15}], 'has_more': False},
-            {'items': [{'record_id': 'recA', 'fields': {'链接': {'text': '周报显示名称', 'link': 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE'}}}], 'has_more': False},
+            {'items': [{'record_id': 'recA', 'fields': {'链接': {'text': '周报显示名称', 'link': 'https://vnet.feishu.cn/docx/docQA'}}}], 'has_more': False},
         ])
         rows = api.list_records(base_token='baseA', table_id='tblA', field_ids=['链接'], identity='bot', max_pages=1)
-        self.assertEqual(rows[0]['fields']['链接'], 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE')
+        self.assertEqual(rows[0]['fields']['链接'], 'https://vnet.feishu.cn/docx/docQA')
 
     def test_historic_rich_text_link_extracts_hyperlink_target(self):
         api = native_feishu.NativeFeishu('qa-token')
         api.request = Mock(side_effect=[
             {'items': [{'field_id': 'fldLink', 'field_name': '链接', 'type': 1}], 'has_more': False},
-            {'items': [{'record_id': 'recA', 'fields': {'链接': [{'type': 'text', 'text': '周报显示名称', 'link': 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE'}]}}], 'has_more': False},
+            {'items': [{'record_id': 'recA', 'fields': {'链接': [{'type': 'text', 'text': '周报显示名称', 'link': 'https://vnet.feishu.cn/docx/docQA'}]}}], 'has_more': False},
         ])
         rows = api.list_records(base_token='baseA', table_id='tblA', field_ids=['链接'], identity='bot', max_pages=1)
-        self.assertEqual(rows[0]['fields']['链接'], 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE')
+        self.assertEqual(rows[0]['fields']['链接'], 'https://vnet.feishu.cn/docx/docQA')
 
     def test_document_urls_are_restricted(self):
-        for url in ['https://evil.invalid/docx/abc', 'file:///a', 'https://example.feishu.cn/a/PUBLIC_EXAMPLE_SOURCE']:
+        for url in ['https://evil.invalid/docx/abc', 'file:///a', 'https://vnet.feishu.cn/docx/../../a']:
             with self.assertRaises(native_feishu.NativeError):
                 native_feishu.document_id(url)
 
@@ -102,14 +102,14 @@ class NativeFeishuTests(unittest.TestCase):
             api = FakeDocumentApi(work)
             api.timeout_append = True
             with self.assertRaises(native_feishu.NativeError):
-                api.write('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', '<title>验收</title><h1>新周报</h1><p>检查供电</p>')
+                api.write('https://vnet.feishu.cn/docx/docQA', '<title>验收</title><h1>新周报</h1><p>检查供电</p>')
             self.assertIn('old', api.root['children'])
             api.timeout_append = False
-            api.write('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', '<title>验收</title><h1>新周报</h1><p>检查供电</p>')
+            api.write('https://vnet.feishu.cn/docx/docQA', '<title>验收</title><h1>新周报</h1><p>检查供电</p>')
             self.assertEqual(api.append_count, 1)
             self.assertNotIn('old', api.root['children'])
             self.assertEqual(len(api.root['children']), 2)
-            api.write('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', '<title>验收</title><h1>新周报</h1><p>检查供电</p>')
+            api.write('https://vnet.feishu.cn/docx/docQA', '<title>验收</title><h1>新周报</h1><p>检查供电</p>')
             self.assertEqual(api.append_count, 1)
             from pathlib import Path
             self.assertNotIn('qa-token', ''.join(p.read_text(encoding='utf-8') for p in Path(work).glob('*.json')))
@@ -120,7 +120,7 @@ class NativeFeishuTests(unittest.TestCase):
             api = FakeDocumentApi(work)
             api.corrupt = True
             with self.assertRaises(native_feishu.NativeError):
-                api.write('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', '<h1>新周报</h1><p>检查供电</p>')
+                api.write('https://vnet.feishu.cn/docx/docQA', '<h1>新周报</h1><p>检查供电</p>')
             self.assertIn('old', api.root['children'])
             self.assertEqual(api.delete_count, 0)
 
@@ -130,12 +130,12 @@ class NativeFeishuTests(unittest.TestCase):
             api = FakeDocumentApi(work)
             api.timeout_append = True
             with self.assertRaises(native_feishu.NativeError):
-                api.write('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', '<p>新周报</p>')
+                api.write('https://vnet.feishu.cn/docx/docQA', '<p>新周报</p>')
             api.items[1]['text']['elements'][0]['text_run']['content'] = '刚刚手动修改'
             api.revision += 1
             api.timeout_append = False
             with self.assertRaises(native_feishu.NativeError) as raised:
-                api.write('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', '<p>新周报</p>')
+                api.write('https://vnet.feishu.cn/docx/docQA', '<p>新周报</p>')
             self.assertEqual(raised.exception.category, 'document-conflict')
             self.assertEqual(api.delete_count, 0)
 
@@ -146,11 +146,11 @@ class NativeFeishuTests(unittest.TestCase):
             api.timeout_append_at = 2
             xml = ''.join(f'<p>验收事项{i}</p>' for i in range(120))
             with self.assertRaises(native_feishu.NativeError):
-                api.write('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', xml)
+                api.write('https://vnet.feishu.cn/docx/docQA', xml)
             self.assertEqual(api.append_count, 2)
             self.assertIn('old', api.root['children'])
             api.timeout_append_at = 0
-            api.write('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', xml)
+            api.write('https://vnet.feishu.cn/docx/docQA', xml)
             self.assertEqual(api.append_count, 3)
             self.assertEqual(len(api.root['children']), 120)
             self.assertEqual(len(set(api.root['children'])), 120)
@@ -163,7 +163,7 @@ class NativeFeishuTests(unittest.TestCase):
             api.timeout_append = True
             with self.assertRaises(native_feishu.NativeError) as raised:
                 api.create('<title>验收</title><p>检查供电</p>', {})
-            self.assertEqual(raised.exception.document_url, 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE')
+            self.assertEqual(raised.exception.document_url, 'https://vnet.feishu.cn/docx/docQA')
             self.assertEqual(api.create_count, 1)
 
     def test_full_template_writes_and_reads_back_without_cli(self):

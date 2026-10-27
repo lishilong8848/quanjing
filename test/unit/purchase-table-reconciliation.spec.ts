@@ -66,7 +66,7 @@ describe('purchase table reconciliation', () => {
       [
         record({
           recordId: 'submission-shi',
-          requester: '示例人员009',
+          requester: '施小东',
           itemName: '数字钳形表表笔',
         }),
       ],
@@ -75,7 +75,7 @@ describe('purchase table reconciliation', () => {
           recordId: 'execution-shi',
           code: 'CG251217-101',
           building: 'A楼',
-          requester: '示例人员009',
+          requester: '施小东',
           itemName: '数字钳形表表笔',
           createdAt: Date.parse('2025-12-17T10:04:00+08:00'),
         }),
@@ -134,7 +134,7 @@ describe('purchase table reconciliation', () => {
       recordId: 'submission-c-building',
       code: 'CG260112-301',
       building: 'C楼',
-      requester: '示例人员010',
+      requester: '明志勇',
       itemName: '消防器材点检卡',
     });
     const plan = planPurchaseTableReconciliation(
@@ -144,7 +144,7 @@ describe('purchase table reconciliation', () => {
           recordId: 'execution-a-building',
           code: 'CG260112-102',
           building: 'A楼',
-          requester: '示例人员010',
+          requester: '明志勇',
           itemName: '消防器材点检卡',
           createdAt: submission.createdAt + 60_000,
         }),
@@ -152,7 +152,7 @@ describe('purchase table reconciliation', () => {
           recordId: 'execution-c-building',
           code: 'CG260112-302',
           building: 'C楼',
-          requester: '示例人员010',
+          requester: '明志勇',
           itemName: '消防器材点检卡',
           createdAt: submission.createdAt + 70_000,
         }),
@@ -172,7 +172,7 @@ describe('purchase table reconciliation', () => {
 
   it('assigns remaining H submission to the only unclaimed execution authority', () => {
     const base = record({
-      requester: '示例人员010',
+      requester: '明志勇',
       itemName: '藿香正气口服液',
       quantity: 5,
       unit: '盒',
@@ -226,7 +226,7 @@ describe('purchase table reconciliation', () => {
   it('pairs an equal-size ambiguous batch by creation order', () => {
     const first = record({
       recordId: 'submission-first',
-      requester: '示例人员010',
+      requester: '明志勇',
       itemName: '电子称',
     });
     const second = record({

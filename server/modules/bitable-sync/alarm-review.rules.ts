@@ -4,7 +4,7 @@ import { ALARM_REVIEW_CUSTOM_OUTCOME, ALARM_REVIEW_REPLY_MAX_LENGTH, ALARM_REVIE
 import { extractDisplayText } from '../../common/feishu/bitable-direct-read';
 
 export const ALARM_REVIEW_FIELD = '人工复核结果';
-export const ALARM_REVIEW_PERSON_FIELD = '复核示例人员019';
+export const ALARM_REVIEW_PERSON_FIELD = '复核责任人';
 export const ALARM_REVIEW_REPLY_FIELD = '复核回复';
 export function readAlarmReviewReply(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -23,7 +23,7 @@ export function normalizeAlarmReviewRequest(value: unknown): AlarmReviewRequest 
     !ALARM_REVIEW_OUTCOMES.includes(input.outcome as AlarmReviewOutcome) ||
     typeof input.responsibleRecordId !== 'string' || !/^rec[A-Za-z0-9]+$/.test(input.responsibleRecordId) ||
     typeof input.clientMutationId !== 'string' || !/^alarm-review-[A-Za-z0-9_-]{8,100}$/.test(input.clientMutationId)) {
-    throw new BadRequestException('请选择 1–50 条告警、复核结果和示例人员019，并保留本次提交标识');
+    throw new BadRequestException('请选择 1–50 条告警、复核结果和责任人，并保留本次提交标识');
   }
   const recordIds = [...new Set(input.recordIds)].sort();
   const customReply = typeof input.customReply === 'string' ? input.customReply.trim() : '';

@@ -34,7 +34,7 @@ jest.mock(
 );
 
 jest.mock('../../server/modules/bitable-sync/employee-onboarding.config', () => ({
-  readEmployeeOnboardingConfig: jest.fn(() => ({ appToken: 'canonicalPersonApp', wikiToken: '', tableId: 'tbl122d1a08645adab', tableName: '员工信息池（全量）' })),
+  readEmployeeOnboardingConfig: jest.fn(() => ({ appToken: 'canonicalPersonApp', wikiToken: '', tableId: 'tblCanonicalPerson', tableName: '员工信息池（全量）' })),
 }));
 
 jest.mock(
@@ -150,7 +150,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       [
         '张鹏',
         '411024199110154959',
-        '13800004492',
+        '17550110588',
         '浙江省邮电工程建设有限公司',
         'HA楼',
         '2026-06-08 至 2026-06-14',
@@ -354,7 +354,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     const loggerError = jest.fn();
     service.logger.error = loggerError;
     const sensitiveMessage =
-      'write rejected for private-summary.pdf, 示例人员008, tenant-token-secret';
+      'write rejected for private-summary.pdf, 张三, tenant-token-secret';
     const error = Object.assign(new Error(sensitiveMessage), {
       response: {
         status: 400,
@@ -373,7 +373,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       /^变更总结记录创建被飞书拒绝：requestRef=[0-9a-f]{12}, upstreamStatus=400, bitableCode=1254015$/,
     );
     expect(message).not.toMatch(
-      /private-summary|示例人员008|tenant-token-secret|write rejected/i,
+      /private-summary|张三|tenant-token-secret|write rejected/i,
     );
   });
 
@@ -632,7 +632,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     overrides: Partial<LeaveRequestCreateRequest> = {},
     schedules: LeaveRequestImpactSchedule[] = [createLeaveSchedule()],
   ): LeaveRequestCreateRequest {
-    const leaveStaffName = overrides.leaveStaffName ?? '示例人员008';
+    const leaveStaffName = overrides.leaveStaffName ?? '张三';
     const startAt = overrides.startAt ?? '2026-08-05T18:00';
     const endAt = overrides.endAt ?? '2026-08-06T09:00';
     return {
@@ -643,7 +643,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       leaveType: '年假',
       leaveReason: '年度休假',
       needSubstitute: true,
-      substituteStaffName: '示例人员013',
+      substituteStaffName: '李四',
       ...overrides,
       expectedImpact:
         overrides.expectedImpact ??
@@ -717,7 +717,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       teamText: '一班',
       shift: 'night',
       shiftText: '夜间值守',
-      dutyStaffActual: ['示例人员008'],
+      dutyStaffActual: ['张三'],
       ...overrides,
     };
   }
@@ -831,16 +831,16 @@ describe('DutyScheduleService construction crew ledger views', () => {
       {
         record_id: 'recPersonZhangSan',
         fields: {
-          姓名: '示例人员008',
-          员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }],
+          姓名: '张三',
+          员工姓名: [{ id: 'ou_zhangsan', name: '张三' }],
           班组: 'A班',
         },
       },
       {
         record_id: 'recPersonLiSi',
         fields: {
-          姓名: '示例人员013',
-          员工姓名: [{ id: 'ou_lisi', name: '示例人员013' }],
+          姓名: '李四',
+          员工姓名: [{ id: 'ou_lisi', name: '李四' }],
           班组: 'A班',
         },
       },
@@ -874,7 +874,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           }
           return personnelRecords;
         }
-        if (read.tableId === 'tbl122d1a08645adab') return options.canonicalPersonnelRecords ?? personnelRecords;
+        if (read.tableId === 'tblCanonicalPerson') return options.canonicalPersonnelRecords ?? personnelRecords;
         return [];
       },
     );
@@ -894,7 +894,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       viewId: 'vewHyBE14E',
       tableName: '请休假替班修正',
       sourceUrl:
-        'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E',
     };
     service.fetchBitableFieldMetas = jest.fn(
       async () => options.fieldMetas ?? createLeaveRequestFieldMetas(),
@@ -923,7 +923,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     schedules: OvertimeRequestImpactSchedule[] = [],
     staffShift: string | null = 'A班',
   ): OvertimeRequestCreateRequest {
-    const staffName = overrides.staffName ?? '示例人员008';
+    const staffName = overrides.staffName ?? '张三';
     const startAt = overrides.startAt ?? '2026-08-05T19:00+08:00';
     const endAt = overrides.endAt ?? '2026-08-05T22:00+08:00';
     return {
@@ -984,7 +984,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       options.personnelRecords ?? createDefaultLeavePersonnelRecords();
     getBitableRecordsMock().mockImplementation(
       async (_httpService: unknown, read: { tableId?: string }) => {
-        if (read.tableId === 'tblf1bbd02a2b049') {
+        if (read.tableId === 'tblpCzmTT3EapaUY') {
           if (options.overtimeLookupError !== undefined) {
             throw options.overtimeLookupError;
           }
@@ -1029,11 +1029,11 @@ describe('DutyScheduleService construction crew ledger views', () => {
     service.leaveSubstituteConfig = {
       appToken: 'leaveApp',
       wikiToken: '',
-      tableId: 'tblf1bbd02a2b049',
+      tableId: 'tblpCzmTT3EapaUY',
       viewId: 'vewHyBE14E',
       tableName: '请休假替班修正',
       sourceUrl:
-        'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E',
     };
     service.fetchBitableFieldMetas = jest.fn(
       async () => options.fieldMetas ?? createOvertimeRequestFieldMetas(),
@@ -1093,7 +1093,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     const service = createOvertimeRequestService();
     service.resolveLeaveRequestStaff = jest.fn(async () => ({ userId: 'ou_verified_self', personRecordId: 'recVerifiedSelf' }));
     await expect(DutyScheduleService.prototype.createOvertimeRequest.call(service, createOvertimeRequestInput(), createLeaveScreenshot(), {
-      role: 'admin', purchaseBuilding: null, accountId: 'feishu-' + 'a'.repeat(64), displayName: '示例人员008',
+      role: 'admin', purchaseBuilding: null, accountId: 'feishu-' + 'a'.repeat(64), displayName: '张三',
     })).rejects.toThrow('加班人员缓存不一致');
     expect(service.uploadBitableAttachment).not.toHaveBeenCalled();
     expect(service.createBitableRecord).not.toHaveBeenCalled();
@@ -1103,7 +1103,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     const service = createOvertimeRequestService();
     service.resolveLeaveRequestStaff = jest.fn(async () => ({ userId: 'ou_zhangsan', personRecordId: 'recVerifiedSelf' }));
     await expect(DutyScheduleService.prototype.createOvertimeRequest.call(service, createOvertimeRequestInput(), createLeaveScreenshot(), {
-      role: 'admin', purchaseBuilding: null, accountId: 'feishu-' + 'a'.repeat(64), displayName: '示例人员008',
+      role: 'admin', purchaseBuilding: null, accountId: 'feishu-' + 'a'.repeat(64), displayName: '张三',
     })).resolves.toMatchObject({ success: true });
     expect(service.createBitableRecord).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ 加班人员: [{ id: 'ou_zhangsan' }] }), expect.anything(), expect.anything());
   });
@@ -1131,7 +1131,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       clientMutationId: request.clientMutationId,
       requestFingerprint: fingerprint,
       impact: request.expectedImpact,
-      message: '加班申请已提交：示例人员008，3 小时',
+      message: '加班申请已提交：张三，3 小时',
     });
     expect(service.getMonthlySchedulesFromLocalCache).toHaveBeenCalledWith(
       '2026-08-04',
@@ -1159,11 +1159,11 @@ describe('DutyScheduleService construction crew ledger views', () => {
     );
     expect(service.createBitableRecord).toHaveBeenCalledWith(
       'leaveApp',
-      'tblf1bbd02a2b049',
+      'tblpCzmTT3EapaUY',
       '请休假替班修正',
       {
         加班人员: [{ id: 'ou_zhangsan' }],
-        加班人员姓名: '示例人员008',
+        加班人员姓名: '张三',
         加班开始时间: new Date('2026-08-05T19:00:00+08:00').getTime(),
         加班结束时间: new Date('2026-08-05T22:00:00+08:00').getTime(),
         加班时长: 3,
@@ -1263,7 +1263,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     const loggerError = jest.fn();
     service.logger.error = loggerError;
     const sensitiveMessage =
-      'upload failed for overtime-proof.png, 示例人员008, tenant-token-secret';
+      'upload failed for overtime-proof.png, 张三, tenant-token-secret';
     service.uploadBitableAttachment.mockRejectedValueOnce(
       Object.assign(new Error(sensitiveMessage), {
         response: {
@@ -1303,7 +1303,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     });
     expect(publicDiagnostics).not.toContain(sensitiveMessage);
     expect(publicDiagnostics).not.toContain('overtime-proof.png');
-    expect(publicDiagnostics).not.toContain('示例人员008');
+    expect(publicDiagnostics).not.toContain('张三');
     expect(publicDiagnostics).not.toContain('tenant-token-secret');
     expect(service.createBitableRecord).not.toHaveBeenCalled();
   });
@@ -1469,8 +1469,8 @@ describe('DutyScheduleService construction crew ledger views', () => {
           {
             record_id: `recPersonShift-${shiftFieldName}`,
             fields: {
-              姓名: '示例人员008',
-              员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }],
+              姓名: '张三',
+              员工姓名: [{ id: 'ou_zhangsan', name: '张三' }],
               [shiftFieldName]: 'A班',
             },
           },
@@ -1478,7 +1478,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       });
 
       await expect(
-        service.resolveOvertimeRequestStaff('示例人员008'),
+        service.resolveOvertimeRequestStaff('张三'),
       ).resolves.toEqual({
         userId: 'ou_zhangsan',
         shift: 'A班',
@@ -1558,8 +1558,8 @@ describe('DutyScheduleService construction crew ledger views', () => {
         {
           record_id: 'recPersonLongWhite',
           fields: {
-            姓名: '示例人员008',
-            员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }],
+            姓名: '张三',
+            员工姓名: [{ id: 'ou_zhangsan', name: '张三' }],
             班次: '长白',
           },
         },
@@ -1598,8 +1598,8 @@ describe('DutyScheduleService construction crew ledger views', () => {
         {
           record_id: 'recPersonLongWhiteUnknownCalendar',
           fields: {
-            姓名: '示例人员008',
-            员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }],
+            姓名: '张三',
+            员工姓名: [{ id: 'ou_zhangsan', name: '张三' }],
             班次: '长白',
           },
         },
@@ -1741,8 +1741,8 @@ describe('DutyScheduleService construction crew ledger views', () => {
         {
           record_id: 'recPersonMissingShift',
           fields: {
-            姓名: '示例人员008',
-            员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }],
+            姓名: '张三',
+            员工姓名: [{ id: 'ou_zhangsan', name: '张三' }],
           },
         },
       ],
@@ -1754,7 +1754,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           clientMutationId: 'overtime-request-personnel-shift-missing',
         }),
       ),
-    ).rejects.toThrow('加班人员“示例人员008”缺少班次信息，请先在人员表维护');
+    ).rejects.toThrow('加班人员“张三”缺少班次信息，请先在人员表维护');
     expect(service.uploadBitableAttachment).not.toHaveBeenCalled();
     expect(service.createBitableRecord).not.toHaveBeenCalled();
   });
@@ -1788,7 +1788,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     expect(getBitableRecordsMock()).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        tableId: 'tblf1bbd02a2b049',
+        tableId: 'tblpCzmTT3EapaUY',
         fieldNames: ['请求唯一ID', '请求指纹', '加班开始时间'],
         forceRefresh: true,
         strict: true,
@@ -1980,7 +1980,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
 
       getBitableRecordsMock().mockImplementation(
         async (_httpService: unknown, read: { tableId?: string }) => {
-          if (read.tableId === 'tblf1bbd02a2b049') return [];
+          if (read.tableId === 'tblpCzmTT3EapaUY') return [];
           if (read.tableId === 'tblLeavePerson') {
             return createDefaultLeavePersonnelRecords();
           }
@@ -2314,7 +2314,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
   ): ChangeRequestCreateRequest {
     return {
       clientMutationId: 'change-request-123e4567-e89b-42d3-a456-426614174000',
-      submitterName: '示例人员008',
+      submitterName: '张三',
       nature: '标准变更',
       summary: 'UPS 年度维护',
       changeType: '计划性变更',
@@ -2417,8 +2417,8 @@ describe('DutyScheduleService construction crew ledger views', () => {
               {
                 record_id: 'recPersonZhangSan',
                 fields: {
-                  姓名: '示例人员008',
-                  员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }],
+                  姓名: '张三',
+                  员工姓名: [{ id: 'ou_zhangsan', name: '张三' }],
                 },
               },
             ],
@@ -2429,11 +2429,11 @@ describe('DutyScheduleService construction crew ledger views', () => {
     (service as any).calendarChangeConfig = {
       appToken: 'changeApp',
       wikiToken: '',
-      tableId: 'tbl8f743982e48e1',
+      tableId: 'tblBvg6wCYSX3hcg',
       viewId: 'vewew3vfZT',
       tableName: '计划变更日历',
       sourceUrl:
-        'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/wiki/JhiVwgfoIimAqEk8YwEc09sknGd?table=tblBvg6wCYSX3hcg&view=vewew3vfZT',
     };
     service.fetchBitableFieldMetas = jest.fn(
       async () => options.fieldMetas ?? createMigratedChangeRequestFieldMetas(),
@@ -2473,7 +2473,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       buildings: ['A楼', '110站'],
       riskSummary: '切换前确认旁路供电正常',
       isKey: false,
-      recordUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+      recordUrl: 'https://vnet.feishu.cn/base/change?record=recChange1',
       createdAt: '2026-08-03T01:00:00.000Z',
       updatedAt: '2026-08-03T01:00:00.000Z',
     }));
@@ -2540,7 +2540,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     });
 
     const fieldsUrl =
-      'https://open.feishu.cn/open-apis/bitable/v1/apps/changeApp/tables/tbl8f743982e48e1/fields';
+      'https://open.feishu.cn/open-apis/bitable/v1/apps/changeApp/tables/tblBvg6wCYSX3hcg/fields';
     expect(put).toHaveBeenCalledWith(
       `${fieldsUrl}/fld9oFnegn`,
       { field_name: '系统创建人', type: 1003 },
@@ -2682,7 +2682,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     );
     expect(service.createBitableRecord).toHaveBeenCalledWith(
       'changeApp',
-      'tbl8f743982e48e1',
+      'tblBvg6wCYSX3hcg',
       '计划变更日历',
       {
         变更性质判断: '标准变更',
@@ -2719,7 +2719,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     ).toBeLessThan(service.createBitableRecord.mock.invocationCallOrder[0]);
     expect(service.fetchBitableRecordById).toHaveBeenCalledWith(
       'changeApp',
-      'tbl8f743982e48e1',
+      'tblBvg6wCYSX3hcg',
       '计划变更日历',
       'recChange1',
       'tenant-token',
@@ -2727,7 +2727,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     );
     expect(getInvalidateBitableRecordCacheMock()).toHaveBeenCalledWith({
       appToken: 'changeApp',
-      tableId: 'tbl8f743982e48e1',
+      tableId: 'tblBvg6wCYSX3hcg',
     });
     expect(getPersistedBitableRecordSnapshotMock()).toHaveBeenCalledWith({
       appToken: 'leavePersonApp',
@@ -2787,7 +2787,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     );
     expect(service.updateBitableRecordFields).toHaveBeenCalledWith(
       'changeApp',
-      'tbl8f743982e48e1',
+      'tblBvg6wCYSX3hcg',
       '计划变更日历',
       'recChange1',
       { 变更文档: [{ file_token: 'tok-change-plan.pdf' }] },
@@ -2939,7 +2939,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     expect(service.updateBitableRecordFields).toHaveBeenCalledTimes(1);
     expect(service.updateBitableRecordFields).toHaveBeenCalledWith(
       'changeApp',
-      'tbl8f743982e48e1',
+      'tblBvg6wCYSX3hcg',
       '计划变更日历',
       'recChange1',
       {
@@ -3622,7 +3622,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     ).toHaveLength(2);
     expect(service.createBitableRecord).toHaveBeenCalledWith(
       'changeApp',
-      'tbl8f743982e48e1',
+      'tblBvg6wCYSX3hcg',
       '计划变更日历',
       expect.objectContaining({
         变更文档: [
@@ -3782,7 +3782,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       expect(restartedService.createBitableRecord).not.toHaveBeenCalled();
       expect(restartedService.fetchBitableRecordById).toHaveBeenCalledWith(
         'changeApp',
-        'tbl8f743982e48e1',
+        'tblBvg6wCYSX3hcg',
         '计划变更日历',
         'recChange1',
         'tenant-token',
@@ -4305,7 +4305,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     try {
       const service = createLeaveRequestService([createLeaveSchedule()]);
       const principal: AccessPrincipal = {
-        role: 'site_member', purchaseBuilding: null, displayName: '示例人员008',
+        role: 'site_member', purchaseBuilding: null, displayName: '张三',
         accountId: `feishu-${feishuIdentityFingerprint('cli_fixture', 'ou_other')}`,
       };
       await expect(service.createLeaveRequest(createLeaveRequestInput(), createLeaveScreenshot(), principal))
@@ -4323,12 +4323,12 @@ describe('DutyScheduleService construction crew ledger views', () => {
     try {
       const service = createLeaveRequestService([createLeaveSchedule()]);
       await expect(service.createLeaveRequest(createLeaveRequestInput(), createLeaveScreenshot(), {
-        role: 'site_member', purchaseBuilding: null, displayName: '示例人员008',
+        role: 'site_member', purchaseBuilding: null, displayName: '张三',
         accountId: `feishu-${feishuIdentityFingerprint('cli_fixture', 'ou_zhangsan')}`,
-      })).resolves.toMatchObject({ success: true, leaveStaffName: '示例人员008' });
+      })).resolves.toMatchObject({ success: true, leaveStaffName: '张三' });
       expect(service.createBitableRecord).toHaveBeenCalledTimes(1);
       await expect(service.createLeaveRequest(createLeaveRequestInput(), createLeaveScreenshot(), {
-        role: 'site_member', purchaseBuilding: null, displayName: '示例人员008',
+        role: 'site_member', purchaseBuilding: null, displayName: '张三',
         accountId: `feishu-${feishuIdentityFingerprint('cli_fixture', 'ou_other')}`,
       })).rejects.toThrow('登录账号与申请人员资料不一致');
       expect(service.createBitableRecord).toHaveBeenCalledTimes(1);
@@ -4343,16 +4343,16 @@ describe('DutyScheduleService construction crew ledger views', () => {
     try {
       const service = createLeaveRequestService([createLeaveSchedule()]);
       const externalPrincipal = (recordId: string): AccessPrincipal => ({
-        role, purchaseBuilding: null, displayName: '示例人员008',
+        role, purchaseBuilding: null, displayName: '张三',
         accountId: 'local-external-' + require('node:crypto').createHash('sha256')
-          .update(JSON.stringify(['cli_fixture', 'canonicalPersonApp', 'tbl122d1a08645adab', recordId])).digest('hex'),
+          .update(JSON.stringify(['cli_fixture', 'canonicalPersonApp', 'tblCanonicalPerson', recordId])).digest('hex'),
       });
       await expect(service.createLeaveRequest(createLeaveRequestInput(), createLeaveScreenshot(), externalPrincipal('recPersonLiSi')))
         .rejects.toThrow('登录账号与申请人员资料不一致');
       expect(service.uploadBitableAttachment).not.toHaveBeenCalled();
       expect(service.createBitableRecord).not.toHaveBeenCalled();
       await expect(service.createLeaveRequest(createLeaveRequestInput(), createLeaveScreenshot(), externalPrincipal('recPersonZhangSan')))
-        .resolves.toMatchObject({ success: true, leaveStaffName: '示例人员008' });
+        .resolves.toMatchObject({ success: true, leaveStaffName: '张三' });
       expect(service.createBitableRecord).toHaveBeenCalledTimes(1);
     } finally {
       readEnvMock.mockImplementation(() => '');
@@ -4365,16 +4365,16 @@ describe('DutyScheduleService construction crew ledger views', () => {
     try {
       const service = createLeaveRequestService([createLeaveSchedule()], {
         canonicalPersonnelRecords: [{ record_id: 'recCanonicalZhangSan', fields: {
-          姓名: '示例人员008', 员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }], '机楼/专业': ['A楼'],
+          姓名: '张三', 员工姓名: [{ id: 'ou_zhangsan', name: '张三' }], '机楼/专业': ['A楼'],
         } }],
       });
       const accountId = 'local-external-' + require('node:crypto').createHash('sha256')
-        .update(JSON.stringify(['cli_fixture', 'canonicalPersonApp', 'tbl122d1a08645adab', 'recCanonicalZhangSan'])).digest('hex');
+        .update(JSON.stringify(['cli_fixture', 'canonicalPersonApp', 'tblCanonicalPerson', 'recCanonicalZhangSan'])).digest('hex');
       await expect(service.createLeaveRequest(createLeaveRequestInput(), createLeaveScreenshot(), {
-        role: 'guest', purchaseBuilding: null, displayName: '示例人员008', accountId,
-      })).resolves.toMatchObject({ success: true, leaveStaffName: '示例人员008' });
+        role: 'guest', purchaseBuilding: null, displayName: '张三', accountId,
+      })).resolves.toMatchObject({ success: true, leaveStaffName: '张三' });
       expect(getBitableRecordsMock()).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-        appToken: 'canonicalPersonApp', tableId: 'tbl122d1a08645adab', strict: true, allowStale: false,
+        appToken: 'canonicalPersonApp', tableId: 'tblCanonicalPerson', strict: true, allowStale: false,
       }));
       expect(service.createBitableRecord).toHaveBeenCalledTimes(1);
     } finally { readEnvMock.mockImplementation(() => ''); }
@@ -4386,9 +4386,9 @@ describe('DutyScheduleService construction crew ledger views', () => {
     try {
       const service = createLeaveRequestService([createLeaveSchedule()], { canonicalPersonnelRecords: [] });
       const accountId = 'local-external-' + require('node:crypto').createHash('sha256')
-        .update(JSON.stringify(['cli_fixture', 'canonicalPersonApp', 'tbl122d1a08645adab', 'recCanonicalZhangSan'])).digest('hex');
+        .update(JSON.stringify(['cli_fixture', 'canonicalPersonApp', 'tblCanonicalPerson', 'recCanonicalZhangSan'])).digest('hex');
       await expect(service.createLeaveRequest(createLeaveRequestInput(), createLeaveScreenshot(), {
-        role: 'guest', purchaseBuilding: null, displayName: '示例人员008', accountId,
+        role: 'guest', purchaseBuilding: null, displayName: '张三', accountId,
       })).rejects.toThrow('未找到');
       expect(service.uploadBitableAttachment).not.toHaveBeenCalled();
       expect(service.createBitableRecord).not.toHaveBeenCalled();
@@ -4409,7 +4409,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       recordIds: ['recLeave1'],
       startAt: '2026-08-05T18:00',
       endAt: '2026-08-06T09:00',
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
       clientMutationId: 'leave-request-test-1',
       rawHours: 15,
       minimumHours: 15,
@@ -4481,7 +4481,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         休假类型: '年假',
         请假原因: '年度休假',
         休假人员: [{ id: 'ou_zhangsan' }],
-        '休假人员姓名（程序）': '示例人员008',
+        '休假人员姓名（程序）': '张三',
         需替班人员: [{ id: 'ou_zhangsan' }],
         '是否需要替班（替班打√）': false,
         休假工时数: 15,
@@ -4541,7 +4541,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         buildingText: '110站',
         shift: 'white',
         shiftText: '白班',
-        dutyStaffActual: ['示例人员005'],
+        dutyStaffActual: ['卞天洋'],
       }),
     ];
     const service = createLeaveRequestService(schedules, {
@@ -4549,7 +4549,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         {
           record_id: 'recPersonBianTianYang',
           fields: {
-            姓名: '示例人员005',
+            姓名: '卞天洋',
             岗位: '110值班人员',
             '机楼/专业': '110站',
             班组: 'B班',
@@ -4563,7 +4563,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         createLeaveRequestInput(
           {
             clientMutationId: 'leave-request-110-no-account',
-            leaveStaffName: '示例人员005',
+            leaveStaffName: '卞天洋',
             startAt: '2026-08-20T08:00',
             endAt: '2026-08-20T20:00',
             needSubstitute: false,
@@ -4572,11 +4572,11 @@ describe('DutyScheduleService construction crew ledger views', () => {
           schedules,
         ),
       ),
-    ).resolves.toMatchObject({ success: true, leaveStaffName: '示例人员005' });
+    ).resolves.toMatchObject({ success: true, leaveStaffName: '卞天洋' });
 
     const fields = service.createBitableRecord.mock.calls[0][3];
     expect(fields).toMatchObject({
-      '休假人员姓名（程序）': '示例人员005',
+      '休假人员姓名（程序）': '卞天洋',
       '是否需要替班（替班打√）': false,
     });
     expect(fields).not.toHaveProperty('休假人员');
@@ -4659,8 +4659,8 @@ describe('DutyScheduleService construction crew ledger views', () => {
         {
           record_id: 'recPersonZhangSan',
           fields: {
-            姓名: '示例人员008',
-            员工姓名: [{ id: 'ou_wrong_person', name: '示例人员013' }],
+            姓名: '张三',
+            员工姓名: [{ id: 'ou_wrong_person', name: '李四' }],
             '机楼/专业': ['A楼'],
           },
         },
@@ -4669,7 +4669,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
 
     await expect(
       service.createLeaveRequest(createLeaveRequestInput({}, schedules)),
-    ).rejects.toThrow('请休假人员“示例人员008”的飞书账号与姓名不一致');
+    ).rejects.toThrow('请休假人员“张三”的飞书账号与姓名不一致');
     expect(service.createBitableRecord).not.toHaveBeenCalled();
   });
 
@@ -4743,14 +4743,14 @@ describe('DutyScheduleService construction crew ledger views', () => {
       candidateSchedule: createLeaveSchedule({
         recordId: 'recPreviousNight',
         scheduleDate: '2026-08-04',
-        dutyStaffActual: ['示例人员013'],
+        dutyStaffActual: ['李四'],
       }),
     },
     {
       label: '后一夜班',
       candidateSchedule: createLeaveSchedule({
         recordId: 'recNextNight',
-        dutyStaffActual: ['示例人员013'],
+        dutyStaffActual: ['李四'],
       }),
     },
   ])(
@@ -4770,7 +4770,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
               startAt: '2026-08-05T09:00',
               endAt: '2026-08-05T18:00',
               needSubstitute: false,
-              substituteStaffName: '示例人员013',
+              substituteStaffName: '李四',
             },
             schedules,
           ),
@@ -4872,7 +4872,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
             startAt: '2026-08-03T09:00',
             endAt: '2026-08-03T18:00',
             needSubstitute: true,
-            substituteStaffName: '示例人员008',
+            substituteStaffName: '张三',
           },
           schedules,
         ),
@@ -4895,7 +4895,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           {
             clientMutationId: 'leave-request-authoritative-substitute-flag',
             needSubstitute: false,
-            substituteStaffName: '  示例人员013  ',
+            substituteStaffName: '  李四  ',
           },
           schedules,
         ),
@@ -4924,7 +4924,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           {
             clientMutationId: 'leave-request-self-substitute',
             needSubstitute: false,
-            substituteStaffName: '示例人员008',
+            substituteStaffName: '张三',
           },
           schedules,
         ),
@@ -4944,7 +4944,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         buildingText: 'B楼',
         shift: 'white',
         shiftText: '白班',
-        dutyStaffActual: ['示例人员013'],
+        dutyStaffActual: ['李四'],
       }),
     ];
     const service = createLeaveRequestService(schedules);
@@ -4957,7 +4957,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
             startAt: '2026-08-05T09:00',
             endAt: '2026-08-05T18:00',
             needSubstitute: false,
-            substituteStaffName: '示例人员013',
+            substituteStaffName: '李四',
           },
           schedules,
         ),
@@ -4971,45 +4971,45 @@ describe('DutyScheduleService construction crew ledger views', () => {
   it.each([
     {
       label: '人员表不存在',
-      substituteStaffName: '示例人员017',
+      substituteStaffName: '王五',
       personnelRecords: [
         {
           record_id: 'recPersonZhangSan',
           fields: {
-            姓名: '示例人员008',
-            员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }],
+            姓名: '张三',
+            员工姓名: [{ id: 'ou_zhangsan', name: '张三' }],
           },
         },
       ],
-      error: '请休假人员资料中未找到替班人员“示例人员017”',
+      error: '请休假人员资料中未找到替班人员“王五”',
     },
     {
       label: '人员表重复',
-      substituteStaffName: '示例人员013',
+      substituteStaffName: '李四',
       personnelRecords: [
         {
           record_id: 'recPersonZhangSan',
           fields: {
-            姓名: '示例人员008',
-            员工姓名: [{ id: 'ou_zhangsan', name: '示例人员008' }],
+            姓名: '张三',
+            员工姓名: [{ id: 'ou_zhangsan', name: '张三' }],
           },
         },
         {
           record_id: 'recPersonLiSi1',
           fields: {
-            姓名: '示例人员013',
-            员工姓名: [{ id: 'ou_lisi_1', name: '示例人员013' }],
+            姓名: '李四',
+            员工姓名: [{ id: 'ou_lisi_1', name: '李四' }],
           },
         },
         {
           record_id: 'recPersonLiSi2',
           fields: {
-            姓名: '示例人员013',
-            员工姓名: [{ id: 'ou_lisi_2', name: '示例人员013' }],
+            姓名: '李四',
+            员工姓名: [{ id: 'ou_lisi_2', name: '李四' }],
           },
         },
       ],
-      error: '请休假人员资料中存在多个替班人员“示例人员013”，请先在人员表中完成去重',
+      error: '请休假人员资料中存在多个替班人员“李四”，请先在人员表中完成去重',
     },
   ])(
     'does not resolve an applicant-supplied substitute when $label',
@@ -5039,13 +5039,13 @@ describe('DutyScheduleService construction crew ledger views', () => {
 
   it('lets the dedicated leave personnel table environment override the default source URL table', () => {
     const previousTableId = process.env.FEISHU_LEAVE_PERSON_PROFILE_TABLE_ID;
-    process.env.FEISHU_LEAVE_PERSON_PROFILE_TABLE_ID = 'tbldef80a4eea3ec35e37';
+    process.env.FEISHU_LEAVE_PERSON_PROFILE_TABLE_ID = 'tblLeavePersonFromEnv';
     const readEnvMock = readEnv as jest.MockedFunction<typeof readEnv>;
     readEnvMock.mockImplementation((name) => process.env[name]?.trim() || '');
     try {
       const service = createServiceWithAxios({});
       expect((service as any).leavePersonProfileConfig.tableId).toBe(
-        'tbldef80a4eea3ec35e37',
+        'tblLeavePersonFromEnv',
       );
     } finally {
       if (previousTableId === undefined) {
@@ -6761,7 +6761,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       viewId: 'vewSeal',
       tableName: '封网信息',
       sourceUrl:
-        'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblSeal&view=vewSeal',
     };
     service.fetchBitableFieldMetas = jest.fn(async () => [
       { field_id: 'fldyloi3Wd', field_name: '封网信息', type: 1 },
@@ -6902,7 +6902,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
               fields: {
                 施工编码: 'SG260625-0001',
                 姓名: '张鹏',
-                手机号: '13800004492',
+                手机号: '17550110588',
                 授权状态: '授权有效',
                 持证统计: '低压电工证',
               },
@@ -7733,7 +7733,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         fields: {
           施工编码: 'SG260605-1036',
           姓名: '张鹏',
-          手机号: '13800004492',
+          手机号: '17550110588',
         },
       },
     ]);
@@ -7769,7 +7769,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       [
         '张鹏',
         '411024199110154959',
-        '13800004492',
+        '17550110588',
         '浙江省邮电工程建设有限公司',
         'HA楼',
         '2026-06-08 至 2026-06-14',
@@ -7777,7 +7777,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       [
         '周淑娟',
         '320611197206091525',
-        '13800007382',
+        '13773667895',
         '浙江邮电',
         'HA楼',
         '2026-06-08 至 2026-06-14',
@@ -7809,7 +7809,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       'recExistingCrew',
       expect.objectContaining({
         姓名: '张鹏',
-        手机号: '13800004492',
+        手机号: '17550110588',
         施工单位: '浙江省邮电工程建设有限公司',
         授权开始日期: new Date('2026-06-08T00:00:00+08:00').getTime(),
         授权结束日期: new Date('2026-06-14T00:00:00+08:00').getTime(),
@@ -7826,7 +7826,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       '施工人员台账',
       expect.objectContaining({
         姓名: '周淑娟',
-        手机号: '13800007382',
+        手机号: '13773667895',
         公司: '浙江邮电',
         施工单位: '浙江邮电',
         授权范围: 'HA楼',
@@ -8664,7 +8664,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         fields: {
           施工编码: 'SG260605-1031',
           施工总览: ['recOverview'],
-          跟进人员: [{ id: 'ou_1', name: '示例人员006' }],
+          跟进人员: [{ id: 'ou_1', name: '周海祥' }],
         },
       },
     ]);
@@ -9027,7 +9027,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           dailyCrewMembers: JSON.stringify([
             {
               recordId: 'recCrew1',
-              name: '示例人员008',
+              name: '张三',
               certificateSummary: '高处作业证',
               complianceStatus: null,
               issueSummary: null,
@@ -9126,7 +9126,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           dailyCrewMembers: JSON.stringify([
             {
               recordId: 'recCrew1',
-              name: '示例人员008',
+              name: '张三',
               certificateSummary: '低压电工证',
             },
           ]),
@@ -9225,7 +9225,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           dailyCrewMembers: JSON.stringify([
             {
               recordId: 'recCrew1',
-              name: '示例人员008',
+              name: '张三',
               certificateSummary: '低压电工证',
             },
           ]),
@@ -9596,7 +9596,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       dailyCrewMembers: JSON.stringify([
         {
           recordId: 'recCrew1',
-          name: '示例人员008',
+          name: '张三',
           certificateSummary: '一般作业',
         },
       ]),
@@ -9815,7 +9815,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       dailyCrewMembers: JSON.stringify([
         {
           recordId: 'recCrew1',
-          name: '示例人员008',
+          name: '张三',
           certificateSummary: '一般作业',
         },
       ]),
@@ -11413,7 +11413,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           buffer: buildTrainingSignInWorkbookBuffer([
             '张一',
             '张二',
-            '示例人员008',
+            '张三',
             '张四',
             '张五',
           ]),
@@ -11553,7 +11553,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       created: 0,
       updated: 1,
       records: [{ record_id: 'recCrewMember', fields: {} }],
-      members: [{ name: '示例人员008' }],
+      members: [{ name: '张三' }],
     }));
     service.runConstructionCrewRosterCertificateBatchCheck = jest.fn(
       async () => ({ summary: '1 人持证检查完成' }),
@@ -12850,7 +12850,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         dailyCrewMembers: JSON.stringify([
           {
             recordId: 'recCrew1',
-            name: '示例人员008',
+            name: '张三',
             certificateSummary: '低压电工证、高处作业证',
             complianceStatus: '合规',
             issueSummary: null,
@@ -12998,7 +12998,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           dailyCrewMembers: JSON.stringify([
             {
               recordId: 'recCrew1',
-              name: '示例人员008',
+              name: '张三',
               certificateSummary: '低压电工证',
               complianceStatus: '合规',
               issueSummary: null,
@@ -14175,7 +14175,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
               buffer: buildTrainingSignInWorkbookBuffer([
                 '张一',
                 '张二',
-                '示例人员008',
+                '张三',
                 '张四',
                 '张五',
               ]),
@@ -14478,7 +14478,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         dailyCrewMembers: JSON.stringify([
           {
             recordId: 'crew-1',
-            name: '示例人员008',
+            name: '张三',
             certificateSummary: '低压电工证',
           },
         ]),

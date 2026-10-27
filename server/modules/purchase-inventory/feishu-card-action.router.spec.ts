@@ -321,6 +321,7 @@ describe('FeishuCardActionRouter', () => {
     isEnabled: jest.Mock;
     handleManagerCardAction: jest.Mock;
     handleManagerBatchCardAction: jest.Mock;
+    patchManagerApprovalCardView: jest.Mock;
     handlePurchaseBatchFulfillmentCardAction: jest.Mock;
     handlePurchaseReceiptImageMessage: jest.Mock;
     patchPurchaseBatchFulfillmentCardView: jest.Mock;
@@ -383,6 +384,7 @@ describe('FeishuCardActionRouter', () => {
       handleManagerBatchCardAction: jest
         .fn()
         .mockResolvedValue(resolvedCard('manager-batch-card')),
+      patchManagerApprovalCardView: jest.fn().mockResolvedValue(undefined),
       handlePurchaseBatchFulfillmentCardAction: jest.fn().mockResolvedValue({
         claimed: false,
         card: resolvedCard('purchase-receipt-form'),
@@ -850,12 +852,11 @@ describe('FeishuCardActionRouter', () => {
     expect(overtime.acceptApprovalAction).not.toHaveBeenCalled();
   });
 
-  it('returns the manager card update unchanged', async () => {
+  it('acknowledges the manager reject editor before patching its current bound card', async () => {
     await expect(
       createRouter().handle(purchaseManagerPayload()),
     ).resolves.toEqual({
-      toast: { type: 'info', content: '审批操作已受理' },
-      card: rawCardUpdate('manager-card'),
+      toast: { type: 'info', content: '请填写驳回原因' },
     });
     expect(manager.handleManagerCardAction).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -865,6 +866,13 @@ describe('FeishuCardActionRouter', () => {
         messageId: 'om_manager_ws_01',
         executionRecordId: 'rec_manager_ws_01',
       }),
+    );
+    expect(manager.patchManagerApprovalCardView).not.toHaveBeenCalled();
+    expect(manager.runAcceptedTasks).not.toHaveBeenCalled();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(manager.patchManagerApprovalCardView).toHaveBeenCalledTimes(1);
+    expect(manager.patchManagerApprovalCardView).toHaveBeenCalledWith(
+      'om_manager_ws_01', 'ou_purchase_manager', false,
     );
   });
 

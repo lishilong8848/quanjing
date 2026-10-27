@@ -25,7 +25,7 @@ function Fixture() {
         </p>
         <p>楼栋范围：{access.purchaseBuilding || '无楼栋限制'}</p>
         <p>登录姓名：{access.displayName || '未提供'}</p>
-        <a href="/fixture/admin-callback">模拟示例人员020授权回调（隔离测试）</a>
+        <a href="/fixture/admin-callback">模拟马进宇授权回调（隔离测试）</a>
         <a className="block" href="/fixture/identities">
           查看本次授权身份（隔离测试）
         </a>

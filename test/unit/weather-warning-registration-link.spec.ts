@@ -7,13 +7,13 @@ describe('buildWeatherGuardRegistrationUrl', () => {
   it('builds an HTTPS registration deep link with the configured client base path', () => {
     expect(
       buildWeatherGuardRegistrationUrl({
-        publicBaseUrl: 'https://example.com:3001/',
+        publicBaseUrl: 'https://www.sm.sjhl.online:3001/',
         clientBasePath: '/schedule',
         warningId: 'warning / 1',
         source: 'feishu-card',
       }),
     ).toBe(
-      'https://example.com:3001/schedule/monthly-schedule?weatherGuardRegistration=1&warningId=warning+%2F+1&source=feishu-card',
+      'https://www.sm.sjhl.online:3001/schedule/monthly-schedule?weatherGuardRegistration=1&warningId=warning+%2F+1&source=feishu-card',
     );
   });
 
@@ -137,8 +137,8 @@ describe('buildWeatherGuardRegistrationUrl', () => {
   });
 
   it.each([
-    'https://user-7b06753a@example.com',
-    'https://user:user-af8f5127@example.com',
+    'https://user@app.sjhl.online',
+    'https://user:password@app.sjhl.online',
     'https://app.sjhl.online?token=secret',
     'https://app.sjhl.online/#credential',
   ])('rejects a credential-bearing or non-base URL %s', (publicBaseUrl) => {

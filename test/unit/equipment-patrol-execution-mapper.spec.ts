@@ -179,7 +179,7 @@ describe('equipment patrol execution mapper', () => {
 
 describe('equipment patrol execution service', () => {
   const sourceUrl =
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+    'https://vnet.feishu.cn/wiki/D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tbl0XK1iQ1P6VY5Y&view=vewcI3Ssfv';
   const mockedFetch = jest.mocked(fetchBitableRecords);
   const mockedResolve = jest.mocked(resolveBitableAppToken);
   const httpService = {} as HttpService;
@@ -238,7 +238,7 @@ describe('equipment patrol execution service', () => {
     });
     expect(mockedFetch).toHaveBeenCalledWith(httpService, {
       appToken: 'resolved-app-token',
-      tableId: 'tblabdb9db3e6ddc',
+      tableId: 'tbl0XK1iQ1P6VY5Y',
       tableName: '设备轮巡执行数据',
       forceRefresh: true,
     });

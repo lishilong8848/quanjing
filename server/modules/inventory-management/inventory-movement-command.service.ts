@@ -1713,7 +1713,7 @@ function parsePersistedInbound(
     building: requireBuilding(record.fields, '入库填写'),
     quantity,
     occurredAt: occurredAt || '',
-    operator: fieldText(record.fields, ['示例人员019', '入库示例人员019', '经办人']),
+    operator: fieldText(record.fields, ['责任人', '入库责任人', '经办人']),
   };
   requirePersistedText(item.recordId, '入库填写 record_id');
   requirePersistedText(item.sourceKey, '入库来源');

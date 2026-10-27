@@ -70,7 +70,7 @@ describe('change adjustment Base field migration', () => {
     expect(source).toContain("'+url-resolve'");
     expect(source).toContain('FEISHU_CHANGE_MIGRATION_IDENTITY');
     expect(source).toContain('JhiVwgfoIimAqEk8YwEc09sknGd');
-    expect(source).toContain('tbl8f743982e48e1');
+    expect(source).toContain('tblBvg6wCYSX3hcg');
   });
 
   it('passes field definitions through an @file JSON argument on Windows-safe paths', () => {

@@ -71,7 +71,7 @@ export function createEmployeeOnboardingFixture({
     companyName: '南通承宏云计算有限公司',
     position: '运维实习生',
     identityNumber: '110101199001010015',
-    phone: '13800007889',
+    phone: '19900001234',
     entryDate: shanghaiDateKey(timestamp),
     education: '本科',
     graduateSchool: 'CODEX自动化测试院校',

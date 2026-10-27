@@ -354,10 +354,10 @@ async function listAttendanceArchiveRecords() {
   if (!appId || !appSecret) throw new Error('缺少飞书只读审计凭据');
   const appToken =
     process.env.FEISHU_ATTENDANCE_ARCHIVE_APP_TOKEN?.trim() ||
-    'PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN';
+    'KdCZbSL5CaTErKsFwFucddA5nYd';
   const tableId =
     process.env.FEISHU_ATTENDANCE_ARCHIVE_TABLE_ID?.trim() ||
-    'tbl01cda9acd2f8f';
+    'tblsunmofUPOYGL9';
   const baseUrl = 'https://open.feishu.cn/open-apis';
   const tokenResponse = await axios.post(
     `${baseUrl}/auth/v3/tenant_access_token/internal`,

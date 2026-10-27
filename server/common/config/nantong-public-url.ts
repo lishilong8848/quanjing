@@ -1,5 +1,5 @@
-const LEGACY_NANTONG_PUBLIC_HOST = 'example.com';
-const CANONICAL_NANTONG_PUBLIC_HOST = 'example.com';
+const LEGACY_NANTONG_PUBLIC_HOST = 'www.sm.sjhl.online';
+const CANONICAL_NANTONG_PUBLIC_HOST = 'sm.sjhl.online';
 
 export function canonicalizeNantongPublicUrl(value: string): string {
   const input = value.trim();

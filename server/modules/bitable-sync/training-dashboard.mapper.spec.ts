@@ -32,6 +32,211 @@ function emptySources(
 }
 
 describe('training-dashboard.mapper', () => {
+  describe('active employee text field compatibility', () => {
+    const textField = '员工 （文本）';
+    const score = (fields: Record<string, unknown>) =>
+      record({
+        楼栋: 'A楼',
+        '月份（计划）': '2026-07',
+        课程: '应急管理',
+        签到: true,
+        考试分数: 90,
+        ...fields,
+      });
+    const mapScores = (
+      activeScores: TrainingDashboardSources['activeScores'],
+    ) =>
+      mapCampusTrainingDashboard(
+        emptySources({
+          activeScores,
+          activePlans: ['A楼', 'B楼'].map((building) =>
+            record({
+              培训课程名称: '应急管理',
+              培训年份: '2026',
+              培训月份: '07',
+              '楼栋/专业': building,
+            }),
+          ),
+        }),
+        '2026-07',
+        '2026-07-18T03:00:00.000Z',
+      );
+
+    it('uses complete new text in summary, participation, course counts and drill-down without mutating sources', () => {
+      const activeScores = [
+        score({
+          [textField]: [
+            { type: 'text', text: ' 员工' },
+            { type: 'text', text: '甲 ' },
+          ],
+        }),
+        score({ [textField]: '员工甲' }),
+        score({ [textField]: '员工甲', 课程: '消防培训' }),
+      ];
+      activeScores[0].last_modified_time = Date.parse('2026-07-17T08:30:00.000Z');
+      const original = JSON.parse(JSON.stringify(activeScores));
+      const result = mapScores(activeScores);
+
+      expect(result.summary.monthlyParticipants).toBe(1);
+      expect(
+        result.participation.find(({ building }) => building === 'A楼')?.people,
+      ).toBe(1);
+      expect(result.details.participants).toEqual([
+        expect.objectContaining({
+          name: '员工甲',
+          building: 'A楼',
+          totalCourses: 2,
+        }),
+      ]);
+      expect(
+        result.details.activeCoursePlans.find(
+          ({ building }) => building === 'A楼',
+        )?.actualParticipants,
+      ).toBe(1);
+      expect(result.sourceUpdatedAt).toBe('2026-07-17T08:30:00.000Z');
+      expect(activeScores).toEqual(original);
+    });
+
+    it('keeps text-only names in different buildings separate while deduplicating repeated courses', () => {
+      const result = mapScores([
+        score({ [textField]: '同名员工' }),
+        score({ [textField]: '同名员工', 楼栋: 'B楼' }),
+        score({ [textField]: '同名员工', 楼栋: 'B楼' }),
+      ]);
+
+      expect(result.summary.monthlyParticipants).toBe(2);
+      expect(
+        result.details.participants.map(({ name, building, totalCourses }) => ({
+          name,
+          building,
+          totalCourses,
+        })),
+      ).toEqual([
+        { name: '同名员工', building: 'A楼', totalCourses: 1 },
+        { name: '同名员工', building: 'B楼', totalCourses: 1 },
+      ]);
+      expect(
+        result.details.activeCoursePlans.map(
+          ({ actualParticipants }) => actualParticipants,
+        ),
+      ).toEqual([1, 1]);
+    });
+
+    it('preserves distinct matching stable identities and deduplicates their repeated courses', () => {
+      const result = mapScores([
+        score({
+          [textField]: ' 同名员工 ',
+          员工: [{ id: 'ou-first', name: '同名员工' }],
+        }),
+        score({
+          [textField]: '同名员工',
+          员工: [{ open_id: 'ou-second', name: '同名员工' }],
+        }),
+        score({
+          [textField]: '同名员工',
+          员工: [{ user_id: 'ou-first', name: '同名员工' }],
+          课程: '消防培训',
+        }),
+      ]);
+
+      expect(result.summary.monthlyParticipants).toBe(2);
+      expect(result.details.participants).toHaveLength(2);
+      expect(
+        result.details.participants
+          .map(({ totalCourses }) => totalCourses)
+          .sort(),
+      ).toEqual([1, 2]);
+      expect(
+        result.details.activeCoursePlans.find(
+          ({ building }) => building === 'A楼',
+        )?.actualParticipants,
+      ).toBe(2);
+      expect(JSON.stringify(result)).not.toContain('ou-first');
+      expect(JSON.stringify(result)).not.toContain('ou-second');
+    });
+
+    it('retains both real identities when a single legacy personnel cell contains same-name people', () => {
+      const result = mapScores([
+        score({
+          [textField]: '同名员工',
+          员工: [
+            { id: 'ou-first', name: '同名员工' },
+            { id: 'ou-second', name: '同名员工' },
+            { id: 'ou-first', name: '同名员工' },
+          ],
+        }),
+      ]);
+
+      expect(result.summary.monthlyParticipants).toBe(2);
+      expect(result.details.participants.map(({ name }) => name)).toEqual([
+        '同名员工',
+        '同名员工',
+      ]);
+      expect(
+        result.details.activeCoursePlans.find(
+          ({ building }) => building === 'A楼',
+        )?.actualParticipants,
+      ).toBe(2);
+    });
+
+    it('does not attach an unrelated or unnamed legacy ID to a new employee name', () => {
+      const result = mapScores([
+        score({
+          [textField]: '新员工甲',
+          员工: [{ id: 'ou-old', name: '旧员工' }],
+        }),
+        score({
+          [textField]: '新员工乙',
+          员工: [{ id: 'ou-old', name: '旧员工' }],
+        }),
+        score({ [textField]: '新员工丙', 员工: [{ id: 'ou-old' }] }),
+        score({
+          [textField]: '新员工甲',
+          员工: [{ id: 'ou-other', name: '另一个旧员工' }],
+        }),
+      ]);
+
+      expect(result.summary.monthlyParticipants).toBe(3);
+      expect(
+        result.details.participants.map(({ name }) => name).sort(),
+      ).toEqual(['新员工丙', '新员工乙', '新员工甲'].sort());
+      expect(
+        result.details.activeCoursePlans.find(
+          ({ building }) => building === 'A楼',
+        )?.actualParticipants,
+      ).toBe(3);
+      expect(JSON.stringify(result)).not.toContain('旧员工');
+    });
+
+    it.each([undefined, null, '', ' \t ', [{ type: 'text', text: ' ' }]])(
+      'falls back to legacy identities when new text is empty (%j)',
+      (emptyText) => {
+        const result = mapScores([
+          score({
+            [textField]: emptyText,
+            员工: [{ id: 'ou-legacy-first', name: '同名员工' }],
+          }),
+          score({
+            [textField]: emptyText,
+            员工: [{ id: 'ou-legacy-second', name: '同名员工' }],
+          }),
+          score({
+            [textField]: emptyText,
+            员工: [{ id: 'ou-legacy-first', name: '同名员工' }],
+          }),
+        ]);
+
+        expect(result.summary.monthlyParticipants).toBe(2);
+        expect(result.details.participants).toHaveLength(2);
+        expect(
+          result.details.activeCoursePlans.find(
+            ({ building }) => building === 'A楼',
+          )?.actualParticipants,
+        ).toBe(2);
+      },
+    );
+  });
+
   it('converts Excel serial dates with the 1899-12-30 epoch', () => {
     expect(excelSerialToDate(46026)).toBe('2026-01-04');
     expect(excelSerialToDate(46300)).toBe('2026-10-05');

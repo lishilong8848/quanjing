@@ -1,5 +1,5 @@
 const FEISHU_OPEN_ID_PATTERN = /^ou_[A-Za-z0-9_-]{8,128}$/;
-const FEISHU_CHAT_APPLINK = 'https://example.feishu.cn/client/PUBLIC_EXAMPLE_SOURCE';
+const FEISHU_CHAT_APPLINK = 'https://applink.feishu.cn/client/chat/open';
 const PERSON_FIELD_IDENTIFIER_KEYS = [
   'id',
   'open_id',

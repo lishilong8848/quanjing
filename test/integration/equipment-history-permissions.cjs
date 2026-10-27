@@ -69,7 +69,7 @@ helpers.createBitableBackgroundRefresh = () => ({ start() {}, stop() {} });
 helpers.readLatestPersistedBitableRecordSnapshot = async () => null;
 helpers.resolveBitableAppToken = async () => 'fixture';
 helpers.fetchBitableRecords = async (_http, options) => {
-  if (options.tableId === 'tblfaa7c2608349c') {
+  if (options.tableId === 'tblschT48zXwigUG') {
     ++repairReads;
     return repairs;
   }

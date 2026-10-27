@@ -36,7 +36,7 @@ describe('readWarehouseRoleRecords', () => {
       .mockResolvedValue([
         record('rec_h', {
           楼栋: 'H楼',
-          库房示例人员019员: [{ id: 'ou_h_responsible', name: 'H楼示例人员019' }],
+          库房责任人员: [{ id: 'ou_h_responsible', name: 'H楼责任人' }],
           库房管理人: [{ id: 'ou_h_manager', name: 'H楼管理人' }],
         }),
       ]);
@@ -44,7 +44,7 @@ describe('readWarehouseRoleRecords', () => {
     const directory = createDirectory(readWarehouseRoleRecords);
 
     await expect(directory.resolveApprovers('H楼')).resolves.toEqual([
-      { openId: 'ou_h_responsible', name: 'H楼示例人员019' },
+      { openId: 'ou_h_responsible', name: 'H楼责任人' },
     ]);
     await expect(
       directory.resolveNotificationRecipients('H楼'),
@@ -114,7 +114,7 @@ describe('readWarehouseRoleRecords', () => {
         if (
           options.fieldNames?.some(
             (fieldName) =>
-              !['楼栋', '库房示例人员019员', '库房管理人'].includes(fieldName),
+              !['楼栋', '库房责任人员', '库房管理人'].includes(fieldName),
           )
         ) {
           throw new Error('Feishu Bitable API error: FieldNameNotFound');
@@ -122,8 +122,8 @@ describe('readWarehouseRoleRecords', () => {
         return [
           record('rec_b', {
             楼栋: 'B楼',
-            库房示例人员019员: [
-              { id: 'ou_b_responsible', name: 'B楼示例人员019' },
+            库房责任人员: [
+              { id: 'ou_b_responsible', name: 'B楼责任人' },
             ],
             库房管理人: [{ id: 'ou_b_manager', name: 'B楼管理人' }],
           }),
@@ -133,13 +133,13 @@ describe('readWarehouseRoleRecords', () => {
     const directory = createDirectory(readWarehouseRoleRecords);
 
     await expect(directory.resolveApprovers('B楼')).resolves.toEqual([
-      { openId: 'ou_b_responsible', name: 'B楼示例人员019' },
+      { openId: 'ou_b_responsible', name: 'B楼责任人' },
     ]);
     expect(fetchRecords).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         strict: true,
-        fieldNames: ['楼栋', '库房示例人员019员', '库房管理人'],
+        fieldNames: ['楼栋', '库房责任人员', '库房管理人'],
       }),
     );
   });
@@ -157,7 +157,7 @@ describe('InventoryWarehouseRoleDirectory', () => {
     >(async () => [
       record('rec_a_1', {
         楼栋: ['A楼'],
-        库房示例人员019员: [
+        库房责任人员: [
           { id: 'ou_manager_1', name: '库管甲' },
           { openId: 'ou_manager_1', text: '重复姓名不得覆盖' },
           cyclic,
@@ -165,11 +165,11 @@ describe('InventoryWarehouseRoleDirectory', () => {
         ],
         库房管理人: [{ id: 'ou_manager_cc', name: '管理员知会人' }],
         类别号管理人员: [{ id: 'ou_category', name: '类别人员不得审批' }],
-        示例人员001: [{ id: 'ou_supervisor', name: '示例人员001不得审批' }],
+        主管: [{ id: 'ou_supervisor', name: '主管不得审批' }],
       }),
       record('rec_b_1', {
         楼栋: ['B栋'],
-        库房示例人员019员: [{ id: 'ou_other_building', name: '其他楼示例人员019' }],
+        库房责任人员: [{ id: 'ou_other_building', name: '其他楼责任人' }],
         库房管理人: [{ id: 'ou_other_cc', name: '其他楼管理员' }],
       }),
     ]);
@@ -200,11 +200,11 @@ describe('InventoryWarehouseRoleDirectory', () => {
     },
   );
 
-  it('fails explicitly when the building has no valid 库房示例人员019员 Open ID', async () => {
+  it('fails explicitly when the building has no valid 库房责任人员 Open ID', async () => {
     const directory = createDirectory(async () => [
       record('rec_a', {
         楼栋: 'A楼',
-        库房示例人员019员: [{ id: 'invalid_user', name: '无效人员' }],
+        库房责任人员: [{ id: 'invalid_user', name: '无效人员' }],
         库房管理人: [{ id: 'ou_manager', name: '管理人不得回退审批' }],
       }),
     ]);
@@ -219,7 +219,7 @@ describe('InventoryWarehouseRoleDirectory', () => {
     const reader = jest.fn(async () => [
       record('rec_a', {
         楼栋: 'A楼',
-        库房示例人员019员: [{ id: 'ou_manager_1', name: '库管甲' }],
+        库房责任人员: [{ id: 'ou_manager_1', name: '库管甲' }],
       }),
     ]);
     const directory = createDirectory(reader, () => now, 5_000);
@@ -243,7 +243,7 @@ describe('InventoryWarehouseRoleDirectory', () => {
       .mockResolvedValueOnce([
         record('rec_a_old', {
           楼栋: 'A楼',
-          库房示例人员019员: [{ id: 'ou_old', name: '旧库管' }],
+          库房责任人员: [{ id: 'ou_old', name: '旧库管' }],
         }),
       ])
       .mockImplementationOnce(
@@ -264,7 +264,7 @@ describe('InventoryWarehouseRoleDirectory', () => {
     releaseRefresh?.([
       record('rec_a_new', {
         楼栋: 'A栋',
-        库房示例人员019员: [{ id: 'ou_new', name: '新库管' }],
+        库房责任人员: [{ id: 'ou_new', name: '新库管' }],
       }),
     ]);
     await eventually(() =>
@@ -285,7 +285,7 @@ describe('InventoryWarehouseRoleDirectory', () => {
       .mockResolvedValueOnce([
         record('rec_a_old', {
           楼栋: 'A楼',
-          库房示例人员019员: [{ id: 'ou_old', name: '旧库管' }],
+          库房责任人员: [{ id: 'ou_old', name: '旧库管' }],
         }),
       ])
       .mockImplementationOnce(
@@ -307,7 +307,7 @@ describe('InventoryWarehouseRoleDirectory', () => {
     releaseRefresh?.([
       record('rec_a_new', {
         楼栋: 'A楼',
-        库房示例人员019员: [{ id: 'ou_new', name: '新库管' }],
+        库房责任人员: [{ id: 'ou_new', name: '新库管' }],
       }),
     ]);
     await eventually(() =>
@@ -327,14 +327,14 @@ describe('InventoryWarehouseRoleDirectory', () => {
       .mockResolvedValueOnce([
         record('rec_a_old', {
           楼栋: 'A楼',
-          库房示例人员019员: [{ id: 'ou_old', name: '旧库管' }],
+          库房责任人员: [{ id: 'ou_old', name: '旧库管' }],
         }),
       ])
       .mockRejectedValueOnce(new Error('temporary Base outage'))
       .mockResolvedValueOnce([
         record('rec_a_new', {
           楼栋: 'A楼',
-          库房示例人员019员: [{ id: 'ou_new', name: '新库管' }],
+          库房责任人员: [{ id: 'ou_new', name: '新库管' }],
         }),
       ]);
     const directory = createDirectory(reader, () => now, 100, 1_000);
@@ -360,7 +360,7 @@ describe('InventoryWarehouseRoleDirectory', () => {
     const reader = jest.fn(async () => [
       record('rec_h', {
         楼栋: 'H楼',
-        库房示例人员019员: [{ id: 'ou_h_manager', name: 'H楼库管' }],
+        库房责任人员: [{ id: 'ou_h_manager', name: 'H楼库管' }],
       }),
     ]);
     const directory = createDirectory(reader);

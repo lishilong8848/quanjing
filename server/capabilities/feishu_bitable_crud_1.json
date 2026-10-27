@@ -8,8 +8,8 @@
   "paramsSchema": {},
   "formValue": {
     "owner": "7310140364520734723",
-    "appToken": "PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN",
-    "tableID": "PUBLIC_EXAMPLE_FEISHU_SEALING_TABLE_ID",
+    "appToken": "KdCZbSL5CaTErKsFwFucddA5nYd",
+    "tableID": "tblI0yzyGFZgxe3P",
     "fields": [
       {
         "writeable": false,

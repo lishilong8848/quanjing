@@ -1,4 +1,4 @@
-import manifest from './portal-assets.example.json';
+import manifest from '../../../public/portal/vnet-photo-20261012/manifest.json';
 
 type Variant = 'display' | 'mobile' | 'thumbnail';
 const assets: Record<string, { display: { file: string; width: number }; mobile: { file: string; width: number }; thumbnail: { file: string; width: number } }> = manifest;

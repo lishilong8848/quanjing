@@ -38,12 +38,12 @@ import {
 const CACHE_MS = 5 * 60 * 1000;
 export const MONTHLY_RESOURCE_SOURCES = {
   load: {
-    tableId: 'tbl35e641004a831',
+    tableId: 'tblBgaPzuVj7V9Q6',
     tableName: '月览IT负载率',
     fieldNames: ['日期', '楼栋', '园区IT负载率', 'IT负载率'],
   },
   racks: {
-    tableId: 'tbl55d9d0575047d',
+    tableId: 'tblDYQYihJ0CgepE',
     tableName: '月览机柜容量',
     fieldNames: [
       '楼栋名称',
@@ -56,7 +56,7 @@ export const MONTHLY_RESOURCE_SOURCES = {
     ],
   },
   energy: {
-    tableId: 'tbl32bf112724ed6',
+    tableId: 'tblqSskJvBnx9UJj',
     tableName: '月览电耗与PUE',
     fieldNames: [
       '日期',
@@ -70,7 +70,7 @@ export const MONTHLY_RESOURCE_SOURCES = {
     ],
   },
   weather: {
-    tableId: 'tbl38b1b0b822bf2',
+    tableId: 'tblz8rjxdtRRlYmS',
     viewId: 'vewX77mW48',
     tableName: '月览湿球温度',
     fieldNames: [
@@ -83,7 +83,7 @@ export const MONTHLY_RESOURCE_SOURCES = {
     ],
   },
   water: {
-    tableId: 'tbl85eb2123a63c8',
+    tableId: 'tblz4TkZqrUJB90y',
     tableName: '月览水耗',
     fieldNames: [
       '执行日期',

@@ -103,7 +103,7 @@ export class MbtiAssessmentService {
     bindSelfServiceApplicant('', principal, authenticated, '开始 MBTI 测试');
     if (resolveSelfServiceApplicant(principal, authenticated).mode !== 'automatic') throw new BadRequestException('当前账号需要从名单中选择人员');
     const config = readEmployeeOnboardingConfig();
-    if (config.tableId !== DEFAULT_ACTIVE_PERSONNEL_TABLE_ID) throw new ServiceUnavailableException('示例人员016数据源与登录人员资料不一致，请联系管理员核对');
+    if (config.tableId !== DEFAULT_ACTIVE_PERSONNEL_TABLE_ID) throw new ServiceUnavailableException('测试人员数据源与登录人员资料不一致，请联系管理员核对');
     const appToken = await resolveBitableAppToken(this.http, { appToken: config.appToken, wikiToken: config.wikiToken, tableName: config.tableName, requestTimeoutMs: () => 8_000 });
     let snapshot = this.cachedSnapshot || await readLatestPersistedBitableRecordSnapshot({ appToken, tableId: DEFAULT_ACTIVE_PERSONNEL_TABLE_ID, viewId: DEFAULT_ACTIVE_PERSONNEL_VIEW_ID, tableName: '在职人员' });
     if (!snapshot || snapshot.expiresAt <= Date.now()) snapshot = await this.refreshPeople();
@@ -118,7 +118,7 @@ export class MbtiAssessmentService {
     const request = this.parseSubmission(raw);
     if (request.audience === 'active' && isPersonalAccessAccount(principal)) {
       const person = await this.currentPerson(principal, true);
-      if (request.recordId !== person.recordId || request.name?.trim() !== person.name) throw new ForbiddenException('示例人员016必须为当前登录本人');
+      if (request.recordId !== person.recordId || request.name?.trim() !== person.name) throw new ForbiddenException('测试人员必须为当前登录本人');
     }
     const result = scoreAttachedBank(request.version, request.answers);
     const type = getAttachedBankDisplayType(result);
@@ -209,7 +209,7 @@ export class MbtiAssessmentService {
       if (entry.actor) {
         const config = readEmployeeOnboardingConfig();
         const appToken = await resolveBitableAppToken(this.http, { appToken: config.appToken, wikiToken: config.wikiToken, tableName: config.tableName, requestTimeoutMs: () => 8_000 });
-        if (config.tableId !== DEFAULT_ACTIVE_PERSONNEL_TABLE_ID) throw new ForbiddenException('示例人员016数据源已变更，请联系管理员核对');
+        if (config.tableId !== DEFAULT_ACTIVE_PERSONNEL_TABLE_ID) throw new ForbiddenException('测试人员数据源已变更，请联系管理员核对');
         resolveSelfServicePersonnelRecord(entry.actor, { appId: readEnv('FEISHU_APP_ID'), appToken, tableId: config.tableId }, [{ record_id: entry.recordId, fields }]);
       }
       await this.gateway.updateMbti(entry.recordId, entry.type);

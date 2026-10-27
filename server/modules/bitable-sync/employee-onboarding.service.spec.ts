@@ -33,7 +33,7 @@ function request(
     companyName: '南通承宏云计算有限公司',
     position: '运维实习生',
     identityNumber: '110101199001010015',
-    phone: '13800007889',
+    phone: '19900001234',
     entryDate: '2026-08-15',
     education: '本科',
     graduateSchool: '自动化测试院校',
@@ -467,7 +467,7 @@ describe('EmployeeOnboardingService', () => {
   });
 
   it('maps an unknown create failure to a redacted HTTP 502 fallback', async () => {
-    const secret = 'private-create-response boxPrivateToken 13800007889';
+    const secret = 'private-create-response boxPrivateToken 19900001234';
     const gateway = gatewayMock();
     gateway.createRecord.mockRejectedValueOnce(new Error(secret));
     const { service } = serviceWith(gateway);
@@ -480,7 +480,7 @@ describe('EmployeeOnboardingService', () => {
     expect(String(error)).toContain('写入新员工入职记录失败');
     expect(serialiseError(error)).not.toContain(secret);
     expect(serialiseError(error)).not.toContain('boxPrivateToken');
-    expect(serialiseError(error)).not.toContain('13800007889');
+    expect(serialiseError(error)).not.toContain('19900001234');
   });
 
   it('keeps the saved record ID when post-readback cache invalidation fails', async () => {
@@ -590,7 +590,7 @@ describe('EmployeeOnboardingService', () => {
   });
 
   it('maps continuous unknown readback failures to a redacted HTTP 503 fallback', async () => {
-    const secret = 'private-read-response boxPrivateToken 13800007889';
+    const secret = 'private-read-response boxPrivateToken 19900001234';
     const gateway = gatewayMock();
     gateway.readRecord.mockRejectedValue(new Error(secret));
     const { service } = serviceWith(gateway);
@@ -603,7 +603,7 @@ describe('EmployeeOnboardingService', () => {
     expect(String(error)).toContain('读取新员工入职记录暂时失败');
     expect(serialiseError(error)).not.toContain(secret);
     expect(serialiseError(error)).not.toContain('boxPrivateToken');
-    expect(serialiseError(error)).not.toContain('13800007889');
+    expect(serialiseError(error)).not.toContain('19900001234');
   });
 
   it('returns HTTP 502 after any successful but unconfirmed readback, even if later reads fail temporarily', async () => {
@@ -861,7 +861,7 @@ describe('EmployeeOnboardingService', () => {
   it('rejects unknown file keys without echoing their names and without external work', async () => {
     const gateway = gatewayMock();
     const { service } = serviceWith(gateway);
-    const maliciousKey = '身份证号-13800007889';
+    const maliciousKey = '身份证号-19900001234';
 
     const error = await service
       .create(request(), { photo: png(), [maliciousKey]: png('unknown.png') } as never)
@@ -869,7 +869,7 @@ describe('EmployeeOnboardingService', () => {
 
     expect(error).toBeInstanceOf(BadRequestException);
     expect(serialiseError(error)).not.toContain(maliciousKey);
-    expect(serialiseError(error)).not.toContain('13800007889');
+    expect(serialiseError(error)).not.toContain('19900001234');
     expect(gateway.fetchFieldMetas).not.toHaveBeenCalled();
   });
 });

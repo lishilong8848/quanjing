@@ -38,9 +38,9 @@ const supplierRecords = [
     record_id: 'rec-supplier-existing',
     fields: {
       公司单位: '现有供应商',
-      联系人: '示例人员013',
-      联系电话: '13800008135',
-      园区对接人: [{ id: 'ou_liaison', name: '示例人员017' }],
+      联系人: '李四',
+      联系电话: '13800000001',
+      园区对接人: [{ id: 'ou_liaison', name: '王五' }],
     },
   },
 ];
@@ -48,7 +48,7 @@ const supplierRecords = [
 const executionRecords = [
   {
     record_id: 'rec-existing-contract',
-    fields: { 跟进人: [{ id: 'ou_owner', name: '示例人员008' }] },
+    fields: { 跟进人: [{ id: 'ou_owner', name: '张三' }] },
   },
 ];
 
@@ -57,7 +57,7 @@ const organizationRecords = [
     record_id: 'rec-org',
     fields: {
       职位: '机房经理',
-      示例人员001: [{ id: 'ou_manager', name: '合同经理' }],
+      主管: [{ id: 'ou_manager', name: '合同经理' }],
     },
   },
 ];
@@ -224,7 +224,7 @@ describe('ContractCreationService', () => {
         fields: {
           fld7wwRKhu: '新供应商',
           fld7XJlAfD: '赵六',
-          fldH9YKIX8: '13800002356',
+          fldH9YKIX8: '13800000002',
           fldSE2n6Pv: 'supplier@example.com',
           fldOSoZVHD: 'ou_liaison',
         },

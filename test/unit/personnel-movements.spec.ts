@@ -13,12 +13,12 @@ describe('personnel movement overview', () => {
           buildingName: 'C栋',
           leaveStaff: ['任烁炜'],
           substituteStaff: ['祁金鹰'],
-          temporarySubstituteStaff: ['示例人员012'],
+          temporarySubstituteStaff: ['曹雷'],
           temporarySubstitutes: [
             {
               shift: 'night',
               shiftLabel: '夜',
-              staff: ['示例人员012'],
+              staff: ['曹雷'],
             },
           ],
         },
@@ -36,12 +36,12 @@ describe('personnel movement overview', () => {
         buildingName: 'C栋',
         leaveStaff: ['任烁炜'],
         substituteStaff: ['祁金鹰'],
-        temporarySubstituteStaff: ['示例人员012'],
+        temporarySubstituteStaff: ['曹雷'],
         temporarySubstitutes: [
           {
             shift: 'night',
             shiftLabel: '夜',
-            staff: ['示例人员012'],
+            staff: ['曹雷'],
           },
         ],
         travelStaff: [],
@@ -129,20 +129,20 @@ describe('personnel movement overview', () => {
           shiftText: '白班',
           team: 'B班',
           teamText: 'B班',
-          leaveStaff: ['示例人员008', '示例人员013'],
-          substituteStaff: ['示例人员017', '赵六'],
+          leaveStaff: ['张三', '李四'],
+          substituteStaff: ['王五', '赵六'],
           leaveAssignments: [
             {
               requestRecordId: 'leave-zhang-san',
-              leaveStaffName: '示例人员008',
-              substituteStaff: ['示例人员017'],
+              leaveStaffName: '张三',
+              substituteStaff: ['王五'],
               startAt: '2026-09-15T09:00',
               endAt: '2026-09-15T14:00',
               leaveHours: 4,
             },
             {
               requestRecordId: 'leave-li-si',
-              leaveStaffName: '示例人员013',
+              leaveStaffName: '李四',
               substituteStaff: ['赵六'],
               startAt: '2026-09-15T09:00',
               endAt: '2026-09-15T18:00',
@@ -158,20 +158,20 @@ describe('personnel movement overview', () => {
       {
         shift: 'white',
         shiftLabel: '白',
-        leaveStaff: ['示例人员008', '示例人员013'],
-        substituteStaff: ['示例人员017', '赵六'],
+        leaveStaff: ['张三', '李四'],
+        substituteStaff: ['王五', '赵六'],
         assignments: [
           {
             requestRecordId: 'leave-zhang-san',
-            leaveStaffName: '示例人员008',
-            substituteStaff: ['示例人员017'],
+            leaveStaffName: '张三',
+            substituteStaff: ['王五'],
             startAt: '2026-09-15T09:00',
             endAt: '2026-09-15T14:00',
             leaveHours: 4,
           },
           {
             requestRecordId: 'leave-li-si',
-            leaveStaffName: '示例人员013',
+            leaveStaffName: '李四',
             substituteStaff: ['赵六'],
             startAt: '2026-09-15T09:00',
             endAt: '2026-09-15T18:00',
@@ -247,15 +247,15 @@ describe('personnel movement overview', () => {
     expect(applyDutyStaffActualUpdates).toEqual(expect.any(Function));
 
     const schedules: ScheduleStub[] = [
-      { recordId: 'unchanged', dutyStaffActual: ['示例人员008'], marker: 'keep' },
-      { recordId: 'target', dutyStaffActual: ['示例人员013'], marker: 'update' },
+      { recordId: 'unchanged', dutyStaffActual: ['张三'], marker: 'keep' },
+      { recordId: 'target', dutyStaffActual: ['李四'], marker: 'update' },
     ];
     const result = applyDutyStaffActualUpdates!(schedules, [
       { recordId: 'target', dutyStaffActual: ['江亮'] },
     ]);
 
     expect(result).toEqual([
-      { recordId: 'unchanged', dutyStaffActual: ['示例人员008'], marker: 'keep' },
+      { recordId: 'unchanged', dutyStaffActual: ['张三'], marker: 'keep' },
       { recordId: 'target', dutyStaffActual: ['江亮'], marker: 'update' },
     ]);
     expect(result[0]).toBe(schedules[0]);

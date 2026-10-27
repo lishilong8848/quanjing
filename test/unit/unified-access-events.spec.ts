@@ -77,7 +77,7 @@ describe('unified access response interceptor', () => {
 
   it.each([
     '/api/authnpaas/lark-user-id',
-    'https://example.com:3001/api/authnpaas/lark-user-id?source=shell',
+    'https://www.sm.sjhl.online:3001/api/authnpaas/lark-user-id?source=shell',
   ])(
     'does not invalidate unified access for a platform identity 403 from %s',
     async (url) => {

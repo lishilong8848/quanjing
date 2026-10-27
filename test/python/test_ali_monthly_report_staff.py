@@ -142,7 +142,7 @@ class StaffRosterWorkbookTests(unittest.TestCase):
                         ["备岗新人", "电气备岗", None, None],
                     )
                     self.assertIsNone(changes_sheet["A5"].value)
-                    self.assertEqual(changes_sheet["A6"].value, "示例人员004员")
+                    self.assertEqual(changes_sheet["A6"].value, "其他人员")
                     self.assertIn("A6:D6", {str(item) for item in changes_sheet.merged_cells.ranges})
                     self.assertEqual(
                         [changes_sheet.cell(7, column).value for column in range(1, 5)],

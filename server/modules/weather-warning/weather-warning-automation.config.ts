@@ -118,7 +118,7 @@ export function loadWeatherWarningAutomationConfig(
         receiveId: ownerOpenId,
         displayName:
           readAutomationEnv(env, 'FEISHU_WEATHER_WARNING_OWNER_NAME') ||
-          '示例人员020',
+          '马进宇',
         audience: 'owner',
       },
     ],

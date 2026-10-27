@@ -129,7 +129,7 @@ describe('阿里月报飞书下载通知工具', () => {
 
   it.each([
     ['HTTP', 'http://portal.example.test/nantong/'],
-    ['用户名密码', 'https://user:user-a1ad1416@example.com/nantong/'],
+    ['用户名密码', 'https://user:password@portal.example.test/nantong/'],
     ['查询参数', 'https://portal.example.test/nantong/?tenant=one'],
     ['片段', 'https://portal.example.test/nantong/#download'],
   ])('拒绝带%s的公共基址', (_name, publicBaseUrl) => {
@@ -345,7 +345,7 @@ describe('阿里月报飞书下载通知工具', () => {
     ['空 URL', '   '],
     ['HTTP URL', 'http://portal.example.test/download/one'],
     ['相对 URL', '/download/one'],
-    ['带凭据 URL', 'https://user:user-a1ad1416@example.com/download/one'],
+    ['带凭据 URL', 'https://user:password@portal.example.test/download/one'],
   ])('拒绝%s', (_name, url) => {
     expect(() =>
       buildAliMonthlyReportFeishuText({
@@ -402,7 +402,7 @@ describe('阿里月报飞书下载通知工具', () => {
 });
 
 describe('阿里月报生成后的飞书通知编排', () => {
-  const targetChatId = 'oc_c79f407063dc9ca9f70cc76cb4059895';
+  const targetChatId = 'oc_9961bb057de8bd715447559c5e63c4f2';
   const generatedResponse: AliMonthlyReportGenerateResponse = {
     success: true,
     reportType: 'high_power_top5',
@@ -429,8 +429,8 @@ describe('阿里月报生成后的飞书通知编排', () => {
     feishuChatIds: [targetChatId],
     automationFeishuChatId: targetChatId,
     feishuUserOpenId: 'ou_testmajinyu',
-    feishuUserEmail: 'user-69255df9@example.com',
-    feishuUserName: '示例人员020',
+    feishuUserEmail: 'ma.jinyu@example.test',
+    feishuUserName: '马进宇',
     defaultEmailRecipient: '',
     publicBaseUrl: 'https://portal.example.test/nantong/',
     downloadSigningRoot: '0123456789abcdef0123456789abcdef',
@@ -559,7 +559,7 @@ describe('阿里月报生成后的飞书通知编排', () => {
     ['在职人员导出', 'staff_roster' as const],
   ])('%s生成成功后只发送资料管理多维表链接', async (_name, reportType) => {
     const bitableRecordUrl =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/base-token?table=table-id&view=view-id&recordId=record-id';
     const responseWithBitableLink = {
       ...generatedResponse,
       reportType,
@@ -750,7 +750,7 @@ describe('阿里月报生成后的飞书通知编排', () => {
     },
   );
 
-  it('四项打包上传一次 ZIP，并把同一飞书文件发送到会话群和示例人员020', async () => {
+  it('四项打包上传一次 ZIP，并把同一飞书文件发送到会话群和马进宇', async () => {
     const { service, internals, fakePost } = createService();
     const readGeneratedFile = jest
       .spyOn(service, 'readGeneratedFile')
@@ -850,12 +850,12 @@ describe('阿里月报生成后的飞书通知编排', () => {
         {
           chatId: 'ou_testmajinyu',
           recipientType: 'user',
-          recipientName: '示例人员020',
+          recipientName: '马进宇',
           sent: true,
         },
       ],
     });
-    expect(sent.message).toContain('会话群和示例人员020');
+    expect(sent.message).toContain('会话群和马进宇');
   });
 
   it('四项打包 ZIP 为空时不上传也不发送飞书文件', async () => {
@@ -880,7 +880,7 @@ describe('阿里月报生成后的飞书通知编排', () => {
     });
   });
 
-  it('四项 ZIP 群发送成功但示例人员020失败时保留 ZIP 并返回逐目标状态', async () => {
+  it('四项 ZIP 群发送成功但马进宇失败时保留 ZIP 并返回逐目标状态', async () => {
     const { service, fakePost } = createService();
     jest.spyOn(service, 'readGeneratedFile').mockResolvedValue({
       buffer: Buffer.from('PK-partial-delivery'),
@@ -916,7 +916,7 @@ describe('阿里月报生成后的飞书通知编排', () => {
         { recipientType: 'chat', sent: true },
         {
           recipientType: 'user',
-          recipientName: '示例人员020',
+          recipientName: '马进宇',
           sent: false,
           error: expect.stringContaining('user blocked bot'),
         },
@@ -925,7 +925,7 @@ describe('阿里月报生成后的飞书通知编排', () => {
     expect(response.message).toContain('部分发送失败');
   });
 
-  it('示例人员020未配置 open_id 时使用飞书邮箱发送同一个 ZIP', async () => {
+  it('马进宇未配置 open_id 时使用飞书邮箱发送同一个 ZIP', async () => {
     const { service, fakePost } = createService({
       runtime: { ...runtime, feishuUserOpenId: '' },
     });
@@ -957,7 +957,7 @@ describe('阿里月报生成后的飞书通知编排', () => {
       String(url).includes('receive_id_type=email'),
     );
     expect(directMessage?.[1]).toMatchObject({
-      receive_id: 'user-69255df9@example.com',
+      receive_id: 'ma.jinyu@example.test',
       msg_type: 'file',
       content: JSON.stringify({ file_key: 'file_email' }),
     });

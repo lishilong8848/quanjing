@@ -17,37 +17,37 @@ import type {
 } from '../../../shared/leave-request-impact';
 
 const people = {
-  applicant: person('示例人员008', 'ou_applicant', '运维值班员', ['A楼'], ['示例人员009']),
-  buildingLead: person('示例人员009', 'ou_building_lead', '设施运维示例人员001', ['A楼']),
+  applicant: person('张三', 'ou_applicant', '运维值班员', ['A楼'], ['施小东']),
+  buildingLead: person('施小东', 'ou_building_lead', '设施运维主管', ['A楼']),
   manager: person(
-    '示例人员020',
+    '马进宇',
     'ou_manager',
     '设施运维经理',
     ['全园区'],
-    ['示例人员020'],
+    ['马进宇'],
   ),
   deputy: person(
-    '示例人员014',
+    '梅冰冰',
     'ou_deputy',
     '设施运维副经理',
     ['全园区'],
-    ['示例人员014'],
+    ['梅冰冰'],
   ),
   dutyAccount: person(
     'A楼值班账号',
     'ou_duty_a',
     '值班账号',
     ['A楼'],
-    ['示例人员009'],
+    ['施小东'],
   ),
   hApplicant: person(
-    '示例人员013',
+    '李四',
     'ou_h_applicant',
     '运维值班员',
     ['H楼'],
     ['周庆庆'],
   ),
-  hLead: person('周庆庆', 'ou_h_lead', 'H楼值班示例人员001', ['H楼']),
+  hLead: person('周庆庆', 'ou_h_lead', 'H楼值班主管', ['H楼']),
   hDutyAccount: person(
     'H楼值班账号',
     'ou_duty_h',
@@ -56,22 +56,22 @@ const people = {
     ['周庆庆'],
   ),
   stationApplicant: person(
-    '示例人员017',
+    '王五',
     'ou_110_applicant',
     '运维值班员',
     ['110站'],
     ['赵六'],
   ),
-  electricalLead: person('赵六', 'ou_electrical_lead', '电气示例人员001', ['110站']),
+  electricalLead: person('赵六', 'ou_electrical_lead', '电气主管', ['110站']),
   electricalEngineer: person(
     '钱七',
     'ou_electrical_engineer',
     '电气工程师',
     ['A楼'],
-    ['示例人员009'],
+    ['施小东'],
   ),
   fireEngineer: person('孙八', 'ou_fire_engineer', '消防工程师', ['A楼']),
-  fireLead: person('吴九', 'ou_fire_lead', '消防示例人员001', ['全园区']),
+  fireLead: person('吴九', 'ou_fire_lead', '消防主管', ['全园区']),
 };
 
 const directory: LeaveOrganizationRecord[] = [
@@ -150,12 +150,12 @@ describe('buildLeaveApprovalPlan', () => {
       'ou_station_chief',
       '110站站长',
       ['110站'],
-      ['示例人员006'],
+      ['周海祥'],
     );
     const stationSupervisor = person(
-      '示例人员006',
+      '周海祥',
       'ou_station_supervisor',
-      '电气示例人员001',
+      '电气主管',
       ['H楼'],
     );
     const plan = buildLeaveApprovalPlan(
@@ -189,7 +189,7 @@ describe('buildLeaveApprovalPlan', () => {
       'ou_station_chief',
       '110站站长',
       ['110站'],
-      ['示例人员006'],
+      ['周海祥'],
     );
 
     expect(() =>
@@ -198,7 +198,7 @@ describe('buildLeaveApprovalPlan', () => {
           applicant: stationChief,
           organizationRecords: [
             stationChief,
-            person('示例人员006', '', '电气示例人员001', ['H楼']),
+            person('周海祥', '', '电气主管', ['H楼']),
             people.manager,
           ],
         }),
@@ -206,7 +206,7 @@ describe('buildLeaveApprovalPlan', () => {
     ).toThrow(
       new LeaveApprovalRoutingError(
         'APPROVER_NOT_FOUND',
-        '审批人“示例人员006”在组织架构中不存在或缺少飞书账号',
+        '审批人“周海祥”在组织架构中不存在或缺少飞书账号',
       ),
     );
   });
@@ -217,7 +217,7 @@ describe('buildLeaveApprovalPlan', () => {
       'ou_station_chief',
       '110站站长',
       ['110站'],
-      ['示例人员006'],
+      ['周海祥'],
     );
 
     expect(() =>
@@ -226,8 +226,8 @@ describe('buildLeaveApprovalPlan', () => {
           applicant: stationChief,
           organizationRecords: [
             stationChief,
-            person('示例人员006', 'ou_station_supervisor_1', '电气示例人员001', ['H楼']),
-            person('示例人员006', 'ou_station_supervisor_2', '电气示例人员001', ['110站']),
+            person('周海祥', 'ou_station_supervisor_1', '电气主管', ['H楼']),
+            person('周海祥', 'ou_station_supervisor_2', '电气主管', ['110站']),
             people.manager,
           ],
         }),
@@ -235,7 +235,7 @@ describe('buildLeaveApprovalPlan', () => {
     ).toThrow(
       new LeaveApprovalRoutingError(
         'APPROVER_NAME_NOT_UNIQUE',
-        '审批人“示例人员006”在组织架构中存在多个飞书账号，无法唯一解析',
+        '审批人“周海祥”在组织架构中存在多个飞书账号，无法唯一解析',
       ),
     );
   });
@@ -246,15 +246,15 @@ describe('buildLeaveApprovalPlan', () => {
       'ou_station_chief',
       '110站站长',
       ['110站'],
-      ['示例人员006'],
+      ['周海祥'],
     );
     const plan = buildLeaveApprovalPlan(
       input({
         applicant: stationChief,
         organizationRecords: [
           stationChief,
-          person('示例人员006', '', '电气示例人员001', ['110站']),
-          person('示例人员006', 'ou_station_supervisor', '电气示例人员001', ['H楼']),
+          person('周海祥', '', '电气主管', ['110站']),
+          person('周海祥', 'ou_station_supervisor', '电气主管', ['H楼']),
           people.manager,
         ],
       }),
@@ -267,9 +267,9 @@ describe('buildLeaveApprovalPlan', () => {
 
   it('keeps the configured supervisor route for ordinary 110 station staff', () => {
     const ordinarySupervisor = person(
-      '普通值班示例人员001',
+      '普通值班主管',
       'ou_ordinary_110_supervisor',
-      '110值班示例人员001',
+      '110值班主管',
       ['110站'],
     );
     const ordinaryApplicant = person(
@@ -280,9 +280,9 @@ describe('buildLeaveApprovalPlan', () => {
       [ordinarySupervisor.name],
     );
     const stationElectricalSupervisor = person(
-      '示例人员006',
+      '周海祥',
       'ou_station_supervisor',
-      '电气示例人员001',
+      '电气主管',
       ['110站'],
     );
     const plan = buildLeaveApprovalPlan(
@@ -304,7 +304,7 @@ describe('buildLeaveApprovalPlan', () => {
 
   it('routes a 110 applicant without a Feishu account by personnel record identity', () => {
     const applicant = {
-      ...person('示例人员005', '', '110值班人员', ['110站'], ['赵六']),
+      ...person('卞天洋', '', '110值班人员', ['110站'], ['赵六']),
       personRecordId: 'rec_110_bian',
     };
     const plan = buildLeaveApprovalPlan(
@@ -390,7 +390,7 @@ describe('requiresSupervisorSubstitute', () => {
   it.each([
     [person('甲', 'ou_h_duty', '运维值班员', ['H楼']), true],
     [person('乙', 'ou_h_lead', '运维值班长', ['H楼']), true],
-    [person('周庆庆', 'ou_h_supervisor', 'H楼值班示例人员001', ['H楼']), true],
+    [person('周庆庆', 'ou_h_supervisor', 'H楼值班主管', ['H楼']), true],
     [person('丙', 'ou_h_foc', 'FOC', ['H楼']), false],
     [person('丁', 'ou_d_any', '实习生（备岗）', ['D楼']), true],
     [person('戊', 'ou_e_any', '设施工程师', ['E楼']), true],
@@ -435,14 +435,14 @@ describe('leave shift substitute assignments', () => {
   const candidates: LeaveSubstituteCandidate[] = [
     {
       personRecordId: 'rec_zhang',
-      name: '示例人员008',
+      name: '张三',
       openId: 'ou_zhang',
       position: '运维值班员',
       buildings: ['A楼'],
     },
     {
       personRecordId: 'rec_li',
-      name: '示例人员013',
+      name: '李四',
       openId: 'ou_li',
       position: '运维值班员',
       buildings: ['B楼'],
@@ -457,7 +457,7 @@ describe('leave shift substitute assignments', () => {
         building: 'A楼',
         team: '一班',
         shift: '白班',
-        dutyStaffActual: ['示例人员012'],
+        dutyStaffActual: ['曹雷'],
       },
       {
         recordId: 'zhang-conflict',
@@ -465,7 +465,7 @@ describe('leave shift substitute assignments', () => {
         building: 'C楼',
         team: '三班',
         shift: '白班',
-        dutyStaffActual: ['示例人员008'],
+        dutyStaffActual: ['张三'],
       },
       {
         recordId: 'schedule-2',
@@ -473,7 +473,7 @@ describe('leave shift substitute assignments', () => {
         building: 'B楼',
         team: '二班',
         shift: '夜班',
-        dutyStaffActual: ['示例人员012'],
+        dutyStaffActual: ['曹雷'],
       },
       {
         recordId: 'li-conflict',
@@ -481,7 +481,7 @@ describe('leave shift substitute assignments', () => {
         building: 'D楼',
         team: '四班',
         shift: '夜班',
-        dutyStaffActual: ['示例人员013'],
+        dutyStaffActual: ['李四'],
       },
     ];
 
@@ -491,7 +491,7 @@ describe('leave shift substitute assignments', () => {
         schedules,
         applicant: {
           personRecordId: 'rec_cao',
-          name: '示例人员012',
+          name: '曹雷',
           openId: 'ou_cao',
           position: '运维值班员',
           buildings: ['A楼'],
@@ -525,7 +525,7 @@ describe('leave shift substitute assignments', () => {
           candidates,
         })),
         actorOpenId: 'ou_supervisor',
-        actorName: '示例人员001',
+        actorName: '主管',
         changedAt: '2026-08-25T10:00:00.000Z',
       }),
     ).toMatchObject({
@@ -546,7 +546,7 @@ describe('leave shift substitute assignments', () => {
       groups,
       candidateSets,
       actorOpenId: 'ou_supervisor',
-      actorName: '示例人员001',
+      actorName: '主管',
       changedAt: '2026-08-25T10:00:00.000Z',
     };
 

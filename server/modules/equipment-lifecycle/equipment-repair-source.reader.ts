@@ -37,7 +37,7 @@ export const EQUIPMENT_REPAIR_FIELDS = [
   '关联台账记录ID',
 ] as const;
 const SOURCE =
-  'https://open.feishu.cn/open-apis/base/v3/bases/RR4Sbm81xaII07sW0kacCb9xnih/tables/tblfaa7c2608349c';
+  'https://open.feishu.cn/open-apis/base/v3/bases/RR4Sbm81xaII07sW0kacCb9xnih/tables/tblschT48zXwigUG';
 const fingerprint = createHash('sha256')
   .update(JSON.stringify({ SOURCE, fields: EQUIPMENT_REPAIR_FIELDS }))
   .digest('hex');

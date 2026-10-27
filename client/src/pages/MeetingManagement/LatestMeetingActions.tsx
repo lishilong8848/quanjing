@@ -128,7 +128,7 @@ export function LatestMeetingActions({
               aria-pressed={onlyUnassigned}
               onClick={() => setOnlyUnassigned(true)}
             >
-              示例人员019未注明 {unassigned}
+              责任人未注明 {unassigned}
             </Button>
           </div>
           {data.newestReportDate !== data.date && (
@@ -146,7 +146,7 @@ export function LatestMeetingActions({
         <>
           <div className="meeting-action-labels" aria-hidden="true">
             <span>事宜</span>
-            <span>示例人员019员</span>
+            <span>责任人员</span>
             <span>来源</span>
           </div>
           <ol className="meeting-action-list">
@@ -239,11 +239,11 @@ export function LatestMeetingActions({
                     }
                   >
                     <UserRound />
-                    {item.responsible || '未注明示例人员019'}
+                    {item.responsible || '未注明责任人'}
                     {editable && (
                       <button
                         disabled={overrides[item.id]?.pending}
-                        aria-label={`修改示例人员019${index + 1}`}
+                        aria-label={`修改责任人${index + 1}`}
                         onClick={() => setEditing(item)}
                       >
                         <Pencil />

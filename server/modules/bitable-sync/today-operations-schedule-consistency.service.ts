@@ -35,7 +35,7 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const SOURCE_CACHE_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_SCHEDULE_SYNC_GRACE_MS = 10 * 60_000;
 const DEFAULT_SCHEDULE_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblRV9KeWFh9xCkm&view=vew6jLlGzq';
 interface BuildConsistencySnapshotInput {
   businessDate: string;
   scheduleRecords: BitableRecordItem[];

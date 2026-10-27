@@ -275,7 +275,7 @@ describe('finalizeFailedChangeSummarySelfTestLedgers', () => {
     [
       'submitter',
       (ledger: Record<string, any>) => {
-        ledger.request.submitterName = '示例人员004';
+        ledger.request.submitterName = '其他人';
       },
     ],
     [
@@ -335,7 +335,7 @@ describe('finalizeFailedChangeSummarySelfTestLedgers', () => {
 
   it('rejects different submitters across active durable summary ledgers', async () => {
     const backup = failedSummaryLedger();
-    backup.request.submitterName = '示例人员004';
+    backup.request.submitterName = '其他人';
     await writeFile(
       join(summaryLedgerDir, `${SUMMARY_MUTATION_ID}.json.bak`),
       JSON.stringify(backup),

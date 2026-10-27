@@ -555,7 +555,7 @@ function createPayload(): EmployeeOnboardingCreateRequest {
     companyName: '南通承宏云计算有限公司',
     position: '运维实习生',
     identityNumber: '110101199001010015',
-    phone: '13800007889',
+    phone: '19900001234',
     entryDate: '2026-08-15',
     education: '本科',
     graduateSchool: '自动化测试院校',

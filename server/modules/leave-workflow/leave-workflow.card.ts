@@ -569,7 +569,7 @@ function applicationTitle(context: LeaveCardContext): string {
 function titleForStage(context: LeaveCardContext): string {
   return context.stageKey === 'manager'
     ? `${applicationTitle(context)} · 待经理审批`
-    : `${applicationTitle(context)} · 待示例人员001审批`;
+    : `${applicationTitle(context)} · 待主管审批`;
 }
 
 function summary(context: LeaveCardContext): Array<Record<string, unknown>> {

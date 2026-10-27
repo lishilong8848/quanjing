@@ -41,7 +41,7 @@ export class WeeklyGateway {
       throw new Error('新建条目链接未确认，请核对记录后重试群提醒');
     const link = result.items[0].record_url;
     if (!link)
-      return 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+      return 'https://vnet.feishu.cn/wiki/JbZywYBfgiltYpksj2bc1HvCnPd?table=tbl9GlPjdwTHIKSp&view=vewDqqJuM7';
     if (
       typeof link !== 'string' ||
       !/^https:\/\/vnet\.feishu\.cn\/(?:base|wiki)\/[A-Za-z0-9]+(?:\?[^\s]*)?$/.test(
@@ -90,7 +90,7 @@ export class WeeklyGateway {
           msg_type: 'text',
           uuid,
           content: JSON.stringify({
-            text: `${title}\n${documentUrl}\n请各专业示例人员019更新本周内容和待办。`,
+            text: `${title}\n${documentUrl}\n请各专业责任人更新本周内容和待办。`,
           }),
         },
       })
@@ -401,7 +401,7 @@ export class WeeklyGateway {
       );
     if (matches(desired, found)) return;
     if (!matches(expected, found))
-      throw new Error('周报内容已被示例人员004修改，请重新打开核对');
+      throw new Error('周报内容已被其他人修改，请重新打开核对');
     const fields: Record<string, unknown> = { ...desired };
     if ('链接' in fields && types.get('链接') === 15)
       fields['链接'] = { link: desired['链接'], text: '查看周报' };
@@ -427,7 +427,7 @@ export class WeeklyGateway {
         DEFAULT_ACTIVE_PERSONNEL_TABLE_ID,
       viewId:
         process.env.FEISHU_ORG_VIEW_ID || DEFAULT_ACTIVE_PERSONNEL_VIEW_ID,
-      tableName: '周会示例人员019员',
+      tableName: '周会责任人员',
       automaticFields: true,
       strict: true,
       cacheTtlMs: 300000,
@@ -531,7 +531,7 @@ export class WeeklyGateway {
     const actual = this.attachmentTokens((await this.record(id))[field]);
     if (JSON.stringify(actual) === JSON.stringify(desired)) return;
     if (JSON.stringify(actual) !== JSON.stringify([...expected].sort()))
-      throw new Error('会议附件已被示例人员004修改，请核对后重试');
+      throw new Error('会议附件已被其他人修改，请核对后重试');
     await this.request('PUT', `records/${id}`, {
       fields: { [field]: desired.map((file_token) => ({ file_token })) },
     });

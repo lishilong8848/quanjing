@@ -197,7 +197,7 @@ export const PAGE_REGISTRY: readonly SwitcherPage[] = [
   {
     key: 'twin-graph',
     label: '孪生图谱',
-    path: 'https://example.com:8787/',
+    path: 'https://www.sm.sjhl.online:8787/',
     icon: Network,
     domainKey: 'equipment',
     description: '打开设备孪生图谱平台',

@@ -19,7 +19,7 @@ import type {
 import { CertificateDashboardService } from './certificate-dashboard.service';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
-const DEFAULT_REMINDER_CHAT_ID = 'oc_ce346352cc9230b9944a1dbf874b512b';
+const DEFAULT_REMINDER_CHAT_ID = 'oc_8402dd5799db4fba085334749bfbb635';
 const TOKEN_EXPIRY_BUFFER_SECONDS = 300;
 const MEMBER_CACHE_TTL_MS = 2 * 60 * 1000;
 const PREVIEW_TTL_MS = 15 * 60 * 1000;

@@ -45,14 +45,14 @@ const roles = [
   {
     openId: 'ou_qa_building',
     name: '验收楼长',
-    position: '设施运维示例人员001',
+    position: '设施运维主管',
     professions: [],
     buildings: ['A楼'],
   },
   {
     openId: 'ou_qa_professional',
-    name: '验收示例人员001',
-    position: '电气示例人员001',
+    name: '验收主管',
+    position: '电气主管',
     professions: ['电气'],
     buildings: ['电气'],
   },

@@ -61,19 +61,19 @@ const CROSS_GUIDE_TABLES = [
     source: 'system',
     tableName: '风险排查标准-体系',
     sourceUrl:
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/base/E8bybwfd6a3kAKsBPmCc2WA0nch?table=tblaK4n3JtsWDV3V',
   },
   {
     source: 'ali',
     tableName: '风险排查标准-阿里',
     sourceUrl:
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/base/E8bybwfd6a3kAKsBPmCc2WA0nch?table=tblZkw7z0DmCnMGl',
   },
   {
     source: 'environment',
     tableName: '环境检查标准',
     sourceUrl:
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/base/E8bybwfd6a3kAKsBPmCc2WA0nch?table=tblPqIuib8UjoNMp',
   },
 ] as const satisfies ReadonlyArray<{
   source: CrossInspectionGuideSource;
@@ -82,17 +82,17 @@ const CROSS_GUIDE_TABLES = [
 }>;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const ALI_DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tblcTPsC1Z057ic8&view=vewD2Rmoz3';
 const ALI_MONTHLY_QUALITY_TABLE_NAME = '阿里月度质量检查清单';
 const ALI_MONTHLY_QUALITY_DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tbl2ukkCV1Fjh149&view=vewPxuzNcN';
 const ALI_MONTHLY_QUALITY_RATING_TABLE_NAME = '阿里月度质量评级';
 const ALI_MONTHLY_QUALITY_RATING_DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tblNXLt8mIDaaB2e&view=vewtVt4UKI';
 const MONTHLY_ALARM_OVERVIEW_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tblqTFdVQNjRWKOK&view=vew8OzP7Nc';
 const CROSS_DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/base/E8bybwfd6a3kAKsBPmCc2WA0nch?table=tblskUG3o7nbJAoJ&view=vewRaApGY9';
 const LOCAL_MONTHLY_REPORT_CONFIG =
   'D:\\ai\\codex\\阿里月报下载及邮件发送\\config.json';
 const STALE_WARNING =

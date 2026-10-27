@@ -44,6 +44,7 @@ interface CachedDashboardSnapshot {
 interface CachedTrainingSources {
   sources: TrainingDashboardSources;
   cachedAt: number;
+  syncedAt: string;
 }
 
 @Injectable()
@@ -59,6 +60,8 @@ export class TrainingDashboardService {
   >();
   private lastGoodSources: CachedTrainingSources | null = null;
   private activeSourceRefresh: Promise<TrainingDashboardSources> | null = null;
+  private sourceRefreshFailed = false;
+  private storedSourceLoad: Promise<void> | null = null;
   private appTokenPromise: Promise<string> | null = null;
 
   constructor(private readonly httpService: HttpService) {}
@@ -141,104 +144,87 @@ export class TrainingDashboardService {
     }
 
     try {
-      const sources = await this.getLiveSources(true);
-      const dashboard = buildCheckedDashboard(sources, requestedMonth);
+      await this.getLiveSources(true);
+      const dashboard = this.buildSourceDashboard(requestedMonth);
       this.cacheSnapshot(requestKey, dashboard);
       return dashboard;
     } catch {
       this.logger.warn('园区培训实时数据同步失败');
-      const lastGood = this.lastGoodSnapshots.get(requestKey);
-      if (lastGood) {
-        const staleSnapshot = markSnapshotStale(lastGood.snapshot);
-        this.cacheSnapshot(requestKey, staleSnapshot);
-        return staleSnapshot;
-      }
-      if (this.lastGoodSources) {
-        const staleSnapshot = markSnapshotStale(
-          buildCheckedDashboard(this.lastGoodSources.sources, requestedMonth),
-        );
-        this.cacheSnapshot(requestKey, staleSnapshot);
-        return staleSnapshot;
-      }
     }
-
-    try {
-      const sources = await readTrainingDashboardSourceSnapshot();
-      if (!sources) {
-        throw new Error('training source snapshot missing');
-      }
-      assertAllSourcesQuality(sources);
-      this.lastGoodSources = { sources, cachedAt: 0 };
-      const dashboard = markSnapshotStale(
-        buildCheckedDashboard(sources, requestedMonth),
-      );
-      this.cacheSnapshot(requestKey, dashboard);
-      return dashboard;
-    } catch {
-      this.logger.warn('园区培训持久快照不可用');
-      const dashboard = markSnapshotStale(
-        buildCheckedDashboard(emptyTrainingSources(), requestedMonth),
-        BACKGROUND_SYNC_MESSAGE,
-      );
-      this.cacheSnapshot(requestKey, dashboard);
-      return dashboard;
-    }
+    await this.loadStoredSources();
+    const dashboard = this.buildSourceDashboard(requestedMonth);
+    this.cacheSnapshot(requestKey, dashboard);
+    return dashboard;
   }
 
   private async loadDashboardWithoutBlocking(
     requestedMonth: string | undefined,
     requestKey: string,
   ): Promise<CampusTrainingDashboardResponse> {
-    if (this.lastGoodSources) {
-      const dashboard =
-        Date.now() - this.lastGoodSources.cachedAt < SOURCE_BUNDLE_CACHE_TTL_MS
-          ? buildCheckedDashboard(this.lastGoodSources.sources, requestedMonth)
-          : markSnapshotStale(
-              buildCheckedDashboard(
-                this.lastGoodSources.sources,
-                requestedMonth,
-              ),
-            );
-      this.cacheSnapshot(requestKey, dashboard);
-      if (dashboard.sourceStatus === 'stale') {
-        this.refreshSourcesInBackground();
-      }
-      return dashboard;
+    await this.loadStoredSources();
+    if (
+      !this.sourceRefreshFailed &&
+      (!this.lastGoodSources ||
+        Date.now() - this.lastGoodSources.cachedAt >=
+          SOURCE_BUNDLE_CACHE_TTL_MS)
+    ) {
+      this.refreshSourcesInBackground();
     }
-
-    const storedSources = await readTrainingDashboardSourceSnapshot();
-    if (storedSources) {
-      try {
-        assertAllSourcesQuality(storedSources);
-        this.lastGoodSources = { sources: storedSources, cachedAt: 0 };
-        const dashboard = markSnapshotStale(
-          buildCheckedDashboard(storedSources, requestedMonth),
-        );
-        this.cacheSnapshot(requestKey, dashboard);
-        this.refreshSourcesInBackground();
-        return dashboard;
-      } catch {
-        this.logger.warn('园区培训持久快照不可用');
-      }
-    }
-
-    const dashboard = markSnapshotStale(
-      buildCheckedDashboard(emptyTrainingSources(), requestedMonth),
-      BACKGROUND_SYNC_MESSAGE,
-    );
+    const dashboard = this.buildSourceDashboard(requestedMonth);
     this.cacheSnapshot(requestKey, dashboard);
-    this.refreshSourcesInBackground();
     return dashboard;
   }
 
+  private loadStoredSources(): Promise<void> {
+    if (this.lastGoodSources) return Promise.resolve();
+    if (!this.storedSourceLoad) {
+      this.storedSourceLoad = readTrainingDashboardSourceSnapshot()
+        .then((stored) => {
+          if (!stored || this.lastGoodSources) return;
+          assertAllSourcesQuality(stored.sources);
+          this.lastGoodSources = {
+            sources: stored.sources,
+            cachedAt: 0,
+            syncedAt: stored.savedAt,
+          };
+        })
+        .catch(() => {
+          this.logger.warn('园区培训持久快照不可用');
+        });
+    }
+    return this.storedSourceLoad;
+  }
+
+  private buildSourceDashboard(
+    requestedMonth: string | undefined,
+  ): CampusTrainingDashboardResponse {
+    const dashboard = buildCheckedDashboard(
+      this.lastGoodSources?.sources ?? emptyTrainingSources(),
+      requestedMonth,
+      this.lastGoodSources?.syncedAt ?? '',
+    );
+    if (this.activeSourceRefresh) {
+      return {
+        ...dashboard,
+        sourceStatus: 'refreshing',
+        errorMessage: BACKGROUND_SYNC_MESSAGE,
+      };
+    }
+    return this.sourceRefreshFailed
+      ? markSnapshotStale(
+          dashboard,
+          this.lastGoodSources
+            ? STALE_ERROR_MESSAGE
+            : '源数据同步失败，请刷新重试',
+        )
+      : dashboard;
+  }
+
   private refreshSourcesInBackground(): void {
-    void this.getLiveSources(true)
-      .then(() => {
-        this.lastGoodSnapshots.clear();
-      })
-      .catch(() => {
-        this.logger.warn('园区培训后台数据同步失败');
-      });
+    if (this.activeSourceRefresh) return;
+    void this.getLiveSources(true).catch(() => {
+      this.logger.warn('园区培训后台数据同步失败');
+    });
   }
 
   private getLiveSources(
@@ -255,18 +241,28 @@ export class TrainingDashboardService {
       return this.activeSourceRefresh;
     }
 
+    this.sourceRefreshFailed = false;
+    this.lastGoodSnapshots.clear();
     let refresh!: Promise<TrainingDashboardSources>;
     refresh = this.loadLiveSources(forceRefresh)
       .then((sources) => {
-        this.lastGoodSources = { sources, cachedAt: Date.now() };
-        void writeTrainingDashboardSourceSnapshot(sources).catch(() => {
-          this.logger.warn('园区培训完整源快照写入失败');
-        });
+        const syncedAt = new Date().toISOString();
+        this.lastGoodSources = { sources, cachedAt: Date.now(), syncedAt };
+        void writeTrainingDashboardSourceSnapshot(sources, syncedAt).catch(
+          () => {
+            this.logger.warn('园区培训完整源快照写入失败');
+          },
+        );
         return sources;
+      })
+      .catch((error: unknown) => {
+        this.sourceRefreshFailed = true;
+        throw error;
       })
       .finally(() => {
         if (this.activeSourceRefresh === refresh) {
           this.activeSourceRefresh = null;
+          this.lastGoodSnapshots.clear();
         }
       });
     this.activeSourceRefresh = refresh;
@@ -279,17 +275,23 @@ export class TrainingDashboardService {
     const appToken = await this.resolveAppToken();
     const entries = await Promise.all(
       TRAINING_DASHBOARD_TABLE_CONFIGS.map(async (config) => {
-        const records = await fetchBitableRecords(this.httpService, {
-          appToken,
-          tableId: getTrainingTableId(config),
-          tableName: config.tableName,
-          fieldNames: [...config.fieldNames],
-          cacheTtlMs: BITABLE_RECORD_CACHE_TTL_MS,
-          forceRefresh,
-          strict: true,
-          validateRecords: (items) => assertTrainingTableQuality(config, items),
-        });
-        return [config.key, records] as const;
+        try {
+          const records = await fetchBitableRecords(this.httpService, {
+            appToken,
+            tableId: getTrainingTableId(config),
+            tableName: config.tableName,
+            fieldNames: [...config.fieldNames],
+            cacheTtlMs: BITABLE_RECORD_CACHE_TTL_MS,
+            forceRefresh,
+            strict: true,
+            validateRecords: (items) =>
+              assertTrainingTableQuality(config, items),
+          });
+          return [config.key, records] as const;
+        } catch (error: unknown) {
+          this.logger.warn(`园区培训来源读取失败：${config.tableName}`);
+          throw error;
+        }
       }),
     );
     const sources = buildTrainingSources(entries);
@@ -407,13 +409,18 @@ function hasRealValue(value: unknown): boolean {
 function buildCheckedDashboard(
   sources: TrainingDashboardSources,
   requestedMonth: string | undefined,
+  syncedAt: string,
 ): CampusTrainingDashboardResponse {
-  const dashboard = mapCampusTrainingDashboard(
-    sources,
-    requestedMonth,
-    new Date().toISOString(),
-    readTrainingPassScore(),
-  );
+  const dashboard = {
+    ...mapCampusTrainingDashboard(
+      sources,
+      requestedMonth,
+      new Date().toISOString(),
+      readTrainingPassScore(),
+    ),
+    // The selected month follows today's calendar, not an old snapshot's age.
+    syncedAt,
+  };
   assertDashboardQuality(dashboard);
   return dashboard;
 }

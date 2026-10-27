@@ -21,7 +21,7 @@ const appId='cli_retirement_synthetic', openId='ou_retirement_synthetic';
 const identity=feishuIdentityFingerprint(appId,openId), personnelId=`local-external-${createHash('sha256').update(JSON.stringify([appId,'synthetic-base','tblSynthetic','recPwdFixture'])).digest('hex')}`;
 const account:stores.StoredAccount={id:`feishu-${identity}`,kind:'feishu',appId,openId,identityHash:identity,name:'合成在职人员',role:'site_member',building:null,version:3,enabled:true,deleted:false,source:'configuration',permissionSource:'personnel',siteMember:true,personnelIdentity:personnelId};
 function directory(active=true):ConfigurationDirectorySnapshot {
-  return {appId,people:[],employees:[{name:account.name,openId,position:'设施示例人员001',specialties:'C楼',inactive:!active}],snapshotAt:Date.now(),personnelComplete:true,
+  return {appId,people:[],employees:[{name:account.name,openId,position:'设施主管',specialties:'C楼',inactive:!active}],snapshotAt:Date.now(),personnelComplete:true,
     activeMembers:active?[{name:account.name,openId,passwordAccountId:personnelId}]:[],
     ...{ employmentState:{complete:true,entries:[{personnelIdentity:personnelId,openId,inactive:!active}]} } };
 }
@@ -107,7 +107,7 @@ describe('人员状态与基础成员资格分开判定',()=>{
   });
   it('实际收回状态仍可游客登录，但不能通过原请休假卡片办理新审批',async()=>{
     const leaveFile=join(root,'leave-ledger.json'),leaveStore=new LeaveWorkflowStore(leaveFile,leaveFile);
-    const actor={name:account.name,openId,position:'设施示例人员001',buildings:['C楼']};
+    const actor={name:account.name,openId,position:'设施主管',buildings:['C楼']};
     await leaveStore.acceptApplication({clientMutationId:'synthetic-revoke-leave',recordId:'recRevokeLeave',snapshot:{applicantName:'合成申请人',applicantOpenId:'ou_synthetic_applicant',building:'C楼',position:'运维值班员',leaveType:'年假',startAt:'2026-10-13T09:00:00+08:00',endAt:'2026-10-13T18:00:00+08:00',leaveHours:8,approvalDayCount:1,reason:'合成验收'}});
     const snapshot=(await leaveStore.getApplication('recRevokeLeave'))!.snapshot;
     await leaveStore.setApprovalPlan('recRevokeLeave',{snapshot,approvalPlan:{approvalClass:'ordinary',discipline:null,approvalDayCount:1,stages:[{key:'supervisor',approvers:[actor],resolutionPolicy:'first_legal_action'}],notificationPlan:{finalResultRecipients:[actor],professionalRecipients:[],substituteRecipients:[]}},resultRecipients:[actor]});
@@ -156,7 +156,7 @@ describe('人员状态与基础成员资格分开判定',()=>{
     for(const current of service.snapshot().accounts) expect(current).toMatchObject({enabled:true,role:'site_member',personnelIdentity:personnelId});
     expect(service.feishuPrincipal(openId,appId)?.role).toBe('site_member'); expect(service.employeeTargets(account.name)).toHaveLength(1);
   });
-  it('已启用的在职成员及手工楼栋示例人员001能完成实际OAuth回调、签发并读取实名会话',async()=>{
+  it('已启用的在职成员及手工楼栋主管能完成实际OAuth回调、签发并读取实名会话',async()=>{
     await service.synchronizePersonnel(directory(true));
     for(const role of ['site_member','building_admin'] as const){
       await store.mutate(store.read().revision,`synthetic-enabled-${role}`,'synthetic-enabled',state=>{const current=state.accounts[account.id];current.role=role;current.building=role==='building_admin'?'C楼':null;current.permissionSource=role==='building_admin'?'manual':'personnel';current.version++;});

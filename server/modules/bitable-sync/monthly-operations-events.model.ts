@@ -65,7 +65,7 @@ function reviewReport(
   const mentionPath = reportMentionPath(value);
   const tokenLink =
     token && mentionPath && /^[A-Za-z0-9_-]{16,80}$/.test(token)
-      ? `https://example.feishu.cn/$%7BmentionPath%7D/PUBLIC_EXAMPLE_SOURCE`
+      ? `https://vnet.feishu.cn/${mentionPath}/${token}`
       : '';
   const urlValue =
     directLink ||

@@ -130,7 +130,7 @@ describe('InventoryOutboundWorkflowService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.FEISHU_WAREHOUSE_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/QmxAbhXNJaA9YKsbfZyclzhGnSd';
     delete process.env.FEISHU_WAREHOUSE_APP_TOKEN;
     process.env.FEISHU_WAREHOUSE_INVENTORY_TABLE_ID = TABLES.inventory;
     process.env.FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID = TABLES.outbound;
@@ -188,7 +188,7 @@ describe('InventoryOutboundWorkflowService', () => {
     gateway.updateRecord.mockImplementation(applyUpdate);
     approvalService.registerPending.mockResolvedValue(undefined);
     warehouseRoleDirectory.resolveApprovers.mockResolvedValue([
-      { openId: 'ou_warehouse_responsible', name: 'A楼示例人员019' },
+      { openId: 'ou_warehouse_responsible', name: 'A楼责任人' },
     ]);
     warehouseRoleDirectory.resolveNotificationRecipients.mockResolvedValue([
       { openId: 'ou_warehouse_manager', name: 'A楼管理人' },
@@ -255,7 +255,7 @@ describe('InventoryOutboundWorkflowService', () => {
         building: 'A楼',
         quantity: 2,
         status: '待审批',
-        operator: 'A楼示例人员019',
+        operator: 'A楼责任人',
         occurredAt: '2026-07-12T10:00:00.000Z',
       },
     });
@@ -302,7 +302,7 @@ describe('InventoryOutboundWorkflowService', () => {
       location: 'A-1F-001',
       reason: REQUEST.reason,
       appliedAt: '2026-07-12T10:00:00.000Z',
-      approvers: [{ openId: 'ou_warehouse_responsible', name: 'A楼示例人员019' }],
+      approvers: [{ openId: 'ou_warehouse_responsible', name: 'A楼责任人' }],
       managerRecipients: [
         { openId: 'ou_warehouse_manager', name: 'A楼管理人' },
       ],
@@ -382,19 +382,19 @@ describe('InventoryOutboundWorkflowService', () => {
 
   it('writes an actionable workflow error and preserves the original record when no approver can be resolved', async () => {
     warehouseRoleDirectory.resolveApprovers.mockRejectedValueOnce(
-      new Error('A楼未配置有效的库房示例人员019员'),
+      new Error('A楼未配置有效的库房责任人员'),
     );
     const service = createService();
 
     await expect(service.createPending(REQUEST, ADMIN)).rejects.toThrow(
-      /A楼未配置有效的库房示例人员019员/u,
+      /A楼未配置有效的库房责任人员/u,
     );
 
     expect(gateway.createRecord).toHaveBeenCalledTimes(1);
     expect(approvalService.registerPending).not.toHaveBeenCalled();
     expect(approvalGateway.writeWorkflowError).toHaveBeenCalledWith(
       'outbound-record-1',
-      expect.stringMatching(/A楼.*库房示例人员019员.*原编号/u),
+      expect.stringMatching(/A楼.*库房责任人员.*原编号/u),
     );
     expect(recordsByTable[TABLES.outbound]).toHaveLength(1);
     expect(recordsByTable[TABLES.outbound][0].fields['出库创建标识']).toBe(
@@ -415,7 +415,7 @@ describe('InventoryOutboundWorkflowService', () => {
 
     expect(approvalService.registerPending).toHaveBeenCalledWith(
       expect.objectContaining({
-        approvers: [{ openId: 'ou_warehouse_responsible', name: 'A楼示例人员019' }],
+        approvers: [{ openId: 'ou_warehouse_responsible', name: 'A楼责任人' }],
         managerRecipients: [],
       }),
     );
@@ -867,7 +867,7 @@ describe('InventoryOutboundWorkflowService', () => {
     const decision = {
       action: 'approve' as const,
       actorOpenId: 'ou_warehouse_responsible',
-      actorName: 'A楼示例人员019',
+      actorName: 'A楼责任人',
       messageId: 'om_approval_card',
       eventId: 'evt_approval_once',
       decidedAt: '2026-07-12T10:05:00.000Z',
@@ -952,7 +952,7 @@ describe('InventoryOutboundWorkflowService', () => {
       出库审批快照: JSON.stringify({ schemaVersion: 1, snapshot }),
     });
     warehouseRoleDirectory.resolveApprovers.mockResolvedValueOnce([
-      { openId: 'ou_current_responsible', name: '当前示例人员019' },
+      { openId: 'ou_current_responsible', name: '当前责任人' },
     ]);
     gateway.updateRecord.mockClear();
 

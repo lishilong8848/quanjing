@@ -457,7 +457,7 @@ describe('construction permit manual review UI wiring', () => {
       '审核人：合作伙伴EHS工程师',
     );
     expect(workApplicationTemplateSource).not.toContain(
-      '一级审批：FM/IM驻场示例人员001',
+      '一级审批：FM/IM驻场主管',
     );
     expect(onlineFormModelSource).toContain("ehsReviewer: ''");
     expect(onlineFormModelSource).toContain("levelOneApprover: ''");

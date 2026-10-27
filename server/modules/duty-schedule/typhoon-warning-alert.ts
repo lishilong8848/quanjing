@@ -4,7 +4,7 @@ import type {
 } from '@server/modules/bitable-sync/bitable-sync.service';
 
 export const TYPHOON_PATH_URL = 'https://typhoon.slt.zj.gov.cn/#/';
-export const DEFAULT_TYPHOON_PATH_CHAT_ID = 'PUBLIC_EXAMPLE_FEISHU_MONTHLY_SCHEDULE_ACCESS_CHAT_ID';
+export const DEFAULT_TYPHOON_PATH_CHAT_ID = 'oc_afb27caf36b3bfeea2de20bd6f955d21';
 
 export type TyphoonWarningLevel = 'blue' | 'yellow' | 'orange' | 'red';
 

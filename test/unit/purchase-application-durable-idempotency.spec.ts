@@ -59,8 +59,8 @@ describe('PurchaseApplicationService durable idempotency', () => {
   const originalExecutionTable = process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID;
 
   beforeEach(() => {
-    process.env.FEISHU_PURCHASE_SUBMISSION_TABLE_ID = 'tblf96808ef0f366';
-    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'tbl43b4896a8cb2';
+    process.env.FEISHU_PURCHASE_SUBMISSION_TABLE_ID = 'tblSubmission123';
+    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'tblExecution123';
   });
 
   afterEach(() => {

@@ -1,6 +1,6 @@
 import { normalizeProfessionalScope, canManageProfessionalRecord, professionalScopeIsValid } from '../../shared/professional-access';
 
-describe('专业示例人员001范围', () => {
+describe('专业主管范围', () => {
   const principal = { role: 'professional_admin' as const, purchaseBuilding: null, specialties: ['暖通'] as const };
   it('标准化去重且不把其他或标题猜成专业', () => {
     expect(normalizeProfessionalScope(['消防', 'EHS', '消防'])).toEqual(['消防', 'EHS']);

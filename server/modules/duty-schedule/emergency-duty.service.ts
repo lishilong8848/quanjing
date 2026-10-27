@@ -37,7 +37,7 @@ import type {
 } from '@shared/emergency-duty.interface';
 
 export const DEFAULT_EMERGENCY_DUTY_WIKI_TOKEN = 'G7oUwGdwaiTmimk8i2ecGTWOn4d';
-export const DEFAULT_EMERGENCY_DUTY_TABLE_ID = 'tbldaccbff3eb177';
+export const DEFAULT_EMERGENCY_DUTY_TABLE_ID = 'tblnGg3s3lgn6Plq';
 export const DEFAULT_EMERGENCY_DUTY_VIEW_ID = 'vewgzik2Nv';
 export const DEFAULT_EMERGENCY_DUTY_CACHE_REFRESH_MS = 15 * 60 * 1000;
 

@@ -219,7 +219,7 @@ describe('change summary report task polling', () => {
       request: {
         clientMutationId:
           'change-summary-report-123e4567-e89b-42d3-a456-426614174000',
-        submitterName: '示例人员020',
+        submitterName: '马进宇',
         changeRecordId: 'recChange12345678',
         summaryDocuments: [],
       },
@@ -243,7 +243,7 @@ describe('change summary report task polling', () => {
     const binding = {
       request: {
         clientMutationId: 'task-1',
-        submitterName: '示例人员020',
+        submitterName: '马进宇',
         changeRecordId: 'recChange12345678',
         summaryDocuments: [],
       },
@@ -283,7 +283,7 @@ describe('change summary report task polling', () => {
     const binding = {
       request: {
         clientMutationId: 'task-1',
-        submitterName: '示例人员020',
+        submitterName: '马进宇',
         changeRecordId: 'recChange12345678',
         summaryDocuments: [],
       },
@@ -310,7 +310,7 @@ describe('change summary report task polling', () => {
     const binding = {
       request: {
         clientMutationId: 'task-1',
-        submitterName: '示例人员020',
+        submitterName: '马进宇',
         changeRecordId: 'recChange12345678',
         summaryDocuments: [
           {
@@ -351,7 +351,7 @@ describe('change summary report task polling', () => {
     expect(abandon).toHaveBeenCalledWith({
       clientMutationId: 'task-1',
       changeRecordId: 'recChange12345678',
-      submitterName: '示例人员020',
+      submitterName: '马进宇',
     });
     expect(removeRecovery).toHaveBeenCalledWith('task-1');
   });
@@ -360,7 +360,7 @@ describe('change summary report task polling', () => {
     const binding = {
       request: {
         clientMutationId: 'task-1',
-        submitterName: '示例人员020',
+        submitterName: '马进宇',
         changeRecordId: 'recChange12345678',
         summaryDocuments: [
           {
@@ -407,7 +407,7 @@ describe('change summary report task polling', () => {
     const binding = {
       request: {
         clientMutationId: 'task-1',
-        submitterName: '示例人员020',
+        submitterName: '马进宇',
         changeRecordId: 'recChange12345678',
         summaryDocuments: [],
       },
@@ -438,7 +438,7 @@ describe('change summary report task polling', () => {
     const binding = {
       request: {
         clientMutationId: 'task-1',
-        submitterName: '示例人员020',
+        submitterName: '马进宇',
         changeRecordId: 'recChange12345678',
         summaryDocuments: [],
       },

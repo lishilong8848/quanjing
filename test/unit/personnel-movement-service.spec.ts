@@ -184,8 +184,8 @@ describe('personnel movement handling', () => {
       {
         record_id: 'schedule-record',
         fields: {
-          '人员（文本）': '示例人员008 示例人员013',
-          '值班人员（实际）程序修改': '示例人员008 示例人员013',
+          '人员（文本）': '张三 李四',
+          '值班人员（实际）程序修改': '张三 李四',
           值班人员程序修改: '旧别名内容',
           差旅人员: '',
         },
@@ -270,28 +270,28 @@ describe('personnel movement handling', () => {
         record_id: 'before-date',
         fields: {
           排班日期: '2026-07-07',
-          '值班人员（实际）程序修改': '示例人员008 示例人员013',
+          '值班人员（实际）程序修改': '张三 李四',
         },
       },
       {
         record_id: 'future-program',
         fields: {
           排班日期: '2026-07-08',
-          '值班人员（实际）程序修改': '示例人员008 示例人员013',
+          '值班人员（实际）程序修改': '张三 李四',
         },
       },
       {
         record_id: 'future-fallback',
         fields: {
           排班日期: '2026-07-09',
-          '值班人员（实际）程序修改': '示例人员013 示例人员008',
+          '值班人员（实际）程序修改': '李四 张三',
         },
       },
       {
         record_id: 'future-other',
         fields: {
           排班日期: '2026-07-10',
-          '值班人员（实际）程序修改': '示例人员017 示例人员013',
+          '值班人员（实际）程序修改': '王五 李四',
         },
       },
     ]);
@@ -299,21 +299,21 @@ describe('personnel movement handling', () => {
       {
         record_id: 'person-rec',
         fields: {
-          姓名: '示例人员008',
-          员工姓名: [{ name: '示例人员008' }],
+          姓名: '张三',
+          员工姓名: [{ name: '张三' }],
         },
       },
     ]);
 
     const result = await service.createPersonnelMovement({
-      staffName: '示例人员008',
+      staffName: '张三',
       movementType: '离职',
       movementDate: '2026-07-08',
     });
 
     expect(result).toMatchObject({
       success: true,
-      staffName: '示例人员008',
+      staffName: '张三',
       movementType: '离职',
       movementDate: '2026-07-08',
       personnelUpdated: true,
@@ -339,7 +339,7 @@ describe('personnel movement handling', () => {
             field_name: '值班人员（实际）程序修改',
             type: 1,
           },
-          value: '示例人员013',
+          value: '李四',
         },
       ],
       'tenant-token',
@@ -353,7 +353,7 @@ describe('personnel movement handling', () => {
             field_name: '值班人员（实际）程序修改',
             type: 1,
           },
-          value: '示例人员013',
+          value: '李四',
         },
       ],
       'tenant-token',
@@ -367,13 +367,13 @@ describe('personnel movement handling', () => {
         record_id: 'future-program',
         fields: {
           排班日期: '2026-07-08',
-          '值班人员（实际）程序修改': '示例人员008 示例人员013',
+          '值班人员（实际）程序修改': '张三 李四',
         },
       },
     ]);
 
     const result = await service.createPersonnelMovement({
-      staffName: '示例人员008',
+      staffName: '张三',
       movementType: '异动',
       movementDate: '2026-07-08',
     });
@@ -399,7 +399,7 @@ describe('personnel movement handling', () => {
         record_id: 'outside-window',
         fields: {
           fldZSaDbGf: '2026-06-21',
-          fldJi5bxBG: '示例人员008 示例人员013',
+          fldJi5bxBG: '张三 李四',
           '值班人员（实际）程序修改': '旧值',
         },
       },
@@ -407,14 +407,14 @@ describe('personnel movement handling', () => {
         record_id: 'target-row',
         fields: {
           fldZSaDbGf: '2026-06-22',
-          fldJi5bxBG: '示例人员008 示例人员013',
-          fld4xMPICY: '示例人员008',
-          fldZnstUS3: '示例人员017',
+          fldJi5bxBG: '张三 李四',
+          fld4xMPICY: '张三',
+          fldZnstUS3: '王五',
           __systemLeaveApprovalVerified: true,
-          __systemApprovedLeaveStaff: '示例人员008',
-          __systemApprovedSubstituteStaff: '示例人员017',
-          差旅人员: '示例人员013',
-          '值班人员（实际）程序修改': '示例人员008 示例人员013',
+          __systemApprovedLeaveStaff: '张三',
+          __systemApprovedSubstituteStaff: '王五',
+          差旅人员: '李四',
+          '值班人员（实际）程序修改': '张三 李四',
         },
       },
     ]);
@@ -440,7 +440,7 @@ describe('personnel movement handling', () => {
       1,
       [{
         record_id: 'target-row',
-        fields: { '值班人员（实际）程序修改': '示例人员008 示例人员013' },
+        fields: { '值班人员（实际）程序修改': '张三 李四' },
       }],
       'scheduleApp',
       'scheduleTable',
@@ -450,7 +450,7 @@ describe('personnel movement handling', () => {
       2,
       [{
         record_id: 'target-row',
-        fields: { '值班人员（实际）程序修改': '示例人员017' },
+        fields: { '值班人员（实际）程序修改': '王五' },
       }],
       'scheduleApp',
       'scheduleTable',
@@ -465,12 +465,12 @@ describe('personnel movement handling', () => {
         record_id: 'leave-without-substitute',
         fields: {
           fldZSaDbGf: '2026-07-03',
-          fldJi5bxBG: '示例人员008 示例人员013',
-          fld4xMPICY: '示例人员008',
+          fldJi5bxBG: '张三 李四',
+          fld4xMPICY: '张三',
           __systemLeaveApprovalVerified: true,
-          __systemApprovedLeaveStaff: '示例人员008',
+          __systemApprovedLeaveStaff: '张三',
           __systemApprovedSubstituteStaff: [],
-          '值班人员（实际）程序修改': '示例人员008 示例人员013',
+          '值班人员（实际）程序修改': '张三 李四',
         },
       },
     ]);
@@ -492,7 +492,7 @@ describe('personnel movement handling', () => {
       2,
       [{
         record_id: 'leave-without-substitute',
-        fields: { '值班人员（实际）程序修改': '示例人员013' },
+        fields: { '值班人员（实际）程序修改': '李四' },
       }],
       'scheduleApp',
       'scheduleTable',
@@ -508,7 +508,7 @@ describe('personnel movement handling', () => {
         record_id: 'manually-adjusted',
         fields: {
           fldZSaDbGf: '2026-07-14',
-          fldJi5bxBG: '示例人员008',
+          fldJi5bxBG: '张三',
           '值班人员（实际）程序修改': '江亮',
         },
       },
@@ -531,7 +531,7 @@ describe('personnel movement handling', () => {
       1,
       [{
         record_id: 'manually-adjusted',
-        fields: { '值班人员（实际）程序修改': '示例人员008' },
+        fields: { '值班人员（实际）程序修改': '张三' },
       }],
       'scheduleApp',
       'scheduleTable',

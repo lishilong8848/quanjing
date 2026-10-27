@@ -373,10 +373,10 @@ export class SystemMonthlyReportService implements OnModuleInit {
         process.env.ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_OPEN_ID,
     );
     const recipient =
-      people.find((person) => person.name === '示例人员020' && person.openId) ||
-      (configuredOpenId ? { openId: configuredOpenId, name: '示例人员020' } : null);
+      people.find((person) => person.name === '马进宇' && person.openId) ||
+      (configuredOpenId ? { openId: configuredOpenId, name: '马进宇' } : null);
     if (!recipient)
-      throw new BadRequestException('人员数据中未找到示例人员020的稳定飞书 open_id');
+      throw new BadRequestException('人员数据中未找到马进宇的稳定飞书 open_id');
     return this.packageService.accept(
       request,
       expectedRooms,

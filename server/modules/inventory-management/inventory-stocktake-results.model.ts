@@ -5,7 +5,7 @@ import type {
 import { stocktakeWarehouse } from '../../../shared/inventory-stocktake-warehouse';
 
 export const STOCKTAKE_RESULTS_BASE = 'QmxAbhXNJaA9YKsbfZyclzhGnSd';
-export const STOCKTAKE_RESULTS_TABLE = 'tbl83d66e680c2bd';
+export const STOCKTAKE_RESULTS_TABLE = 'tblAoZ4ngXT22mVU';
 export const STOCKTAKE_RESULTS_START = '2026-10';
 export const STOCKTAKE_RESULT_FIELDS: Record<string, number> = {
   物品名称: 1,

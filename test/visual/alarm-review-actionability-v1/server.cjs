@@ -155,12 +155,12 @@ async function serve(directory) {
   const { TodayOperationsAlarmService } = load('server/modules/bitable-sync/today-operations-alarm.service.ts');
   const data = require(path.join(original, 'data.ts'));
   const gateway = { preflight: async () => {}, resolveResponsibleUserId: async id => id,
-    syncRecord: async (_id, outcome, id, _version, reply) => ({ 人工复核结果: outcome, 复核回复: reply || '', 复核示例人员019: [{ id }] }) };
+    syncRecord: async (_id, outcome, id, _version, reply) => ({ 人工复核结果: outcome, 复核回复: reply || '', 复核责任人: [{ id }] }) };
   bootStage = 'nest-module-compile';
   const module = await require('@nestjs/testing').Test.createTestingModule({ imports: [UnifiedAccessModule], controllers: [AlarmReviewController], providers: [
     AlarmReviewService, AlarmReviewStore, { provide: ALARM_REVIEW_LEDGER_PATH, useValue: path.join(directory, 'ledger.json') },
     { provide: AlarmReviewGateway, useValue: gateway }, { provide: BitableSyncService, useValue: { getCachedActivePersonnelDirectory: async () => ({ personnel: data.personnel }) } },
-    { provide: TodayOperationsAlarmService, useValue: { patchHumanReview: (id, fields) => { const item = data.items.find(value => value.id === id); if (item) item.humanReview = { outcome: fields.人工复核结果, customReply: fields.复核回复 || undefined, responsibleName: data.personnel.find(person => person.openId === fields.复核示例人员019[0].id)?.name || '合成人员', version: 'synthetic-reviewed' }; } } },
+    { provide: TodayOperationsAlarmService, useValue: { patchHumanReview: (id, fields) => { const item = data.items.find(value => value.id === id); if (item) item.humanReview = { outcome: fields.人工复核结果, customReply: fields.复核回复 || undefined, responsibleName: data.personnel.find(person => person.openId === fields.复核责任人[0].id)?.name || '合成人员', version: 'synthetic-reviewed' }; } } },
   ] }).overrideProvider(AccessConfigurationDirectory).useValue({ read: async () => ({ appId: 'cli_synthetic_entry', people: [], snapshotAt: Date.now() }), assertKnown: async () => {} })
     .overrideProvider(AccessConfigurationCardDirectory).useValue({ read: async () => ({ members: [] }) }).compile();
   const app = module.createNestApplication({ logger: false });

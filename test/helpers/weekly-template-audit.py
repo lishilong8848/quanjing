@@ -27,7 +27,7 @@ for name in ['template', 'week41-a', 'week41-b']:
 period = report.weekly_period_from_dates('2026-10-01', '2026-10-07')
 data = report.NantongWeeklyData(title=report.format_report_title(period),
     start_date='2026-10-01', end_date='2026-10-07', week_number=41,
-    meeting_todos=['验收：检查水泵（待办人：示例人员020）'])
+    meeting_todos=['验收：检查水泵（待办人：马进宇）'])
 xml, _ = report.render_docx_xml(data)
 required = ['阿里周会待办', '上周内部周会待办', '本周周会内容', '整体概况', '管理线：', '专业线：', '运营线：']
 for source in sources[1:]:
@@ -37,7 +37,7 @@ assert all(heading in sources[0]['headings'] for heading in required[2:])
 assert all(building + ':' in xml for building in report.BUILDINGS)
 assert xml.count('二、效率（变更、维护A类）') == 1
 assert xml.count('二、效率（变更、维护类）') == 5
-assert '待办人：示例人员020' in xml and '维护A类/类' not in xml
+assert '待办人：马进宇' in xml and '维护A类/类' not in xml
 (out / 'sample-report.xml').write_text(xml, encoding='utf-8')
 proof = {'checkedAt': datetime.now(timezone.utc).isoformat(), 'passed': True,
     'scope': '当前指定模板最新版本及第41周两份实际周报的业务结构；未宣称不存在其他业务模板',

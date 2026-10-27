@@ -296,7 +296,7 @@ describe('ChangeSummaryReportService', () => {
   });
 
   it.each([
-    { submitterName: '示例人员004', expected: '提交人' },
+    { submitterName: '其他人', expected: '提交人' },
     { progress: '进行中', expected: '已结束' },
     { progress: 'optUnknownProgress', expected: '未解析' },
     { level: 'optUnknownLevel', expected: '未解析' },

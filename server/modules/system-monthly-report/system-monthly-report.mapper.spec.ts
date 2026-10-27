@@ -318,7 +318,7 @@ describe('system monthly report mapper', () => {
             机房: '南通-B',
             月报月份: 7,
             月报提醒日期: '2026-08-01',
-            十夫长: { users: [{ id: 'ou_leader', name: '示例人员014' }] },
+            十夫长: { users: [{ id: 'ou_leader', name: '梅冰冰' }] },
             可提报人员: { users: [{ id: 'ou_submitter', name: '陈继猛' }] },
           },
         },
@@ -329,7 +329,7 @@ describe('system monthly report mapper', () => {
     });
 
     expect(dashboard.rooms[0]).toMatchObject({
-      leader: { openId: 'ou_leader', name: '示例人员014' },
+      leader: { openId: 'ou_leader', name: '梅冰冰' },
       submitters: [{ openId: 'ou_submitter', name: '陈继猛' }],
       currentOwnerRole: '可提报人员',
       currentOwnerName: '陈继猛',
@@ -350,8 +350,8 @@ describe('system monthly report mapper', () => {
             月报提醒日期: '2026-08-01',
             十夫长: {
               users: [
-                { id: 'ou_mei', name: '示例人员014' },
-                { id: 'ou_ma', name: '示例人员020' },
+                { id: 'ou_mei', name: '梅冰冰' },
+                { id: 'ou_ma', name: '马进宇' },
               ],
             },
           },
@@ -363,10 +363,10 @@ describe('system monthly report mapper', () => {
     });
 
     expect(dashboard.rooms[0]).toMatchObject({
-      leader: { openId: 'ou_mei', name: '示例人员014' },
+      leader: { openId: 'ou_mei', name: '梅冰冰' },
       leaders: [
-        { openId: 'ou_mei', name: '示例人员014' },
-        { openId: 'ou_ma', name: '示例人员020' },
+        { openId: 'ou_mei', name: '梅冰冰' },
+        { openId: 'ou_ma', name: '马进宇' },
       ],
     });
   });
@@ -398,8 +398,8 @@ describe('system monthly report mapper', () => {
             负责人: { users: [{ id: 'ou_chen', name: '陈继猛' }] },
             十夫长: {
               users: [
-                { id: 'ou_mei', name: '示例人员014' },
-                { id: 'ou_ma', name: '示例人员020' },
+                { id: 'ou_mei', name: '梅冰冰' },
+                { id: 'ou_ma', name: '马进宇' },
               ],
             },
           },
@@ -428,10 +428,10 @@ describe('system monthly report mapper', () => {
     expect(dashboard.rooms[0]).toMatchObject({
       submitters: [{ openId: 'ou_chen', name: '陈继猛' }],
       leaders: [
-        { openId: 'ou_mei', name: '示例人员014' },
-        { openId: 'ou_ma', name: '示例人员020' },
+        { openId: 'ou_mei', name: '梅冰冰' },
+        { openId: 'ou_ma', name: '马进宇' },
       ],
-      leader: { openId: 'ou_mei', name: '示例人员014' },
+      leader: { openId: 'ou_mei', name: '梅冰冰' },
     });
     expect(dashboard.schedule).toEqual([
       expect.objectContaining({

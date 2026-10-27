@@ -1,9 +1,9 @@
 import type { ProfessionalSpecialty } from '../../../shared/professional-access';
 
 export const PROFESSIONAL_DEFAULTS: ReadonlyArray<{ name: string; openId: string; specialties: ProfessionalSpecialty[] }> = [
-  { name: '示例人员006', openId: 'ou_33a6d4d900133eef61cd752407740274', specialties: ['电气'] },
-  { name: '示例人员018', openId: 'ou_b6fda0276813fd816a3aeffda0c86f9b', specialties: ['暖通'] },
-  { name: '示例人员011', openId: 'PUBLIC_EXAMPLE_FEISHU_ACCESS_INVENTORY_ADMIN_H_OPEN_IDS', specialties: ['弱电'] },
-  { name: '示例人员021', openId: 'ou_d22c6190a18a9d6df49fa72565e120f7', specialties: ['消防', 'EHS'] },
-  { name: '示例人员010', openId: 'PUBLIC_EXAMPLE_FEISHU_ACCESS_CONSTRUCTION_ADMIN_OPEN_IDS', specialties: ['消防', 'EHS'] },
+  { name: '周海祥', openId: 'ou_00e4670ccd913f3bc4f2821f00a574cc', specialties: ['电气'] },
+  { name: '王庆华', openId: 'ou_fd6a4bdbb811ca6247ae492bf2b5e7f8', specialties: ['暖通'] },
+  { name: '曹毅', openId: 'ou_5a4c9222affb2062a1f0d4f167181121', specialties: ['弱电'] },
+  { name: '高荣', openId: 'ou_0e3ade873ee4d95533919427546c100b', specialties: ['消防', 'EHS'] },
+  { name: '明志勇', openId: 'ou_4fa470cbe21075fb274583fdf0dee727', specialties: ['消防', 'EHS'] },
 ];

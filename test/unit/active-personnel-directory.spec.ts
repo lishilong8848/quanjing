@@ -45,11 +45,11 @@ describe('active personnel directory', () => {
       {
         records: [
           record('rec-operator', {
-            姓名: [{ text: '示例人员008' }],
-            员工姓名: [{ id: 'ou-operator', name: '示例人员008' }],
-            示例人员001: [
-              { id: 'ou-supervisor-a', name: '直属示例人员001甲' },
-              { id: 'ou-supervisor-b', name: '直属示例人员001乙' },
+            姓名: [{ text: '张三' }],
+            员工姓名: [{ id: 'ou-operator', name: '张三' }],
+            主管: [
+              { id: 'ou-supervisor-a', name: '直属主管甲' },
+              { id: 'ou-supervisor-b', name: '直属主管乙' },
             ],
             员工工号: [{ text: '1001' }],
             岗位: '值班工程师',
@@ -120,11 +120,11 @@ describe('active personnel directory', () => {
       }),
       expect.objectContaining({
         recordId: 'rec-operator',
-        name: '示例人员008',
+        name: '张三',
         openId: 'ou-operator',
         employeeNo: '1001',
         buildings: ['A', 'B'],
-        supervisorNames: ['直属示例人员001甲', '直属示例人员001乙'],
+        supervisorNames: ['直属主管甲', '直属主管乙'],
       }),
     ]);
     expect(directory.selectablePersonnel).toEqual(
@@ -137,7 +137,7 @@ describe('active personnel directory', () => {
         }),
         expect.objectContaining({
           recordId: 'rec-operator',
-          name: '示例人员008',
+          name: '张三',
           openId: 'ou-operator',
         }),
       ]),
@@ -162,8 +162,8 @@ describe('active personnel directory', () => {
       duplicateOpenIdCount: 1,
       missingBuildingCount: 0,
     });
-    expect(searchActivePersonnelCandidates(directory, '示例人员008')).toEqual([
-      { recordId: 'rec-operator', name: '示例人员008', position: '值班工程师', buildings: ['A', 'B'] },
+    expect(searchActivePersonnelCandidates(directory, '张三')).toEqual([
+      { recordId: 'rec-operator', name: '张三', position: '值班工程师', buildings: ['A', 'B'] },
     ]);
     expect(searchActivePersonnelCandidates(directory, '已离职')).toEqual([]);
   });

@@ -13,7 +13,7 @@ describe('bitable record update helpers', () => {
   it('chunks record updates at the Feishu 1000-record batch limit', () => {
     const updates = Array.from({ length: 1001 }, (_, index) => ({
       record_id: `rec${index}`,
-      fields: { '值班人员（实际）程序修改': '示例人员008' },
+      fields: { '值班人员（实际）程序修改': '张三' },
     }));
 
     const chunks = chunkBitableRecordUpdates(updates);

@@ -152,10 +152,10 @@ Assert-CompiledFileContains `
   -RelativePath $serverRelativePaths[2] `
   -Markers @(
     'getCrossGuides',
-    'tbl59899bfa825ba',
-    'tblb434ca9548528',
-    'tbl83174d3ae2e32',
-    'tbl645137e7274a5'
+    'tblskUG3o7nbJAoJ',
+    'tblaK4n3JtsWDV3V',
+    'tblZkw7z0DmCnMGl',
+    'tblPqIuib8UjoNMp'
   )
 
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null

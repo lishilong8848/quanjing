@@ -70,10 +70,20 @@ export function getLeaveScheduleCoverageDateKeys(
   endAt: string,
 ): string[] {
   return deduplicateScheduleDateKeysByMonth([
-    businessDateKey,
-    addDaysToDateKey(businessDateKey, -1),
+    ...getAdjacentScheduleMonthDateKeys(businessDateKey),
     ...getLeaveRangeMonthDateKeys(startAt, endAt),
   ]);
+}
+
+export function getAdjacentScheduleMonthDateKeys(dateKey: string): string[] {
+  const validDateKey = addDaysToDateKey(dateKey, 0);
+  if (!validDateKey) return [];
+  const monthStart = new Date(`${validDateKey.slice(0, 7)}-01T00:00:00.000Z`);
+  return [-1, 0, 1].map((offset) => {
+    const month = new Date(monthStart);
+    month.setUTCMonth(month.getUTCMonth() + offset);
+    return month.toISOString().slice(0, 10);
+  });
 }
 
 export function resolveLeaveScheduleForceRefresh(

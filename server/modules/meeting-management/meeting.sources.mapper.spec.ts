@@ -25,11 +25,11 @@ describe('真实会议字段适配', () => {
           SourceID: 'private-internal-id',
           '演示文档/PPT（链接）': {
             text: '课件',
-            link: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+            link: 'https://vnet.feishu.cn/wiki/Example?from=copy',
           },
           '会议回放&妙记链接': {
             text: '回放',
-            link: 'https://example.feishu.cn/minutes/PUBLIC_EXAMPLE_SOURCE',
+            link: 'https://vnet.feishu.cn/minutes/Example',
           },
         },
       },
@@ -38,7 +38,7 @@ describe('真实会议字段适配', () => {
     expect(meeting.id).toBe('training:recA');
     expect(meeting.presenters).toEqual([{ id: 'ou_test', name: '分享人甲' }]);
     expect(meeting.documentUrl).toBe(
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/Example?from=copy',
     );
     expect(meeting.resources?.map((r) => r.kind)).toEqual(['slides', 'replay']);
     expect(JSON.stringify(meeting)).not.toMatch(/private/);
@@ -94,7 +94,7 @@ describe('真实会议字段适配', () => {
     for (const link of [
       'javascript:alert(1)',
       'https://vnet.feishu.cn.evil.test/docx/A',
-      'https://user:user-3d40ddff@example.com/docx/A',
+      'https://user:pass@vnet.feishu.cn/docx/A',
     ]) {
       const meeting = mapAdditionalMeeting(
         { record_id: 'recA', fields: { 会议纪要: { text: '纪要', link } } },

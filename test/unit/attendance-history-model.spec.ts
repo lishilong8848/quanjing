@@ -25,10 +25,10 @@ describe('attendance history model', () => {
       fetchedAt: '2026-09-19 10:00',
       checkedCount: 20,
       anomalies: [
-        anomaly({ key: 'h-1', name: '示例人员008', building: 'H楼', reason: '迟到' }),
+        anomaly({ key: 'h-1', name: '张三', building: 'H楼', reason: '迟到' }),
         anomaly({
           key: 'h-2',
-          name: '示例人员008',
+          name: '张三',
           building: 'H楼',
           direction: 'OffDuty',
           expectedAt: '2026-09-03 18:00',
@@ -36,7 +36,7 @@ describe('attendance history model', () => {
         }),
         anomaly({
           key: 'b-1',
-          name: '示例人员013',
+          name: '李四',
           building: 'B楼',
           expectedAt: '2026-09-04 09:00',
           reason: '未查询到有效打卡',
@@ -52,7 +52,7 @@ describe('attendance history model', () => {
       corrected: [
         {
           key: 'b-2',
-          name: '示例人员017',
+          name: '王五',
           building: 'B楼',
           shiftLabel: '白班',
           direction: 'OnDuty',
@@ -79,10 +79,10 @@ describe('attendance history model', () => {
       { category: 'other', label: '其他异常', count: 0 },
     ]);
     expect(result.personRanking).toEqual([
-      { name: '示例人员008', buildings: ['H楼'], count: 2 },
+      { name: '张三', buildings: ['H楼'], count: 2 },
       { name: '陈诚', buildings: ['110站'], count: 1 },
-      { name: '示例人员013', buildings: ['B楼'], count: 1 },
-      { name: '示例人员017', buildings: ['B楼'], count: 1 },
+      { name: '李四', buildings: ['B楼'], count: 1 },
+      { name: '王五', buildings: ['B楼'], count: 1 },
     ]);
     expect(result.buildingRanking).toEqual([
       { building: 'B楼', peopleCount: 2, count: 2 },

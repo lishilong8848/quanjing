@@ -4,9 +4,9 @@ import { UserNameAvatar } from '../../client/src/components/UserNameAvatar';
 
 describe('user name avatar', () => {
   it.each([
-    ['示例人员020', '进宇'],
-    ['示例人员014', '冰冰'],
-    ['示例人员009', '小东'],
+    ['马进宇', '进宇'],
+    ['梅冰冰', '冰冰'],
+    ['施小东', '小东'],
     ['  刘小杏  ', '小杏'],
     ['李', '李'],
     ['A𠮷野', '𠮷野'],
@@ -19,7 +19,7 @@ describe('user name avatar', () => {
 
   it('does not retain the previous name after switching to guest', () => {
     const markup = renderToStaticMarkup(createElement(UserNameAvatar, {
-      name: '示例人员020', isGuest: true,
+      name: '马进宇', isGuest: true,
     }));
     expect(markup).toContain('>游客</span>');
     expect(markup).not.toContain('进宇');
@@ -27,7 +27,7 @@ describe('user name avatar', () => {
 
   it('shows a pending identity without displaying a stale name', () => {
     const markup = renderToStaticMarkup(createElement(UserNameAvatar, {
-      name: '示例人员020', isLoading: true,
+      name: '马进宇', isLoading: true,
     }));
     expect(markup).toContain('>…</span>');
     expect(markup).not.toContain('进宇');

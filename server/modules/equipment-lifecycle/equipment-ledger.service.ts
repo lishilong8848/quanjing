@@ -45,7 +45,7 @@ import {
 } from './equipment-ledger.model';
 
 const SOURCE_URL =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/base/WMcQbPn71aXwoGsNv0vcnzz2n6c?table=tblPIgIZ5fyEeQnY';
 const TTL = 4 * 60 * 60 * 1000;
 export const EQUIPMENT_LEDGER_FIELDS = [
   '编号',

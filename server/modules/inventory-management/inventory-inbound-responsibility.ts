@@ -36,7 +36,7 @@ function person(value: unknown): InboundResponsiblePerson {
     typeof value.openId !== 'string' || !/^ou_[A-Za-z0-9_-]{1,124}$/.test(value.openId) ||
     typeof value.name !== 'string' || !value.name.trim() || value.name !== value.name.trim() || value.name.length > 128 || /[\u0000-\u001f\u007f]/u.test(value.name) ||
     !Array.isArray(value.accountIds) || !value.accountIds.length || value.accountIds.length > 10 || new Set(value.accountIds).size !== value.accountIds.length ||
-    value.accountIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(id))) throw new BadRequestException('入库示例人员019身份无效');
+    value.accountIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(id))) throw new BadRequestException('入库责任人身份无效');
   return { personRecordId: value.personRecordId, openId: value.openId, name: value.name, accountIds: [...value.accountIds].sort() };
 }
 export function normalizeInboundResponsibilityHandover(value: InboundResponsibilityHandoverInput): InboundResponsibilityHandoverInput {
@@ -77,6 +77,6 @@ export function inboundResponsibilities(extensions: Record<string, unknown> | un
 }
 export function assertInboundResponsibilitySource(plan: InboundResponsibility | undefined, input: InboundResponsibilityHandoverInput): void {
   if ((plan?.generation || 1) !== input.expectedGeneration || plan && JSON.stringify(plan.target) !== JSON.stringify(input.source)) {
-    throw new ConflictException('入库示例人员019或代际已变化，请重新预览');
+    throw new ConflictException('入库责任人或代际已变化，请重新预览');
   }
 }

@@ -19,7 +19,7 @@ describe('detectTodayOperationsScheduleConsistencyIssues', () => {
       ...nightShift,
       recordId: 'rec_schedule_b_night_20260822',
       building: 'B栋',
-      actualStaff: ['示例人员017'],
+      actualStaff: ['王五'],
     };
     const issues = detectTodayOperationsScheduleConsistencyIssues({
       schedules: [{ ...nightShift, actualStaff: ['赵六'] }, otherShift],

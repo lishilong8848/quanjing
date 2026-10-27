@@ -11,10 +11,10 @@ import { LeaveWorkflowModule } from '../../server/modules/leave-workflow/leave-w
 import { AccessConfigurationService } from '../../server/common/access/access-configuration.service';
 import { LeaveWorkflowService } from '../../server/modules/leave-workflow/leave-workflow.service';
 
-const source = { name: '合成前任', openId: 'ou_synthetic_old', personRecordId: 'recOldPerson', position: '设施示例人员001', buildings: ['C楼'] };
-const target = { name: '合成接任', openId: 'ou_synthetic_new', personRecordId: 'recNewPerson', position: '设施示例人员001', buildings: ['C楼'] };
+const source = { name: '合成前任', openId: 'ou_synthetic_old', personRecordId: 'recOldPerson', position: '设施主管', buildings: ['C楼'] };
+const target = { name: '合成接任', openId: 'ou_synthetic_new', personRecordId: 'recNewPerson', position: '设施主管', buildings: ['C楼'] };
 const person = (value: typeof source, marker: string, active: boolean) => ({ id: `local-external-${marker.repeat(64)}`, recordId: value.personRecordId, name: value.name, openId: value.openId, active, type: 'employee' as const, position: value.position, systemPosition: '', buildings: ['C楼' as const], specialties: [], permissionTags: [], dutyRecordIds: ['recDutyFixture'] });
-const context = (): HandoverContext => ({ from: person(source,'a',false), to: person(target,'b',true), directoryVersion: 'synthetic-directory', duties: [{ recordId: 'recDutyFixture', name: 'C楼示例人员001', kind: 'leave_supervisor', personnelIds: [`local-external-${'a'.repeat(64)}`], buildings: ['C楼'], specialties: null, enabled: true, startsAt: 0, endsAt: null, parentDutyIds: [], version: 1 }] });
+const context = (): HandoverContext => ({ from: person(source,'a',false), to: person(target,'b',true), directoryVersion: 'synthetic-directory', duties: [{ recordId: 'recDutyFixture', name: 'C楼主管', kind: 'leave_supervisor', personnelIds: [`local-external-${'a'.repeat(64)}`], buildings: ['C楼'], specialties: null, enabled: true, startsAt: 0, endsAt: null, parentDutyIds: [], version: 1 }] });
 const mutationId = `handover-${'c'.repeat(64)}`;
 describe('请休假真实交接适配器（本地账本，外部零调用）', () => {
   let directory: string, temporaryRoot: string, owner: string, file: string, store: LeaveWorkflowStore, adapter: LeavePersonnelHandoverAdapter, originalApp: string | undefined;

@@ -900,7 +900,7 @@ export class InventoryOutboundWorkflowService
                   ),
             ]);
           if (!approvers.length) {
-            throw new Error(`${request.building}未配置有效的库房示例人员019员`);
+            throw new Error(`${request.building}未配置有效的库房责任人员`);
           }
           if (!snapshotOption)
             throw consistencyConflict('无法恢复出库物品信息');
@@ -919,7 +919,7 @@ export class InventoryOutboundWorkflowService
       const guidance = cause.includes('存放位置无效')
         ? `请给对应物品的${request.building}库存台账配置有效存放位置，系统将按原编号 ${request.clientMutationId} 自动恢复，无需重新申请`
         : cause.includes('未配置') || cause.includes('配置缺失')
-          ? `请检查库房示例人员019员及库房管理人配置后使用原编号 ${request.clientMutationId} 重试`
+          ? `请检查库房责任人员及库房管理人配置后使用原编号 ${request.clientMutationId} 重试`
           : `系统将保留原编号 ${request.clientMutationId} 核对审批账本并恢复，请勿重复申请`;
       const message = `${request.building}出库审批路由失败：${cause}。${guidance}`;
       try {

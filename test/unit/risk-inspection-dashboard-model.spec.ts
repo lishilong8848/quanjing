@@ -46,7 +46,7 @@ function issue(
     discoveredAt: '2026-07-01',
     dueAt: '2026-07-20',
     closedAt: null,
-    owner: '示例人员016',
+    owner: '测试人员',
     status,
     statusLabel: statusLabels[status],
     overdueDays: 0,
@@ -149,7 +149,7 @@ describe('risk inspection metric issue lists', () => {
       description: '配电柜温度异常',
       discoveredAt: '2026-07-08',
       dueAt: '2026-07-11',
-      owner: '示例人员013',
+      owner: '李四',
       overdueDays: 8,
     },
     {
@@ -158,7 +158,7 @@ describe('risk inspection metric issue lists', () => {
       description: '冷机房巡检问题',
       discoveredAt: '2026-07-10',
       dueAt: '2026-07-28',
-      owner: '示例人员017',
+      owner: '王五',
     },
     {
       ...issue('history-unknown', '其他', 'unknown', 'unknown'),
@@ -401,7 +401,7 @@ function crossIssue(
     tag: '消防',
     type: '安全隐患',
     description: `${id}问题`,
-    owner: '示例人员008',
+    owner: '张三',
     rectification: '待整改',
     status: 'pending',
     createdAt: '2026-07-01T00:00:00.000Z',
@@ -419,12 +419,12 @@ describe('cross-inspection ledger filters', () => {
       month: '2026-06',
       type: '环境卫生',
       description: '通道堆物',
-      owner: '示例人员013',
+      owner: '李四',
     }),
     crossIssue('cross-3', {
       type: '环境卫生',
       description: '消防通道占用',
-      owner: '示例人员017',
+      owner: '王五',
     }),
   ];
 
@@ -433,7 +433,7 @@ describe('cross-inspection ledger filters', () => {
     ['month', { month: '2026-06' }, ['cross-2']],
     ['type', { type: '安全隐患' }, ['cross-1']],
     ['description query', { query: '通道' }, ['cross-2', 'cross-3']],
-    ['owner query', { query: '  示例人员013  ' }, ['cross-2']],
+    ['owner query', { query: '  李四  ' }, ['cross-2']],
   ])('filters ledger issues by %s only', (_label, filters, expectedIds) => {
     const result = filterCrossLedgerIssues(issues, {
       building: 'all',
@@ -453,7 +453,7 @@ describe('cross-inspection ledger filters', () => {
       building: 'A楼',
       month: '2026-07',
       type: '环境卫生',
-      query: '  示例人员017 ',
+      query: '  王五 ',
     });
 
     expect(result.map(({ id }) => id)).toEqual(['cross-3']);

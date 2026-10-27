@@ -9,7 +9,7 @@ import type {
 import { resolveWeatherWarningCheckScope } from './weather-warning-check-scope';
 import { WEATHER_GUARD_BUILDINGS } from './weather-warning-registration.rules';
 
-const CHECKLIST_URL = 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+const CHECKLIST_URL = 'https://vnet.feishu.cn/wiki/Hs4fwlplAijAgskmBnkcEDMvnKc';
 const TEST_TAG_LABEL = '测试';
 const MAX_WARNING_TAGS = 2;
 const MAX_ACTIONS = 5;

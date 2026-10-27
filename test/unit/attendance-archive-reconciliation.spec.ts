@@ -167,7 +167,7 @@ describe('attendance archive business identity', () => {
       创建时间: Date.parse('2026-09-07T18:07:00+08:00'),
       员工姓名: ['测试'],
       楼栋: ['H楼'],
-      示例人员001: [{ id: 'manager' }],
+      主管: [{ id: 'manager' }],
     };
 
     const plan = reconcileAttendanceRows(
@@ -187,7 +187,7 @@ describe('attendance archive business identity', () => {
     expect(plan.rows[0].fields).not.toHaveProperty('创建时间');
     expect(plan.rows[0].fields).not.toHaveProperty('员工姓名');
     expect(plan.rows[0].fields).not.toHaveProperty('楼栋');
-    expect(plan.rows[0].fields).not.toHaveProperty('示例人员001');
+    expect(plan.rows[0].fields).not.toHaveProperty('主管');
     expect(plan.rows[0].fields).not.toHaveProperty('经度');
     expect(plan.rows[0].fields).not.toHaveProperty('纬度');
   });

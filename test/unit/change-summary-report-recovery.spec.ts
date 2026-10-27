@@ -21,7 +21,7 @@ const principalB = 'principal-b-1234567890';
 const request: ChangeSummaryReportCreateRequest = {
   clientMutationId:
     'change-summary-report-123e4567-e89b-42d3-a456-426614174000',
-  submitterName: '示例人员020',
+  submitterName: '马进宇',
   changeRecordId: 'recChange12345678',
   summaryDocuments: [
     {
@@ -52,7 +52,7 @@ const original: ChangeInfo = {
   type: '计划性变更',
   progress: '已结束',
   executor: null,
-  submitterName: '示例人员020',
+  submitterName: '马进宇',
   workflowStatus: '审批通过',
   hasSummaryReport: false,
   buildings: ['A楼'],
@@ -163,7 +163,7 @@ describe('change summary report recovery', () => {
       {
         request: {
           ...request,
-          submitterName: principalFingerprint === principalA ? '示例人员020' : '乙',
+          submitterName: principalFingerprint === principalA ? '马进宇' : '乙',
         },
         original: recoveryOriginal,
         state: 'pending' as const,
@@ -251,7 +251,7 @@ describe('change summary report recovery', () => {
       },
       {
         request,
-        original: { ...original, submitterName: '示例人员004' },
+        original: { ...original, submitterName: '其他人' },
         state: 'pending',
       },
       { request, original, state: 'invalid' },

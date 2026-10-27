@@ -11,7 +11,7 @@ const { resolveLeaveRequestApplicant } = require('../../shared/leave-request-app
 const { bindLeaveRequestApplicant } = require('../../server/modules/duty-schedule/leave-request-applicant');
 const express = require('express');
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));
 const names = ['验收员工甲', '验收员工乙', ...Array.from({ length: 1200 }, (_, i) => `验收人员${i}`)];
 const actors = {
   guest: { role: 'guest', purchaseBuilding: null },
@@ -22,11 +22,16 @@ const actors = {
   missing: { role: 'admin', purchaseBuilding: null, accountId: 'feishu-' + 'c'.repeat(64) },
   unmatched: { role: 'admin', purchaseBuilding: null, accountId: 'feishu-' + 'd'.repeat(64), displayName: '未维护验收人员' },
 };
+const scenario = { rowsPerMonth: 0, delayMs: 0, now: null, shift: 'white', onlyMonth: null };
+function configureScenario(options = {}) {
+  Object.assign(scenario, { rowsPerMonth: 0, delayMs: 0, now: null, shift: 'white', onlyMonth: null }, options);
+  observations.length = 0;
+}
 const actorOf = req => /qa_actor=([a-z]+)/.exec(req.headers.cookie || '')?.[1] || 'guest';
 const session = actor => {
   const principal = actors[actor] || actors.guest;
   return { ...principal,
-    expiresAt: actor === 'guest' ? null : Date.now() + 3600000,
+    expiresAt: actor === 'guest' ? null : (scenario.now ? Date.parse(scenario.now) : Date.now()) + 3600000,
     principalFingerprint: actor === 'guest' ? null : 'qa-fingerprint-' + actor,
     pagePaths: ['/nantong-base', '/monthly-schedule'],
     capabilities: { canEdit: principal.role === 'admin', canDelete: principal.role === 'admin', canForceRefresh: principal.role === 'admin', canAccessContracts: principal.role === 'admin' },
@@ -35,7 +40,7 @@ const session = actor => {
 const observations = [];
 let resultMode = 'failure';
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/')) observations.push({ path: req.path, actor: actorOf(req), method: req.method });
+  if (req.path.startsWith('/api/')) observations.push({ path: req.path, actor: actorOf(req), method: req.method, refresh: req.query.refresh, at: performance.now() });
   next();
 });
 app.get('/qa/report', (_, res) => res.json(observations));
@@ -60,25 +65,27 @@ app.post('/api/access/login', (req, res) => {
   res.json(session(actor));
 });
 const schedulesFor = (year, month) => {
+  if (scenario.onlyMonth && `${year}-${String(month).padStart(2, '0')}` !== scenario.onlyMonth) return [];
   const days = new Date(year, month, 0).getDate();
-  return Array.from({ length: days }, (_, i) => {
-    const date = `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
-    return { id: `qa-${date}`, recordId: `rec${year}${month}${i}`, dutyCode: null, scheduleDate: date,
-      code: null, building: 'building_a', team: '甲', shift: 'white', personText: names.slice(0, 2).join('、'),
-      dutyStaffReference: names.slice(0, 2), dutyStaffActual: names.slice(0, 2), remark: '', emergencyDuty: '', emergencyDutySchedule: '',
-      leaveStaff: [], substituteStaff: [], actualDutyStaff: names.slice(0, 2).join('、'), buildingText: 'A楼', teamText: '甲',
-      shiftText: '白班', createdAt: '', updatedAt: '',
+  return Array.from({ length: scenario.rowsPerMonth || days }, (_, i) => {
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(i % days + 1).padStart(2, '0')}`;
+    const staff = i < days ? names.slice(0, 2) : [names[2 + (i % 1200)]];
+    return { id: `qa-${year}-${month}-${i}`, recordId: `rec${year}${month}${i}`, dutyCode: null, scheduleDate: date,
+      code: null, building: 'building_a', team: scenario.shift === 'long_white' ? '长白' : '甲', shift: scenario.shift, personText: staff.join('、'),
+      dutyStaffReference: staff, dutyStaffActual: staff, remark: '', emergencyDuty: '', emergencyDutySchedule: '',
+      leaveStaff: [], substituteStaff: [], actualDutyStaff: staff.join('、'), buildingText: 'A楼', teamText: '甲',
+      shiftText: scenario.shift === 'long_white' ? '长白班' : '白班', createdAt: '', updatedAt: '',
     };
   });
 };
-app.get('/api/monthly-schedules/:year/:month', (req, res) => res.json({ year: +req.params.year, month: +req.params.month, schedules: schedulesFor(+req.params.year, +req.params.month) }));
-app.get('/api/bitable/person-profiles', (_, res) => res.json({ organizations: names.map(name => ({ supervisorText: name, position: '值班员', buildingsSpecialties: ['A楼'], shift: '白班' })), changeRequestSubmitters: [] }));
+app.get('/api/monthly-schedules/:year/:month', (req, res) => setTimeout(() => res.json({ year: +req.params.year, month: +req.params.month, schedules: schedulesFor(+req.params.year, +req.params.month) }), scenario.delayMs));
+app.get('/api/bitable/person-profiles', (_, res) => res.json({ organizations: names.map((name, i) => ({ id: `qa-person-${i}`, recordId: `qa-person-${i}`, supervisorText: name, position: '值班员', buildingsSpecialties: ['A楼'], shift: '白班' })), changeRequestSubmitters: [] }));
 app.get('/api/bitable/person-profile-details', (_, res) => res.json({ organizations: [] }));
 app.get('/api/duty-schedules/work-calendar', (_, res) => res.json({ days: [], revision: 'qa' }));
 app.get('/api/duty-schedules/emergency-duty', (_, res) => res.json({ schedules: [] }));
 app.get('/api/duty-schedules/travel-staff', (_, res) => res.json({ success: true, total: 0, details: [] }));
 app.get('/api/bitable/today-leave-staff', (req, res) => res.json({ date: req.query.date, buildings: [], totalLeaveCount: 0 }));
-app.get('/api/bitable/schedule-snapshot-revision', (_, res) => res.json({ revision: 'qa' }));
+app.get('/api/bitable/schedule-snapshot-revision', (_, res) => res.json({ available: true, token: 'qa-static', scheduleFetchedAt: 1, nonDutyFetchedAt: 1 }));
 for (const kind of ['festival', 'holiday']) app.get(`/api/bitable/${kind}-schedules`, (_, res) => res.json({ schedules: [] }));
 app.get('/api/sealing-info/:year', (req, res) => res.json({ year: +req.params.year, sealingInfos: [], sealings: [] }));
 app.get('/api/change-info/:year', (req, res) => res.json({ year: +req.params.year, changes: [] }));
@@ -102,6 +109,9 @@ app.post('/api/duty-schedules/leave-request', require('multer')().array('screens
   } catch (error) { res.status(error.getStatus?.() || 400).json({ message: error.message }); }
 });
 app.use('/api', (_, res) => res.status(503).json({ message: '隔离验收未配置该模块' }));
-const server = app.listen(43226, '127.0.0.1', () => console.log('leave applicant fixture ready: synthetic data only, no external writes'));
-process.once('SIGINT', () => server.close());
-process.once('SIGTERM', () => server.close());
+module.exports = { app, observations, configureScenario, schedulesFor, names };
+if (require.main === module) {
+  const server = app.listen(43226, '127.0.0.1', () => console.log('leave applicant fixture ready: synthetic data only, no external writes'));
+  process.once('SIGINT', () => server.close());
+  process.once('SIGTERM', () => server.close());
+}

@@ -25,9 +25,9 @@ describe('专业配置、会话与人员对齐', () => {
   });
   afterEach(() => { process.env = { ...saved }; rmSync(directory, { recursive: true, force: true }); });
   const snapshot = (): ConfigurationDirectorySnapshot => ({ appId: APPROVED_FEISHU_APP_ID, people: [], snapshotAt: Date.now(), personnelComplete: true,
-    employees: PROFESSIONAL_DEFAULTS.map(person => ({ ...person, specialties: person.specialties.join('、'), position: '专业示例人员001', inactive: false })) });
+    employees: PROFESSIONAL_DEFAULTS.map(person => ({ ...person, specialties: person.specialties.join('、'), position: '专业主管', inactive: false })) });
 
-  it('五人默认专业正确且没有本地专业示例人员001', () => {
+  it('五人默认专业正确且没有本地专业主管', () => {
     for (const person of PROFESSIONAL_DEFAULTS) expect(configuration.feishuPrincipal(person.openId, APPROVED_FEISHU_APP_ID)).toMatchObject({ role: 'professional_admin', displayName: person.name, specialties: person.specialties });
     expect(configuration.localTargets().some(value => value.principal.role === 'professional_admin')).toBe(false);
     expect(configuration.feishuPrincipal(PROFESSIONAL_DEFAULTS[0].openId, 'cli_other')).toBeNull();
@@ -91,7 +91,7 @@ describe('专业配置、会话与人员对齐', () => {
     const before = configuration.snapshot().accounts;
     await expect(configuration.synchronizePersonnel(invalid)).rejects.toThrow('身份冲突');
     expect(configuration.snapshot().accounts).toEqual(before);
-    const valid = snapshot(); valid.employees.push({ ...valid.employees[0], openId: 'ou_synthetic_unmanaged', name: '示例人员004员' }, { ...valid.employees[1], openId: 'ou_synthetic_unmanaged', name: '示例人员004员2' });
+    const valid = snapshot(); valid.employees.push({ ...valid.employees[0], openId: 'ou_synthetic_unmanaged', name: '其他人员' }, { ...valid.employees[1], openId: 'ou_synthetic_unmanaged', name: '其他人员2' });
     await configuration.synchronizePersonnel(valid);
     expect(configuration.snapshot().personnelSync?.status).toBe('success');
   });

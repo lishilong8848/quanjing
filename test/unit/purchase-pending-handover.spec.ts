@@ -77,7 +77,7 @@ describe('采购批次未决议审批交接账本', () => {
     } finally { jest.restoreAllMocks(); if (originalApp === undefined) delete process.env.FEISHU_APP_ID; else process.env.FEISHU_APP_ID = originalApp; }
   });
   it('实际采购gateway只改当前负责人，按OpenID回读，重试不重写，已批准及姓名代替身份均拒绝', async () => {
-    const overrides: Record<string, string> = { FEISHU_APP_ID: 'cli_synthetic_handover', FEISHU_APP_SECRET: 'synthetic-test-only', FEISHU_PURCHASE_INVENTORY_APP_TOKEN: 'synthetic_app_token', FEISHU_PURCHASE_EXECUTION_TABLE_ID: 'tbl4d5cc1d204f3ce139' };
+    const overrides: Record<string, string> = { FEISHU_APP_ID: 'cli_synthetic_handover', FEISHU_APP_SECRET: 'synthetic-test-only', FEISHU_PURCHASE_INVENTORY_APP_TOKEN: 'synthetic_app_token', FEISHU_PURCHASE_EXECUTION_TABLE_ID: 'tblSyntheticPurchase' };
     const saved = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]])); Object.assign(process.env, overrides);
     try {
       const original: Record<string, unknown> = { 采购流程: '未开始（待审批）', [F.source]: '程序卡片', [F.state]: '待经理审批', [F.currentApprover]: [{ id: input.sourceOpenId }], [F.actualApprover]: [], [F.approvalTime]: null, [F.actionId]: '', [F.policyVersion]: PURCHASE_MANAGER_APPROVAL_POLICY_VERSION, [F.batchId]: card.approvalBatchId };
@@ -156,7 +156,7 @@ describe('采购批次未决议审批交接账本', () => {
     } finally { jest.restoreAllMocks(); if (originalApp === undefined) delete process.env.FEISHU_APP_ID; else process.env.FEISHU_APP_ID = originalApp; }
   });
   it('实际新卡回执gateway按日期语义回读，写后重试不重PUT，已审批史实字段保持', async () => {
-    const overrides: Record<string, string> = { FEISHU_APP_ID: 'cli_synthetic_handover', FEISHU_APP_SECRET: 'synthetic-test-only', FEISHU_PURCHASE_INVENTORY_APP_TOKEN: 'synthetic_app_token', FEISHU_PURCHASE_EXECUTION_TABLE_ID: 'tbl4d5cc1d204f3ce139' };
+    const overrides: Record<string, string> = { FEISHU_APP_ID: 'cli_synthetic_handover', FEISHU_APP_SECRET: 'synthetic-test-only', FEISHU_PURCHASE_INVENTORY_APP_TOKEN: 'synthetic_app_token', FEISHU_PURCHASE_EXECUTION_TABLE_ID: 'tblSyntheticPurchase' };
     const saved = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]])); Object.assign(process.env, overrides);
     try {
       let current: Record<string, unknown> = { [F.source]: '程序卡片', [F.policyVersion]: PURCHASE_MANAGER_APPROVAL_POLICY_VERSION, [F.batchId]: card.approvalBatchId, [F.currentApprover]: [], [F.actualApprover]: [{ id: input.target.openId }], [F.approvalTime]: 1791849600000, [F.actionId]: 'synthetic-approved', [F.state]: '已通过' };

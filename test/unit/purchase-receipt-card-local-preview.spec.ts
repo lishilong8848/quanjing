@@ -8,9 +8,9 @@ import {
 
 describe('local purchase receipt card preview', () => {
   it('is permanently restricted to Ma Jinyu', () => {
-    expect(DIAGNOSTIC_RECEIPT_RECIPIENT_NAME).toBe('示例人员020');
+    expect(DIAGNOSTIC_RECEIPT_RECIPIENT_NAME).toBe('马进宇');
     expect(DIAGNOSTIC_RECEIPT_RECIPIENT_OPEN_ID).toBe(
-      'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID',
+      'ou_a6644e62a43b916c6bc26148cf74f208',
     );
     expect(() =>
       resolveDiagnosticReceiptMode(['--recipient', 'ou_other']),
@@ -65,7 +65,7 @@ describe('local purchase receipt card preview', () => {
       '本机签收卡诊断应用不匹配',
     );
     expect(() =>
-      assertDiagnosticReceiptAppId('cli_0831564613853b26'),
+      assertDiagnosticReceiptAppId('cli_a9d1c9fe9d381cee'),
     ).not.toThrow();
   });
 });

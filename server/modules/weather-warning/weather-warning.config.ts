@@ -48,9 +48,9 @@ export interface WeatherWarningRuntimeConfig
 }
 
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
-const DEFAULT_RULE_TABLE_ID = 'tbl249bff422a711';
-const DEFAULT_CHECK_TABLE_ID = 'tblc4742cfc8398f';
+  'https://vnet.feishu.cn/base/Tmn8bjGnpasbLTskafbcRijvnKe?table=tbldeLoJJe6cPiHy&view=vewXWFTfcG';
+const DEFAULT_RULE_TABLE_ID = 'tbldeLoJJe6cPiHy';
+const DEFAULT_CHECK_TABLE_ID = 'tblVFWuUbjo4GHOY';
 const DEFAULT_RULE_FIELDS = {
   type: '预警类型',
   color: '预警等级',
@@ -101,7 +101,7 @@ export function loadWeatherWarningRuntimeConfig(
             readWeatherWarningEnv(
               env,
               'FEISHU_WEATHER_WARNING_TEST_RECIPIENT_NAME',
-            ) || '示例人员020',
+            ) || '马进宇',
         }
       : null,
   };

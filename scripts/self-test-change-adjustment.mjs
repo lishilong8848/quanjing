@@ -26,10 +26,10 @@ import {
 } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const CHANGE_TABLE_ID = 'tbl8f743982e48e1';
+const CHANGE_TABLE_ID = 'tblBvg6wCYSX3hcg';
 const CHANGE_TABLE_NAME = '计划变更日历';
 const DEFAULT_CHANGE_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/JhiVwgfoIimAqEk8YwEc09sknGd?table=tblBvg6wCYSX3hcg&view=vewew3vfZT';
 const DEFAULT_BASE_URL = 'https://127.0.0.1:3001';
 const DEFAULT_STATE_PATH = resolve(
   process.cwd(),

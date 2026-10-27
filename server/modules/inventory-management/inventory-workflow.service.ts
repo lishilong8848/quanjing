@@ -578,9 +578,9 @@ function purchaseNotificationCard(
 
 function itemConfirmationCard(): Record<string, unknown> {
   const buttons = [
-    ['入库', 'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE'],
-    ['借调', 'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE'],
-    ['出库', 'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE'],
+    ['入库', 'https://vnet.feishu.cn/share/base/form/shrcns4L7KGk25hfbmbVj9V4tOd'],
+    ['借调', 'https://vnet.feishu.cn/share/base/form/shrcnIrdtq98224Ub2XmW6f0Itr'],
+    ['出库', 'https://vnet.feishu.cn/share/base/form/shrcnvvIVWACv1Fb4moOigY24we'],
   ];
   return {
     config: { wide_screen_mode: true },

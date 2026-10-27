@@ -96,14 +96,21 @@ browser-profile/
 /progress.md
 /task_plan.md
 
-# Public-source repository: never publish operational or private material
+# Private material excluded from the public GitHub repository
+/AGENTS.md
+/design-qa.md
+/docs/
+/deploy/
 /data/
-/docs/internal/
 /client/public/portal/
 /client/public/meeting-templates/
+/client/public/assets/employee-onboarding-blue-id-photo-example.jpg
 /tools/*/resources/
 *.key
 *.pem
 *.crt
+*.cer
 *.pfx
 *.p12
+__pycache__/
+*.py[cod]

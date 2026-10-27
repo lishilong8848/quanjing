@@ -75,16 +75,16 @@ const EXPECTED_DUTY_BUILDINGS = DUTY_BUILDING_ORDER.filter(
 
 const DEFAULT_SOURCE_URLS = {
   safety:
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblQUF2CepuzSeAl&view=vewy90gPcP',
   personnel:
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
-  pue: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblRV9KeWFh9xCkm&view=vew6jLlGzq',
+  pue: 'https://vnet.feishu.cn/base/ASLxbfESPahdTKs0A9NccgbrnXc?table=tblqSskJvBnx9UJj&view=vewUBXgM67',
   itLoad:
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/base/ASLxbfESPahdTKs0A9NccgbrnXc?table=tblBgaPzuVj7V9Q6&view=vewTUyPs7E',
   electricity:
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/base/ASLxbfESPahdTKs0A9NccgbrnXc?table=tblf1YG2l2BDqcjV&view=vewTUyPs7E',
   water:
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/base/ASLxbfESPahdTKs0A9NccgbrnXc?table=tblz4TkZqrUJB90y&view=vewrekh8YI',
 } as const;
 
 const SOURCE_DEFINITIONS = {

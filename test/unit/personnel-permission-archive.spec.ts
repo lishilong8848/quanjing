@@ -10,7 +10,7 @@ import { feishuIdentityFingerprint } from '../../server/common/access/feishu-acc
 
 const appId='cli_archive_synthetic';
 const identity=feishuIdentityFingerprint(appId,'ou_archive_synthetic_chief');
-const chief:stores.StoredAccount={ id:`feishu-${identity}`,kind:'feishu',name:'合成示例人员001',openId:'ou_archive_synthetic_chief',appId,identityHash:identity,role:'building_admin',building:'C楼',buildings:['C楼'],version:3,enabled:true,deleted:false,source:'configuration',permissionSource:'personnel',siteMember:true,
+const chief:stores.StoredAccount={ id:`feishu-${identity}`,kind:'feishu',name:'合成主管',openId:'ou_archive_synthetic_chief',appId,identityHash:identity,role:'building_admin',building:'C楼',buildings:['C楼'],version:3,enabled:true,deleted:false,source:'configuration',permissionSource:'personnel',siteMember:true,
   personalRules:[{ id:'synthetic-extra',effect:'allow',module:'knowledge',actions:['read','update'],buildings:null,specialties:null }] };
 const archiveState=(store:stores.AccessConfigurationStore)=>store.read() as stores.ConfigurationState & { personnelPermissionArchives?: Record<string, ReturnType<typeof capturePersonnelPermission>> };
 
@@ -45,7 +45,7 @@ describe('离职与权限变更前的完整授权快照',()=>{
     expect(capturePersonnelPermission({ ...chief,enabled:false },undefined,9)).toBeNull();
   });
   it('人员同步禁用与前任授权快照在同一原子配置中保存，重启可恢复且页面API不泄露归档',async()=>{
-    await service.synchronizePersonnel({ appId,people:[],employees:[{ name:chief.name,openId:chief.openId!,position:'设施示例人员001',specialties:'C楼',inactive:true }],snapshotAt:Date.now(),personnelComplete:true });
+    await service.synchronizePersonnel({ appId,people:[],employees:[{ name:chief.name,openId:chief.openId!,position:'设施主管',specialties:'C楼',inactive:true }],snapshotAt:Date.now(),personnelComplete:true });
     expect(service.snapshot().accounts[0].enabled).toBe(false);
     const restored=archiveState(new stores.AccessConfigurationStore(file)).personnelPermissionArchives?.[chief.id];
     expect(restored?.template).toMatchObject({ role:'building_admin',buildings:['C楼'],sourceVersion:3,personalRules:chief.personalRules });

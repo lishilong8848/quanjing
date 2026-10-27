@@ -4,7 +4,7 @@ jest.mock(
     parseFeishuBitableLink: jest.fn(() => ({ appToken: 'app-token' })),
     readEnv: jest.fn((name: string) => {
       const values: Record<string, string> = {
-        FEISHU_WAREHOUSE_SOURCE_URL: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        FEISHU_WAREHOUSE_SOURCE_URL: 'https://vnet.feishu.cn/base/app-token',
         FEISHU_WAREHOUSE_PURCHASE_TABLE_ID: 'tbl-purchase',
         FEISHU_WAREHOUSE_INBOUND_TABLE_ID: 'tbl-inbound',
         FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID: 'tbl-outbound',
@@ -45,7 +45,7 @@ function createHarness() {
       .mockResolvedValueOnce('om-1')
       .mockResolvedValueOnce('om-2')
       .mockResolvedValueOnce('om-3'),
-    recordLink: jest.fn(() => 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE'),
+    recordLink: jest.fn(() => 'https://vnet.feishu.cn/base/app-token?record=rec-inbound'),
   };
   const store = {
     find: jest.fn(async (_appToken: string, _tableId: string, key: string) =>
@@ -125,7 +125,7 @@ describe('InventoryWorkflowService', () => {
       stage: '源记录已回写',
       attempts: 1,
       messageState: {
-        ou_9c63b3e37ad95f93afe98d98514ed0ab: 'om-existing',
+        ou_6d8059fdf5a524ceaf964076187dae8f: 'om-existing',
       },
     });
     gateway.listRecords.mockResolvedValue([purchase]);
@@ -137,7 +137,7 @@ describe('InventoryWorkflowService', () => {
     expect(gateway.updateRecord).not.toHaveBeenCalled();
     expect(gateway.sendInteractiveCard).toHaveBeenCalledTimes(1);
     expect(gateway.sendInteractiveCard).toHaveBeenCalledWith(
-      'PUBLIC_EXAMPLE_FEISHU_ACCESS_INVENTORY_ADMIN_H_OPEN_IDS',
+      'ou_5a4c9222affb2062a1f0d4f167181121',
       expect.any(Object),
     );
   });
@@ -181,7 +181,7 @@ describe('InventoryWorkflowService', () => {
     expect(JSON.stringify(card)).toContain('借调');
     expect(JSON.stringify(card)).toContain('出库');
     expect(JSON.stringify(card)).toContain(
-      'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/share/base/form/shrcns4L7KGk25hfbmbVj9V4tOd',
     );
   });
 });

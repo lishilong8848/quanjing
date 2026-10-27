@@ -147,7 +147,7 @@ describe('排班人员名单独立就绪', () => {
     expect(c.setPersonProfileDetails).not.toHaveBeenCalledWith([{ supervisorText: '已离开页面' }]);
   });
 
-  it('C楼示例人员001杨占山使用已有置顶加粗规则', () => {
+  it('C楼主管杨占山使用已有置顶加粗规则', () => {
     expect(/building_c:\s*\['杨占山'\]/u.test(pageSource)).toBe(true);
   });
 });

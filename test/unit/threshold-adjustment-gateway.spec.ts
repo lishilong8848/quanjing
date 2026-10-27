@@ -56,7 +56,7 @@ function entry(): ThresholdAdjustmentEntry {
         },
         {
           role: 'professional',
-          approver: { openId: 'ou_qa_professional', name: '验收示例人员001' },
+          approver: { openId: 'ou_qa_professional', name: '验收主管' },
         },
       ],
     },

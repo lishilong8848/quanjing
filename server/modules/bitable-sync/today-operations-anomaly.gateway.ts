@@ -20,7 +20,7 @@ import type {
 } from './today-operations-anomaly.types';
 
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblCGU1ry3tanQ20&view=vewX0MdewN';
 const REQUEST_TIMEOUT_MS = 15_000;
 const FIELD_SCHEMA = {
   日期: 5,
@@ -74,7 +74,7 @@ export class TodayOperationsAnomalyGateway {
   }
 
   recipientName(): string {
-    return readEnv('TODAY_OPERATIONS_ANOMALY_RECIPIENT_NAME') || '示例人员020';
+    return readEnv('TODAY_OPERATIONS_ANOMALY_RECIPIENT_NAME') || '马进宇';
   }
 
   async ensureRecord(

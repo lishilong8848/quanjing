@@ -37,13 +37,13 @@ const request: EmergencyDutyUpsertRequest = {
 
 const person: EmergencyDutyPersonOption = {
   key: 'person-a',
-  name: '示例人员016',
+  name: '测试人员',
   role: '运维值班员',
 };
 
 const otherPerson: EmergencyDutyPersonOption = {
   key: 'person-b',
-  name: '示例人员004员',
+  name: '其他人员',
   role: '运维值班员',
 };
 

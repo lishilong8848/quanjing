@@ -592,10 +592,10 @@ describe('construction optimistic CRUD', () => {
 
   it('confirms derived staff text and members regardless of ordering', () => {
     const followup = createFollowup({
-      followupStaff: '示例人员008、示例人员013',
+      followupStaff: '张三、李四',
       followupStaffMembers: [
-        { id: 'staff-2', name: '示例人员013' },
-        { id: 'staff-1', name: '示例人员008' },
+        { id: 'staff-2', name: '李四' },
+        { id: 'staff-1', name: '张三' },
       ],
     });
     const data = createData(
@@ -614,10 +614,10 @@ describe('construction optimistic CRUD', () => {
         followupRecordId: 'followup-1',
         followupDate: '2026-07-24',
         fields: {
-          followupStaff: '示例人员013、示例人员008',
+          followupStaff: '李四、张三',
           followupStaffMembers: [
-            { id: 'staff-1', name: '示例人员008' },
-            { id: 'staff-2', name: '示例人员013' },
+            { id: 'staff-1', name: '张三' },
+            { id: 'staff-2', name: '李四' },
           ],
         },
       }),

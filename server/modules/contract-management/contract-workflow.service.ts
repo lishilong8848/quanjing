@@ -30,10 +30,10 @@ import {
 import { ContractWorkflowStore, type ContractRoleNotification, type ContractRoleNotificationInput } from './contract-workflow.store';
 import { paymentDigestDeliveryKey, type ContractPaymentDigestCandidate, type ContractPaymentDigestJob } from './contract-payment-digest';
 
-const CONTRACT_TABLE_ID = 'tbl1171c5349e996';
-const FRAMEWORK_TABLE_ID = 'tbl033c8ec63ff1b';
+const CONTRACT_TABLE_ID = 'tblWfHs0iwQh8lHj';
+const FRAMEWORK_TABLE_ID = 'tblQehMrGf4zIfnt';
 const CONTRACT_VIEW_ID = 'vewgPPCOHp';
-const PAYMENT_TABLE_ID = 'tbl277d0db09de0f';
+const PAYMENT_TABLE_ID = 'tblYK1vdLAkpoaIC';
 
 export interface ContractCreatedNotificationInput {
   kind: ContractCreateKind;
@@ -394,7 +394,7 @@ function mapContractWorkflowRecord(
     ownerNames: extractNames(fields['跟进人']),
     ownerOpenIds: extractOpenIds(fields['跟进人']),
     specialty: extractDisplayText(fields['专业类别']),
-    specialtyManagerOpenIds: extractOpenIds(fields['专业示例人员001']),
+    specialtyManagerOpenIds: extractOpenIds(fields['专业主管']),
     amount: extractNumberValue(fields['合同金额']) || 0,
     startDate: dateKey(fields['合同开始日期']),
     endDate: dateKey(fields['合同结束日期']),
@@ -444,7 +444,7 @@ function managerOpenIds(records: BitableRecordItem[]): string[] {
       const fields = record.fields || {};
       const position = extractDisplayText(fields['职位']);
       return /机房经理|副经理|综合管理/.test(position)
-        ? extractOpenIds(fields['示例人员001'])
+        ? extractOpenIds(fields['主管'])
         : [];
     }),
   );

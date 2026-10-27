@@ -51,8 +51,8 @@ describe('inventory workflow rules', () => {
         '采购入库后是否需要即可领用出库（勿点）': true,
       },
       recipients: [
-        'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-        'PUBLIC_EXAMPLE_FEISHU_ACCESS_INVENTORY_ADMIN_H_OPEN_IDS',
+        'ou_6d8059fdf5a524ceaf964076187dae8f',
+        'ou_5a4c9222affb2062a1f0d4f167181121',
       ],
       detailButton: false,
     });
@@ -69,9 +69,9 @@ describe('inventory workflow rules', () => {
       '采购入库后是否需要即可领用出库（勿点）': false,
     });
     expect(action?.recipients).toEqual([
-      'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-      'PUBLIC_EXAMPLE_FEISHU_ACCESS_BUILDING_ADMIN_A_OPEN_IDS',
-      'ou_b4fe57da4d5fd0420c31dcbbebdc855e',
+      'ou_6d8059fdf5a524ceaf964076187dae8f',
+      'ou_32ff59c86bbadabb6c22c21f0ad249ec',
+      'ou_98fd35eb79d3f290280b9ddf6eacd2f5',
     ]);
     expect(action?.detailButton).toBe(true);
 
@@ -80,7 +80,7 @@ describe('inventory workflow rules', () => {
         'purchase_abcde',
         purchaseRecord({
           申请楼栋: ['A楼'],
-          需求人: [{ id: 'ou_d22c6190a18a9d6df49fa72565e120f7' }],
+          需求人: [{ id: 'ou_0e3ade873ee4d95533919427546c100b' }],
         }),
       ),
     ).toBeNull();
@@ -89,7 +89,7 @@ describe('inventory workflow rules', () => {
         'purchase_abcde',
         purchaseRecord({
           申请楼栋: ['E楼'],
-          需求人: [{ id: 'PUBLIC_EXAMPLE_FEISHU_ACCESS_CONSTRUCTION_ADMIN_OPEN_IDS' }],
+          需求人: [{ id: 'ou_4fa470cbe21075fb274583fdf0dee727' }],
         }),
       ),
     ).toBeNull();
@@ -105,8 +105,8 @@ describe('inventory workflow rules', () => {
       '采购入库后是否需要即可领用出库（勿点）': true,
     });
     expect(action?.recipients).toEqual([
-      'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-      'PUBLIC_EXAMPLE_FEISHU_ACCESS_BUILDING_ADMIN_D_OPEN_IDS',
+      'ou_6d8059fdf5a524ceaf964076187dae8f',
+      'ou_6e9ab06be2174a56908c289a4c4926fa',
     ]);
 
     expect(

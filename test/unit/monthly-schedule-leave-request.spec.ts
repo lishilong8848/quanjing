@@ -3,6 +3,7 @@ import { join } from 'path';
 import { Children, createElement, isValidElement } from 'react';
 import type { FunctionComponent, ReactElement, ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import * as ts from 'typescript';
 import {
   LeaveRequestScheduleTimeFields,
   selectDefaultScheduleTimeForGroup,
@@ -688,7 +689,7 @@ describe('Monthly schedule leave request tool', () => {
     expect(source).toContain('replaceScheduleMonthsFromAuthoritative');
   });
 
-  it('drives selected-date loading from a Shanghai business-day clock without forcing today month', () => {
+  it('loads the business month and both adjacent months while preserving the selected date', () => {
     const source = readFileSync(
       join(process.cwd(), 'client/src/pages/MonthlySchedule/index.tsx'),
       'utf8',
@@ -740,21 +741,73 @@ describe('Monthly schedule leave request tool', () => {
       "document.addEventListener('visibilitychange', refreshBusinessClock)",
     );
     expect(businessClockSource).toContain('window.clearInterval(intervalId)');
-    expect(
-      source.match(
-        /refreshBusinessClock\(\);\s*setLeaveRequestDialogOpen\(true\)/g,
-      ),
-    ).toHaveLength(3);
+    const parsedPage = ts.createSourceFile(
+      'MonthlySchedule.tsx',
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const openingCalls: ts.CallExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'setLeaveRequestDialogOpen' &&
+        node.arguments[0]?.kind === ts.SyntaxKind.TrueKeyword
+      )
+        openingCalls.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(parsedPage);
+    expect(openingCalls).toHaveLength(3);
+    for (const opening of openingCalls) {
+      const statement = opening.parent;
+      expect(ts.isExpressionStatement(statement)).toBe(true);
+      const block = statement.parent;
+      expect(ts.isBlock(block)).toBe(true);
+      if (!ts.isExpressionStatement(statement) || !ts.isBlock(block)) {
+        throw new Error(
+          'Leave opening must be a direct statement in its entry block',
+        );
+      }
+      const beforeOpen = block.statements.slice(
+        0,
+        block.statements.indexOf(statement),
+      );
+      const refreshIndex = beforeOpen
+        .map(
+          (entry) =>
+            ts.isExpressionStatement(entry) &&
+            ts.isCallExpression(entry.expression) &&
+            ts.isIdentifier(entry.expression.expression) &&
+            entry.expression.expression.text === 'refreshBusinessClock',
+        )
+        .lastIndexOf(true);
+      expect(refreshIndex).toBeGreaterThanOrEqual(0);
+      expect(
+        beforeOpen
+          .slice(refreshIndex + 1)
+          .every(
+            (entry) =>
+              ts.isExpressionStatement(entry) &&
+              ts.isBinaryExpression(entry.expression) &&
+              entry.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken,
+          ),
+      ).toBe(true);
+    }
     expect(
       source.match(
         /refreshBusinessClock\(\);\s*overtimeRequestDialogRef\.current\?\.open\(\)/g,
       ),
     ).toHaveLength(2);
 
-    expect(monthMapSource).toMatch(
-      /const \[businessYear,\s*businessMonth\]\s*=\s*businessDateKey\s*\.split\('-'\)\s*\.map\(Number\)/,
+    expect(monthMapSource).toContain(
+      'getAdjacentScheduleMonthDateKeys(businessDateKey)',
     );
-    expect(monthMapSource).toContain('monthMap.set(businessMonthKey');
+    expect(monthMapSource).toContain('selectedDate.getFullYear()');
+    expect(monthMapSource).toContain('selectedDate.getMonth()');
+    expect(monthMapSource).toContain('options.additionalDateKeys');
     expect(monthMapSource).not.toContain('forceRefresh');
     expect(monthMapSource).not.toContain('setSelectedDate');
     expect(pageLoader).toMatch(
@@ -769,7 +822,7 @@ describe('Monthly schedule leave request tool', () => {
     );
   });
 
-  it('uses only necessary leave coverage months and preserves an explicit historical shift', () => {
+  it('uses business-month coverage and preserves an explicit historical shift', () => {
     const source = readFileSync(
       join(process.cwd(), 'client/src/pages/MonthlySchedule/index.tsx'),
       'utf8',
@@ -843,10 +896,11 @@ describe('Monthly schedule leave request tool', () => {
     ).toEqual(['2026-08-02', '2026-07-31', '2026-09-01']);
   });
 
-  it('loads only the business-day boundary on open and adds the actual range on demand', () => {
+  it('loads all three adjacent months on open and retains the selected leave range', () => {
     expect(getLeaveScheduleCoverageDateKeys('2026-09-01', '', '')).toEqual([
+      '2026-08-01',
       '2026-09-01',
-      '2026-08-31',
+      '2026-10-01',
     ]);
     expect(
       getLeaveScheduleCoverageDateKeys(
@@ -854,7 +908,7 @@ describe('Monthly schedule leave request tool', () => {
         '2026-08-31T09:00',
         '2026-08-31T18:00',
       ),
-    ).toEqual(['2026-09-01', '2026-08-31']);
+    ).toEqual(['2026-08-01', '2026-09-01', '2026-10-01']);
   });
 
   it('does not preload leave coverage before staff selection', () => {
@@ -1568,7 +1622,7 @@ describe('Monthly schedule leave request tool', () => {
     ).toBe(true);
     expect(readLeaveRequestUnknownMutationId(storage)).toBe(clientMutationId);
     expect([...values.values()]).toEqual([clientMutationId]);
-    expect([...values.values()].join('')).not.toContain('示例人员020');
+    expect([...values.values()].join('')).not.toContain('马进宇');
     expect(clearLeaveRequestUnknownMutationId(storage)).toBe(true);
     expect(readLeaveRequestUnknownMutationId(storage)).toBeNull();
   });
@@ -1614,7 +1668,7 @@ describe('Monthly schedule leave request tool', () => {
       recordIds: ['leave-record-1'],
       startAt: draft.startAt,
       endAt: draft.endAt,
-      leaveStaffName: '示例人员020',
+      leaveStaffName: '马进宇',
       clientMutationId: draft.clientMutationId,
       affectedSchedules: [],
       excludedSchedules: [],
@@ -1648,7 +1702,7 @@ describe('Monthly schedule leave request tool', () => {
       recordIds: ['leave-record-2'],
       startAt: draft.startAt,
       endAt: draft.endAt,
-      leaveStaffName: '示例人员020',
+      leaveStaffName: '马进宇',
       clientMutationId: draft.clientMutationId,
       affectedSchedules: [],
       excludedSchedules: [],
@@ -1689,7 +1743,7 @@ describe('Monthly schedule leave request tool', () => {
     } = requireSubmissionStateHelpers();
     const screenshot = Object.freeze({ name: 'leave-proof.png' });
     const snapshot = Object.freeze({
-      staffName: '示例人员020',
+      staffName: '马进宇',
       startAt: '2026-08-04T09:00',
       endAt: '2026-08-04T18:00',
       expectedImpact: createImpact(),
@@ -1761,7 +1815,7 @@ describe('Monthly schedule leave request tool', () => {
       resolveLeaveRequestMutationBinding,
     } = requireSubmissionStateHelpers();
     const snapshot = Object.freeze({
-      staffName: '示例人员020',
+      staffName: '马进宇',
       startAt: '2026-08-04T09:00',
       endAt: '2026-08-04T18:00',
       expectedImpact: createImpact(),
@@ -1872,7 +1926,7 @@ describe('Monthly schedule leave request tool', () => {
       resolveLeaveRequestMutationBinding,
     } = requireSubmissionStateHelpers();
     const snapshot = Object.freeze({
-      staffName: '示例人员020',
+      staffName: '马进宇',
       startAt: '2026-08-04T09:00',
       endAt: '2026-08-04T18:00',
       expectedImpact: createImpact(),
@@ -1918,7 +1972,7 @@ describe('Monthly schedule leave request tool', () => {
       size: 1_024,
     });
     const draft = Object.freeze({
-      staffName: '示例人员020',
+      staffName: '马进宇',
       startAt: '2026-08-03T09:00',
       endAt: '2026-08-03T18:00',
       screenshot,
@@ -1983,8 +2037,8 @@ describe('Monthly schedule leave request tool', () => {
       size: 2_048,
     });
     const draft = Object.freeze({
-      staffName: '示例人员020',
-      staffSearch: '示例人员020',
+      staffName: '马进宇',
+      staffSearch: '马进宇',
       leaveType: '年假',
       reason: '原始草稿',
       needSubstitute: false,

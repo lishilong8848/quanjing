@@ -62,6 +62,7 @@ import {
   type TrainingParticipation,
 } from './model';
 import { getCampusTrainingDashboard } from '@/api';
+import { startTrainingRefreshPolling } from './refresh-polling';
 import {
   buildSmoothAreaPath,
   buildSmoothLinePath,
@@ -1113,12 +1114,13 @@ export default function CampusTrainingDashboard({
   const [error, setError] = useState('');
   const [showAllNewHires, setShowAllNewHires] = useState(false);
   const [notice, setNotice] = useState('');
+  const [pollMessage, setPollMessage] = useState('');
+  const [pollCycle, setPollCycle] = useState(0);
   const [detail, setDetail] = useState<TrainingDetail | null>(null);
   const visibleRequestIdRef = useRef(0);
   const silentRequestIdRef = useRef(0);
+  const silentReadPendingRef = useRef(false);
   const displayedMonthRef = useRef<string | undefined>(undefined);
-  const stalePollAttemptsRef = useRef(0);
-  const stalePollMonthRef = useRef<string | undefined>(undefined);
 
   const loadDashboard = useCallback(
     async (
@@ -1126,6 +1128,8 @@ export default function CampusTrainingDashboard({
       forceRefresh = false,
       silent = false,
     ) => {
+      if (silent && silentReadPendingRef.current) return 'refreshing' as const;
+      if (silent) silentReadPendingRef.current = true;
       const requestId = silent
         ? ++silentRequestIdRef.current
         : ++visibleRequestIdRef.current;
@@ -1136,6 +1140,8 @@ export default function CampusTrainingDashboard({
         setLoading(true);
         setError('');
         setNotice('');
+        setPollMessage('');
+        setPollCycle((current) => current + 1);
         setDetail(null);
       }
       const isCurrentRequest = () =>
@@ -1153,16 +1159,20 @@ export default function CampusTrainingDashboard({
         setDashboard(data);
         setMonth(data.month);
         displayedMonthRef.current = data.month;
+        if (data.sourceStatus !== 'refreshing') setPollMessage('');
         if (forceRefresh && data.sourceStatus === 'fresh') {
           setNotice('培训数据已重新加载');
         }
+        return data.sourceStatus;
       } catch {
         if (!isCurrentRequest()) return;
         if (!silent) {
           setMonth(previousMonth);
           setError('培训数据加载失败，请稍后重试');
         }
+        return 'error' as const;
       } finally {
+        if (silent) silentReadPendingRef.current = false;
         if (!silent && requestId === visibleRequestIdRef.current) {
           setLoading(false);
         }
@@ -1182,26 +1192,31 @@ export default function CampusTrainingDashboard({
   const dashboardMonth = dashboard?.month;
   const dashboardSourceStatus = dashboard?.sourceStatus;
   useEffect(() => {
-    if (!dashboardMonth || dashboardSourceStatus !== 'stale' || loading) {
-      stalePollAttemptsRef.current = 0;
-      stalePollMonthRef.current = dashboardMonth;
+    if (
+      !dashboardMonth ||
+      dashboardSourceStatus !== 'refreshing' ||
+      loading ||
+      error
+    ) {
       return undefined;
     }
-    if (stalePollMonthRef.current !== dashboardMonth) {
-      stalePollAttemptsRef.current = 0;
-      stalePollMonthRef.current = dashboardMonth;
-    }
-
-    const timer = window.setInterval(() => {
-      if (stalePollAttemptsRef.current >= 20) {
-        window.clearInterval(timer);
-        return;
-      }
-      stalePollAttemptsRef.current += 1;
-      void loadDashboard(dashboardMonth, false, true);
-    }, 3_000);
-    return () => window.clearInterval(timer);
-  }, [dashboardMonth, dashboardSourceStatus, loadDashboard, loading]);
+    return startTrainingRefreshPolling(
+      () => loadDashboard(dashboardMonth, false, true),
+      (reason) =>
+        setPollMessage(
+          reason === 'timeout'
+            ? '后台同步仍未完成，已暂停自动查询。请稍后点击刷新查看结果。'
+            : '暂时无法确认同步进度，已暂停自动查询。请点击刷新重试。',
+        ),
+    );
+  }, [
+    dashboardMonth,
+    dashboardSourceStatus,
+    error,
+    loadDashboard,
+    loading,
+    pollCycle,
+  ]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -1284,9 +1299,7 @@ export default function CampusTrainingDashboard({
   }, [loadDashboard, month]);
   const headerUpdatedAt = useMemo(
     () =>
-      formatTrainingTimestamp(
-        dashboard ? dashboard.sourceUpdatedAt || dashboard.syncedAt : null,
-      ),
+      dashboard?.syncedAt ? formatTrainingTimestamp(dashboard.syncedAt) : '',
     [dashboard],
   );
 
@@ -1382,6 +1395,90 @@ export default function CampusTrainingDashboard({
             </div>
           </header>
 
+          {loading && dashboard ? (
+            <div
+              className="training-dashboard-loading training-dashboard-state-banner"
+              role="status"
+              aria-live="polite"
+            >
+              <RefreshCw
+                className="training-refresh-icon-loading"
+                aria-hidden="true"
+              />
+              正在加载 {formatTrainingMonth(month)}…
+            </div>
+          ) : null}
+
+          {error && dashboard ? (
+            <div
+              className="training-dashboard-error training-dashboard-state-banner"
+              role="alert"
+            >
+              <TriangleAlert aria-hidden="true" />
+              <span>{error}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void loadDashboard(month, true)}
+              >
+                重新加载
+              </Button>
+            </div>
+          ) : null}
+
+          {dashboard?.sourceStatus === 'refreshing' && !error ? (
+            <div
+              className={`${pollMessage ? 'training-dashboard-stale' : 'training-dashboard-loading'} training-dashboard-state-banner`}
+              role="status"
+              aria-live="polite"
+            >
+              {pollMessage ? (
+                <TriangleAlert aria-hidden="true" />
+              ) : (
+                <RefreshCw
+                  className="training-refresh-icon-loading"
+                  aria-hidden="true"
+                />
+              )}
+              <span>
+                {pollMessage || '培训数据正在后台同步，完成后将自动更新'}
+              </span>
+              {pollMessage ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={loading}
+                  onClick={handleRefresh}
+                >
+                  刷新
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {dashboard?.sourceStatus === 'stale' && !error ? (
+            <div
+              className="training-dashboard-stale training-dashboard-state-banner"
+              role="status"
+            >
+              <TriangleAlert aria-hidden="true" />
+              <span>
+                {dashboard.errorMessage || '源数据同步失败，已展示上次成功结果'}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={loading}
+                onClick={handleRefresh}
+              >
+                刷新重试
+              </Button>
+            </div>
+          ) : null}
+
           {!dashboard ? (
             error ? (
               <section
@@ -1419,8 +1516,16 @@ export default function CampusTrainingDashboard({
               aria-live="polite"
             >
               <BookOpenCheck aria-hidden="true" />
-              <h2>{formatTrainingMonth(dashboard.month)} 暂无培训数据</h2>
-              <p>该月份没有可展示的培训记录，可以切换月份或重新加载。</p>
+              <h2>
+                {dashboard.sourceStatus === 'fresh'
+                  ? `${formatTrainingMonth(dashboard.month)} 暂无培训数据`
+                  : '培训数据尚未准备好'}
+              </h2>
+              <p>
+                {dashboard.sourceStatus === 'fresh'
+                  ? '该月份没有可展示的培训记录，可以切换月份或重新加载。'
+                  : '请查看同步状态，或点击重新加载重试。'}
+              </p>
               <Button
                 type="button"
                 variant="outline"
@@ -1490,48 +1595,6 @@ export default function CampusTrainingDashboard({
               </section>
             </>
           )}
-
-          {loading && dashboard ? (
-            <div
-              className="training-dashboard-loading training-dashboard-state-banner"
-              role="status"
-              aria-live="polite"
-            >
-              <RefreshCw
-                className="training-refresh-icon-loading"
-                aria-hidden="true"
-              />
-              正在加载 {formatTrainingMonth(month)}…
-            </div>
-          ) : null}
-
-          {error && dashboard ? (
-            <div
-              className="training-dashboard-error training-dashboard-state-banner"
-              role="alert"
-            >
-              <TriangleAlert aria-hidden="true" />
-              <span>{error}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => void loadDashboard(month, true)}
-              >
-                重新加载
-              </Button>
-            </div>
-          ) : null}
-
-          {dashboard?.sourceStatus === 'stale' ? (
-            <div
-              className="training-dashboard-stale training-dashboard-state-banner"
-              role="status"
-            >
-              <TriangleAlert aria-hidden="true" />
-              {dashboard.errorMessage || '源数据同步失败，已展示上次成功结果'}
-            </div>
-          ) : null}
 
           {notice ? (
             <div

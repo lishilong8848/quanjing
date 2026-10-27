@@ -326,7 +326,7 @@ describe('FeishuAccessService', () => {
     it.each([
       [
         FEISHU_OAUTH_ENV_NAMES.publicBaseUrl,
-        'https://user:user-a1ad1416@example.com/root',
+        'https://user:password@portal.example.test/root',
       ],
       [
         FEISHU_OAUTH_ENV_NAMES.publicBaseUrl,

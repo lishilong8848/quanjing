@@ -143,8 +143,8 @@ class StaffReportConfigTests(unittest.TestCase):
             hasattr(config, "staff_report_table_config"),
             "ReportConfig 尚未提供人员变动目标表配置",
         )
-        self.assertEqual(config.staff_report_table_config["table_id"], "tblf5fc5e5730d03")
-        self.assertEqual(config.staff_report_table_config["view_id"], "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID")
+        self.assertEqual(config.staff_report_table_config["table_id"], "tbl3KED5CdvNSCwT")
+        self.assertEqual(config.staff_report_table_config["view_id"], "vewrHJHl3v")
 
     def test_cli_config_file_keeps_file_values_and_applies_non_empty_environment_overrides(self) -> None:
         captured_configs: list[ReportConfig] = []
@@ -289,13 +289,13 @@ class StaffReportSyncTests(unittest.TestCase):
         )
 
         self.assertEqual(finder_calls[0]["report_type_name"], "南通机房人员变动")
-        self.assertEqual(finder_calls[0]["table_config"]["table_id"], "tblf5fc5e5730d03")
-        self.assertEqual(finder_calls[0]["table_config"]["view_id"], "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID")
+        self.assertEqual(finder_calls[0]["table_config"]["table_id"], "tbl3KED5CdvNSCwT")
+        self.assertEqual(finder_calls[0]["table_config"]["view_id"], "vewrHJHl3v")
         self.assertEqual(updater_calls[0]["record_id"], "rec-existing")
         self.assertEqual(result["action"], "generated_and_updated")
         self.assertEqual(
             result["updated"]["record_url"],
-            "https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE",
+            "https://vnet.feishu.cn/base/base-token?table=tbl3KED5CdvNSCwT&view=vewrHJHl3v&recordId=rec-existing",
         )
 
     def test_missing_staff_month_record_is_created_without_fixed_record_id(self) -> None:

@@ -141,8 +141,8 @@ describe('duty schedule fast sync', () => {
 
     await service.batchUpdateScheduleTextField(
       [
-        { record_id: 'rec1', fields: { '值班人员（实际）程序修改': '示例人员008' } },
-        { record_id: 'rec2', fields: { '值班人员（实际）程序修改': '示例人员013' } },
+        { record_id: 'rec1', fields: { '值班人员（实际）程序修改': '张三' } },
+        { record_id: 'rec2', fields: { '值班人员（实际）程序修改': '李四' } },
       ],
       'app_token',
       'table_id',
@@ -154,8 +154,8 @@ describe('duty schedule fast sync', () => {
       'https://open.feishu.cn/open-apis/bitable/v1/apps/app_token/tables/table_id/records/batch_update',
       {
         records: [
-          { record_id: 'rec1', fields: { '值班人员（实际）程序修改': '示例人员008' } },
-          { record_id: 'rec2', fields: { '值班人员（实际）程序修改': '示例人员013' } },
+          { record_id: 'rec1', fields: { '值班人员（实际）程序修改': '张三' } },
+          { record_id: 'rec2', fields: { '值班人员（实际）程序修改': '李四' } },
         ],
       },
       expect.objectContaining({
@@ -181,7 +181,7 @@ describe('duty schedule fast sync', () => {
         record_id: 'rec1',
         fields: {
           fldZSaDbGf: '2026-07-21',
-          fldJi5bxBG: '示例人员008 示例人员013',
+          fldJi5bxBG: '张三 李四',
           '值班人员（实际）程序修改': '旧值',
         },
       },
@@ -189,7 +189,7 @@ describe('duty schedule fast sync', () => {
 
     const count = await service.replaceLocalScheduleRecords(
       records,
-      new Map([['rec1', '示例人员017']]),
+      new Map([['rec1', '王五']]),
     );
 
     expect(count).toBe(1);
@@ -199,7 +199,7 @@ describe('duty schedule fast sync', () => {
     expect(insertValues).toHaveBeenCalledWith([
       expect.objectContaining({
         recordId: 'rec1',
-        dutyStaffActual: ['示例人员017'],
+        dutyStaffActual: ['王五'],
       }),
     ]);
   });

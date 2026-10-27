@@ -36,7 +36,7 @@ const rules = require(path.join(root, 'server/modules/bitable-sync/alarm-review.
 const loadedApplicationFiles = Object.keys(require.cache).filter(file => file.startsWith(path.join(root, 'server') + path.sep) || file.startsWith(path.join(root, 'shared') + path.sep)).map(file => path.relative(root, file).replace(/\\/g, '/')).sort();
 const expectedApplicationFiles = ['server/common/config/external-services.config.ts', 'server/common/feishu/bitable-direct-read.ts', 'server/modules/bitable-sync/alarm-review.rules.ts', 'shared/today-operations-alarm-review.interface.ts'].sort();
 assert.deepEqual(loadedApplicationFiles, expectedApplicationFiles, 'PURE_APPLICATION_IMPORT_BOUNDARY');
-const fields = { 人工复核结果: '自定义回复', 复核回复: '合成复核结论：已经核查，待现场确认。', 复核示例人员019: [{ id: 'recSyntheticPersonA' }] };
+const fields = { 人工复核结果: '自定义回复', 复核回复: '合成复核结论：已经核查，待现场确认。', 复核责任人: [{ id: 'recSyntheticPersonA' }] };
 const body = { recordIds: ['recSyntheticAlarmA', 'recSyntheticAlarmB'], outcome: '自定义回复', customReply: fields.复核回复, responsibleRecordId: 'recSyntheticPersonA', clientMutationId: 'alarm-review-contract00000001', expectedVersions: { recSyntheticAlarmA: 'synthetic-reviewed', recSyntheticAlarmB: 'unreviewed' } };
 assert.throws(() => rules.normalizeAlarmReviewRequest(body), error => error.getStatus() === 400 && error.message === '复核清单已变化，请重新打开后提交');
 const version = rules.reviewVersion(fields);

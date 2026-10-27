@@ -23,13 +23,13 @@ describe('attendance periodic summary delivery', () => {
   });
 
   it('reads one date range from Bitable and keeps only each expectation latest effective result', async () => {
-    const correctedKey = '2026-09-03:building_c:white:OnDuty:示例人员011';
+    const correctedKey = '2026-09-03:building_c:white:OnDuty:曹毅';
     jest.mocked(fetchBitableRecords).mockResolvedValue([
       attendanceRecord({
         id: 'older-missing',
         workDate: '2026-09-03',
         key: correctedKey,
-        name: '示例人员011',
+        name: '曹毅',
         buildingStatus: '未打卡',
         legal: '否',
         syncAt: '2026-09-03T16:31:00.000Z',
@@ -38,7 +38,7 @@ describe('attendance periodic summary delivery', () => {
         id: 'newer-corrected',
         workDate: '2026-09-03',
         key: correctedKey,
-        name: '示例人员011',
+        name: '曹毅',
         buildingStatus: '正常',
         legal: '是',
         syncAt: '2026-09-04T02:00:00.000Z',
@@ -46,8 +46,8 @@ describe('attendance periodic summary delivery', () => {
       attendanceRecord({
         id: 'early',
         workDate: '2026-09-05',
-        key: '2026-09-05:building_b:white:OffDuty:示例人员008',
-        name: '示例人员008',
+        key: '2026-09-05:building_b:white:OffDuty:张三',
+        name: '张三',
         buildingStatus: '早退',
         legal: '是',
         syncAt: '2026-09-05T16:31:00.000Z',
@@ -55,8 +55,8 @@ describe('attendance periodic summary delivery', () => {
       attendanceRecord({
         id: 'outside',
         workDate: '2026-08-31',
-        key: '2026-08-31:building_a:white:OnDuty:示例人员013',
-        name: '示例人员013',
+        key: '2026-08-31:building_a:white:OnDuty:李四',
+        name: '李四',
         buildingStatus: '迟到',
         legal: '是',
         syncAt: '2026-08-31T16:31:00.000Z',
@@ -77,11 +77,11 @@ describe('attendance periodic summary delivery', () => {
       fetchedAt: '2026-09-06 00:31',
     });
     expect(summary.normal).toEqual([
-      expect.objectContaining({ key: correctedKey, name: '示例人员011' }),
+      expect.objectContaining({ key: correctedKey, name: '曹毅' }),
     ]);
     expect(summary.anomalies).toEqual([
       expect.objectContaining({
-        name: '示例人员008',
+        name: '张三',
         building: 'B楼',
         reason: '早退',
       }),
@@ -262,7 +262,7 @@ function serviceFixture() {
         anomalies: [
           {
             key: 'late',
-            name: '示例人员008',
+            name: '张三',
             building: 'C楼',
             shiftLabel: '白班',
             direction: 'OnDuty',

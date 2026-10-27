@@ -59,7 +59,7 @@ describe('PBKDF2目录同步与实际姓名登录', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'nt-personnel-pbkdf2-'));
     process.env.ACCESS_CONFIGURATION_FILE = join(root, 'configuration.json');
-    process.env.FEISHU_APP_ID = 'cli_0831564613853b26';
+    process.env.FEISHU_APP_ID = 'cli_a9d1c9fe9d381cee';
     process.env.LOCAL_ACCESS_SESSION_SECRET = randomBytes(32).toString('base64');
     process.env.LOCAL_ADMIN_PASSWORD_HASH = hashAccessPassword('synthetic-admin-only');
   });

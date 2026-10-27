@@ -16,7 +16,7 @@ describe('Stage2 real administrator preview HTTP',()=>{
   const saved={...process.env};
   let app:INestApplication,folder:string,owner:string,url:string,cookie:string,configuration:AccessConfigurationService;
   const appId='cli_preview_http_fixture';
-  const from:AuthorityPerson={id:'local-external-'+ 'a'.repeat(64),recordId:'recOld',name:'合成前任',openId:'ou_preview_old',active:false,type:'employee',position:'C楼示例人员001',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:['recDuty']};
+  const from:AuthorityPerson={id:'local-external-'+ 'a'.repeat(64),recordId:'recOld',name:'合成前任',openId:'ou_preview_old',active:false,type:'employee',position:'C楼主管',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:['recDuty']};
   const to:AuthorityPerson={...from,id:'local-external-'+ 'b'.repeat(64),recordId:'recNew',name:'合成接任者',openId:'ou_preview_new',active:true,dutyRecordIds:[]};
   const authority:PersonnelAuthoritySnapshot={mode:'shadow',version:'e'.repeat(64),snapshotAt:Date.now(),source:{appId,appToken:'fixture',tableId:'tblPeople'},people:[from,to],duties:[{recordId:'recDuty',name:'C楼请休假',kind:'leave_supervisor',personnelIds:[to.id],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}],problems:[],issues:[]};
   beforeEach(async()=>{

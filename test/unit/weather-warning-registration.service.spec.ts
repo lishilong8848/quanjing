@@ -43,7 +43,7 @@ jest.mock(
     loadWeatherWarningRegistrationRuntimeConfig: () => ({
       appToken: 'app-weather',
       wikiToken: '',
-      registrationTableId: 'tbld85f2e4a48893',
+      registrationTableId: 'tblRegistrations',
       registrationFields: mockRegistrationFields,
     }),
   }),
@@ -1570,8 +1570,8 @@ function organizationManagerRecord(
     record_id: recordId,
     fields: {
       职位: position,
-      示例人员001: [{ id: openId, name }],
-      '示例人员001（文本）': name,
+      主管: [{ id: openId, name }],
+      '主管（文本）': name,
     },
   };
 }
@@ -1731,7 +1731,7 @@ function activePersonnelDirectory() {
     managers: [
       {
         recordId: 'rec-manager-a',
-        name: '示例人员014',
+        name: '梅冰冰',
         openId: 'ou_manager_a',
         employeeNo: null,
         position: '设施运维经理',
@@ -1740,7 +1740,7 @@ function activePersonnelDirectory() {
       },
       {
         recordId: 'rec-manager-b',
-        name: '示例人员020',
+        name: '马进宇',
         openId: 'ou_manager_b',
         employeeNo: null,
         position: '设施运维副经理',

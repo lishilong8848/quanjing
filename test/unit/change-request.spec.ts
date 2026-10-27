@@ -22,7 +22,7 @@ const VALID_MUTATION_ID = 'change-request-123e4567-e89b-42d3-a456-426614174000';
 
 const validRequest = (): ChangeRequestCreateRequest => ({
   clientMutationId: VALID_MUTATION_ID,
-  submitterName: '示例人员020',
+  submitterName: '马进宇',
   nature: '标准变更',
   summary: 'UPS 年度维护',
   changeType: '计划性变更',

@@ -448,7 +448,7 @@ describe('盘点执行服务', () => {
     (source as any).currentMany.mockImplementation(async () => {
       store.update((state) => {
         state.sheets[0].review!.version++;
-        state.sheets[0].review!.lines[0].note = '示例人员004草稿';
+        state.sheets[0].review!.lines[0].note = '其他人草稿';
         return true;
       });
       return items;

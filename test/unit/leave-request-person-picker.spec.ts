@@ -38,7 +38,7 @@ function mountPicker() {
   let tree: ReactElement;
   function render() {
     stateIndex = 0; refIndex = 0;
-    tree = renderComponent({ selectedName: '', options: ['示例人员008', '张四'], disabled: false,
+    tree = renderComponent({ selectedName: '', options: ['张三', '张四'], disabled: false,
       matches: (name: string, search: string) => name.includes(search), onSelect });
     const outerRef = (tree.props as { ref?: { current: unknown } }).ref;
     if (outerRef) outerRef.current = container;
@@ -122,7 +122,7 @@ describe('LeaveRequestPersonPicker blur lifecycle', () => {
   it('preserves mouse focus protection and cancels the old timer on selection', () => {
     const picker = mountPicker(); picker.focus(); picker.assertMouseProtection(); picker.blur();
     picker.selectFirst();
-    expect(picker.onSelect).toHaveBeenCalledWith('示例人员008');
+    expect(picker.onSelect).toHaveBeenCalledWith('张三');
     expect(picker.isOpen()).toBe(false); expect(jest.getTimerCount()).toBe(0); picker.unmount();
   });
 });

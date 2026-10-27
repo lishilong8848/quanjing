@@ -93,26 +93,26 @@ function datedBuildingRows(
 }
 
 const sourceRecords: Record<string, BitableRecordItem[]> = {
-  tblc52553f0930da: [
+  tblQUF2CepuzSeAl: [
     record('safety', {
       起始日期: Date.parse('2018-10-26T00:00:00+08:00'),
       安全运行天数: formulaNumber(2824),
     }),
   ],
-  PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID: [
+  tblRV9KeWFh9xCkm: [
     record('today-long-white-a', {
       排班日期: Date.parse('2026-07-20T00:00:00+08:00'),
       机楼: 'A楼',
       班组: '长白',
       班次: '白班',
-      '值班人员（实际）程序修改': '示例人员008、示例人员013、周九、重复人、替班甲、缺岗甲',
-      请假人员: '示例人员013',
-      '请假人员(辅助)': '示例人员013',
+      '值班人员（实际）程序修改': '张三、李四、周九、重复人、替班甲、缺岗甲',
+      请假人员: '李四',
+      '请假人员(辅助)': '李四',
       替班人员: '替班乙',
       缺岗替班人员: '缺岗乙',
-      差旅人员: '示例人员008',
+      差旅人员: '张三',
       员工工号: '1001',
-      联系电话: '13800009626',
+      联系电话: '13800000000',
     }),
     record('today-long-white-b', {
       排班日期: Date.parse('2026-07-20T00:00:00+08:00'),
@@ -163,7 +163,7 @@ const sourceRecords: Record<string, BitableRecordItem[]> = {
       }),
     ),
   ],
-  tbl32bf112724ed6: datedBuildingRows(
+  tblqSskJvBnx9UJj: datedBuildingRows(
     'pue',
     'PUE',
     [1.2, 1.3, 1.4, 9.9, 19.9],
@@ -174,7 +174,7 @@ const sourceRecords: Record<string, BitableRecordItem[]> = {
     ...item,
     fields: { ...item.fields, 汇总分类: 'PUE' },
   })),
-  tbl35e641004a831: datedBuildingRows(
+  tblBgaPzuVj7V9Q6: datedBuildingRows(
     'it-load',
     'IT负载率',
     [0.6, 0.62, 0.64, 0.4, 0.3],
@@ -188,7 +188,7 @@ const sourceRecords: Record<string, BitableRecordItem[]> = {
       ),
     },
   })),
-  tbl4ee10540b26b2: datedBuildingRows(
+  tblf1YG2l2BDqcjV: datedBuildingRows(
     'electricity',
     '用电量',
     [200_000, 200_000, 200_000, 200_000, 200_000],
@@ -199,7 +199,7 @@ const sourceRecords: Record<string, BitableRecordItem[]> = {
     ...item,
     fields: { ...item.fields, 项目: '变压器总进线' },
   })),
-  tbl85eb2123a63c8: datedBuildingRows(
+  tblz4TkZqrUJB90y: datedBuildingRows(
     'water',
     '当日耗水总量（实际）',
     [300, 300, 300, 300, 300],
@@ -262,9 +262,9 @@ describe('TodayOperationsKpiService', () => {
 
   it('keeps four complete periods for anomaly scans when today already has data', async () => {
     const dateFields: Record<string, string> = {
-      tbl32bf112724ed6: '日期',
-      tbl4ee10540b26b2: '日期',
-      tbl85eb2123a63c8: '执行日期',
+      tblqSskJvBnx9UJj: '日期',
+      tblf1YG2l2BDqcjV: '日期',
+      tblz4TkZqrUJB90y: '执行日期',
     };
     mockedFetch.mockImplementation(async (_httpService, options) => {
       const rows = sourceRecords[options.tableId];
@@ -423,7 +423,7 @@ describe('TodayOperationsKpiService', () => {
       forceRefresh: false,
     });
     expect(mockedEnrichScheduleRecordsWithLeaveApproval).toHaveBeenCalledWith(
-      sourceRecords.PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID,
+      sourceRecords.tblRV9KeWFh9xCkm,
       expect.objectContaining({ verified: true }),
     );
     expect(
@@ -434,7 +434,7 @@ describe('TodayOperationsKpiService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID',
+        tableId: 'tblRV9KeWFh9xCkm',
         viewId: 'vew6jLlGzq',
         fieldNames: undefined,
       }),
@@ -442,7 +442,7 @@ describe('TodayOperationsKpiService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl4ee10540b26b2',
+        tableId: 'tblf1YG2l2BDqcjV',
         filter: expect.objectContaining({
           conditions: expect.arrayContaining([
             expect.objectContaining({
@@ -459,7 +459,7 @@ describe('TodayOperationsKpiService', () => {
     mockedFetch.mockImplementation(async (_httpService, options) => {
       const rows = sourceRecords[options.tableId];
       if (!rows) throw new Error(`Unexpected source ${options.tableId}`);
-      if (options.tableId !== 'tbl32bf112724ed6') return rows;
+      if (options.tableId !== 'tblqSskJvBnx9UJj') return rows;
       return rows.filter((item) =>
         ['A楼', 'B楼', 'C楼'].includes(String(item.fields?.['楼栋'] ?? '')),
       );
@@ -488,7 +488,7 @@ describe('TodayOperationsKpiService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl32bf112724ed6',
+        tableId: 'tblqSskJvBnx9UJj',
         tableName: '机楼每日用电汇总',
       }),
     );
@@ -498,7 +498,7 @@ describe('TodayOperationsKpiService', () => {
     mockedFetch.mockImplementation(async (_httpService, options) => {
       const rows = sourceRecords[options.tableId];
       if (!rows) throw new Error(`Unexpected source ${options.tableId}`);
-      if (options.tableId !== 'tbl32bf112724ed6') return rows;
+      if (options.tableId !== 'tblqSskJvBnx9UJj') return rows;
       return rows.map((item) =>
         item.record_id === 'pue-current-A楼'
           ? {
@@ -590,7 +590,7 @@ describe('TodayOperationsKpiService', () => {
     expect(whiteStaff).toContain('倒班人员');
     expect(nightStaff).toContain('夜班人员');
     expect(whiteStaff).not.toEqual(
-      expect.arrayContaining(['示例人员008', '示例人员013', '昨日人员', '夜班人员']),
+      expect.arrayContaining(['张三', '李四', '昨日人员', '夜班人员']),
     );
   });
 
@@ -610,7 +610,7 @@ describe('TodayOperationsKpiService', () => {
         缺岗替班人员: '补位甲',
         差旅人员: '差旅甲',
         员工工号: '1001',
-        联系电话: '13800009626',
+        联系电话: '13800000000',
       }),
       record('long-white-b', {
         排班日期: Date.parse('2026-07-20T00:00:00+08:00'),
@@ -671,7 +671,7 @@ describe('TodayOperationsKpiService', () => {
       }),
     ];
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID') return personnelRows;
+      if (options.tableId === 'tblRV9KeWFh9xCkm') return personnelRows;
       const rows = sourceRecords[options.tableId];
       if (!rows) throw new Error(`Unexpected source ${options.tableId}`);
       return rows;
@@ -767,7 +767,7 @@ describe('TodayOperationsKpiService', () => {
       ]),
     );
     expect(JSON.stringify(result)).not.toContain('1001');
-    expect(JSON.stringify(result)).not.toContain('13800009626');
+    expect(JSON.stringify(result)).not.toContain('13800000000');
   });
 
   it('does not expose pending leave or substitute staff in on-duty details', async () => {
@@ -800,7 +800,7 @@ describe('TodayOperationsKpiService', () => {
       ],
     );
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID') return personnelRows;
+      if (options.tableId === 'tblRV9KeWFh9xCkm') return personnelRows;
       const rows = sourceRecords[options.tableId];
       if (!rows) throw new Error(`Unexpected source ${options.tableId}`);
       return rows;
@@ -852,7 +852,7 @@ describe('TodayOperationsKpiService', () => {
       ],
     );
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID') {
+      if (options.tableId === 'tblRV9KeWFh9xCkm') {
         return options.viewId ? personnelViewRows : fullTableRows;
       }
       const rows = sourceRecords[options.tableId];
@@ -868,7 +868,7 @@ describe('TodayOperationsKpiService', () => {
     expect(result.details.onDutyPeople.nightShiftTotal).toBe(6);
     expect(
       mockedFetch.mock.calls
-        .filter(([, options]) => options.tableId === 'PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID')
+        .filter(([, options]) => options.tableId === 'tblRV9KeWFh9xCkm')
         .map(([, options]) => options.viewId),
     ).toEqual(['vew6jLlGzq', undefined]);
     expect(
@@ -921,7 +921,7 @@ describe('TodayOperationsKpiService', () => {
       requests: [],
     });
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID') return personnelRows;
+      if (options.tableId === 'tblRV9KeWFh9xCkm') return personnelRows;
       const rows = sourceRecords[options.tableId];
       if (!rows) throw new Error(`Unexpected source ${options.tableId}`);
       return rows;
@@ -1051,7 +1051,7 @@ describe('TodayOperationsKpiService', () => {
       ]),
     );
     expect(JSON.stringify(result)).not.toContain('1001');
-    expect(JSON.stringify(result)).not.toContain('13800009626');
+    expect(JSON.stringify(result)).not.toContain('13800000000');
     expect(mockedPersistedSnapshot).toHaveBeenCalledTimes(6);
   });
 });

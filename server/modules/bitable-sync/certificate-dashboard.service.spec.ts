@@ -22,7 +22,7 @@ const ENV_KEYS = [
 const sourceRecord = {
   record_id: 'rec-1',
   fields: {
-    姓名: '示例人员008',
+    姓名: '张三',
     楼栋: 'A楼',
     岗位: '运维值班员',
     班组: 'A班',
@@ -85,7 +85,7 @@ describe('CertificateDashboardService', () => {
       expect.anything(),
       expect.objectContaining({
         appToken: 'resolved-certificate-app-token',
-        tableId: 'tblce45d88e70ea3',
+        tableId: 'tbl9NBxImAt3kzx2',
         tableName: '园区持证正式表',
         forceRefresh: true,
         strict: true,
@@ -202,7 +202,7 @@ describe('CertificateDashboardService', () => {
 
     expect(fetchBitableRecords).not.toHaveBeenCalled();
     expect(readLatestPersistedBitableRecords).toHaveBeenCalledWith({
-      tableId: 'tblce45d88e70ea3',
+      tableId: 'tbl9NBxImAt3kzx2',
       tableName: '园区持证正式表',
     });
     expect(stale.people).toHaveLength(1);

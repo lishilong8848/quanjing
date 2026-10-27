@@ -1,6 +1,6 @@
 {
-  "baseToken": "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_APP_TOKEN",
-  "tables": { "电气": "tbl2969c90955d38", "暖通": "tblae925f9016648" },
+  "baseToken": "MliKbC3fXa8PXrsndKscmxjdn1g",
+  "tables": { "电气": "tblLWBFOrGUuvLDG", "暖通": "tblgZf1thm7zSkDR" },
   "fields": {
     "id": "记录标识",
     "profession": "专业",

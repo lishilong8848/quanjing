@@ -38,7 +38,7 @@ describe('原始周报缺失分区补读', () => {
     const children = [
       mainHeading('todos', '一、本周待办'),
       heading('ali', '1. 阿里周会待办'),
-      line('a', '检查UPS（示例人员019：老马）'),
+      line('a', '检查UPS（责任人：老马）'),
       heading('previous', '2. 上周内部周会待办'),
       line('p', '复核冷机'),
       mainHeading('content', '二、本周周会内容'),
@@ -145,7 +145,7 @@ describe('原始周报缺失分区补读', () => {
               data: {
                 record_id_list: ['recQA'],
                 fields: ['链接'],
-                data: [['[原文](https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE)']],
+                data: [['[原文](https://vnet.feishu.cn/docx/docQA)']],
               },
             },
           }
@@ -164,7 +164,7 @@ describe('原始周报缺失分区补读', () => {
     expect(reader.get(meeting)).toBe(first);
     await new Promise((resolve) => setImmediate(resolve));
     expect(first.state).toBe('ready');
-    expect(first.url).toBe('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE');
+    expect(first.url).toBe('https://vnet.feishu.cn/docx/docQA');
     expect(first.sections).toHaveLength(3);
     expect(request).toHaveBeenCalledTimes(2);
     expect(getTenantAccessToken).toHaveBeenCalled();
@@ -182,7 +182,7 @@ describe('原始周报缺失分区补读', () => {
     );
     const meeting = mapWeeklyMeeting({
       record_id: 'recQA',
-      fields: { 链接: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' },
+      fields: { 链接: 'https://vnet.feishu.cn/docx/docQA' },
     });
     const result = reader.get(meeting);
     await new Promise((resolve) => setImmediate(resolve));

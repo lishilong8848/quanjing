@@ -64,7 +64,7 @@ describe('LeaveWorkflowService', () => {
     const wake = jest.fn();
     service.setTaskWakeHandler(wake);
     const accepted = service.acceptApplications({
-      clientMutationId: 'wake-after-persist', recordIds: ['rec_wake'], leaveStaffName: '示例人员008',
+      clientMutationId: 'wake-after-persist', recordIds: ['rec_wake'], leaveStaffName: '张三',
       startAt: '2026-08-17T09:00:00+08:00', endAt: '2026-08-17T18:00:00+08:00',
       leaveType: '年假', leaveHours: 8, approvalDayCount: 1, reason: '测试',
     });
@@ -185,7 +185,7 @@ describe('LeaveWorkflowService', () => {
       key: 'leave:rec_leave_multi',
       recordId: 'rec_leave_multi',
       snapshot: {
-        applicantName: '示例人员012',
+        applicantName: '曹雷',
         applicantOpenId: 'ou_cao',
         applicantPersonRecordId: 'rec_cao',
         applicantNotificationOpenIds: ['ou_cao'],
@@ -220,27 +220,27 @@ describe('LeaveWorkflowService', () => {
             shiftAssignments: input.shiftAssignments,
           },
         },
-        action: { actorName: '示例人员001', rejectionReason: '' },
+        action: { actorName: '主管', rejectionReason: '' },
       })),
     };
     const personnel = [
       {
         recordId: 'rec_cao',
-        name: '示例人员012',
+        name: '曹雷',
         openId: 'ou_cao',
         position: '运维值班员',
         buildings: ['A楼'],
       },
       {
         recordId: 'rec_zhang',
-        name: '示例人员008',
+        name: '张三',
         openId: 'ou_zhang',
         position: '运维值班员',
         buildings: ['A楼'],
       },
       {
         recordId: 'rec_li',
-        name: '示例人员013',
+        name: '李四',
         openId: 'ou_li',
         position: '运维值班员',
         buildings: ['B楼'],
@@ -258,7 +258,7 @@ describe('LeaveWorkflowService', () => {
           building: 'A楼',
           team: '一班',
           shift: '白班',
-          dutyStaffActual: ['示例人员012'],
+          dutyStaffActual: ['曹雷'],
         },
         {
           recordId: 'schedule_2',
@@ -266,7 +266,7 @@ describe('LeaveWorkflowService', () => {
           building: 'B楼',
           team: '二班',
           shift: '夜班',
-          dutyStaffActual: ['示例人员012'],
+          dutyStaffActual: ['曹雷'],
         },
       ]),
     };
@@ -282,7 +282,7 @@ describe('LeaveWorkflowService', () => {
       stageKey: 'supervisor',
       stageVersion: 1,
       actorOpenId: 'ou_supervisor',
-      actorName: '示例人员001',
+      actorName: '主管',
       action: 'approve',
       messageId: 'om_multi_approve',
       shiftSelections: [
@@ -318,7 +318,7 @@ describe('LeaveWorkflowService', () => {
         store.claimStageAction.mock.calls[0][0].shiftAssignments,
       ),
     ).toBe(
-      '2026-08-26 白班 09:00–18:00：示例人员008\n2026-08-27 夜班 18:00–09:00：示例人员013',
+      '2026-08-26 白班 09:00–18:00：张三\n2026-08-27 夜班 18:00–09:00：李四',
     );
   });
 
@@ -409,7 +409,7 @@ describe('LeaveWorkflowService', () => {
       service.acceptApplications({
         clientMutationId: 'leave-mutation-1',
         recordIds: ['rec_leave_1'],
-        leaveStaffName: '示例人员008',
+        leaveStaffName: '张三',
         startAt: '2026-08-17T09:00:00+08:00',
         endAt: '2026-08-17T18:00:00+08:00',
         leaveType: '年假',
@@ -446,7 +446,7 @@ describe('LeaveWorkflowService', () => {
       service.acceptApplications({
         clientMutationId: 'leave-mutation-2',
         recordIds: ['rec_leave_2'],
-        leaveStaffName: '示例人员013',
+        leaveStaffName: '李四',
         startAt: '2026-08-17T09:00:00+08:00',
         endAt: '2026-08-17T18:00:00+08:00',
         leaveType: '年假',
@@ -493,7 +493,7 @@ describe('LeaveWorkflowService', () => {
           ...routePerson('梁煊晨', 'ou_applicant', '运维值班长', ['D楼']),
           supervisorNames: ['陶必亮'],
         },
-        routePerson('陶必亮', 'ou_supervisor', '设施运维示例人员001', ['D楼']),
+        routePerson('陶必亮', 'ou_supervisor', '设施运维主管', ['D楼']),
         routePerson('机房经理', 'ou_manager', '设施运维经理', ['H楼']),
       ]),
       sendInteractiveCard: jest.fn().mockResolvedValue('om_leave_concurrent'),
@@ -504,7 +504,7 @@ describe('LeaveWorkflowService', () => {
         .mockResolvedValue(
           directoryOf([
             person('梁煊晨', 'ou_applicant', '运维值班长', ['D'], ['陶必亮']),
-            person('陶必亮', 'ou_supervisor', '设施运维示例人员001', ['D']),
+            person('陶必亮', 'ou_supervisor', '设施运维主管', ['D']),
             person('机房经理', 'ou_manager', '设施运维经理', ['H']),
           ]),
         ),
@@ -582,7 +582,7 @@ describe('LeaveWorkflowService', () => {
           ...routePerson('张宇航', 'ou_applicant', '运维值班员', ['H楼']),
           supervisorNames: ['周庆庆'],
         },
-        routePerson('周庆庆', 'ou_supervisor', 'H楼值班示例人员001', ['H楼']),
+        routePerson('周庆庆', 'ou_supervisor', 'H楼值班主管', ['H楼']),
         routePerson('机房经理', 'ou_manager', '设施运维经理', ['H楼']),
       ]),
       sendInteractiveCard: jest.fn().mockResolvedValue('om_leave_detail_retry'),
@@ -593,7 +593,7 @@ describe('LeaveWorkflowService', () => {
         .mockResolvedValue(
           directoryOf([
             person('张宇航', 'ou_applicant', '运维值班员', ['H'], ['周庆庆']),
-            person('周庆庆', 'ou_supervisor', 'H楼值班示例人员001', ['H']),
+            person('周庆庆', 'ou_supervisor', 'H楼值班主管', ['H']),
             person('机房经理', 'ou_manager', '设施运维经理', ['H']),
           ]),
         ),
@@ -700,7 +700,7 @@ describe('LeaveWorkflowService', () => {
     );
     const store = new LeaveWorkflowStore(join(directoryPath, 'ledger.json'));
     const fields: Record<string, unknown> = {
-      休假人员: '示例人员008',
+      休假人员: '张三',
       休假开始时间: Date.parse('2026-08-21T09:00:00+08:00'),
       休假结束时间: Date.parse('2026-08-21T18:00:00+08:00'),
       机楼: 'A楼',
@@ -716,12 +716,12 @@ describe('LeaveWorkflowService', () => {
           Object.assign(fields, updates);
         }),
       fetchOrganizationRoutingRecords: jest.fn().mockResolvedValue([
-        routePerson('示例人员008', 'ou_applicant', 'FOC', ['A楼']),
+        routePerson('张三', 'ou_applicant', 'FOC', ['A楼']),
         {
           ...routePerson('A楼值班账号', 'ou_duty', '值班账号', ['A楼']),
-          supervisorNames: ['示例人员009'],
+          supervisorNames: ['施小东'],
         },
-        routePerson('示例人员009', 'ou_supervisor', '运维示例人员001', ['A楼']),
+        routePerson('施小东', 'ou_supervisor', '运维主管', ['A楼']),
         routePerson('机房经理', 'ou_manager', '设施运维经理', ['H楼']),
       ]),
       sendInteractiveCard: jest
@@ -733,8 +733,8 @@ describe('LeaveWorkflowService', () => {
         .fn()
         .mockResolvedValue(
           directoryOf([
-            person('示例人员008', 'ou_applicant', 'FOC', ['A'], ['示例人员009']),
-            person('示例人员009', 'ou_supervisor', '运维示例人员001', ['A']),
+            person('张三', 'ou_applicant', 'FOC', ['A'], ['施小东']),
+            person('施小东', 'ou_supervisor', '运维主管', ['A']),
             person('机房经理', 'ou_manager', '设施运维经理', ['H']),
           ]),
         ),
@@ -749,7 +749,7 @@ describe('LeaveWorkflowService', () => {
       await service.acceptApplications({
         clientMutationId: 'leave-delivery-error-1',
         recordIds: ['rec_leave_delivery_error'],
-        leaveStaffName: '示例人员008',
+        leaveStaffName: '张三',
         startAt: '2026-08-21T09:00:00+08:00',
         endAt: '2026-08-21T18:00:00+08:00',
         leaveType: '年假',
@@ -781,7 +781,7 @@ describe('LeaveWorkflowService', () => {
       );
       const store = new LeaveWorkflowStore(join(directoryPath, 'ledger.json'));
       const fields: Record<string, unknown> = {
-        休假人员: '示例人员008',
+        休假人员: '张三',
         休假开始时间: Date.parse('2026-08-17T09:00:00+08:00'),
         休假结束时间: Date.parse('2026-08-17T18:00:00+08:00'),
         机楼: 'A楼',
@@ -801,12 +801,12 @@ describe('LeaveWorkflowService', () => {
             Object.assign(fields, updates);
           }),
         fetchOrganizationRoutingRecords: jest.fn().mockResolvedValue([
-          routePerson('示例人员008', 'ou_applicant', position, ['A楼']),
+          routePerson('张三', 'ou_applicant', position, ['A楼']),
           {
             ...routePerson('A楼值班账号', 'ou_duty', '值班账号', ['A楼']),
-            supervisorNames: ['示例人员009'],
+            supervisorNames: ['施小东'],
           },
-          routePerson('示例人员009', 'ou_supervisor', '运维示例人员001', ['A楼']),
+          routePerson('施小东', 'ou_supervisor', '运维主管', ['A楼']),
           routePerson('机房经理', 'ou_manager', '设施运维经理', ['A楼']),
         ]),
         sendInteractiveCard: jest.fn().mockImplementation(async () => {
@@ -827,10 +827,10 @@ describe('LeaveWorkflowService', () => {
           .fn()
           .mockResolvedValue(
             directoryOf([
-              person('示例人员008', 'ou_applicant', position, ['A'], ['示例人员009']),
-              person('示例人员009', 'ou_supervisor', '运维示例人员001', ['A']),
+              person('张三', 'ou_applicant', position, ['A'], ['施小东']),
+              person('施小东', 'ou_supervisor', '运维主管', ['A']),
               person('机房经理', 'ou_manager', '设施运维经理', ['A']),
-              person('示例人员006', 'ou_professional', '电气示例人员001', ['H']),
+              person('周海祥', 'ou_professional', '电气主管', ['H']),
             ]),
           ),
       };
@@ -844,7 +844,7 @@ describe('LeaveWorkflowService', () => {
         await service.acceptApplications({
           clientMutationId: 'leave-route-mutation-1',
           recordIds: ['rec_leave_1'],
-          leaveStaffName: '示例人员008',
+          leaveStaffName: '张三',
           startAt: '2026-08-17T09:00:00+08:00',
           endAt: '2026-08-17T18:00:00+08:00',
           leaveType: '年假',
@@ -860,7 +860,7 @@ describe('LeaveWorkflowService', () => {
         expect(gateway.sendInteractiveCard).toHaveBeenCalledTimes(1);
         expect(fields).toMatchObject({
           审批来源: '程序卡片',
-          请假工作流状态: '待示例人员001审批',
+          请假工作流状态: '待主管审批',
         });
 
         const accepted = await service.acceptApprovalAction({
@@ -869,7 +869,7 @@ describe('LeaveWorkflowService', () => {
           stageKey: 'supervisor',
           stageVersion: 1,
           actorOpenId: 'ou_supervisor',
-          actorName: '示例人员009',
+          actorName: '施小东',
           action: 'approve',
           messageId: 'om_leave_1',
         });
@@ -881,7 +881,7 @@ describe('LeaveWorkflowService', () => {
         expect(
           bitableSync.syncApprovedLeaveScheduleSnapshot,
         ).toHaveBeenCalledWith([], {
-          applicantName: '示例人员008',
+          applicantName: '张三',
           startAt: '2026-08-17T01:00:00.000Z',
           endAt: '2026-08-17T10:00:00.000Z',
         });
@@ -937,7 +937,7 @@ describe('LeaveWorkflowService', () => {
         : 'rec_leave_screenshot_ready';
       const store = new LeaveWorkflowStore(join(directoryPath, 'ledger.json'));
       const fields: Record<string, unknown> = {
-        休假人员: '示例人员008',
+        休假人员: '张三',
         休假开始时间: Date.parse('2026-08-17T09:00:00+08:00'),
         休假结束时间: Date.parse('2026-08-17T18:00:00+08:00'),
         机楼: 'A楼',
@@ -957,10 +957,10 @@ describe('LeaveWorkflowService', () => {
           }),
         fetchOrganizationRoutingRecords: jest.fn().mockResolvedValue([
           {
-            ...routePerson('示例人员008', 'ou_applicant', 'FOC', ['A楼']),
-            supervisorNames: ['示例人员009'],
+            ...routePerson('张三', 'ou_applicant', 'FOC', ['A楼']),
+            supervisorNames: ['施小东'],
           },
-          routePerson('示例人员009', 'ou_supervisor', '运维示例人员001', ['A楼']),
+          routePerson('施小东', 'ou_supervisor', '运维主管', ['A楼']),
           routePerson('机房经理', 'ou_manager', '设施运维经理', ['A楼']),
         ]),
         prepareLeaveApprovalScreenshotImages,
@@ -971,8 +971,8 @@ describe('LeaveWorkflowService', () => {
           .fn()
           .mockResolvedValue(
             directoryOf([
-              person('示例人员008', 'ou_applicant', 'FOC', ['A'], ['示例人员009']),
-              person('示例人员009', 'ou_supervisor', '运维示例人员001', ['A']),
+              person('张三', 'ou_applicant', 'FOC', ['A'], ['施小东']),
+              person('施小东', 'ou_supervisor', '运维主管', ['A']),
               person('机房经理', 'ou_manager', '设施运维经理', ['A']),
             ]),
           ),
@@ -987,7 +987,7 @@ describe('LeaveWorkflowService', () => {
         await service.acceptApplications({
           clientMutationId: `leave-screenshot-${imageFailure ? 'error' : 'ready'}`,
           recordIds: [recordId],
-          leaveStaffName: '示例人员008',
+          leaveStaffName: '张三',
           startAt: '2026-08-17T09:00:00+08:00',
           endAt: '2026-08-17T18:00:00+08:00',
           leaveType: '年假',
@@ -1033,7 +1033,7 @@ describe('LeaveWorkflowService', () => {
     );
     const store = new LeaveWorkflowStore(join(directoryPath, 'ledger.json'));
     const fields: Record<string, unknown> = {
-      休假人员: '示例人员008',
+      休假人员: '张三',
       休假开始时间: Date.parse('2026-08-17T09:00:00+08:00'),
       休假结束时间: Date.parse('2026-08-17T18:00:00+08:00'),
       机楼: 'A楼',
@@ -1061,8 +1061,8 @@ describe('LeaveWorkflowService', () => {
         .fn()
         .mockResolvedValue(
           directoryOf([
-            person('示例人员008', 'ou_applicant', 'FOC', ['A'], ['示例人员009']),
-            person('示例人员009', 'ou_supervisor', '运维示例人员001', ['A']),
+            person('张三', 'ou_applicant', 'FOC', ['A'], ['施小东']),
+            person('施小东', 'ou_supervisor', '运维主管', ['A']),
             person('机房经理', 'ou_manager', '设施运维经理', ['H']),
           ]),
         ),
@@ -1077,7 +1077,7 @@ describe('LeaveWorkflowService', () => {
       await service.acceptApplications({
         clientMutationId: 'leave-rejection-1',
         recordIds: ['rec_leave_rejected'],
-        leaveStaffName: '示例人员008',
+        leaveStaffName: '张三',
         startAt: '2026-08-17T09:00:00+08:00',
         endAt: '2026-08-17T18:00:00+08:00',
         leaveType: '年假',
@@ -1093,7 +1093,7 @@ describe('LeaveWorkflowService', () => {
         stageKey: 'supervisor',
         stageVersion: 1,
         actorOpenId: 'ou_supervisor',
-        actorName: '示例人员009',
+        actorName: '施小东',
         action: 'reject',
         messageId: 'om_leave_rejected_1',
         rejectionReason: '当日保障力量不足',
@@ -1158,8 +1158,8 @@ describe('LeaveWorkflowService', () => {
           supervisorNames: ['刘小杏', '林柳'],
         },
         routePerson('林柳', 'ou_foc_peer', 'FOC', ['H楼']),
-        routePerson('示例人员014', 'ou_deputy_manager', '设施运维副经理', ['H楼']),
-        routePerson('示例人员020', 'ou_manager', '设施运维经理', ['H楼']),
+        routePerson('梅冰冰', 'ou_deputy_manager', '设施运维副经理', ['H楼']),
+        routePerson('马进宇', 'ou_manager', '设施运维经理', ['H楼']),
       ]),
       sendInteractiveCard: jest.fn().mockResolvedValue('om_leave_foc'),
       patchInteractiveCard: jest.fn().mockResolvedValue(undefined),
@@ -1169,10 +1169,10 @@ describe('LeaveWorkflowService', () => {
         .fn()
         .mockResolvedValue(
           directoryOf([
-            person('刘小杏', 'ou_foc', 'FOC', ['H'], ['示例人员014', '示例人员020']),
+            person('刘小杏', 'ou_foc', 'FOC', ['H'], ['梅冰冰', '马进宇']),
             person('林柳', 'ou_foc_peer', 'FOC', ['H']),
-            person('示例人员014', 'ou_deputy_manager', '设施运维副经理', ['H']),
-            person('示例人员020', 'ou_manager', '设施运维经理', ['H']),
+            person('梅冰冰', 'ou_deputy_manager', '设施运维副经理', ['H']),
+            person('马进宇', 'ou_manager', '设施运维经理', ['H']),
           ]),
         ),
     };
@@ -1192,7 +1192,7 @@ describe('LeaveWorkflowService', () => {
         leaveType: '年假',
         leaveHours: 8,
         approvalDayCount: 1,
-        reason: '验证人员表示例人员001路由',
+        reason: '验证人员表主管路由',
       });
       await expect(service.runPendingTasks()).resolves.toEqual({
         processed: 2,
@@ -1204,7 +1204,7 @@ describe('LeaveWorkflowService', () => {
       ).toEqual(['ou_deputy_manager', 'ou_manager']);
       expect(fields).toMatchObject({
         审批来源: '程序卡片',
-        请假工作流状态: '待示例人员001审批',
+        请假工作流状态: '待主管审批',
       });
     } finally {
       await rm(directoryPath, { recursive: true, force: true });
@@ -1217,7 +1217,7 @@ describe('LeaveWorkflowService', () => {
     );
     const store = new LeaveWorkflowStore(join(directoryPath, 'ledger.json'));
     const fields: Record<string, unknown> = {
-      '休假人员姓名（程序）': '示例人员005',
+      '休假人员姓名（程序）': '卞天洋',
       休假开始时间: Date.parse('2026-08-20T08:00:00+08:00'),
       休假结束时间: Date.parse('2026-08-20T20:00:00+08:00'),
       机楼: '110站',
@@ -1242,7 +1242,7 @@ describe('LeaveWorkflowService', () => {
     };
     const applicant = {
       recordId: 'rec_person_bian',
-      name: '示例人员005',
+      name: '卞天洋',
       openId: '',
       employeeNo: null,
       position: '110值班人员',
@@ -1256,12 +1256,12 @@ describe('LeaveWorkflowService', () => {
       '值班账号',
       ['110'],
     );
-    const approver = person('赵六', 'ou_electrical_lead', '电气示例人员001', ['110']);
+    const approver = person('赵六', 'ou_electrical_lead', '电气主管', ['110']);
     const substitute = {
       ...person('蒋京桦', 'ou_110_substitute', '值班员（备岗）', ['110']),
       recordId: 'rec_person_substitute_110',
     };
-    const manager = person('示例人员020', 'ou_manager', '设施运维经理', ['H']);
+    const manager = person('马进宇', 'ou_manager', '设施运维经理', ['H']);
     const directory = directoryOf([
       sharedDutyAccount,
       approver,
@@ -1288,7 +1288,7 @@ describe('LeaveWorkflowService', () => {
           buildingText: '110站',
           teamText: 'A班',
           shiftText: '白班',
-          dutyStaffActual: ['示例人员005'],
+          dutyStaffActual: ['卞天洋'],
         },
       ]),
     };
@@ -1302,7 +1302,7 @@ describe('LeaveWorkflowService', () => {
       await service.acceptApplications({
         clientMutationId: 'leave-route-110-no-account',
         recordIds: ['rec_leave_110_no_account'],
-        leaveStaffName: '示例人员005',
+        leaveStaffName: '卞天洋',
         startAt: '2026-08-20T08:00:00+08:00',
         endAt: '2026-08-20T20:00:00+08:00',
         leaveType: '年假',
@@ -1409,7 +1409,7 @@ describe('LeaveWorkflowService', () => {
       ).resolves.toMatchObject({
         status: 'approved',
         snapshot: {
-          applicantName: '示例人员005',
+          applicantName: '卞天洋',
           applicantOpenId: '',
           applicantPersonRecordId: 'rec_person_bian',
           applicantNotificationOpenIds: ['ou_110_shared'],
@@ -1426,11 +1426,11 @@ describe('LeaveWorkflowService', () => {
     );
     const store = new LeaveWorkflowStore(join(directoryPath, 'ledger.json'));
     const fields: Record<string, unknown> = {
-      '休假人员姓名（程序）': '示例人员005',
+      '休假人员姓名（程序）': '卞天洋',
       休假开始时间: Date.parse('2026-08-20T08:00:00+08:00'),
       休假结束时间: Date.parse('2026-08-20T20:00:00+08:00'),
       机楼: '110站',
-      示例人员001: '示例人员006',
+      主管: '周海祥',
     };
     const gateway = {
       readLeaveRecord: jest.fn().mockResolvedValue({
@@ -1444,8 +1444,8 @@ describe('LeaveWorkflowService', () => {
       sendInteractiveCard: jest.fn().mockResolvedValue('om_leave_110_direct'),
       patchInteractiveCard: jest.fn().mockResolvedValue(undefined),
     };
-    const applicant = person('示例人员005', '', '110值班人员', ['110']);
-    const supervisor = person('示例人员006', 'ou_110_supervisor', '电气示例人员001', [
+    const applicant = person('卞天洋', '', '110值班人员', ['110']);
+    const supervisor = person('周海祥', 'ou_110_supervisor', '电气主管', [
       '110',
     ]);
     const sharedDutyAccount = person(
@@ -1460,7 +1460,7 @@ describe('LeaveWorkflowService', () => {
       ]),
       recordId: 'rec_person_direct_substitute_110',
     };
-    const manager = person('示例人员020', 'ou_manager', '设施运维经理', ['H']);
+    const manager = person('马进宇', 'ou_manager', '设施运维经理', ['H']);
     const directory = directoryOf([
       supervisor,
       sharedDutyAccount,
@@ -1488,7 +1488,7 @@ describe('LeaveWorkflowService', () => {
             buildingText: '110站',
             teamText: 'A班',
             shiftText: '白班',
-            dutyStaffActual: ['示例人员005'],
+            dutyStaffActual: ['卞天洋'],
           },
         ]),
       } as never,
@@ -1498,13 +1498,13 @@ describe('LeaveWorkflowService', () => {
       await service.acceptApplications({
         clientMutationId: 'leave-route-110-record-supervisor',
         recordIds: ['rec_leave_110_record_supervisor'],
-        leaveStaffName: '示例人员005',
+        leaveStaffName: '卞天洋',
         startAt: '2026-08-20T08:00:00+08:00',
         endAt: '2026-08-20T20:00:00+08:00',
         leaveType: '年假',
         leaveHours: 12,
         approvalDayCount: 1,
-        reason: '验证记录示例人员001直路由',
+        reason: '验证记录主管直路由',
       });
       await expect(service.runPendingTasks()).resolves.toEqual({
         processed: 2,
@@ -1520,7 +1520,7 @@ describe('LeaveWorkflowService', () => {
         JSON.stringify(gateway.sendInteractiveCard.mock.calls[0][1]),
       ).toContain('rec_person_direct_substitute_110');
       expect(fields).toMatchObject({
-        请假工作流状态: '待示例人员001审批',
+        请假工作流状态: '待主管审批',
         请假当前审批人: [{ id: 'ou_110_supervisor' }],
         请假工作流错误: '',
       });
@@ -1542,15 +1542,15 @@ describe('LeaveWorkflowService', () => {
       休假结束时间: Date.parse(snapshot.endAt),
       机楼: '110站',
       岗位: '110站站长',
-      示例人员001: '示例人员006',
+      主管: '周海祥',
     };
     const stationChief = person('张华', 'ou_station_chief', '110站站长', [
       '110站',
     ]);
-    const supervisor = person('示例人员006', 'ou_110_supervisor', '电气示例人员001', [
+    const supervisor = person('周海祥', 'ou_110_supervisor', '电气主管', [
       'H楼',
     ]);
-    const manager = person('示例人员020', 'ou_manager', '设施运维经理', ['H楼']);
+    const manager = person('马进宇', 'ou_manager', '设施运维经理', ['H楼']);
     const substitute = person('蒋京桦', 'ou_110_substitute', '值班员（备岗）', [
       '110站',
     ]);
@@ -1630,7 +1630,7 @@ describe('LeaveWorkflowService', () => {
     );
     const store = new LeaveWorkflowStore(join(directoryPath, 'ledger.json'));
     const fields: Record<string, unknown> = {
-      休假人员: '示例人员008',
+      休假人员: '张三',
       休假开始时间: Date.parse('2026-08-19T09:00:00+08:00'),
       休假结束时间: Date.parse('2026-08-19T18:00:00+08:00'),
       机楼: 'D楼',
@@ -1662,10 +1662,10 @@ describe('LeaveWorkflowService', () => {
         .fn()
         .mockResolvedValue(
           directoryOf([
-            person('示例人员008', 'ou_applicant_d', '运维值班员', ['D'], ['陶必亮']),
-            person('陶必亮', 'ou_supervisor_d', '设施运维示例人员001', ['D']),
-            person('示例人员007', 'ou_substitute', '实习生（备岗）', ['E']),
-            person('示例人员017', 'ou_substitute_new', '长白', ['E']),
+            person('张三', 'ou_applicant_d', '运维值班员', ['D'], ['陶必亮']),
+            person('陶必亮', 'ou_supervisor_d', '设施运维主管', ['D']),
+            person('廖栩', 'ou_substitute', '实习生（备岗）', ['E']),
+            person('王五', 'ou_substitute_new', '长白', ['E']),
             person('相邻夜班', 'ou_blocked', '运维值班员', ['D']),
             person('机房经理', 'ou_manager', '设施运维经理', ['H']),
           ]),
@@ -1677,7 +1677,7 @@ describe('LeaveWorkflowService', () => {
           buildingText: 'D楼',
           teamText: 'A班',
           shiftText: '白班',
-          dutyStaffActual: ['示例人员008'],
+          dutyStaffActual: ['张三'],
         },
         {
           recordId: 'd-previous-night',
@@ -1699,13 +1699,13 @@ describe('LeaveWorkflowService', () => {
       await service.acceptApplications({
         clientMutationId: 'leave-route-d-1',
         recordIds: ['rec_leave_d'],
-        leaveStaffName: '示例人员008',
+        leaveStaffName: '张三',
         startAt: '2026-08-19T09:00:00+08:00',
         endAt: '2026-08-19T18:00:00+08:00',
         leaveType: '年假',
         leaveHours: 8,
         approvalDayCount: 1,
-        reason: '验证示例人员001选择替班',
+        reason: '验证主管选择替班',
       });
       await expect(service.runPendingTasks()).resolves.toEqual({
         processed: 2,
@@ -1758,7 +1758,7 @@ describe('LeaveWorkflowService', () => {
           expect.objectContaining({ scheduleRecordIds: ['d-white'] }),
         ]),
         {
-          applicantName: '示例人员008',
+          applicantName: '张三',
           startAt: '2026-08-19T01:00:00.000Z',
           endAt: '2026-08-19T10:00:00.000Z',
         },
@@ -1767,7 +1767,7 @@ describe('LeaveWorkflowService', () => {
       expect(fields).toMatchObject({
         请假工作流状态: '已审批',
         '是否需要替班（替班打√）': true,
-        '替班人员（填姓名）': '示例人员007',
+        '替班人员（填姓名）': '廖栩',
       });
       expect(
         gateway.sendInteractiveCard.mock.calls.map((call) => call[0]),
@@ -1822,7 +1822,7 @@ describe('LeaveWorkflowService', () => {
         bitableSync.syncApprovedLeaveScheduleSnapshot,
       ).toHaveBeenCalledTimes(2);
       expect(fields).toMatchObject({
-        '替班人员（填姓名）': '示例人员017',
+        '替班人员（填姓名）': '王五',
         替班调整版本: 1,
         替班调整人: [{ id: 'ou_supervisor_d' }],
       });
@@ -1832,7 +1832,7 @@ describe('LeaveWorkflowService', () => {
             expect.objectContaining({
               shiftKey: '2026-08-19T09:00__2026-08-19T18:00',
               substitutePersonRecordId: 'person-ou_substitute_new',
-              substituteName: '示例人员017',
+              substituteName: '王五',
             }),
           ],
           substituteRevision: 1,
@@ -1919,9 +1919,9 @@ describe('LeaveWorkflowService', () => {
         .fn()
         .mockResolvedValue(
           directoryOf([
-            person('陈凯', 'ou_applicant_e', '设施运维示例人员001', ['E']),
-            person('示例人员020', 'ou_manager', '设施运维经理', ['H']),
-            person('示例人员007', 'ou_substitute', '实习生（备岗）', ['E']),
+            person('陈凯', 'ou_applicant_e', '设施运维主管', ['E']),
+            person('马进宇', 'ou_manager', '设施运维经理', ['H']),
+            person('廖栩', 'ou_substitute', '实习生（备岗）', ['E']),
           ]),
         ),
       getCachedLeaveRequestImpactSchedules: jest.fn().mockResolvedValue([
@@ -1939,7 +1939,7 @@ describe('LeaveWorkflowService', () => {
           buildingText: 'E楼',
           teamText: '长白',
           shiftText: '长白',
-          dutyStaffActual: ['示例人员007'],
+          dutyStaffActual: ['廖栩'],
         },
       ]),
     };
@@ -1976,7 +1976,7 @@ describe('LeaveWorkflowService', () => {
       expect(serialized).toContain('确认审批');
       expect(serialized).not.toContain('leave_approve_submit:');
       expect(serialized).not.toContain('逐班次替班安排');
-      expect(serialized).toContain('E楼 · 设施运维示例人员001');
+      expect(serialized).toContain('E楼 · 设施运维主管');
       expect(serialized).toContain('2026-08-18 09:00 至 2026-08-18 18:00');
       expect(serialized).not.toContain('optpT0s3iH');
       expect(serialized).not.toContain('2026-08-18 01:00');
@@ -2019,7 +2019,7 @@ describe('LeaveWorkflowService', () => {
           stageKey: 'manager',
           stageVersion: 1,
           actorOpenId: 'ou_manager',
-          actorName: '示例人员020',
+          actorName: '马进宇',
           action: 'approve',
           messageId: 'om_leave_manager_direct_1',
         }),
@@ -2060,8 +2060,8 @@ describe('LeaveWorkflowService', () => {
         .fn()
         .mockResolvedValue(
           directoryOf([
-            person('周庆庆', 'ou_h_duty_supervisor', 'H楼值班示例人员001', ['H']),
-            person('示例人员020', 'ou_manager', '设施运维经理', ['H']),
+            person('周庆庆', 'ou_h_duty_supervisor', 'H楼值班主管', ['H']),
+            person('马进宇', 'ou_manager', '设施运维经理', ['H']),
             person('李董', 'ou_h_substitute', '长白', ['H']),
           ]),
         ),
@@ -2100,7 +2100,7 @@ describe('LeaveWorkflowService', () => {
         leaveType: '年假',
         leaveHours: 8,
         approvalDayCount: 1,
-        reason: '验证H楼值班示例人员001强制替班',
+        reason: '验证H楼值班主管强制替班',
       });
       await expect(service.runPendingTasks()).resolves.toEqual({
         processed: 2,
@@ -2130,25 +2130,25 @@ describe('LeaveWorkflowService', () => {
     );
     const store = new LeaveWorkflowStore(join(directoryPath, 'ledger.json'));
     const recordId = 'rec_leave_stage_substitute_change';
-    const applicant = routePerson('示例人员008', 'ou_stage_applicant', '运维值班员', [
+    const applicant = routePerson('张三', 'ou_stage_applicant', '运维值班员', [
       'D楼',
     ]);
     const supervisor = routePerson(
       '陶必亮',
       'ou_stage_supervisor',
-      '设施运维示例人员001',
+      '设施运维主管',
       ['D楼'],
     );
-    const manager = routePerson('示例人员020', 'ou_stage_manager', '设施运维经理', [
+    const manager = routePerson('马进宇', 'ou_stage_manager', '设施运维经理', [
       'H楼',
     ]);
     const previousSubstitute = routePerson(
-      '示例人员013',
+      '李四',
       'ou_stage_previous',
       '长白',
       ['D楼'],
     );
-    const substitute = routePerson('示例人员017', 'ou_stage_new', '长白', ['D楼']);
+    const substitute = routePerson('王五', 'ou_stage_new', '长白', ['D楼']);
     const snapshot = {
       applicantName: applicant.name,
       applicantOpenId: applicant.openId,
@@ -2391,22 +2391,22 @@ describe('LeaveWorkflowService', () => {
       休假结束时间: Date.parse(snapshot.endAt),
       机楼: '110站',
       岗位: '110站站长',
-      示例人员001: '示例人员006',
+      主管: '周海祥',
     };
     const stationChief = person(
       '张华',
       'ou_station_chief',
       '110站站长',
       ['110站'],
-      ['示例人员020'],
+      ['马进宇'],
     );
     const stationSupervisor = person(
-      '示例人员006',
+      '周海祥',
       'ou_station_supervisor',
-      '电气示例人员001',
+      '电气主管',
       ['H楼'],
     );
-    const manager = person('示例人员020', 'ou_wrong_manager', '设施运维经理', [
+    const manager = person('马进宇', 'ou_wrong_manager', '设施运维经理', [
       '全园区',
     ]);
     const gateway = {
@@ -2447,7 +2447,7 @@ describe('LeaveWorkflowService', () => {
           stageKey: 'manager',
           stageVersion: 1,
           actorOpenId: 'ou_wrong_manager',
-          actorName: '示例人员020',
+          actorName: '马进宇',
           action: 'approve',
           messageId: 'om_wrong_manager_card',
         }),
@@ -2478,7 +2478,7 @@ describe('LeaveWorkflowService', () => {
         gateway.patchInteractiveCard.mock.invocationCallOrder[0],
       ).toBeLessThan(gateway.sendInteractiveCard.mock.invocationCallOrder[0]);
       expect(fields).toMatchObject({
-        请假工作流状态: '待示例人员001审批',
+        请假工作流状态: '待主管审批',
         请假当前审批人: [{ id: stationSupervisor.openId }],
         请假工作流错误: '',
       });
@@ -2559,16 +2559,16 @@ describe('LeaveWorkflowService', () => {
       休假结束时间: Date.parse(snapshot.endAt),
       机楼: '110站',
       岗位: '110站站长',
-      示例人员001: '示例人员006',
+      主管: '周海祥',
     };
     const stationChief = person(
       '张华',
       'ou_station_chief',
       '110站站长',
       ['110站'],
-      ['示例人员006'],
+      ['周海祥'],
     );
-    const manager = person('示例人员020', 'ou_wrong_manager', '设施运维经理', [
+    const manager = person('马进宇', 'ou_wrong_manager', '设施运维经理', [
       '全园区',
     ]);
     const gateway = {
@@ -2609,7 +2609,7 @@ describe('LeaveWorkflowService', () => {
       ).resolves.toMatchObject({
         status: 'routing_failed',
         currentStage: null,
-        lastError: expect.stringContaining('示例人员006'),
+        lastError: expect.stringContaining('周海祥'),
       });
     } finally {
       await rm(directoryPath, { recursive: true, force: true });
@@ -2702,7 +2702,7 @@ async function seedMisroutedStationChief(store: LeaveWorkflowStore) {
   if (!routeTask) throw new Error('expected initial route task');
   await store.completeTask(routeTask.key, routeTask.claimToken);
   const wrongManager = routePerson(
-    '示例人员020',
+    '马进宇',
     'ou_wrong_manager',
     '设施运维经理',
     ['全园区'],

@@ -2,7 +2,7 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { readEnv } from '../../common/config/external-services.config';
 import { readConfiguredCardMembers } from '../../common/access/access-configuration.service';
 
-const DEFAULT_MANAGER_NAME = '示例人员020';
+const DEFAULT_MANAGER_NAME = '马进宇';
 const MAX_OPEN_ID_LENGTH = 128;
 const OPEN_ID_PATTERN = /^ou_[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const ENABLED_PATTERN = /^(1|true|yes|on)$/i;

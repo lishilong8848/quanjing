@@ -336,7 +336,7 @@ export function getAccessRoleLabel(
 ): string {
   const scopeLabel = buildings?.join('、') || purchaseBuilding;
   if (role === 'site_member') return '基地成员';
-  if (role === 'professional_admin') return '专业示例人员001';
+  if (role === 'professional_admin') return '专业主管';
   if (role === 'professional_engineer') return '专业工程师';
   if (role === 'admin') return '管理员';
   if (role === 'editor') return '子管理员';

@@ -77,7 +77,7 @@ function harness(): {
     }),
     resolveBuildingSupervisorAsApp: jest.fn().mockResolvedValue({
       openId: 'ou_building_supervisor',
-      name: '楼栋示例人员001',
+      name: '楼栋主管',
       positions: [],
       buildings: ['D楼'],
     }),

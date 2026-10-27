@@ -119,7 +119,7 @@ import {
   mapOrganizationPersonProfileRecord,
 } from './organization-person-profile.mapper';
 
-const ALI_MONTHLY_QUALITY_ISSUE_TABLE_ID = 'tbl995a202f637ee';
+const ALI_MONTHLY_QUALITY_ISSUE_TABLE_ID = 'tbl2ukkCV1Fjh149';
 const ALI_MONTHLY_QUALITY_ISSUE_VIEW_ID = 'vewPxuzNcN';
 
 interface OpenMeteoForecastResponse {
@@ -291,7 +291,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly TRAVEL_PERSON_PROFILE_VIEW_ID =
     readEnv('FEISHU_TRAVEL_PERSON_PROFILE_VIEW_ID', [
       'FEISHU_PERSONNEL_MOVEMENT_VIEW_ID',
-    ]) || 'PUBLIC_EXAMPLE_FEISHU_ORG_VIEW_ID';
+    ]) || 'vewrQcypV4';
 
   // 飞书多维表配置 - 员工证书信息表
   private readonly CERT_APP_TOKEN = readEnv('FEISHU_CERT_APP_TOKEN');
@@ -314,7 +314,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly FESTIVAL_IMPORTANT_TABLE_ID =
     readEnv('FEISHU_FESTIVAL_IMPORTANT_TABLE_ID', [
       'FEISHU_FESTIVAL_TABLE_ID',
-    ]) || 'tbl48bcc5bf85c44';
+    ]) || 'tblS3x6aazHbvAck';
   private readonly FESTIVAL_IMPORTANT_VIEW_ID =
     readEnv('FEISHU_FESTIVAL_IMPORTANT_VIEW_ID', ['FEISHU_FESTIVAL_VIEW_ID']) ||
     'vewgzik2Nv';
@@ -339,11 +339,11 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly CAMPUS_OPS_APP_TOKEN =
     readEnv('FEISHU_CAMPUS_OPS_APP_TOKEN') || 'ASLxbfESPahdTKs0A9NccgbrnXc';
   private readonly CAMPUS_OPS_TRANSFORMER_TABLE_ID =
-    readEnv('FEISHU_CAMPUS_OPS_TRANSFORMER_TABLE_ID') || 'tbl53498f2c0de9e';
+    readEnv('FEISHU_CAMPUS_OPS_TRANSFORMER_TABLE_ID') || 'tbl8Ni54taYGeWAa';
   private readonly CAMPUS_OPS_TRANSFORMER_VIEW_ID =
     readEnv('FEISHU_CAMPUS_OPS_TRANSFORMER_VIEW_ID') || 'vewVqB5Mps';
   private readonly CAMPUS_OPS_MACHINE_TABLE_ID =
-    readEnv('FEISHU_CAMPUS_OPS_MACHINE_TABLE_ID') || 'tbl38b1b0b822bf2';
+    readEnv('FEISHU_CAMPUS_OPS_MACHINE_TABLE_ID') || 'tblz8rjxdtRRlYmS';
   private readonly CAMPUS_OPS_MACHINE_VIEW_ID =
     readEnv('FEISHU_CAMPUS_OPS_MACHINE_VIEW_ID') || 'vewP1zyEKp';
   private readonly CAMPUS_OPS_CACHE_TTL_MS =
@@ -1372,7 +1372,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       pickField(fields, ['员工姓名', '人员']),
     );
     const supervisorText = extractDisplayText(
-      pickField(fields, ['示例人员001', '直接示例人员001']),
+      pickField(fields, ['主管', '直接主管']),
       '、',
     );
     const shift = this.normalizeShiftLabel(
@@ -1508,11 +1508,11 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       [
         '设施运维经理',
         '设施运维副经理',
-        '设施运维示例人员001',
-        '弱电示例人员001',
-        '电气示例人员001',
-        '暖通示例人员001',
-        '消防示例人员001',
+        '设施运维主管',
+        '弱电主管',
+        '电气主管',
+        '暖通主管',
+        '消防主管',
         '综合管理',
         '安全&消防工程师',
         '消防工程师',
@@ -1693,10 +1693,10 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   private isOrganizationPosition(position: string): boolean {
     return new Set([
       '设施运维经理',
-      '设施运维示例人员001',
-      '弱电示例人员001',
-      '电气示例人员001',
-      '暖通示例人员001',
+      '设施运维主管',
+      '弱电主管',
+      '电气主管',
+      '暖通主管',
       '设施运维副经理',
       '综合管理',
       '电气工程师',
@@ -1704,7 +1704,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       '弱电工程师',
       '安全&消防工程师',
       '消防工程师',
-      '消防示例人员001',
+      '消防主管',
       'FOC',
     ]).has(position);
   }
@@ -1716,7 +1716,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       '运维实习生',
       '110值班人员',
       '110站站长',
-      'H楼值班示例人员001',
+      'H楼值班主管',
     ]).has(position);
   }
 
@@ -1796,7 +1796,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         }
 
         const shiftData = shiftMap.get(normalizedShift)!;
-        if (position === '运维值班长' || position === 'H楼值班示例人员001') {
+        if (position === '运维值班长' || position === 'H楼值班主管') {
           shiftData.leader = person;
         } else if (position === '运维值班员' || position === '运维实习生') {
           shiftData.staff = person;
@@ -2866,13 +2866,13 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
             ? this.extractMultiSelectValues(fields['楼栋/专业'])
             : [];
           const supervisor = fields
-            ? this.extractTextValue(fields['示例人员001'])
+            ? this.extractTextValue(fields['主管'])
             : null;
           const dutyAccount = fields
             ? this.extractUserIds(fields['值班账号'])
             : [];
           const supervisorText = fields
-            ? this.extractTextValue(fields['示例人员001（文本）'])
+            ? this.extractTextValue(fields['主管（文本）'])
             : null;
           const parentRecord = fields
             ? this.extractTextValue(fields['父记录'])
@@ -3690,10 +3690,21 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     if (!approvalState.snapshot.verified) {
       throw new ServiceUnavailableException('请休假审批本地缓存缺失或已过期，请等待后台同步后重试');
     }
-    const nonDutyRecords = enrichScheduleRecordsWithLeaveApproval(nonDutySnapshot.records, approvalState.snapshot);
-    const scheduleRecords = enrichScheduleRecordsWithLeaveApproval(scheduleSnapshot.records, approvalState.snapshot);
     const inRange = (date: string | null): date is string =>
       Boolean(date && date >= startDate && date <= endDate);
+    // The caller includes adjacent rest days; unrelated historical rows need no approval projection.
+    const nonDutyRecords = enrichScheduleRecordsWithLeaveApproval(
+      nonDutySnapshot.records.filter(record => inRange(extractFeishuDateValue(
+        pickField(record.fields || {}, ['排班日期', '日期', 'schedule_date']),
+      ))),
+      approvalState.snapshot,
+    );
+    const scheduleRecords = enrichScheduleRecordsWithLeaveApproval(
+      scheduleSnapshot.records.filter(record => inRange(extractFeishuDateValue(
+        pickField(record.fields || {}, ['fldZSaDbGf', '排班日期', '日期']),
+      ))),
+      approvalState.snapshot,
+    );
     const result: LeaveRequestImpactSchedule[] = [];
 
     for (const record of nonDutyRecords) {
@@ -4450,7 +4461,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         })
         .from(appEmployeeCertInfoFormal)
         .where(
-          sql`${appEmployeeCertInfoFormal.position} IN ('运维值班长', '运维值班员', '运维实习生', '110值班人员', '110站站长', 'H楼值班示例人员001')`,
+          sql`${appEmployeeCertInfoFormal.position} IN ('运维值班长', '运维值班员', '运维实习生', '110值班人员', '110站站长', 'H楼值班主管')`,
         );
 
       this.logger.log(`获取到 ${staff.length} 条值班人员记录`);
@@ -4545,7 +4556,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
           }
 
           const shiftData = shiftMap.get(normalizedShift)!;
-          if (position === '运维值班长' || position === 'H楼值班示例人员001') {
+          if (position === '运维值班长' || position === 'H楼值班主管') {
             shiftData.leader = person;
           } else if (position === '运维值班员' || position === '运维实习生') {
             shiftData.staff = person;

@@ -9,7 +9,7 @@ import type { OvertimeApplicationSnapshot } from './overtime-workflow.types';
 
 const snapshot: OvertimeApplicationSnapshot = {
   recordId: 'rec_overtime_001',
-  applicantName: '示例人员008',
+  applicantName: '张三',
   applicantOpenId: 'ou_zhangsan',
   building: 'A楼',
   position: '运维值班员',
@@ -25,7 +25,7 @@ describe('overtime workflow cards', () => {
     const serialized = JSON.stringify(card);
     const buttons = collectButtons(card);
 
-    expect(serialized).toContain('示例人员008');
+    expect(serialized).toContain('张三');
     expect(serialized).toContain('A楼 / 运维值班员');
     expect(serialized).toContain('2026-08-13 18:00');
     expect(serialized).toContain('2026-08-14 02:00');
@@ -42,12 +42,12 @@ describe('overtime workflow cards', () => {
   it('renders approval terminal cards with visible disabled choices and no callback', () => {
     const approved = buildOvertimeApprovalResolvedCard(snapshot, {
       action: 'approve',
-      actorName: '示例人员009',
+      actorName: '施小东',
       resolvedAt: '2026-08-12 18:00',
     });
     const rejected = buildOvertimeApprovalResolvedCard(snapshot, {
       action: 'reject',
-      actorName: '示例人员009',
+      actorName: '施小东',
       resolvedAt: '2026-08-12 18:00',
     });
     for (const [card, title] of [
@@ -76,7 +76,7 @@ describe('overtime workflow cards', () => {
       actualHours: 6,
       disposition: '加班费',
       confirmedAt: '2026-08-14T09:00:00+08:00',
-      confirmedBy: '示例人员009',
+      confirmedBy: '施小东',
     });
     const serialized = JSON.stringify(confirmed);
 
@@ -101,7 +101,7 @@ describe('overtime workflow cards', () => {
     expect(serialized).toContain(snapshot.position);
     expect(serialized).toContain(snapshot.reason);
     expect(serialized).toContain('处理人');
-    expect(serialized).toContain('示例人员009');
+    expect(serialized).toContain('施小东');
     expect(serialized).toContain('08-13 10:00');
     expect(serialized).toContain('08-13 16:00');
     expect(serialized).toContain('08-14 09:00');
@@ -175,7 +175,7 @@ describe('overtime workflow cards', () => {
         actualHours: 6,
         disposition,
         confirmedAt: '2026-08-14T09:00:00+08:00',
-        confirmedBy: '示例人员009',
+        confirmedBy: '施小东',
       });
 
     expect(() => build(null)).toThrow('加班确认工时处置不能为空');
@@ -255,7 +255,7 @@ describe('overtime workflow cards', () => {
 
   it('事后确认卡严格只有一个打开调用方URL的“确认加班信息”按钮', () => {
     const confirmationUrl =
-      'https://example.com:3001/?overtimeConfirmation=rec_overtime_001&token=safe-token';
+      'https://www.sm.sjhl.online:3001/?overtimeConfirmation=rec_overtime_001&token=safe-token';
     const card = buildOvertimeConfirmationCard(
       {
         ...snapshot,
@@ -288,11 +288,11 @@ describe('overtime workflow cards', () => {
 
   it('紧凑确认卡转义动态 lark_md 文本并把 UTC 时间转换为上海时间', () => {
     const confirmationUrl =
-      'https://example.com:3001/?overtimeConfirmation=rec_overtime_001&token=safe-token';
+      'https://www.sm.sjhl.online:3001/?overtimeConfirmation=rec_overtime_001&token=safe-token';
     const card = buildOvertimeConfirmationCard(
       {
         ...snapshot,
-        applicantName: '*示例人员008*',
+        applicantName: '*张三*',
         building: '<A楼>',
         position: '[值班员]',
         reason: '_维护_<script>',
@@ -304,7 +304,7 @@ describe('overtime workflow cards', () => {
     const contents = collectLarkMarkdown(card);
     const serialized = contents.join('\n');
 
-    expect(serialized).toContain('\\*示例人员008\\*');
+    expect(serialized).toContain('\\*张三\\*');
     expect(serialized).toContain('\\<A楼\\>');
     expect(serialized).toContain('\\[值班员\\]');
     expect(serialized).toContain('\\_维护\\_\\<script\\>');
@@ -318,14 +318,14 @@ describe('overtime workflow cards', () => {
   it('业务文本按Unicode字符截断并转义飞书Markdown控制字符', () => {
     const card = buildOvertimeApprovalCard({
       ...snapshot,
-      applicantName: '*示例人员008*',
+      applicantName: '*张三*',
       reason: `${'甲'.repeat(220)}_[危险](https://example.com)<tag>`,
     });
     const contents = collectMarkdown(card);
     const applicant = contents.find((value) => value.includes('申请人'));
     const reason = contents.find((value) => value.includes('加班原因'));
 
-    expect(applicant).toContain('\\*示例人员008\\*');
+    expect(applicant).toContain('\\*张三\\*');
     expect(reason).not.toContain('[危险]');
     expect(reason).not.toContain('<tag>');
     expect(reason).toContain('…');

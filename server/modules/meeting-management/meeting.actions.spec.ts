@@ -30,11 +30,11 @@ describe('周会最新待办提取', () => {
       record_id: id,
       fields: { 日期: date, 第几周: `${date}周报`, 本周代办: content },
     });
-  it('按编号拆分，延续换行保留，沟通对象不冒充示例人员019', () => {
+  it('按编号拆分，延续换行保留，沟通对象不冒充责任人', () => {
     const meeting = make(
       'recA',
       '2026-08-19',
-      '1. 与郭海源沟通A楼ATS问题\n保留备件\n2. 调整B楼液位（示例人员019：示例人员008；截止：2026-08-21）',
+      '1. 与郭海源沟通A楼ATS问题\n保留备件\n2. 调整B楼液位（责任人：张三；截止：2026-08-21）',
     );
     const actions = parseActionSection(meeting, meeting.sections[0]);
     expect(actions).toHaveLength(2);
@@ -45,7 +45,7 @@ describe('周会最新待办提取', () => {
     });
     expect(actions[0].content).toContain('保留备件');
     expect(actions[1]).toMatchObject({
-      responsible: '示例人员008',
+      responsible: '张三',
       dueText: '2026-08-21',
       buildings: ['B楼'],
     });
@@ -75,7 +75,7 @@ describe('周会最新待办提取', () => {
     ]);
     expect(result?.newestReportDate).toBe('2026-10-07');
   });
-  it('没有明确示例人员019和截止时间时留空；空源返回null', () => {
+  it('没有明确责任人和截止时间时留空；空源返回null', () => {
     expect(latestMeetingActions([])).toBeNull();
     const meeting = make('recA', '2026-08-19', '1. 下午与武源面对面沟通问题');
     expect(parseActionSection(meeting, meeting.sections[0])[0]).toMatchObject({
@@ -88,10 +88,10 @@ describe('周会最新待办提取', () => {
     const meeting = make(
       'recA',
       '2026-08-19',
-      '1. 与示例人员021沟通，向供应商确认合同，向部门确认安排',
+      '1. 与高荣沟通，向供应商确认合同，向部门确认安排',
     );
     expect(
       parseActionSection(meeting, meeting.sections[0])[0].mentionedPeople,
-    ).toEqual(['示例人员021']);
+    ).toEqual(['高荣']);
   });
 });

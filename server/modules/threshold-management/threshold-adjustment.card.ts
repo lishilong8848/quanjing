@@ -45,7 +45,7 @@ export function thresholdAdjustmentCard(
       a.stages
         .map(
           (s) =>
-            `${s.role === 'building' ? '楼长' : '专业示例人员001'} · ${s.approver.name}：${s.decision ? (s.decision.action === 'approve' ? '通过' : '驳回') : '待审批'}`,
+            `${s.role === 'building' ? '楼长' : '专业主管'} · ${s.approver.name}：${s.decision ? (s.decision.action === 'approve' ? '通过' : '驳回') : '待审批'}`,
         )
         .join('\n'),
     ),
@@ -136,7 +136,7 @@ export function thresholdAdjustmentCard(
                 a,
                 s.role,
                 'approve',
-                `${stages.length > 1 ? (s.role === 'building' ? '楼长' : '专业示例人员001') + ' · ' : ''}确认通过`,
+                `${stages.length > 1 ? (s.role === 'building' ? '楼长' : '专业主管') + ' · ' : ''}确认通过`,
                 !waiting || !!s.decision,
               ),
             ],

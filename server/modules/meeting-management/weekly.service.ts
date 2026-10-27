@@ -72,8 +72,8 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
     // This confirmed user mapping is only valid for the application named in AGENTS.md.
     const defaults =
       (process.env.FEISHU_APP_ID || process.env.LARK_APP_ID) ===
-      'cli_0831564613853b26'
-        ? ['PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID']
+      'cli_a9d1c9fe9d381cee'
+        ? ['ou_a6644e62a43b916c6bc26148cf74f208']
         : [];
     const editors = configured.length ? configured : defaults;
     if (
@@ -112,7 +112,7 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
           this.peopleLoaded = Date.now();
         })
         .catch(() => {
-          this.peopleError = '人员列表暂时不可用，已有示例人员019保留；稍后重试';
+          this.peopleError = '人员列表暂时不可用，已有责任人保留；稍后重试';
           this.peopleLoaded = Date.now() - 240000;
         })
         .finally(() => {
@@ -220,7 +220,7 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
           )
         )
       )
-        throw new BadRequestException('示例人员019不在当前人员列表，请重新选择');
+        throw new BadRequestException('责任人不在当前人员列表，请重新选择');
     await this.meetings.detail(meeting.targetRecordId, false);
     const job = this.store.accept('meeting', normalized, actor);
     setImmediate(() => void this.tick());
@@ -607,7 +607,7 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
         this.store.completeGeneration(
           job.id,
           { status: 'success', stage: 'done' },
-          'oc_a584b9f72f95d94e665e51af321e516c',
+          'oc_ba4172984f3293d75bbe7e268d51ef40',
         );
         return;
       }
@@ -649,7 +649,7 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
               )
             )
               throw new BadRequestException(
-                '示例人员019不在当前在职员工列表，请重新选择',
+                '责任人不在当前在职员工列表，请重新选择',
               );
           }
           this.store.change(job.id, { preparedAction: command }, {});
@@ -777,7 +777,7 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
           documentUrl,
           record: summarizeMeeting(confirmed),
         },
-        'oc_a584b9f72f95d94e665e51af321e516c',
+        'oc_ba4172984f3293d75bbe7e268d51ef40',
       );
     } catch (error) {
       if (this.store.get(job.id).job.status === 'success') {

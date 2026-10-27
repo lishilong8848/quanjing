@@ -50,7 +50,7 @@ describe('AliMonthlyReportTaskCoordinatorService', () => {
               attempts: 1,
               updatedAt: STARTED_AT.toISOString(),
               fileName: 'alarm.xlsx',
-              recordUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+              recordUrl: 'https://vnet.feishu.cn/base/app?recordId=alarm',
             },
             over_power: {
               status: 'failed',
@@ -174,15 +174,15 @@ describe('AliMonthlyReportTaskCoordinatorService', () => {
     expect(persisted.periods['2026-07'].tasks).toMatchObject({
       alarm_analysis: {
         status: 'succeeded',
-        recordUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        recordUrl: 'https://vnet.feishu.cn/base/app?recordId=alarm_analysis',
       },
       over_power: {
         status: 'succeeded',
-        recordUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        recordUrl: 'https://vnet.feishu.cn/base/app?recordId=over_power',
       },
       staff_roster: {
         status: 'succeeded',
-        recordUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        recordUrl: 'https://vnet.feishu.cn/base/app?recordId=staff_roster',
       },
     });
   });
@@ -212,7 +212,7 @@ describe('AliMonthlyReportTaskCoordinatorService', () => {
           attempts: 1,
           updatedAt: STARTED_AT.toISOString(),
           fileName: 'alarm.xlsx',
-          recordUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+          recordUrl: 'https://vnet.feishu.cn/base/app?recordId=alarm',
         },
         over_power: {
           status: 'failed',
@@ -225,7 +225,7 @@ describe('AliMonthlyReportTaskCoordinatorService', () => {
           attempts: 1,
           updatedAt: STARTED_AT.toISOString(),
           fileName: 'staff.xlsx',
-          recordUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+          recordUrl: 'https://vnet.feishu.cn/base/app?recordId=staff',
         },
       },
     };
@@ -486,7 +486,7 @@ function successfulResult(reportType: AliMonthlyReportAutomationType) {
     ],
     logs: [],
     bitableRecordUrls: [
-      `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`,
+      `https://vnet.feishu.cn/base/app?recordId=${reportType}`,
     ],
   };
 }

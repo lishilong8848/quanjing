@@ -26,7 +26,7 @@ import {
 
 const TABLE_NAME = '设备轮巡执行数据';
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tbl0XK1iQ1P6VY5Y&view=vewcI3Ssfv';
 const SNAPSHOT_PATH = join(
   process.cwd(),
   'data',

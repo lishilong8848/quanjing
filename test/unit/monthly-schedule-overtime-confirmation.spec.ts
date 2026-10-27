@@ -26,7 +26,7 @@ const detail = (
   patch: Partial<OvertimeConfirmationDetail> = {},
 ): OvertimeConfirmationDetail => ({
   recordId: 'recOvertime12345678',
-  staffName: '示例人员008',
+  staffName: '张三',
   building: 'A楼',
   position: '运维值班员',
   plannedStartAt: '2026-08-11T09:00:00+08:00',
@@ -470,7 +470,7 @@ describe('monthly schedule overtime confirmation', () => {
     const historyState = { navigation: 'kept' };
     const browser = {
       location: {
-        href: 'https://example.com:3001/monthly-schedule?from=card#keep=1&overtimeConfirmation=1&recordId=rec_123&ticket=payload.signature',
+        href: 'https://www.sm.sjhl.online:3001/monthly-schedule?from=card#keep=1&overtimeConfirmation=1&recordId=rec_123&ticket=payload.signature',
       },
       history: {
         state: historyState,
@@ -488,7 +488,7 @@ describe('monthly schedule overtime confirmation', () => {
     expect(replacements).toEqual([
       {
         state: historyState,
-        url: 'https://example.com:3001/monthly-schedule?from=card#keep=1',
+        url: 'https://www.sm.sjhl.online:3001/monthly-schedule?from=card#keep=1',
       },
     ]);
     expect(replacements[0].url).not.toContain('ticket');
@@ -500,7 +500,7 @@ describe('monthly schedule overtime confirmation', () => {
     const historyState = { navigation: 'kept' };
     const browser = {
       location: {
-        href: 'https://example.com:3001/overtime-confirmation?keep=1&overtimeConfirmation=1&recordId=rec_123&ticket=payload.signature#anchor=kept',
+        href: 'https://www.sm.sjhl.online:3001/overtime-confirmation?keep=1&overtimeConfirmation=1&recordId=rec_123&ticket=payload.signature#anchor=kept',
       },
       history: {
         state: historyState,
@@ -518,7 +518,7 @@ describe('monthly schedule overtime confirmation', () => {
     expect(replacements).toEqual([
       {
         state: historyState,
-        url: 'https://example.com:3001/overtime-confirmation?keep=1#anchor=kept',
+        url: 'https://www.sm.sjhl.online:3001/overtime-confirmation?keep=1#anchor=kept',
       },
     ]);
   });
@@ -593,7 +593,7 @@ describe('monthly schedule overtime confirmation', () => {
     const replacements: string[] = [];
     const browser = {
       location: {
-        href: 'https://example.com:3001/monthly-schedule#overtimeConfirmation=1&recordId=rec_123&ticket=not-a-signed-ticket',
+        href: 'https://www.sm.sjhl.online:3001/monthly-schedule#overtimeConfirmation=1&recordId=rec_123&ticket=not-a-signed-ticket',
       },
       history: {
         state: null,
@@ -608,7 +608,7 @@ describe('monthly schedule overtime confirmation', () => {
       message: '加班确认链接无效，请从最新飞书卡片重新打开',
     });
     expect(replacements).toEqual([
-      'https://example.com:3001/monthly-schedule',
+      'https://www.sm.sjhl.online:3001/monthly-schedule',
     ]);
   });
 

@@ -21,9 +21,9 @@ import type { ThresholdAdjustmentEntry } from './threshold-adjustment.store';
 import { getFeishuAuthPayload } from '../../common/config/external-services.config';
 import { thresholdText } from '../../../shared/threshold-bitable';
 
-export const THRESHOLD_APPROVAL_BASE = 'PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN';
-export const THRESHOLD_APPROVAL_TABLE = 'tbl63e8826f2494b';
-export const THRESHOLD_ORGANIZATION_TABLE = 'tble6c080658c1b2';
+export const THRESHOLD_APPROVAL_BASE = 'KdCZbSL5CaTErKsFwFucddA5nYd';
+export const THRESHOLD_APPROVAL_TABLE = 'tbltpz07sO7GYZDd';
+export const THRESHOLD_ORGANIZATION_TABLE = 'tblZsQ6UmLdg9a2m';
 export const THRESHOLD_APPROVAL_FIELDS: Record<string, number> = {
   程序申请编号: 1,
   阈值记录标识: 1,
@@ -62,7 +62,7 @@ export class ThresholdAdjustmentGateway {
         appToken: THRESHOLD_APPROVAL_BASE,
         tableId: THRESHOLD_ORGANIZATION_TABLE,
         tableName: '阈值调整组织架构',
-        fieldNames: ['职位', '示例人员001', '楼栋/专业', '专业', '楼栋'],
+        fieldNames: ['职位', '主管', '楼栋/专业', '专业', '楼栋'],
         strict: true,
         allowStale: false,
         cacheTtlMs: 300000,
@@ -73,7 +73,7 @@ export class ThresholdAdjustmentGateway {
           position = extractDisplayText(f['职位'], '');
         const buildings = extractDisplayValues(f['楼栋/专业']);
         const professions = extractDisplayValues(f['专业']);
-        const users = f['示例人员001'];
+        const users = f['主管'];
         if (!Array.isArray(users)) continue;
         for (const user of users)
           if (
@@ -189,7 +189,7 @@ export class ThresholdAdjustmentGateway {
     }
     const names = {
       routing: '审批准备中',
-      pending: '楼长及专业示例人员001审批',
+      pending: '楼长及专业主管审批',
       approved: '审批通过',
       awaiting_completion: '待工程师确认',
       confirmed: '工程师已确认',

@@ -1,6 +1,6 @@
-const TABLE_ID = 'tblf1bbd02a2b049';
+const TABLE_ID = 'tblpCzmTT3EapaUY';
 const SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E';
 const DEFAULT_OPENAPI_BASE_URL = 'https://open.feishu.cn/open-apis';
 const MAX_OPENAPI_PAGES = 100;
 const OPENAPI_TIMEOUT_MS = 15_000;
@@ -9,7 +9,7 @@ const REQUIRED_FIELDS = [
   select('审批来源', ['飞书工作流', '程序卡片']),
   select('请假工作流状态', [
     '待路由',
-    '待示例人员001审批',
+    '待主管审批',
     '待经理审批',
     '已审批',
     '已驳回',

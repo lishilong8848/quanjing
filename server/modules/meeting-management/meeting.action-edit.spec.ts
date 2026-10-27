@@ -45,16 +45,16 @@ describe('单项待办修改', () => {
   it('选择员工使用稳定身份，正文只写姓名', () => {
     const assignee = {
       kind: 'employee' as const,
-      name: '示例人员020',
+      name: '马进宇',
       openId: 'ou_12345678901',
     };
     const result = prepareActionEdit({ ...input, assignee }, original);
     expect(result.assignee).toEqual(assignee);
-    expect(result.desiredText).toContain('示例人员019：示例人员020');
+    expect(result.desiredText).toContain('责任人：马进宇');
     expect(result.desiredText).not.toContain('ou_');
   });
-  it('自定义身份独立，替换示例人员019保留截止与状态', () => {
-    const text = '1. 检查（示例人员019：示例人员008；截止：2026-10-10；状态：待办）';
+  it('自定义身份独立，替换责任人保留截止与状态', () => {
+    const text = '1. 检查（责任人：张三；截止：2026-10-10；状态：待办）';
     const result = prepareActionEdit(
       {
         ...input,
@@ -64,16 +64,16 @@ describe('单项待办修改', () => {
       },
       text,
     );
-    expect(result.desiredText).toBe(text.replace('示例人员008', '唐工'));
+    expect(result.desiredText).toBe(text.replace('张三', '唐工'));
   });
-  it('清除示例人员019且保留句子', () => {
-    const text = '1. 由示例人员008负责调整';
+  it('清除责任人且保留句子', () => {
+    const text = '1. 由张三负责调整';
     expect(
       prepareActionEdit(
         {
           ...input,
-          expectedContent: '由示例人员008负责调整',
-          content: '由示例人员008负责调整',
+          expectedContent: '由张三负责调整',
+          content: '由张三负责调整',
           assignee: { kind: 'unassigned' },
         },
         text,
@@ -100,7 +100,7 @@ describe('单项待办修改', () => {
       prepareActionEdit(
         {
           ...input,
-          assignee: { kind: 'employee', name: '示例人员020', openId: '示例人员020' },
+          assignee: { kind: 'employee', name: '马进宇', openId: '马进宇' },
         },
         original,
       ),

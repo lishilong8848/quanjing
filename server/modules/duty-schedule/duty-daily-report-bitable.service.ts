@@ -51,8 +51,8 @@ interface FeishuAttachmentValue {
   name?: string;
 }
 
-const DEFAULT_DAILY_REPORT_APP_TOKEN = 'PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_APP_TOKEN';
-const DEFAULT_DAILY_REPORT_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_TABLE_ID';
+const DEFAULT_DAILY_REPORT_APP_TOKEN = 'MliKbC3fXa8PXrsndKscmxjdn1g';
+const DEFAULT_DAILY_REPORT_TABLE_ID = 'tblxfd0HA9kDZQ3w';
 const CHINA_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 @Injectable()
 export class DutyDailyReportBitableService {

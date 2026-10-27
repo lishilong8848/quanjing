@@ -19,12 +19,12 @@ module.exports = {
     setupMiddlewares(middlewares, server) {
       server.app.use(express.json());
       const api = '/api/bitable/alarm-human-reviews';
-      server.app.get(`${api}/people`, (_req, res) => res.json([{ recordId: 'recPersonA', name: '测试示例人员019甲', position: '工程师', buildings: ['A'] }, { recordId: 'recPersonB', name: '测试示例人员019乙', position: '值班长', buildings: ['B'] }]));
+      server.app.get(`${api}/people`, (_req, res) => res.json([{ recordId: 'recPersonA', name: '测试责任人甲', position: '工程师', buildings: ['A'] }, { recordId: 'recPersonB', name: '测试责任人乙', position: '值班长', buildings: ['B'] }]));
       server.app.get(`${api}/mutation/:id`, (req, res) => res.json(tasks.get(req.params.id) || null));
       server.app.post(api, (req, res) => {
         submits++;
         let task = tasks.get(req.body.clientMutationId);
-        if (!task) { writes++; task = { ...req.body, id: `fixture-${writes}`, responsibleName: '测试示例人员019甲', items: req.body.recordIds.map(recordId => ({ recordId, state: 'pending', message: '' })), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), polls: 0 }; tasks.set(req.body.clientMutationId, task); }
+        if (!task) { writes++; task = { ...req.body, id: `fixture-${writes}`, responsibleName: '测试责任人甲', items: req.body.recordIds.map(recordId => ({ recordId, state: 'pending', message: '' })), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), polls: 0 }; tasks.set(req.body.clientMutationId, task); }
         if (req.headers['x-fixture-response-lost'] === '1') return res.status(503).json({ message: '提交响应丢失（测试）' });
         res.json(task);
       });

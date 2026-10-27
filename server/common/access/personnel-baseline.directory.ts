@@ -55,7 +55,7 @@ export class PersonnelBaselineDirectory {
             case 'building_executor':return [await purchase.resolveBuildingSupervisorAsApp(scope.building,scope.specialty||undefined)];
             case 'warehouse_approver':return warehouse.resolveApprovers(scope.building,true);
             case 'warehouse_notify':return warehouse.resolveNotificationRecipients(scope.building,true);
-            case 'contract_notify':{const prior=await cards.read('contract_notify',null);if(prior.members===null)throw Error('合同按单据示例人员019动态通知，不能改为全局固定岗位');return prior.members;}
+            case 'contract_notify':{const prior=await cards.read('contract_notify',null);if(prior.members===null)throw Error('合同按单据责任人动态通知，不能改为全局固定岗位');return prior.members;}
             default:{
               const needsLeave=['building_supervisor','leave_supervisor','leave_manager','professional_supervisor'].includes(duty.kind);
               const needsOvertime=['building_supervisor','overtime_supervisor','overtime_manager','professional_supervisor'].includes(duty.kind);

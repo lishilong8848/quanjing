@@ -80,8 +80,8 @@ describe('DingTalkAttendanceClient', () => {
             result: {
               list:
                 body.dept_id === 1
-                  ? [{ userid: 'u1', name: '示例人员008' }]
-                  : [{ userid: 'u2', name: '示例人员013' }],
+                  ? [{ userid: 'u1', name: '张三' }]
+                  : [{ userid: 'u2', name: '李四' }],
               has_more: false,
             },
           },
@@ -94,8 +94,8 @@ describe('DingTalkAttendanceClient', () => {
     } as unknown as HttpService);
 
     await expect(client.listAllUsers()).resolves.toEqual([
-      { userId: 'u1', name: '示例人员008' },
-      { userId: 'u2', name: '示例人员013' },
+      { userId: 'u1', name: '张三' },
+      { userId: 'u2', name: '李四' },
     ]);
     expect(post.mock.calls.every(([url]) => !url.includes('test-client'))).toBe(
       true,
@@ -117,7 +117,7 @@ describe('DingTalkAttendanceClient', () => {
             data: {
               errcode: 0,
               result: {
-                list: [{ userid: 'u1', name: '示例人员008' }],
+                list: [{ userid: 'u1', name: '张三' }],
                 has_more: false,
               },
             },
@@ -130,7 +130,7 @@ describe('DingTalkAttendanceClient', () => {
       axiosRef: { post: firstPost },
     } as unknown as HttpService);
     await expect(firstClient.listAllUsers()).resolves.toEqual([
-      { userId: 'u1', name: '示例人员008' },
+      { userId: 'u1', name: '张三' },
     ]);
 
     const secondPost = jest.fn(() => {
@@ -141,7 +141,7 @@ describe('DingTalkAttendanceClient', () => {
     } as unknown as HttpService);
 
     await expect(secondClient.listAllUsers()).resolves.toEqual([
-      { userId: 'u1', name: '示例人员008' },
+      { userId: 'u1', name: '张三' },
     ]);
     expect(secondPost).not.toHaveBeenCalled();
   });
@@ -169,20 +169,20 @@ describe('DingTalkAttendanceClient', () => {
         throw new Error(`unexpected url: ${url}`);
       });
 
-    const firstPost = buildPost('u1', '示例人员008');
+    const firstPost = buildPost('u1', '张三');
     const firstClient = new DingTalkAttendanceClient({
       axiosRef: { post: firstPost },
     } as unknown as HttpService);
     await firstClient.listAllUsers();
 
     process.env.DINGTALK_ATTENDANCE_CLIENT_ID = 'replacement-client-id';
-    const secondPost = buildPost('u2', '示例人员013');
+    const secondPost = buildPost('u2', '李四');
     const secondClient = new DingTalkAttendanceClient({
       axiosRef: { post: secondPost },
     } as unknown as HttpService);
 
     await expect(secondClient.listAllUsers()).resolves.toEqual([
-      { userId: 'u2', name: '示例人员013' },
+      { userId: 'u2', name: '李四' },
     ]);
     expect(
       secondPost.mock.calls.some(([url]) => url.includes('/user/list')),

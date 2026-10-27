@@ -48,7 +48,7 @@ describe('purchase manager approval configuration', () => {
 
     expect(readPurchaseManagerApprover()).toEqual({
       openId: 'ou_manager_01',
-      name: '示例人员020',
+      name: '马进宇',
     });
   });
 

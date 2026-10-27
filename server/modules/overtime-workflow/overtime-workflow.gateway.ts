@@ -30,10 +30,10 @@ export const OVERTIME_ORGANIZATION_READER = Symbol(
 );
 export const OVERTIME_WORKFLOW_CLOCK = Symbol('OVERTIME_WORKFLOW_CLOCK');
 
-const DEFAULT_ORGANIZATION_APP_TOKEN = 'PUBLIC_EXAMPLE_FEISHU_ORG_APP_TOKEN';
-const DEFAULT_ORGANIZATION_TABLE_ID = 'tbl82d0b2f3ddc70';
+const DEFAULT_ORGANIZATION_APP_TOKEN = 'F9lDbA5XKaLmyasoARRcZFpKnZd';
+const DEFAULT_ORGANIZATION_TABLE_ID = 'tblZipVFGY4D65tw';
 const DEFAULT_ORGANIZATION_VIEW_ID = 'vewkJ9WMUS';
-const DEFAULT_OVERTIME_TABLE_ID = 'tblf1bbd02a2b049';
+const DEFAULT_OVERTIME_TABLE_ID = 'tblpCzmTT3EapaUY';
 const ORGANIZATION_CACHE_TTL_MS = 4 * 60 * 60 * 1_000;
 const CARD_MAX_BYTES = 30 * 1_024;
 const FEISHU_REQUEST_TIMEOUT_MS = 15_000;
@@ -369,11 +369,11 @@ export function mapOrganizationRoutingRecords(
         .map(normalizeBusinessText)
         .filter(Boolean),
     );
-    const supervisorUsers = extractUsers(fields['示例人员001']);
+    const supervisorUsers = extractUsers(fields['主管']);
     const supervisorNames = unique(
       [
         ...supervisorUsers.map((entry) => entry.name),
-        ...extractDisplayValues(fields['示例人员001（文本）']).map(
+        ...extractDisplayValues(fields['主管（文本）']).map(
           normalizeBusinessText,
         ),
       ].filter(Boolean),
@@ -385,7 +385,7 @@ export function mapOrganizationRoutingRecords(
       ...supervisorUsers,
     ]);
     if (!directUsers.length) {
-      const name = firstText(fields, ['姓名', '示例人员001（文本）', '值班账号']);
+      const name = firstText(fields, ['姓名', '主管（文本）', '值班账号']);
       if (name) {
         const key = `name:${name}:${position}:${buildings.join(',')}`;
         result.set(key, {

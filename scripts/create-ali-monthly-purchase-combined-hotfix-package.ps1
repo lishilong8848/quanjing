@@ -977,7 +977,7 @@ Assert-CompiledFileContains -RelativePath 'tools/ali-monthly-report/ali_monthly_
 Assert-CompiledFileContains -RelativePath 'tools/ali-monthly-report/ali_monthly_reports/staff.py' -Markers @(
   '实习生及备岗',
   '本月新增人员姓名',
-  '示例人员004员'
+  '其他人员'
 )
 Assert-CompiledFileContains -RelativePath 'tools/ali-monthly-report-email/app.py' -Markers @(
   '/api/local_file/open',
@@ -1038,9 +1038,9 @@ $readmeLines = @(
   '- 阿里月报服务端：告警分析、超功率和人员变动上传资料管理多维表；手动成功向双群发送互动卡片，按钮直接打开真实 Base 记录。',
   '- Base app token 在 Python 成功结果中仅供内存解析，生成真实记录链接，不再出现 `/base/***`。',
   '- 阿里月报工具：告警分析和人员变动按年月更新或新建多维表记录、TOP5 直取、独立版文件操作入口、离线依赖安装；人员变动配置示例随包提供。',
-  '- 一键打包四项：使用标准库轻量下载器并发从资料管理多维表各下载 1 份超功率、TOP5、告警分析和人员变动文件，不执行月报 Python 依赖预检；生成唯一 ZIP，并将同一 ZIP 文件发送到配置的会话群和示例人员020。',
+  '- 一键打包四项：使用标准库轻量下载器并发从资料管理多维表各下载 1 份超功率、TOP5、告警分析和人员变动文件，不执行月报 Python 依赖预检；生成唯一 ZIP，并将同一 ZIP 文件发送到配置的会话群和马进宇。',
   '- 飞书附件短暂返回 `Data not ready` 时按 1/2/4 秒有限退避重试，仍受单文件 90 秒总上限保护。',
-  '- “文件与邮件”默认收件人为 `user-b54e355d@example.com`，服务器无本地配置时仍与本地页面一致，环境变量可覆盖。',
+  '- “文件与邮件”默认收件人为 `ma.jinyu@vnet.com`，服务器无本地配置时仍与本地页面一致，环境变量可覆盖。',
   '- 每月 3 日 09:00（Asia/Shanghai）自动生成上月告警分析、超功率和人员变动；三项并行后只向自动任务群发送一次汇总卡片。',
   '- 失败项每小时重试；相同失败摘要不重复刷群，成功项不会重复生成；生产状态持久化到发布目录同级 `nantong-schedule-state`。',
   '- 采购申请：采购形式、单一原因、附件选择、提交中即时反馈与防重复提交。',
@@ -1057,8 +1057,8 @@ $readmeLines = @(
   '6. 不要覆盖现有 `.env`、`.env.local`、config.json、业务数据、下载结果或日志；不要删除发布目录同级 `nantong-schedule-state`。',
   '7. 在服务器现有环境文件中确认 `ALI_MONTHLY_REPORT_PUBLIC_BASE_URL`（或 `PUBLIC_BASE_URL`）为外部可访问的 HTTPS 应用基址。',
   '8. 配置 `ALI_MONTHLY_REPORT_FEISHU_CHAT_IDS` 作为手动成功互动卡片的群 ID 列表；旧 `ALI_MONTHLY_REPORT_FEISHU_CHAT_ID` 仍兼容。',
-  '9. 可选配置 `ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_OPEN_ID`；设置后优先按该 open_id 将四项 ZIP 发送给示例人员020。',
-  '10. 可选配置 `ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_EMAIL`；未配置 open_id 时按该邮箱发送，未设置则使用程序默认的示例人员020企业邮箱。',
+  '9. 可选配置 `ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_OPEN_ID`；设置后优先按该 open_id 将四项 ZIP 发送给马进宇。',
+  '10. 可选配置 `ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_EMAIL`；未配置 open_id 时按该邮箱发送，未设置则使用程序默认的马进宇企业邮箱。',
   '11. 配置 `ALI_MONTHLY_REPORT_AUTOMATION_CHAT_ID` 作为每月自动任务汇总卡片的唯一目标群，并确认 `ALI_MONTHLY_REPORT_FEISHU_APP_ID`、`ALI_MONTHLY_REPORT_FEISHU_APP_SECRET`。',
   '12. 配置 `STAFF_REPORT_TABLE_ID`、`STAFF_REPORT_VIEW_ID`；可参考 `tools/ali-monthly-report/config.example.json`，不要把环境文件或凭据放进热包。',
   '13. 确认 `ALI_ALARM_TEMPLATE_PATH` 指向服务器既有告警模板，并在启动前检查告警模板文件存在且可读；本包不包含业务 XLSX 模板，避免覆盖用户模板。',
@@ -1073,7 +1073,7 @@ $readmeLines = @(
   '## 验收',
   '',
   '- 阿里月报：分别生成告警分析、超功率和人员变动，确认资料管理多维表同年月记录已覆盖或新增；双群卡片按钮均能打开真实记录，不出现 `/base/***` 或服务器 public-files 签名链接。',
-  '- 一键打包4项文件：确认结果区列出超功率、TOP5、告警分析、人员变动各 1 份，ZIP 文件发送到配置的会话群和示例人员020，重复点击不会重复创建或投递。',
+  '- 一键打包4项文件：确认结果区列出超功率、TOP5、告警分析、人员变动各 1 份，ZIP 文件发送到配置的会话群和马进宇，重复点击不会重复创建或投递。',
   '- 自动任务：在受控测试时钟下验证三项并行、成功/部分失败/失败汇总、失败项每小时重试和相同失败不重复通知。',
   '- 采购页面：确认可切换“三方比价 / 单一采购”；单一采购显示必填“单一原因”且不提交隐藏的比价附件。',
   '- 采购提交：受控提交一次，确认出现“提交中”反馈且不会重复创建采购单。',

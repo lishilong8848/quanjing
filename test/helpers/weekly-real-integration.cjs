@@ -55,14 +55,14 @@ const step = (name) => {
 };
 async function main() {
   try {
-    if (process.env.FEISHU_APP_ID !== 'cli_0831564613853b26')
+    if (process.env.FEISHU_APP_ID !== 'cli_a9d1c9fe9d381cee')
       throw new Error('验收应用不匹配');
     if (!(await engine.check()).ready) throw new Error('引擎未就绪');
     const people = await gateway.people();
     const owner = people.find(
-      (p) => p.openId === 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID',
+      (p) => p.openId === 'ou_a6644e62a43b916c6bc26148cf74f208',
     );
-    if (!owner) throw new Error('已确认账号不在示例人员019员目录');
+    if (!owner) throw new Error('已确认账号不在责任人员目录');
     step('engine-and-person-directory-ready');
     const artifact = await engine.call({
       action: 'prepare',
@@ -87,7 +87,7 @@ async function main() {
     if ((await gateway.findCreated(proof.runId)) !== proof.rowId)
       throw new Error('创建标识回读不符');
     step('row-marker-confirmed');
-    const text = `1. ${proof.runId} 测试待办（验收后清理）｜示例人员019：${owner.name}｜截止：2000-01-06｜待办`;
+    const text = `1. ${proof.runId} 测试待办（验收后清理）｜责任人：${owner.name}｜截止：2000-01-06｜待办`;
     await gateway.update(
       proof.rowId,
       { 阿里会议待办: '' },
@@ -165,7 +165,7 @@ async function main() {
           throw new Error('清理标识不匹配');
         const access = await getTenantAccessToken(http);
         const response = await http.axiosRef.delete(
-          `https://open.feishu.cn/open-apis/bitable/v1/apps/Ku17b5rmgaULYJsioBpcHl0Xnqd/tables/tbl96c6dccf01af4/records/${proof.rowId}`,
+          `https://open.feishu.cn/open-apis/bitable/v1/apps/Ku17b5rmgaULYJsioBpcHl0Xnqd/tables/tbl9GlPjdwTHIKSp/records/${proof.rowId}`,
           { timeout: 10000, headers: { Authorization: `Bearer ${access}` } },
         );
         if (

@@ -84,7 +84,7 @@ async function main() {
 
     await page.getByLabel('修改待办1', { exact: true }).click();
     await dialog().getByLabel('搜索在职员工').fill('马');
-    await dialog().getByRole('button', { name: '示例人员020', exact: true }).click();
+    await dialog().getByRole('button', { name: '马进宇', exact: true }).click();
     const revised = `${first.content}【隔离验收修改】`;
     await dialog().getByLabel('待办内容', { exact: true }).fill(revised);
     await control('weekly-delay');
@@ -122,20 +122,20 @@ async function main() {
     assert(edited.latestActions.items[0].content.startsWith(revised));
     assert.equal(
       edited.latestActions.items[0].assignee.openId,
-      'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID',
+      'ou_a6644e62a43b916c6bc26148cf74f208',
     );
     assert.deepEqual(
       edited.latestActions.items.slice(1),
       initial.latestActions.items.slice(1),
     );
-    check('内容和员工示例人员019同步、刷新保留、相邻事项不变、重复点击只提交一次');
+    check('内容和员工责任人同步、刷新保留、相邻事项不变、重复点击只提交一次');
 
     await control('weekly-fail');
-    await page.getByLabel('修改示例人员0192', { exact: true }).click();
+    await page.getByLabel('修改责任人2', { exact: true }).click();
     await dialog()
       .getByRole('button', { name: '自定义人员', exact: true })
       .click();
-    await dialog().getByLabel('自定义示例人员019').fill('唐工');
+    await dialog().getByLabel('自定义责任人').fill('唐工');
     await dialog()
       .getByLabel('待办内容', { exact: true })
       .fill('隔离验收：协调厂家修复照明并保留备件');
@@ -172,7 +172,7 @@ async function main() {
           targetRecordId: current.sourceRecordId,
           actionId: current.id,
           expectedContent: current.content,
-          content: '示例人员004员先修改的内容',
+          content: '其他人员先修改的内容',
         }),
       })
     ).json();
@@ -198,7 +198,7 @@ async function main() {
     await page.getByLabel('目标周报').selectOption(target.id);
     await page.getByRole('button', { name: '阿里待办', exact: true }).click();
     const block =
-      'A楼：\n1. 检查照明\n  保留缩进及补充说明\n\n2. 复核液位（示例人员019：唐工）\n' +
+      'A楼：\n1. 检查照明\n  保留缩进及补充说明\n\n2. 复核液位（责任人：唐工）\n' +
       '完整会议待办补充内容。'.repeat(300);
     await dialog().getByLabel('整段待办内容').fill(block);
     await dialog()

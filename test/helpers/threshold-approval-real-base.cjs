@@ -31,7 +31,7 @@ async function main() {
     gateway = new ThresholdAdjustmentGateway(http),
     context = await gateway.readContext();
   const self = context.roles.find(
-    (p) => p.openId === 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID',
+    (p) => p.openId === 'ou_a6644e62a43b916c6bc26148cf74f208',
   );
   if (!self) throw new Error('当前应用未确认本人Open ID，停止真实验收');
   if (process.argv.includes('--audit-cleanup')) {

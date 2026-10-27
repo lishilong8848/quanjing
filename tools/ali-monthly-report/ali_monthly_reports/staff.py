@@ -91,7 +91,7 @@ def write_staff_roster_workbook(
     for section_index, (title, section_new_hires, section_leavers) in enumerate(
         [
             ("实习生及备岗", intern_or_backup_new_hires, intern_or_backup_leavers),
-            ("示例人员004员", other_new_hires, other_leavers),
+            ("其他人员", other_new_hires, other_leavers),
         ]
     ):
         changes_ws.append([title])

@@ -1,9 +1,9 @@
 import { ServiceUnavailableException } from '@nestjs/common';
 import { readEmployeeOnboardingConfig } from './employee-onboarding.config';
 
-const DEFAULT_WIKI_TOKEN = 'PUBLIC_EXAMPLE_FEISHU_ACTIVE_EMPLOYEE_WIKI_TOKEN';
-const DEFAULT_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID';
-const DIRECT_BASE_TOKEN = 'PUBLIC_EXAMPLE_FEISHU_ORG_APP_TOKEN';
+const DEFAULT_WIKI_TOKEN = 'AdQmwOqwei6Xr4kag3pcp1Flnmg';
+const DEFAULT_TABLE_ID = 'tblOu75UtJTDNHIM';
+const DIRECT_BASE_TOKEN = 'F9lDbA5XKaLmyasoARRcZFpKnZd';
 const GENERIC_ERROR_MESSAGE = '新员工入职数据源配置不可用，请联系管理员';
 
 function read(env: Record<string, string | undefined>) {
@@ -32,12 +32,12 @@ describe('readEmployeeOnboardingConfig', () => {
   it('解析专用完整 Base URL，兼容真实的非 bas 前缀 token', () => {
     expect(
       read({
-        FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL: `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`,
+        FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL: `https://vnet.feishu.cn/base/${DIRECT_BASE_TOKEN}?table=tblDedicated123&view=vewIgnored123`,
       }),
     ).toEqual({
       appToken: DIRECT_BASE_TOKEN,
       wikiToken: '',
-      tableId: 'tbl82a8ba9ec64d',
+      tableId: 'tblDedicated123',
       tableName: '员工信息池（全量）',
     });
   });
@@ -46,7 +46,7 @@ describe('readEmployeeOnboardingConfig', () => {
     expect(
       read({
         FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL:
-          'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/base/SourceAppToken1234?table=tblSource123',
         FEISHU_EMPLOYEE_ONBOARDING_APP_TOKEN: 'DedicatedAppToken1234',
         FEISHU_EMPLOYEE_ONBOARDING_WIKI_TOKEN: 'DedicatedWikiToken1234',
         FEISHU_EMPLOYEE_ONBOARDING_TABLE_ID: 'tblExplicit123',
@@ -63,7 +63,7 @@ describe('readEmployeeOnboardingConfig', () => {
     expect(
       read({
         FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL:
-          'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/base/SourceAppToken1234?table=tblSource123',
         FEISHU_EMPLOYEE_ONBOARDING_WIKI_TOKEN: 'DedicatedWikiToken1234',
       }),
     ).toEqual({
@@ -78,7 +78,7 @@ describe('readEmployeeOnboardingConfig', () => {
     expect(
       read({
         FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL:
-          'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/wiki/SourceWikiToken12345?table=tblSource123',
         FEISHU_PERSONNEL_MOVEMENT_APP_TOKEN: 'bad-token!',
       }),
     ).toEqual({
@@ -93,16 +93,16 @@ describe('readEmployeeOnboardingConfig', () => {
     expect(
       read({
         FEISHU_PERSONNEL_MOVEMENT_SOURCE_URL:
-          'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/wiki/PersonnelWikiToken1234?table=tblPersonnel123',
         FEISHU_ORG_SOURCE_URL:
-          'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/wiki/OrgWikiToken123456?table=tblOrg123',
         FEISHU_ORGANIZATION_SOURCE_URL:
-          'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/wiki/OrganizationWiki123?table=tblOrganization123',
       }),
     ).toEqual({
       appToken: '',
       wikiToken: 'PersonnelWikiToken1234',
-      tableId: 'tbldc7ead693e53',
+      tableId: 'tblPersonnel123',
       tableName: '员工信息池（全量）',
     });
   });
@@ -111,14 +111,14 @@ describe('readEmployeeOnboardingConfig', () => {
     expect(
       read({
         FEISHU_PERSONNEL_MOVEMENT_SOURCE_URL:
-          'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/wiki/AliasSourceWiki123?table=tblAliasSource123',
         FEISHU_PERSONNEL_MOVEMENT_APP_TOKEN: 'AliasExplicitApp123',
-        FEISHU_PERSONNEL_MOVEMENT_TABLE_ID: 'tbla8c3883bfbf7e02a',
+        FEISHU_PERSONNEL_MOVEMENT_TABLE_ID: 'tblAliasExplicit123',
       }),
     ).toEqual({
       appToken: 'AliasExplicitApp123',
       wikiToken: '',
-      tableId: 'tbla8c3883bfbf7e02a',
+      tableId: 'tblAliasExplicit123',
       tableName: '员工信息池（全量）',
     });
   });
@@ -127,13 +127,13 @@ describe('readEmployeeOnboardingConfig', () => {
     expect(
       read({
         FEISHU_PERSONNEL_MOVEMENT_SOURCE_URL:
-          'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/base/AliasSourceApp1234?table=tblAliasSource123',
         FEISHU_PERSONNEL_MOVEMENT_WIKI_TOKEN: 'AliasExplicitWiki123',
       }),
     ).toEqual({
       appToken: '',
       wikiToken: 'AliasExplicitWiki123',
-      tableId: 'tblcc48a080254354',
+      tableId: 'tblAliasSource123',
       tableName: '员工信息池（全量）',
     });
   });
@@ -146,13 +146,13 @@ describe('readEmployeeOnboardingConfig', () => {
         FEISHU_ORGANIZATION_APP_TOKEN: 'OrganizationApp123',
         FEISHU_PERSONNEL_MOVEMENT_WIKI_TOKEN: 'PersonnelWikiToken1234',
         FEISHU_ORG_WIKI_TOKEN: 'OrgWikiToken123456',
-        FEISHU_PERSONNEL_MOVEMENT_TABLE_ID: 'tbldc7ead693e53',
+        FEISHU_PERSONNEL_MOVEMENT_TABLE_ID: 'tblPersonnel123',
         FEISHU_ORG_TABLE_ID: 'tblOrg123',
       }),
     ).toEqual({
       appToken: 'PersonnelAppToken1234',
       wikiToken: 'PersonnelWikiToken1234',
-      tableId: 'tbldc7ead693e53',
+      tableId: 'tblPersonnel123',
       tableName: '员工信息池（全量）',
     });
   });
@@ -164,22 +164,22 @@ describe('readEmployeeOnboardingConfig', () => {
         FEISHU_EMPLOYEE_ONBOARDING_APP_TOKEN: '\t',
         FEISHU_PERSONNEL_MOVEMENT_SOURCE_URL: ' ',
         FEISHU_ORG_SOURCE_URL:
-          'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/base/OrgDirectToken12345?table=tblOrgSelected123',
         FEISHU_ORGANIZATION_SOURCE_URL:
-          'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/base/UnusedToken123456?table=tblUnused123',
       }),
     ).toEqual({
       appToken: 'OrgDirectToken12345',
       wikiToken: '',
-      tableId: 'tbl099b6cf87e0b9b',
+      tableId: 'tblOrgSelected123',
       tableName: '员工信息池（全量）',
     });
   });
 
   it.each([
-    'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/SHARE/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/share/base/form/shrDedicated',
+    'https://vnet.feishu.cn/SHARE/BASE/FORM/shrUpper/',
+    'https://vnet.feishu.cn/share/base/form/?token=shrQuery',
   ])('拒绝专用表单分享地址：%s', (sourceUrl) => {
     const error = captureError({
       FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL: sourceUrl,
@@ -195,9 +195,9 @@ describe('readEmployeeOnboardingConfig', () => {
   });
 
   it.each([
-    'https://example.feishu.cn/share%2Fbase%2Fform/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/sh%61re/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/share%252Fbase%252Fform/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/share%2Fbase%2Fform/shrEncoded?table=tblEncoded123',
+    'https://vnet.feishu.cn/sh%61re/base%2Fform/shrMixed?table=tblMixed123',
+    'https://vnet.feishu.cn/share%252Fbase%252Fform/shrDouble?table=tblDouble123',
   ])('拒绝编码或多重编码的表单分享路径：%s', (sourceUrl) => {
     const error = captureError({
       FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL: sourceUrl,
@@ -215,7 +215,7 @@ describe('readEmployeeOnboardingConfig', () => {
   it('拒绝含非法百分号编码的来源 URL', () => {
     const error = captureError({
       FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/ValidAppToken123/%ZZ?table=tblValid123',
       FEISHU_EMPLOYEE_ONBOARDING_APP_TOKEN: 'ExplicitAppToken1234',
       FEISHU_EMPLOYEE_ONBOARDING_TABLE_ID: 'tblExplicit123',
     });
@@ -229,7 +229,7 @@ describe('readEmployeeOnboardingConfig', () => {
       FEISHU_EMPLOYEE_ONBOARDING_APP_TOKEN: 'ExplicitAppToken1234',
       FEISHU_EMPLOYEE_ONBOARDING_TABLE_ID: 'tblExplicit123',
       FEISHU_ORG_SOURCE_URL:
-        'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/share/base/form/shrAliasMustFail?from=config',
     });
 
     expect(error).toBeInstanceOf(ServiceUnavailableException);
@@ -238,11 +238,11 @@ describe('readEmployeeOnboardingConfig', () => {
   });
 
   it.each([
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/?table=tblValid123',
+    'https://vnet.feishu.cn/base/ValidAppToken123',
     'not a URL',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/base/form?table=tblValid123',
+    'https://vnet.feishu.cn/base/ValidAppToken123/wiki/ValidWikiToken123?table=tblValid123',
     'https://example.com/base/ValidAppToken123?table=tblValid123',
   ])('即使有显式目标也拒绝不完整或非飞书来源 URL：%s', (sourceUrl) => {
     const error = captureError({
@@ -258,9 +258,9 @@ describe('readEmployeeOnboardingConfig', () => {
 
   it('拒绝未被选中但无效的兼容来源 URL', () => {
     const error = captureError({
-      FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL: `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`,
+      FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL: `https://vnet.feishu.cn/base/${DIRECT_BASE_TOKEN}?table=tblDedicated123`,
       FEISHU_ORGANIZATION_SOURCE_URL:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/UnusedAliasToken123',
     });
 
     expect(error).toBeInstanceOf(ServiceUnavailableException);
@@ -294,7 +294,7 @@ describe('readEmployeeOnboardingConfig', () => {
 
   it('返回对象不泄露 sourceUrl、viewId 或其他配置', () => {
     const config = read({
-      FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL: `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`,
+      FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL: `https://vnet.feishu.cn/base/${DIRECT_BASE_TOKEN}?table=tblDedicated123&view=vewMustNotLeak`,
     });
 
     expect(Object.keys(config).sort()).toEqual([

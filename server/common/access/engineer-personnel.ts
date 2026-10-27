@@ -8,7 +8,7 @@ export function readPersonnelEngineerScope(fields: BitableRecordItem['fields']):
   const position = extractDisplayText(fields?.['岗位'], '、').trim();
   const systemPosition = extractDisplayText(fields?.['体系岗位'], '、').trim();
   const labels = [position, systemPosition].filter(Boolean);
-  if (!labels.some(value => value.includes('工程师')) || labels.some(value => /示例人员001|经理|总监|负责人/u.test(value))) return { engineerScope: null };
+  if (!labels.some(value => value.includes('工程师')) || labels.some(value => /主管|经理|总监|负责人/u.test(value))) return { engineerScope: null };
   const specialtiesByLabel = labels.map(label => normalizeProfessionalScope(label.match(/电气|供配电|暖通|弱电|消防|EHS|安全|土建/giu) || []));
   const nonempty = specialtiesByLabel.filter(values => values.length);
   const scopeLabels = extractDisplayText(fields?.['机楼/专业'] ?? fields?.['机楼专业'], '、').split(/[、,，;；/]/u).map(value => value.trim()).filter(Boolean);

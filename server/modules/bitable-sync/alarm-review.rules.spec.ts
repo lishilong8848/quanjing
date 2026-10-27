@@ -16,13 +16,13 @@ describe('alarm human review rules', () => {
   });
   it('writes only the dedicated review fields', () => {
     expect(buildReviewFields('已通知现场跟进', 'user123')).toEqual({
-      人工复核结果: '已通知现场跟进', 复核示例人员019: [{ id: 'user123' }], 复核回复: '',
+      人工复核结果: '已通知现场跟进', 复核责任人: [{ id: 'user123' }], 复核回复: '',
     });
   });
   it('compares semantics, not unrelated API metadata', () => {
-    expect(reviewMatches({ 人工复核结果: '人工复核无问题', 复核示例人员019: [{ id: 'user123', name: '示例人员019', avatar_url: 'anything' }] }, '人工复核无问题', 'user123')).toBe(true);
-    expect(reviewMatches({ 人工复核结果: '人工复核无问题', 复核示例人员019: [{ id: 'someoneElse' }] }, '人工复核无问题', 'user123')).toBe(false);
-    expect(reviewMatches({ 人工复核结果: '人工复核无问题', 复核示例人员019: [] }, '人工复核无问题', 'user123')).toBe(false);
+    expect(reviewMatches({ 人工复核结果: '人工复核无问题', 复核责任人: [{ id: 'user123', name: '责任人', avatar_url: 'anything' }] }, '人工复核无问题', 'user123')).toBe(true);
+    expect(reviewMatches({ 人工复核结果: '人工复核无问题', 复核责任人: [{ id: 'someoneElse' }] }, '人工复核无问题', 'user123')).toBe(false);
+    expect(reviewMatches({ 人工复核结果: '人工复核无问题', 复核责任人: [] }, '人工复核无问题', 'user123')).toBe(false);
   });
   it('accepts a trimmed custom reply and rejects empty, nontext or excessive replies', () => {
     expect(normalizeAlarmReviewRequest({ ...input, outcome: '自定义回复', customReply: '  已核查，等待备件\n明日处理  ' }).customReply).toBe('已核查，等待备件\n明日处理');
@@ -39,29 +39,29 @@ describe('alarm human review rules', () => {
     expect(reviewMatches({ ...fields, 人工复核结果: '人工复核无问题' }, '人工复核无问题', 'user123')).toBe(false);
   });
   it('includes reply changes in versions without invalidating historic preset versions', () => {
-    const legacy = { 人工复核结果: '人工复核无问题', 复核示例人员019: [{ id: 'user123', name: '示例人员019' }] };
-    expect(reviewVersion(legacy)).toBe(createHash('sha256').update(JSON.stringify(['人工复核无问题', '示例人员019'])).digest('hex'));
+    const legacy = { 人工复核结果: '人工复核无问题', 复核责任人: [{ id: 'user123', name: '责任人' }] };
+    expect(reviewVersion(legacy)).toBe(createHash('sha256').update(JSON.stringify(['人工复核无问题', '责任人'])).digest('hex'));
     expect(reviewVersion({ ...legacy, 复核回复: '' })).toBe(reviewVersion(legacy));
     expect(reviewVersion({ ...legacy, 复核回复: '甲' })).not.toBe(reviewVersion({ ...legacy, 复核回复: '乙' }));
   });
   it.each(['已核对，待复查。', '甲、乙、甲', '现场正常\n现场正常', '甲,乙;甲'])('preserves review body punctuation and repeated segments: %s', (reply) => {
-    const fields = { 人工复核结果: '自定义回复', 复核示例人员019: [{ id: 'user123', name: '示例人员019' }], 复核回复: reply };
+    const fields = { 人工复核结果: '自定义回复', 复核责任人: [{ id: 'user123', name: '责任人' }], 复核回复: reply };
     expect(reviewMatches(fields, '自定义回复', 'user123', reply)).toBe(true);
-    expect(reviewVersion(fields)).toBe(createHash('sha256').update(JSON.stringify(['自定义回复', '示例人员019', reply])).digest('hex'));
+    expect(reviewVersion(fields)).toBe(createHash('sha256').update(JSON.stringify(['自定义回复', '责任人', reply])).digest('hex'));
   });
   it('preserves review body rich text segments without adding separators or deduplicating', () => {
     const reply = '已核对，待复查。\n重复重复';
-    const fields = { 人工复核结果: '自定义回复', 复核示例人员019: [{ id: 'user123', name: '示例人员019' }], 复核回复: [{ type: 'text', text: '已核对，' }, { type: 'text', text: '待复查。\n' }, { type: 'text', text: '重复' }, { type: 'text', text: '重复' }] };
+    const fields = { 人工复核结果: '自定义回复', 复核责任人: [{ id: 'user123', name: '责任人' }], 复核回复: [{ type: 'text', text: '已核对，' }, { type: 'text', text: '待复查。\n' }, { type: 'text', text: '重复' }, { type: 'text', text: '重复' }] };
     expect(reviewMatches(fields, '自定义回复', 'user123', reply)).toBe(true);
     expect(reviewVersion(fields)).toBe(reviewVersion({ ...fields, 复核回复: reply }));
   });
   it.each([{ value: '  已核对，待复查。\n重复重复  ' }, { value: [{ text: '  已核对，' }, { value: [{ text: '待复查。\n重复' }, { text: '重复  ' }] }] }])('preserves wrapped review body and trims only outer whitespace: %p', (reply) => {
-    const fields = { 人工复核结果: '自定义回复', 复核示例人员019: [{ id: 'user123', name: '示例人员019' }], 复核回复: reply };
+    const fields = { 人工复核结果: '自定义回复', 复核责任人: [{ id: 'user123', name: '责任人' }], 复核回复: reply };
     expect(reviewMatches(fields, '自定义回复', 'user123', '  已核对，待复查。\n重复重复  ')).toBe(true);
     expect(reviewVersion(fields)).toBe(reviewVersion({ ...fields, 复核回复: '已核对，待复查。\n重复重复' }));
   });
   it.each([undefined, null, '', [], { value: [] }])('preserves review body empty historic preset semantics: %p', (reply) => {
-    const fields = { 人工复核结果: '人工复核无问题', 复核示例人员019: [{ id: 'user123', name: '示例人员019' }] };
+    const fields = { 人工复核结果: '人工复核无问题', 复核责任人: [{ id: 'user123', name: '责任人' }] };
     expect(reviewMatches({ ...fields, 复核回复: reply }, '人工复核无问题', 'user123')).toBe(true);
     expect(reviewVersion({ ...fields, 复核回复: reply })).toBe(reviewVersion(fields));
   });

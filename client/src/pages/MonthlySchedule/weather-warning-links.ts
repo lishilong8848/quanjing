@@ -1,2 +1,2 @@
 export const WEATHER_WARNING_CHECKLIST_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/Hs4fwlplAijAgskmBnkcEDMvnKc';

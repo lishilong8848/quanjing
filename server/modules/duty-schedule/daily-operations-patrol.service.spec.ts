@@ -51,7 +51,7 @@ describe('DailyOperationsPatrolService', () => {
 
   it('uses the canonical Nantong host for card navigation links', async () => {
     process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL =
-      'https://example.com:3001/';
+      'https://www.sm.sjhl.online:3001/';
     const fixture = createFixture();
     const service = createService(fixture);
 
@@ -62,10 +62,10 @@ describe('DailyOperationsPatrolService', () => {
 
     const card = JSON.stringify(fixture.gateway.sendCard.mock.calls[0][0]);
     expect(card).toContain(
-      'https://example.com:3001/today-operations-panorama',
+      'https://sm.sjhl.online:3001/today-operations-panorama',
     );
-    expect(card).toContain('https://example.com:3001/monthly-schedule');
-    expect(card).not.toContain('https://example.com:3001');
+    expect(card).toContain('https://sm.sjhl.online:3001/monthly-schedule');
+    expect(card).not.toContain('https://www.sm.sjhl.online:3001');
   });
 
   it('does not evaluate data dated on the patrol day', async () => {

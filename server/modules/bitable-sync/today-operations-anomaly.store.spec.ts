@@ -293,7 +293,7 @@ describe('TodayOperationsAnomalyStore', () => {
       terminal: anomaly.metricKey.startsWith('alarms') ? 'acknowledged' : null,
       terminalEventId: anomaly.metricKey,
       actorOpenId: '',
-      actorName: '示例人员020',
+      actorName: '马进宇',
       handledAt: anomaly.detectedAt,
       treatmentMeasure: '',
       syncStatus: anomaly.metricKey.startsWith('alarms') ? 'completed' : 'idle',

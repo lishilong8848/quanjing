@@ -23,7 +23,7 @@ const change = (patch: Partial<ChangeInfo> = {}): ChangeInfo => ({
   type: '计划性变更',
   progress: '已结束',
   executor: null,
-  submitterName: '示例人员020',
+  submitterName: '马进宇',
   workflowStatus: '审批通过',
   hasSummaryReport: false,
   buildings: ['A楼'],
@@ -36,9 +36,9 @@ const change = (patch: Partial<ChangeInfo> = {}): ChangeInfo => ({
 
 describe('monthly schedule change summary report state', () => {
   it('accepts a formal finished record for the exact selected submitter', () => {
-    expect(isEligibleChangeSummaryRecord(change(), '示例人员020')).toBe(true);
+    expect(isEligibleChangeSummaryRecord(change(), '马进宇')).toBe(true);
     expect(isEligibleChangeSummaryRecord(change(), '马进')).toBe(false);
-    expect(isEligibleChangeSummaryRecord(change(), '示例人员0202')).toBe(false);
+    expect(isEligibleChangeSummaryRecord(change(), '马进宇2')).toBe(false);
   });
 
   it('compares submitter names after NFKC normalization and trimming', () => {
@@ -63,7 +63,7 @@ describe('monthly schedule change summary report state', () => {
   );
 
   it('keeps cached submitter options selectable after refresh failure', () => {
-    const cachedSubmitters = ['示例人员020', '彭怀响'];
+    const cachedSubmitters = ['马进宇', '彭怀响'];
 
     expect(
       resolveChangeSummaryReportCachePresentation(
@@ -78,7 +78,7 @@ describe('monthly schedule change summary report state', () => {
     });
     expect(
       filterChangeSummaryReportPersonOptions(cachedSubmitters, ''),
-    ).toEqual(['示例人员020', '彭怀响']);
+    ).toEqual(['马进宇', '彭怀响']);
   });
 
   it('blocks only an initial load that has no cached options', () => {
@@ -112,14 +112,14 @@ describe('monthly schedule change summary report state', () => {
     expect(
       isEligibleChangeSummaryRecord(
         change({ progress: '  已 结束  ' }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(true);
     expect(
-      isEligibleChangeSummaryRecord(change({ progress: '已完成' }), '示例人员020'),
+      isEligibleChangeSummaryRecord(change({ progress: '已完成' }), '马进宇'),
     ).toBe(false);
     expect(
-      isEligibleChangeSummaryRecord(change({ progress: null }), '示例人员020'),
+      isEligibleChangeSummaryRecord(change({ progress: null }), '马进宇'),
     ).toBe(false);
   });
 
@@ -130,54 +130,54 @@ describe('monthly schedule change summary report state', () => {
           id: 'change-request-pending-123',
           bitableRecordId: 'recFormal12345678',
         }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(false);
     expect(
       isEligibleChangeSummaryRecord(
         change({ id: 'local-1', bitableRecordId: 'local-1' }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(false);
     expect(
       isEligibleChangeSummaryRecord(
         change({ bitableRecordId: 'rec-short' }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(false);
   });
 
   it('requires a non-empty level other than 超低', () => {
     expect(
-      isEligibleChangeSummaryRecord(change({ level: '高' }), '示例人员020'),
+      isEligibleChangeSummaryRecord(change({ level: '高' }), '马进宇'),
     ).toBe(true);
     expect(
-      isEligibleChangeSummaryRecord(change({ level: ' 超低 ' }), '示例人员020'),
+      isEligibleChangeSummaryRecord(change({ level: ' 超低 ' }), '马进宇'),
     ).toBe(false);
     expect(
-      isEligibleChangeSummaryRecord(change({ level: '   ' }), '示例人员020'),
+      isEligibleChangeSummaryRecord(change({ level: '   ' }), '马进宇'),
     ).toBe(false);
     expect(
-      isEligibleChangeSummaryRecord(change({ level: null }), '示例人员020'),
+      isEligibleChangeSummaryRecord(change({ level: null }), '马进宇'),
     ).toBe(false);
   });
 
   it('rejects returned workflows and records that already have a summary', () => {
     for (const workflowStatus of ['已退回修改', '流程驳回', '审批通过后退回']) {
       expect(
-        isEligibleChangeSummaryRecord(change({ workflowStatus }), '示例人员020'),
+        isEligibleChangeSummaryRecord(change({ workflowStatus }), '马进宇'),
       ).toBe(false);
     }
     expect(
       isEligibleChangeSummaryRecord(
         change({ workflowStatus: null, hasSummaryReport: undefined }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(true);
     expect(
       isEligibleChangeSummaryRecord(
         change({ hasSummaryReport: true }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(false);
   });
@@ -186,29 +186,29 @@ describe('monthly schedule change summary report state', () => {
     expect(
       isEligibleChangeSummaryRecord(
         change({ startDate: '2026-06-01T00:00:00+08:00' }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(true);
     expect(
       isEligibleChangeSummaryRecord(
         change({ startDate: '2026-05-31T23:59:59+08:00' }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(false);
     expect(
       isEligibleChangeSummaryRecord(
         change({ startDate: '2026-05-31T16:00:00.000Z' }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(true);
     expect(
       isEligibleChangeSummaryRecord(
         change({ startDate: '2026-06-01T00:00:00' }),
-        '示例人员020',
+        '马进宇',
       ),
     ).toBe(true);
     expect(
-      isEligibleChangeSummaryRecord(change({ startDate: 'invalid' }), '示例人员020'),
+      isEligibleChangeSummaryRecord(change({ startDate: 'invalid' }), '马进宇'),
     ).toBe(false);
   });
 
@@ -219,7 +219,7 @@ describe('monthly schedule change summary report state', () => {
     '2026-06-01T00:00:00+14:01',
     '2026-06-01T00:00:00+08:60',
   ])('rejects the invalid explicit ISO start date %s', (startDate) => {
-    expect(isEligibleChangeSummaryRecord(change({ startDate }), '示例人员020')).toBe(
+    expect(isEligibleChangeSummaryRecord(change({ startDate }), '马进宇')).toBe(
       false,
     );
   });
@@ -231,7 +231,7 @@ describe('monthly schedule change summary report state', () => {
       '2026-06-01T00:00:00.123+08:00',
     ]) {
       expect(
-        isEligibleChangeSummaryRecord(change({ startDate }), '示例人员020'),
+        isEligibleChangeSummaryRecord(change({ startDate }), '马进宇'),
       ).toBe(true);
     }
   });
@@ -255,12 +255,12 @@ describe('monthly schedule change summary report state', () => {
     const otherSubmitter = change({
       id: 'recOther123456789',
       bitableRecordId: 'recOther123456789',
-      submitterName: '示例人员004',
+      submitterName: '其他人',
     });
     const input = [oldest, newest, otherSubmitter, middle];
 
     expect(
-      listEligibleChangeSummaryRecords(input, '示例人员020').map(({ id }) => id),
+      listEligibleChangeSummaryRecords(input, '马进宇').map(({ id }) => id),
     ).toEqual(['recNewest12345678', 'recMiddle12345678', 'recOldest12345678']);
     expect(input).toEqual([oldest, newest, otherSubmitter, middle]);
   });

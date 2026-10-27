@@ -47,11 +47,11 @@ describe('Feishu verified display name', () => {
   }
 
   it('keeps the verified name through signing, reads and renewal without changing authorization', async () => {
-    const principal = await exchange(' 示例人员020 ');
+    const principal = await exchange(' 马进宇 ');
     expect(principal).toEqual({
       role: 'admin',
       purchaseBuilding: null,
-      displayName: '示例人员020',
+      displayName: '马进宇',
     });
     const access = new UnifiedAccessService();
     const session = access.issueTrustedSession(principal, 1000);
@@ -135,10 +135,10 @@ describe('Feishu verified display name', () => {
 
   it('rejects name tampering without a valid signature', async () => {
     const access = new UnifiedAccessService();
-    const session = access.issueTrustedSession(await exchange('示例人员020'), 1000);
+    const session = access.issueTrustedSession(await exchange('马进宇'), 1000);
     const [body, signature] = session.token.split('.');
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
-    payload.displayName = '示例人员004';
+    payload.displayName = '其他人';
     const changed = Buffer.from(JSON.stringify(payload)).toString('base64url');
     expect(
       access.readSession(`${changed}.${signature}`, 2000).principal.role,

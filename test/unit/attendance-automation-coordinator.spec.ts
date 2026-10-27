@@ -793,7 +793,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
     const archivedAnomalies = [
       {
         key: 'c-cao-on',
-        name: '示例人员011',
+        name: '曹毅',
         building: 'C楼',
         shiftLabel: '白班',
         direction: 'OnDuty',
@@ -833,16 +833,16 @@ describe('AttendanceAutomationCoordinatorService', () => {
         normalByBuilding: { C楼: 2, H楼: 3, '110站': 1 },
       }),
       resolveRecipients: jest.fn().mockResolvedValue([
-        { openId: 'ou_manager', name: '示例人员020', scope: 'manager' },
+        { openId: 'ou_manager', name: '马进宇', scope: 'manager' },
         {
           openId: 'ou_c_supervisor',
-          name: 'C楼示例人员001',
+          name: 'C楼主管',
           scope: 'building',
           building: 'C楼',
         },
         {
           openId: 'ou_station',
-          name: '示例人员006',
+          name: '周海祥',
           scope: 'station',
           building: '110站',
         },
@@ -1011,9 +1011,9 @@ describe('AttendanceAutomationCoordinatorService', () => {
 
   it('sends one green 09:30 attendance and patrol summary to the configured group', async () => {
     const archivedNormal = [
-      { key: 'c-normal', name: 'C楼示例人员015', building: 'C楼' },
-      { key: 'h-normal', name: 'H楼示例人员015', building: 'H楼' },
-      { key: 'station-normal', name: '110站示例人员015', building: '110站' },
+      { key: 'c-normal', name: 'C楼正常人员', building: 'C楼' },
+      { key: 'h-normal', name: 'H楼正常人员', building: 'H楼' },
+      { key: 'station-normal', name: '110站正常人员', building: '110站' },
     ].map((item) => ({
       ...item,
       shiftLabel: '白班',
@@ -1162,7 +1162,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
   it('excludes newly approved leave and retries the single group brief idempotently', async () => {
     const event = {
       key: 'leave-punch',
-      name: '示例人员009',
+      name: '施小东',
       building: 'A楼',
       shiftLabel: '白班',
       direction: 'OnDuty',
@@ -1220,7 +1220,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
     const approved = [
       {
         recordId: 'approved-leave',
-        leaveStaff: ['示例人员009'],
+        leaveStaff: ['施小东'],
         startAt: '2026-09-07T09:00:00+08:00',
         endAt: '2026-09-07T18:00:00+08:00',
         building: 'building_a',
@@ -1237,7 +1237,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
     const cards = patrol.sendMorningBriefCard.mock.calls.map(([card]) =>
       JSON.stringify(card),
     );
-    expect(cards.every((card) => !card.includes('示例人员009'))).toBe(true);
+    expect(cards.every((card) => !card.includes('施小东'))).toBe(true);
     expect(cards.every((card) => card.includes('测试乙'))).toBe(true);
     expect(cards.every((card) => card.includes('40,000'))).toBe(true);
   });
@@ -1726,7 +1726,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
       { userId: 'ding-current', name: '当日值班员' },
       { userId: 'ding-d2-anomaly', name: 'D-2异常人员' },
       { userId: 'ding-d3-anomaly', name: 'D-3异常人员' },
-      { userId: 'ding-normal', name: '历史示例人员015' },
+      { userId: 'ding-normal', name: '历史正常人员' },
       { userId: 'ding-late-correction', name: '迟补卡人员' },
     ];
     const lateCorrection = {

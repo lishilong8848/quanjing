@@ -6,7 +6,7 @@ import type { LeaveSubstituteCandidate } from '../../server/modules/leave-workfl
 const helperPath=resolve(__dirname,'../../server/modules/leave-workflow/leave-two-level-substitution.ts');
 function helper(){expect(existsSync(helperPath)).toBe(true);return require(helperPath);}
 const person=(id:string,name:string):LeaveSubstituteCandidate=>({personRecordId:id,name,openId:`ou_${id}`,position:'运维值班员',buildings:['C楼']});
-const applicant=person('rec_liang','梁煊晨'),wu=person('rec_wu','吴亚兵'),free=person('rec_free','示例人员008');
+const applicant=person('rec_liang','梁煊晨'),wu=person('rec_wu','吴亚兵'),free=person('rec_free','张三');
 const group:LeaveRequestShiftGroup={shiftKey:'2026-10-16T09:00__2026-10-16T18:00',scheduleDate:'2026-10-16',startAt:'2026-10-16T09:00',endAt:'2026-10-16T18:00',kind:'white',shift:'白班',buildings:['D楼'],teams:['A班'],scheduleRecordIds:['rec_schedule_d'],leaveHours:9};
 const schedules:LeaveRequestImpactSchedule[]=[{recordId:'rec_schedule_d',scheduleDate:'2026-10-16',building:'D楼',team:'A班',shift:'白班',dutyStaffActual:['梁煊晨']},{recordId:'rec_schedule_c',scheduleDate:'2026-10-16',building:'C楼',team:'B班',shift:'白班',dutyStaffActual:['吴亚兵']}];
 const build=(rows=schedules,people=[applicant,wu,free])=>helper().buildTwoLevelSubstituteCandidates({group,schedules:rows,applicant,people});
@@ -31,7 +31,7 @@ describe('two-level leave substitution rules',()=>{
   expect(result).toMatchObject({valid:true,primary:{personRecordId:'rec_wu'},backfills:[{person:{personRecordId:'rec_free'},group:{buildings:['C楼'],scheduleRecordIds:['rec_schedule_c']}}]});
  });
  it('does not allow a third level when the second person has a conflicting shift',()=>{
-  const rows=[...schedules,{recordId:'rec_free_shift',scheduleDate:'2026-10-16',building:'A楼',shift:'白班',dutyStaffActual:['示例人员008']}];
+  const rows=[...schedules,{recordId:'rec_free_shift',scheduleDate:'2026-10-16',building:'A楼',shift:'白班',dutyStaffActual:['张三']}];
   const candidates=build(rows);
   expect(helper().resolveTwoLevelSubstitution({candidates,primaryPersonRecordId:'rec_wu',backfillPersonRecordId:'rec_free'}).valid).toBe(false);
  });

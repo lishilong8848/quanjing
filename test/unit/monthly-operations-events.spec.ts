@@ -45,9 +45,9 @@ describe('月览真实事件', () => {
           告警描述: '方舟平台报多个冷冻水供回水温度异常',
           需回溯: true,
           '1-回溯报告':
-            '[A楼夜班模式切换事件报告](https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE)',
+            '[A楼夜班模式切换事件报告](https://vnet.feishu.cn/wiki/P2klwb3Y0i8M4gk5kl7cYQ8nnbe)',
           '2-回溯报告':
-            'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+            'https://vnet.feishu.cn/wiki/Z5Yyw0mo7inn8MkO66ZcMEptnP3',
           事件发生原因: '模式调整导致水温异常',
           事件解决措施: '调整运行模式并加强观察',
         }),
@@ -64,12 +64,12 @@ describe('月览真实事件', () => {
         {
           label: '首次复盘',
           title: 'A楼夜班模式切换事件报告',
-          url: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+          url: 'https://vnet.feishu.cn/wiki/P2klwb3Y0i8M4gk5kl7cYQ8nnbe',
         },
         {
           label: '二次复盘',
           title: '二次复盘报告',
-          url: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+          url: 'https://vnet.feishu.cn/wiki/Z5Yyw0mo7inn8MkO66ZcMEptnP3',
         },
       ],
     });
@@ -105,13 +105,13 @@ describe('月览真实事件', () => {
         row('mention-report', {
           需回溯: true,
           '1-回溯报告': {
-            link: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+            link: 'https://vnet.feishu.cn/docx/CNLGdCHqHozkj2xcL32cavvBnCd?dcuId=7185010722303475713',
             text: 'C楼支路开关事件回顾',
             token: 'CNLGdCHqHozkj2xcL32cavvBnCd',
             type: 'mention',
           },
           '2-回溯报告': {
-            link: 'https://example.feishu.cn/file/PUBLIC_EXAMPLE_SOURCE',
+            link: 'https://vnet.feishu.cn/file/Ii4RbU6WGopA6GxLUPXclODln5c?from=from_copylink',
             text: 'C楼事件回溯.docx',
             token: 'Ii4RbU6WGopA6GxLUPXclODln5c',
             type: 'mention',
@@ -125,12 +125,12 @@ describe('月览真实事件', () => {
       {
         label: '首次复盘',
         title: 'C楼支路开关事件回顾',
-        url: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+        url: 'https://vnet.feishu.cn/docx/CNLGdCHqHozkj2xcL32cavvBnCd?dcuId=7185010722303475713',
       },
       {
         label: '二次复盘',
         title: 'C楼事件回溯.docx',
-        url: 'https://example.feishu.cn/file/PUBLIC_EXAMPLE_SOURCE',
+        url: 'https://vnet.feishu.cn/file/Ii4RbU6WGopA6GxLUPXclODln5c?from=from_copylink',
       },
     ]);
   });

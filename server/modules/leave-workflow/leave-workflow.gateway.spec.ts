@@ -11,7 +11,7 @@ describe('LeaveWorkflowGateway', () => {
     process.env.FEISHU_APP_ID = 'cli_leave_app';
     process.env.FEISHU_APP_SECRET = 'leave-app-secret';
     process.env.FEISHU_LEAVE_REQUEST_APP_TOKEN = 'leave_app_token';
-    process.env.FEISHU_LEAVE_REQUEST_TABLE_ID = 'tblf1bbd02a2b049';
+    process.env.FEISHU_LEAVE_REQUEST_TABLE_ID = 'tblpCzmTT3EapaUY';
   });
 
   afterEach(() => {
@@ -64,7 +64,7 @@ describe('LeaveWorkflowGateway', () => {
       fields: { 标题: '测试' },
     });
     await gateway.updateLeaveRecord('rec_leave_1', {
-      请假工作流状态: '待示例人员001审批',
+      请假工作流状态: '待主管审批',
     });
 
     expect(post.mock.calls[1][1].uuid).toBe(
@@ -230,7 +230,7 @@ describe('LeaveWorkflowGateway', () => {
     for (const call of reader.mock.calls) {
       expect(call[1]).toEqual(
         expect.objectContaining({
-          tableId: 'tblf1bbd02a2b049',
+          tableId: 'tblpCzmTT3EapaUY',
           fieldNames: expect.arrayContaining([
             '休假编号',
             '请求唯一ID',

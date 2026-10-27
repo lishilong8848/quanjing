@@ -92,11 +92,11 @@ describe('PurchaseInboundConfirmationService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.FEISHU_PURCHASE_INVENTORY_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/purchase-app';
     process.env.FEISHU_PURCHASE_SUBMISSION_TABLE_ID = TABLES.submission;
     process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = TABLES.execution;
     process.env.FEISHU_WAREHOUSE_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/warehouse-app';
     process.env.FEISHU_WAREHOUSE_CATALOG_TABLE_ID = TABLES.catalog;
     process.env.FEISHU_WAREHOUSE_INBOUND_TABLE_ID = TABLES.inbound;
     (resolveBitableAppToken as jest.Mock).mockImplementation(

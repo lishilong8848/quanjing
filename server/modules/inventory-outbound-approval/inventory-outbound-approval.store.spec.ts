@@ -1593,7 +1593,7 @@ describe('InventoryOutboundApprovalStore', () => {
     const replacement = snapshot({
       version: 2,
       policyVersion: 'inventory-outbound-responsible-v2',
-      approvers: [{ openId: 'ou_current', name: '当前示例人员019' }],
+      approvers: [{ openId: 'ou_current', name: '当前责任人' }],
     });
 
     await expect(
@@ -1658,7 +1658,7 @@ describe('InventoryOutboundApprovalStore', () => {
     const v2 = snapshot({
       version: 2,
       policyVersion: 'inventory-outbound-responsible-v2',
-      approvers: [{ openId: 'ou_responsible_v2', name: '二版示例人员019' }],
+      approvers: [{ openId: 'ou_responsible_v2', name: '二版责任人' }],
     });
     await store.supersedeApprovedDecision(v1.recordId, 1, v2);
     await store.restoreFromBase({
@@ -1671,7 +1671,7 @@ describe('InventoryOutboundApprovalStore', () => {
       decision: {
         action: 'approve',
         actorOpenId: 'ou_responsible_v2',
-        actorName: '二版示例人员019',
+        actorName: '二版责任人',
         messageId: 'om_responsible_v2',
         eventId: 'evt_v2_approved',
         decidedAt: '2026-08-27T00:01:00.000Z',
@@ -1682,7 +1682,7 @@ describe('InventoryOutboundApprovalStore', () => {
     const v3 = snapshot({
       version: 3,
       policyVersion: 'inventory-outbound-responsible-v3',
-      approvers: [{ openId: 'ou_responsible_v3', name: '三版示例人员019' }],
+      approvers: [{ openId: 'ou_responsible_v3', name: '三版责任人' }],
     });
 
     await expect(
@@ -1726,7 +1726,7 @@ describe('InventoryOutboundApprovalStore', () => {
     const v2 = snapshot({
       version: 2,
       policyVersion: 'inventory-outbound-responsible-v2',
-      approvers: [{ openId: 'ou_responsible_v2', name: '二版示例人员019' }],
+      approvers: [{ openId: 'ou_responsible_v2', name: '二版责任人' }],
     });
     await store.supersedeApprovedDecision(v1.recordId, 1, v2);
 
@@ -1737,7 +1737,7 @@ describe('InventoryOutboundApprovalStore', () => {
         snapshot({
           version: 2,
           policyVersion: 'inventory-outbound-responsible-v2',
-          approvers: [{ openId: 'ou_forked', name: '错误分支示例人员019' }],
+          approvers: [{ openId: 'ou_forked', name: '错误分支责任人' }],
         }),
       ),
     ).rejects.toThrow('替代审批快照与已持久化版本冲突');

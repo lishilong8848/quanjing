@@ -17,8 +17,8 @@ describe('PurchaseCodeService', () => {
       appToken: 'app-token',
       date: '2026-07-21',
       building: 'H楼',
-      submissionTableId: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID',
-      executionTableId: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID',
+      submissionTableId: 'tblIfmOB4VTUMmMh',
+      executionTableId: 'tblKmajonrdwW7Z0',
     };
 
     await expect(service.allocate(input)).resolves.toBe('CG260721-604');

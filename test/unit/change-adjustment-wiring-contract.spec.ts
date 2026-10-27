@@ -95,7 +95,7 @@ describe('change adjustment service and route wiring contract', () => {
             type: 'image/png',
           },
         ],
-        申请提交人: [{ name: '示例人员020', mobile: '13800009626' }],
+        申请提交人: [{ name: '马进宇', mobile: '13800000000' }],
       },
     };
 
@@ -105,7 +105,7 @@ describe('change adjustment service and route wiring contract', () => {
     );
 
     expect(enriched).toMatchObject({
-      submitterName: '示例人员020',
+      submitterName: '马进宇',
       planDocuments: [
         {
           fileToken: 'boxcn_scheme_contract',
@@ -119,7 +119,7 @@ describe('change adjustment service and route wiring contract', () => {
         },
       ],
     });
-    expect(JSON.stringify(enriched)).not.toContain('13800009626');
+    expect(JSON.stringify(enriched)).not.toContain('13800000000');
   });
 
   it('routes POST change-adjustment through DutyScheduleService only', () => {

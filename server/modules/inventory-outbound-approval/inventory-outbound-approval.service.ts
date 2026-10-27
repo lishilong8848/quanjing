@@ -323,7 +323,7 @@ export class InventoryOutboundApprovalService {
           recovery.requiresBusinessFinalization === true
         ) {
           if (!this.warehouseRoleDirectory) {
-            throw new Error('库房示例人员019员目录尚未就绪，请稍后重试');
+            throw new Error('库房责任人员目录尚未就绪，请稍后重试');
           }
           const [currentResponsibleUsers, currentManagerRecipients] =
             await Promise.all([

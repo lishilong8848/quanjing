@@ -95,20 +95,20 @@ APP_HOST = os.getenv("APP_HOST", "127.0.0.1").strip() or "127.0.0.1"
 APP_PORT = read_env_int("APP_PORT", 5011)
 ALLOWED_UPLOAD_EXTENSIONS = {".xlsx", ".xls"}
 MASKED_VALUE = "***"
-DEFAULT_TARGET_CHAT_IDS = ["oc_c79f407063dc9ca9f70cc76cb4059895"]
-DEFAULT_RECIPIENT = "user-b54e355d@example.com; user-20a3f7b8@example.com"
-VISIBLE_ONLY_EMAIL_RECIPIENT = "user-7e80d4ec@example.com"
-ALI_RECORD_NOTIFY_USER_NAME = "示例人员020"
-ALI_RECORD_NOTIFY_USER_EMAIL = "user-b54e355d@example.com"
+DEFAULT_TARGET_CHAT_IDS = ["oc_9961bb057de8bd715447559c5e63c4f2"]
+DEFAULT_RECIPIENT = "ma.jinyu@vnet.com; liu.xiaoxing2-wb@sne.vnet.com"
+VISIBLE_ONLY_EMAIL_RECIPIENT = "mei.bingbing@vnet.com"
+ALI_RECORD_NOTIFY_USER_NAME = "马进宇"
+ALI_RECORD_NOTIFY_USER_EMAIL = "ma.jinyu@vnet.com"
 MONTHLY_REPORT_TRIGGER_KEYWORD = "月报生成"
 AUTO_DOWNLOAD_TABLE_NAME = "高功率TOP5报表"
 ALARM_REPORT_TABLE_NAME = "告警分析报告"
 STAFF_REPORT_TABLE_NAME = "人员变动报告"
 DEFAULT_ALI_ALARM_SOURCE_URL = (
-    "https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE"
+    "https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tblD7hi70s6U6rlU&view=vewG7OKFEg"
 )
 DEFAULT_ALI_STAFF_SOURCE_URL = (
-    "https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE"
+    "https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg?table=tblOu75UtJTDNHIM&view=vewrQcypV4"
 )
 DEFAULT_ALI_ALARM_TEMPLATE_PATH = str(RESOURCE_DIR / "EA118机房2026年3月告警分析表.xlsx")
 DEFAULT_ALI_POWER_TEMPLATE_PATH = str(DOWNLOAD_DIR / "EA118机柜超功耗告警统计表3月份 .xlsx")
@@ -129,18 +129,18 @@ app = Flask(
 BITABLE_CONFIGS = [
     {
         "name": "高功率TOP5报表",
-        "table_id": os.getenv("HIGH_POWER_TABLE_ID", "tbl82468a84ec746").strip() or "tbl82468a84ec746",
-        "view_id": os.getenv("HIGH_POWER_VIEW_ID", "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID").strip() or "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID",
+        "table_id": os.getenv("HIGH_POWER_TABLE_ID", "tblkh6YCMYtS8nHa").strip() or "tblkh6YCMYtS8nHa",
+        "view_id": os.getenv("HIGH_POWER_VIEW_ID", "vewrHJHl3v").strip() or "vewrHJHl3v",
     },
     {
         "name": ALARM_REPORT_TABLE_NAME,
-        "table_id": os.getenv("ALARM_REPORT_TABLE_ID", "tblae41d7fdc6701").strip() or "tblae41d7fdc6701",
-        "view_id": os.getenv("ALARM_REPORT_VIEW_ID", "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID").strip() or "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID",
+        "table_id": os.getenv("ALARM_REPORT_TABLE_ID", "tblAGQeQ7tpV8tWt").strip() or "tblAGQeQ7tpV8tWt",
+        "view_id": os.getenv("ALARM_REPORT_VIEW_ID", "vewrHJHl3v").strip() or "vewrHJHl3v",
     },
     {
         "name": STAFF_REPORT_TABLE_NAME,
-        "table_id": os.getenv("STAFF_REPORT_TABLE_ID", "tblf5fc5e5730d03").strip() or "tblf5fc5e5730d03",
-        "view_id": os.getenv("STAFF_REPORT_VIEW_ID", "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID").strip() or "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID",
+        "table_id": os.getenv("STAFF_REPORT_TABLE_ID", "tbl3KED5CdvNSCwT").strip() or "tbl3KED5CdvNSCwT",
+        "view_id": os.getenv("STAFF_REPORT_VIEW_ID", "vewrHJHl3v").strip() or "vewrHJHl3v",
     },
 ]
 
@@ -1450,8 +1450,8 @@ def build_email_body(month_display: str, max_power: int, counts: dict[str, int])
 <img src="cid:{VNET_LOGO_CID}" alt="VNET 世纪互联" style="width: 150px; height: auto; display: block; border: 0;">
 </div>
 <p style="font-family: Microsoft YaHei, SimHei, sans-serif; font-size: 10pt; color: #666; line-height: 1.5;">
-示例人员020 共享业务中台 | DC运维事业部 | 华东1部<br>
-Tel: +86 13800008017<br>
+马进宇 共享业务中台 | DC运维事业部 | 华东1部<br>
+Tel: +86 18115823710<br>
 Add: 南通市经济开发区中央路108号阿里巴巴南通保税A区数据中心<br>
 PRC: 226000
 </p>
@@ -1461,8 +1461,8 @@ PRC: 226000
 
 def build_email_opening_html() -> str:
     """构造邮件正文开头的可见收件人信息和称呼。"""
-    return """<p style="margin: 0 0 6px 0;">收件人: user-56144b9a@example.com; 'user-c8076df9@example.com' &lt;user-c8076df9@example.com&gt;; 'user-dd1be19c@example.com' &lt;user-dd1be19c@example.com&gt;</p>
-<p style="margin: 0 0 10px 0;">抄送: '王晓明(相尧)' &lt;user-033b4c85@example.com&gt;; 'user-f266d709@example.com' &lt;user-f266d709@example.com&gt;; 'user-a0ae9346@example.com' &lt;user-a0ae9346@example.com&gt;; 'user-55a9a587@example.com' &lt;user-55a9a587@example.com&gt;; 陶必亮 &lt;user-3c1042be@example.com&gt;; 示例人员009 &lt;user-575da34b@example.com&gt;; 陈继猛 &lt;user-f0f5f320@example.com&gt;; 孙婷婷 &lt;user-1148871c@example.com&gt;; 陈凯 &lt;user-adfa458e@example.com&gt;; 示例人员006 &lt;user-032189f6@example.com&gt;; '刘小杏' &lt;user-20a3f7b8@example.com&gt;; 示例人员014 &lt;user-7e80d4ec@example.com&gt;</p>
+    return """<p style="margin: 0 0 6px 0;">收件人: chenchaoyang.ccy@alibaba-inc.com; 'yuanzhuo.lyz@alibaba-inc.com' &lt;yuanzhuo.lyz@alibaba-inc.com&gt;; 'keone.mzy@alibaba-inc.com' &lt;keone.mzy@alibaba-inc.com&gt;</p>
+<p style="margin: 0 0 10px 0;">抄送: '王晓明(相尧)' &lt;xiangyao.wxm@alibaba-inc.com&gt;; 'wb-ghp895452@alibaba-inc.com' &lt;wb-ghp895452@alibaba-inc.com&gt;; 'sjr01538561@alibaba-inc.com' &lt;sjr01538561@alibaba-inc.com&gt;; 'yxw02356095@alibaba-inc.com' &lt;yxw02356095@alibaba-inc.com&gt;; 陶必亮 &lt;tao.biliang@vnet.com&gt;; 施小东 &lt;shi.xiaodong@vnet.com&gt;; 陈继猛 &lt;chen.jimeng@vnet.com&gt;; 孙婷婷 &lt;sun.tingting@vnet.com&gt;; 陈凯 &lt;chen.kai3@vnet.com&gt;; 周海祥 &lt;zhou.haixiang@vnet.com&gt;; '刘小杏' &lt;liu.xiaoxing2-wb@sne.vnet.com&gt;; 梅冰冰 &lt;mei.bingbing@vnet.com&gt;</p>
 <p style="margin: 0 0 10px 0;">绪晨总、刹捺总&远卓总，三位好！</p>"""
 
 
@@ -1480,8 +1480,8 @@ def build_alarm_analysis_email_body(month_display: str) -> str:
 <img src="cid:{VNET_LOGO_CID}" alt="VNET 世纪互联" style="width: 150px; height: auto; display: block; border: 0;">
 </div>
 <p style="font-family: Microsoft YaHei, SimHei, sans-serif; font-size: 10pt; color: #666; line-height: 1.5;">
-示例人员020 共享业务中台 | DC运维事业部 | 华东1部<br>
-Tel: +86 13800008017<br>
+马进宇 共享业务中台 | DC运维事业部 | 华东1部<br>
+Tel: +86 18115823710<br>
 Add: 南通市经济开发区中央路108号阿里巴巴南通保税A区数据中心<br>
 PRC: 226000
 </p>
@@ -2583,7 +2583,7 @@ def write_staff_roster_workbook(
     for section_index, (title, section_new_hires, section_leavers) in enumerate(
         [
             ("实习生及备岗", intern_or_backup_new_hires, intern_or_backup_leavers),
-            ("示例人员004员", other_new_hires, other_leavers),
+            ("其他人员", other_new_hires, other_leavers),
         ]
     ):
         changes_ws.append([title])
@@ -2678,7 +2678,7 @@ def build_bitable_record_url(app_token: str, table_config: dict[str, str], recor
         query_parts.append(f"view={quote(view_id, safe='')}")
     query_parts.append(f"recordId={quote(normalized_record_id, safe='')}")
     query_text = "&".join(query_parts)
-    return f"https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE safe='')}?{query_text}"
+    return f"https://vnet.feishu.cn/base/{quote(normalized_app_token, safe='')}?{query_text}"
 
 
 def resolve_feishu_open_id_by_email(
@@ -2759,7 +2759,7 @@ def send_bitable_record_link_feishu_message(
     token: str | None = None,
     external_log: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
-    """将生成出的多维记录链接通过飞书私聊发送给示例人员020。"""
+    """将生成出的多维记录链接通过飞书私聊发送给马进宇。"""
     valid_records = [item for item in records if str(item.get("record_url", "")).strip()]
     if not valid_records:
         message = "未生成可发送的多维记录链接，已跳过通知"

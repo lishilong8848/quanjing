@@ -247,7 +247,7 @@ def build_bitable_record_url(app_token: str, table_config: dict[str, str], recor
     if view_id:
         query_parts.append(f"view={quote(view_id, safe='')}")
     query_parts.append(f"recordId={quote(normalized_record_id, safe='')}")
-    return f"https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE safe='')}?{'&'.join(query_parts)}"
+    return f"https://vnet.feishu.cn/base/{quote(normalized_app_token, safe='')}?{'&'.join(query_parts)}"
 
 
 def sync_report_attachment(

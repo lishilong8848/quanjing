@@ -8,8 +8,8 @@
   "paramsSchema": {},
   "formValue": {
     "owner": "7310140364520734723",
-    "appToken": "PUBLIC_EXAMPLE_FEISHU_ORG_APP_TOKEN",
-    "tableID": "tbl82d0b2f3ddc70",
+    "appToken": "F9lDbA5XKaLmyasoARRcZFpKnZd",
+    "tableID": "tblZipVFGY4D65tw",
     "fields": [
       {
         "readable": true,
@@ -22,10 +22,10 @@
       {
         "enumValues": [
           "设施运维经理",
-          "设施运维示例人员001",
-          "弱电示例人员001",
-          "电气示例人员001",
-          "暖通示例人员001",
+          "设施运维主管",
+          "弱电主管",
+          "电气主管",
+          "暖通主管",
           "设施运维副经理",
           "综合管理",
           "电气工程师",
@@ -33,7 +33,7 @@
           "弱电工程师",
           "安全&消防工程师",
           "消防工程师",
-          "消防示例人员001",
+          "消防主管",
           "值班账号"
         ],
         "id": "fldBfz4ppb",
@@ -70,14 +70,14 @@
         "readable": true,
         "writeable": false,
         "id": "fldqoMZyRH",
-        "name": "示例人员001",
+        "name": "主管",
         "type": 20,
         "bizType": "Formula"
       },
       {
         "bizType": "Lookup",
         "id": "fldG5AyTUu",
-        "name": "示例人员001 副本 2",
+        "name": "主管 副本 2",
         "readable": false,
         "writeable": false,
         "type": 19
@@ -91,7 +91,7 @@
         "writeable": true
       },
       {
-        "name": "示例人员001（文本）",
+        "name": "主管（文本）",
         "type": 20,
         "bizType": "Formula",
         "readable": true,

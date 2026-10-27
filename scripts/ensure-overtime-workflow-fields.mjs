@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { delimiter, dirname, join, relative } from 'node:path';
 
-const FIXED_OVERTIME_TABLE_ID = 'tblf1bbd02a2b049';
+const FIXED_OVERTIME_TABLE_ID = 'tblpCzmTT3EapaUY';
 const DEFAULT_OVERTIME_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E';
 const DEFAULT_OPENAPI_BASE_URL = 'https://open.feishu.cn/open-apis';
 const MAX_OPENAPI_PAGES = 100;
 const OPENAPI_TIMEOUT_MS = 15_000;
@@ -161,7 +161,7 @@ const sourceUrl =
     'FEISHU_LEAVE_REQUEST_SOURCE_URL',
   ) ||
   (configuredWikiToken
-    ? `https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE`
+    ? `https://vnet.feishu.cn/wiki/${configuredWikiToken}?table=${FIXED_OVERTIME_TABLE_ID}`
     : DEFAULT_OVERTIME_SOURCE_URL);
 const sourceTableId = extractTableId(sourceUrl);
 if (sourceTableId && sourceTableId !== FIXED_OVERTIME_TABLE_ID) {

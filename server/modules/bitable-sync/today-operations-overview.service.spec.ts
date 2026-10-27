@@ -140,7 +140,7 @@ const todayChanges = [
     楼栋: '  A楼---  ',
     专业: '电气 —-- ',
     影响: '无业务影响',
-    示例人员001: '张工',
+    主管: '张工',
   }),
   record('change-finished', {
     变更开始时间: Date.parse('2026-07-20T10:00:00+08:00'),
@@ -154,7 +154,7 @@ const todayChanges = [
     '阿里-变更等级': '低',
     楼栋: 'B楼',
     专业: '网络',
-    示例人员001: '李工',
+    主管: '李工',
   }),
   record('change-bad-end-year', {
     变更开始时间: Date.parse('2026-07-20T12:00:00+08:00'),
@@ -167,7 +167,7 @@ const todayChanges = [
     '阿里-变更等级': '中风险',
     楼栋: 'C楼',
     专业: '暖通',
-    示例人员001: '王工',
+    主管: '王工',
   }),
 ];
 
@@ -263,20 +263,20 @@ describe('TodayOperationsOverviewService', () => {
     );
     mockedPersistedSnapshot.mockResolvedValue(null);
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'tbl35e641004a831') return rackLoads;
-      if (options.tableId === 'tbl55d9d0575047d') return rackMonthly;
-      if (options.tableId === 'tbl38b1b0b822bf2') return rackShiftRows;
-      if (options.tableId === 'tbl72e6608772279') {
+      if (options.tableId === 'tblBgaPzuVj7V9Q6') return rackLoads;
+      if (options.tableId === 'tblDYQYihJ0CgepE') return rackMonthly;
+      if (options.tableId === 'tblz8rjxdtRRlYmS') return rackShiftRows;
+      if (options.tableId === 'tblj9XJLq5QzTAqX') {
         return allEvents;
       }
-      if (options.tableId === 'tbl317cca0d7f340') {
+      if (options.tableId === 'tblYodlEKeWzqogu') {
         if (!options.filter) return [...todayChanges, ...activeChanges];
         return options.filter?.conditions[0]?.field_name === '变更开始时间'
           ? todayChanges
           : activeChanges;
       }
-      if (options.tableId === 'tbl5e05c0848703b') return maintenanceRows;
-      if (options.tableId === 'tblc578e5ee496a3') return inspectionRows;
+      if (options.tableId === 'tblk7QuEsiE4p3nZ') return maintenanceRows;
+      if (options.tableId === 'tblpaHktT0mn0hwg') return inspectionRows;
       throw new Error(`Unexpected source ${options.tableId}`);
     });
   });
@@ -288,7 +288,7 @@ describe('TodayOperationsOverviewService', () => {
   it('isolates a failed rack source from successful operations on a cold start', async () => {
     const original = mockedFetch.getMockImplementation()!;
     mockedFetch.mockImplementation((http, options) => {
-      if (options.tableId === 'tbl35e641004a831')
+      if (options.tableId === 'tblBgaPzuVj7V9Q6')
         return Promise.reject(new Error('offline'));
       return original(http, options);
     });
@@ -304,7 +304,7 @@ describe('TodayOperationsOverviewService', () => {
   it('reads only the two relevant weeks and rack movement fields before the deadline', async () => {
     const original = mockedFetch.getMockImplementation()!;
     mockedFetch.mockImplementation((http, options) => {
-      if (options.tableId === 'tbl38b1b0b822bf2' && !options.filter)
+      if (options.tableId === 'tblz8rjxdtRRlYmS' && !options.filter)
         return new Promise(() => {});
       return original(http, options);
     });
@@ -320,7 +320,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl38b1b0b822bf2',
+        tableId: 'tblz8rjxdtRRlYmS',
         fieldNames: [
           '楼栋',
           '日期',
@@ -363,7 +363,7 @@ describe('TodayOperationsOverviewService', () => {
       jest.setSystemTime(new Date(now));
       await new TodayOperationsOverviewService(httpService).getOverview();
       const options = mockedFetch.mock.calls.find(
-        ([, read]) => read.tableId === 'tbl38b1b0b822bf2',
+        ([, read]) => read.tableId === 'tblz8rjxdtRRlYmS',
       )![1];
       expect(
         options.filter?.conditions.map((condition) => condition.value),
@@ -377,7 +377,7 @@ describe('TodayOperationsOverviewService', () => {
   it('returns available data before the client deadline when a rack source hangs', async () => {
     const original = mockedFetch.getMockImplementation()!;
     mockedFetch.mockImplementation((http, options) => {
-      if (options.tableId === 'tbl35e641004a831') return new Promise(() => {});
+      if (options.tableId === 'tblBgaPzuVj7V9Q6') return new Promise(() => {});
       return original(http, options);
     });
     const resolved = jest.fn();
@@ -419,7 +419,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(results[1]).toEqual(results[0]);
     expect(
       mockedFetch.mock.calls.filter(
-        ([, options]) => options.tableId === 'tbl35e641004a831',
+        ([, options]) => options.tableId === 'tblBgaPzuVj7V9Q6',
       ),
     ).toHaveLength(1);
   });
@@ -427,7 +427,7 @@ describe('TodayOperationsOverviewService', () => {
   it('marks persisted rack records stale while refreshing them without blocking', async () => {
     const original = mockedFetch.getMockImplementation()!;
     mockedPersistedSnapshot.mockImplementation(async (options) =>
-      options.tableId === 'tbl35e641004a831'
+      options.tableId === 'tblBgaPzuVj7V9Q6'
         ? {
             records: rackLoads,
             fetchedAt: Date.now() - 600_000,
@@ -436,7 +436,7 @@ describe('TodayOperationsOverviewService', () => {
         : null,
     );
     mockedFetch.mockImplementation((http, options) =>
-      options.tableId === 'tbl35e641004a831'
+      options.tableId === 'tblBgaPzuVj7V9Q6'
         ? new Promise(() => {})
         : original(http, options),
     );
@@ -454,7 +454,7 @@ describe('TodayOperationsOverviewService', () => {
     const original = mockedFetch.getMockImplementation()!;
     const service = new TodayOperationsOverviewService(httpService);
     mockedFetch.mockImplementation((http, options) =>
-      options.tableId === 'tbl35e641004a831'
+      options.tableId === 'tblBgaPzuVj7V9Q6'
         ? Promise.reject(new Error('offline'))
         : original(http, options),
     );
@@ -660,7 +660,7 @@ describe('TodayOperationsOverviewService', () => {
       '阿里-变更等级': '中风险',
     });
     mockedFetch.mockImplementation(async (service, options) => {
-      if (options.tableId === 'tbl317cca0d7f340') {
+      if (options.tableId === 'tblYodlEKeWzqogu') {
         return [crossDayActive, crossDayFinished];
       }
       if (!defaultImplementation) {
@@ -697,7 +697,7 @@ describe('TodayOperationsOverviewService', () => {
       '阿里-变更等级': '低',
     });
     mockedFetch.mockImplementation(async (service, options) => {
-      if (options.tableId === 'tbl317cca0d7f340') {
+      if (options.tableId === 'tblYodlEKeWzqogu') {
         return [crossDayActive];
       }
       if (!defaultImplementation) {
@@ -731,7 +731,7 @@ describe('TodayOperationsOverviewService', () => {
       ([, options]) => options.tableId,
     );
 
-    expect(refreshedTableIds).toEqual(['tbl72e6608772279', 'tbl317cca0d7f340']);
+    expect(refreshedTableIds).toEqual(['tblj9XJLq5QzTAqX', 'tblYodlEKeWzqogu']);
     service.onModuleDestroy();
   });
 
@@ -756,10 +756,10 @@ describe('TodayOperationsOverviewService', () => {
       '阿里-变更等级': '低',
     });
     mockedFetch.mockImplementation(async (http, options) => {
-      if (options.tableId === 'tbl72e6608772279') {
+      if (options.tableId === 'tblj9XJLq5QzTAqX') {
         return [...allEvents, newEvent];
       }
-      if (options.tableId === 'tbl317cca0d7f340') {
+      if (options.tableId === 'tblYodlEKeWzqogu') {
         return [newChange];
       }
       if (!defaultImplementation) {
@@ -783,7 +783,7 @@ describe('TodayOperationsOverviewService', () => {
     ]);
     expect(
       mockedFetch.mock.calls.map(([, options]) => options.tableId),
-    ).toEqual(['tbl72e6608772279', 'tbl317cca0d7f340']);
+    ).toEqual(['tblj9XJLq5QzTAqX', 'tblYodlEKeWzqogu']);
   });
 
   it('renews the fast snapshot window after a targeted event and change refresh', async () => {
@@ -804,7 +804,7 @@ describe('TodayOperationsOverviewService', () => {
   it('does not renew a stale overview snapshot after a targeted event and change refresh', async () => {
     let maintenanceSnapshotReads = 0;
     mockedPersistedSnapshot.mockImplementation(async (options) => {
-      if (options.tableId !== 'tbl5e05c0848703b') {
+      if (options.tableId !== 'tblk7QuEsiE4p3nZ') {
         return null;
       }
       maintenanceSnapshotReads += 1;
@@ -831,7 +831,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl5e05c0848703b',
+        tableId: 'tblk7QuEsiE4p3nZ',
       }),
     );
     expect(refreshed.sourceStatus).toBe('fresh');
@@ -844,7 +844,7 @@ describe('TodayOperationsOverviewService', () => {
     });
     const defaultImplementation = mockedFetch.getMockImplementation();
     mockedFetch.mockImplementation(async (http, options) => {
-      if (options.tableId === 'tbl72e6608772279') {
+      if (options.tableId === 'tblj9XJLq5QzTAqX') {
         return eventGate;
       }
       if (!defaultImplementation) {
@@ -862,12 +862,12 @@ describe('TodayOperationsOverviewService', () => {
     await Promise.all([first, second]);
     expect(
       mockedFetch.mock.calls.filter(
-        ([, options]) => options.tableId === 'tbl72e6608772279',
+        ([, options]) => options.tableId === 'tblj9XJLq5QzTAqX',
       ),
     ).toHaveLength(1);
     expect(
       mockedFetch.mock.calls.filter(
-        ([, options]) => options.tableId === 'tbl317cca0d7f340',
+        ([, options]) => options.tableId === 'tblYodlEKeWzqogu',
       ),
     ).toHaveLength(1);
   });
@@ -878,8 +878,8 @@ describe('TodayOperationsOverviewService', () => {
     const defaultImplementation = mockedFetch.getMockImplementation();
     mockedFetch.mockImplementation(async (http, options) => {
       if (
-        options.tableId === 'tbl72e6608772279' ||
-        options.tableId === 'tbl317cca0d7f340'
+        options.tableId === 'tblj9XJLq5QzTAqX' ||
+        options.tableId === 'tblYodlEKeWzqogu'
       ) {
         throw new Error('temporary source outage');
       }
@@ -963,8 +963,8 @@ describe('TodayOperationsOverviewService', () => {
     const defaultImplementation = mockedFetch.getMockImplementation();
     mockedFetch.mockImplementation(async (service, options) => {
       if (
-        (options.tableId === 'tbl5e05c0848703b' ||
-          options.tableId === 'tblc578e5ee496a3') &&
+        (options.tableId === 'tblk7QuEsiE4p3nZ' ||
+          options.tableId === 'tblpaHktT0mn0hwg') &&
         options.filter
       ) {
         throw Object.assign(new Error('InvalidFilter'), {
@@ -1006,7 +1006,7 @@ describe('TodayOperationsOverviewService', () => {
         : item,
     );
     mockedFetch.mockImplementation(async (service, options) => {
-      if (options.tableId === 'tbl38b1b0b822bf2') {
+      if (options.tableId === 'tblz8rjxdtRRlYmS') {
         return [...invalidShiftRows, ...rackShiftRows];
       }
       if (!defaultImplementation) {
@@ -1037,7 +1037,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl35e641004a831',
+        tableId: 'tblBgaPzuVj7V9Q6',
         filter: {
           conjunction: 'and',
           conditions: [
@@ -1054,7 +1054,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl38b1b0b822bf2',
+        tableId: 'tblz8rjxdtRRlYmS',
         filter: expect.objectContaining({ conjunction: 'and' }),
         fieldNames: expect.arrayContaining(['楼栋', '日期', '班次']),
         forceRefresh: true,
@@ -1063,7 +1063,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl55d9d0575047d',
+        tableId: 'tblDYQYihJ0CgepE',
         filter: {
           conjunction: 'and',
           conditions: [
@@ -1076,7 +1076,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl72e6608772279',
+        tableId: 'tblj9XJLq5QzTAqX',
         filter: undefined,
         fieldNames: undefined,
         forceRefresh: true,
@@ -1085,7 +1085,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl317cca0d7f340',
+        tableId: 'tblYodlEKeWzqogu',
         filter: undefined,
         fieldNames: undefined,
         forceRefresh: true,
@@ -1094,7 +1094,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tbl5e05c0848703b',
+        tableId: 'tblk7QuEsiE4p3nZ',
         viewId: 'vewJoQQzSc',
         fieldNames: undefined,
         filter: undefined,
@@ -1103,7 +1103,7 @@ describe('TodayOperationsOverviewService', () => {
     expect(mockedFetch).toHaveBeenCalledWith(
       httpService,
       expect.objectContaining({
-        tableId: 'tblc578e5ee496a3',
+        tableId: 'tblpaHktT0mn0hwg',
         viewId: 'vewCwJvtXN',
         fieldNames: undefined,
         filter: undefined,
@@ -1111,12 +1111,12 @@ describe('TodayOperationsOverviewService', () => {
     );
     expect(
       mockedFetch.mock.calls.filter(
-        ([, options]) => options.tableId === 'tbl72e6608772279',
+        ([, options]) => options.tableId === 'tblj9XJLq5QzTAqX',
       ),
     ).toHaveLength(1);
     expect(
       mockedFetch.mock.calls.filter(
-        ([, options]) => options.tableId === 'tbl317cca0d7f340',
+        ([, options]) => options.tableId === 'tblYodlEKeWzqogu',
       ),
     ).toHaveLength(1);
     expect(mockedFetch).toHaveBeenCalledTimes(7);
@@ -1155,7 +1155,7 @@ describe('TodayOperationsOverviewService', () => {
       status: 200,
     });
     mockedPersistedSnapshot.mockImplementation(async (options) =>
-      options.tableId === 'tbl5e05c0848703b'
+      options.tableId === 'tblk7QuEsiE4p3nZ'
         ? {
             records: maintenanceRows,
             fetchedAt: Date.parse('2026-07-19T04:00:00.000Z'),
@@ -1164,7 +1164,7 @@ describe('TodayOperationsOverviewService', () => {
         : null,
     );
     mockedFetch.mockImplementation(async (service, options) => {
-      if (options.tableId === 'tbl5e05c0848703b') {
+      if (options.tableId === 'tblk7QuEsiE4p3nZ') {
         throw sourceError;
       }
       if (!defaultImplementation) {
@@ -1207,7 +1207,7 @@ describe('TodayOperationsOverviewService', () => {
       status: 200,
     });
     mockedPersistedSnapshot.mockImplementation(async (options) =>
-      options.tableId === 'tbl5e05c0848703b'
+      options.tableId === 'tblk7QuEsiE4p3nZ'
         ? {
             records: maintenanceRows,
             fetchedAt: Date.parse('2026-07-20T03:30:00.000Z'),
@@ -1216,7 +1216,7 @@ describe('TodayOperationsOverviewService', () => {
         : null,
     );
     mockedFetch.mockImplementation(async (service, options) => {
-      if (options.tableId === 'tbl5e05c0848703b') {
+      if (options.tableId === 'tblk7QuEsiE4p3nZ') {
         throw sourceError;
       }
       if (!defaultImplementation) {
@@ -1248,7 +1248,7 @@ describe('TodayOperationsOverviewService', () => {
       });
       let maintenanceSnapshotReads = 0;
       mockedPersistedSnapshot.mockImplementation(async (options) => {
-        if (options.tableId !== 'tbl5e05c0848703b') {
+        if (options.tableId !== 'tblk7QuEsiE4p3nZ') {
           return null;
         }
         maintenanceSnapshotReads += 1;
@@ -1261,7 +1261,7 @@ describe('TodayOperationsOverviewService', () => {
           : null;
       });
       mockedFetch.mockImplementation(async (service, options) => {
-        if (options.tableId === 'tbl5e05c0848703b') {
+        if (options.tableId === 'tblk7QuEsiE4p3nZ') {
           throw sourceError;
         }
         if (!defaultImplementation) {
@@ -1278,7 +1278,7 @@ describe('TodayOperationsOverviewService', () => {
       expect(result.sourceStatus).toBe('stale');
       const loggedWarnings = JSON.stringify(warnSpy.mock.calls);
       expect(loggedWarnings).toContain('今日全景维保');
-      expect(loggedWarnings).toContain('tbl5e05c0848703b');
+      expect(loggedWarnings).toContain('tblk7QuEsiE4p3nZ');
       expect(loggedWarnings).toContain('1254018');
       expect(loggedWarnings).not.toContain('InvalidFilter');
       expect(loggedWarnings).not.toContain('resolved-notice-app');
@@ -1339,7 +1339,7 @@ describe('TodayOperationsOverviewService', () => {
         : item,
     );
     mockedFetch.mockImplementation(async (service, options) => {
-      if (options.tableId === 'tbl55d9d0575047d') {
+      if (options.tableId === 'tblDYQYihJ0CgepE') {
         return invalidMonthly;
       }
       if (!defaultImplementation) {
@@ -1379,7 +1379,7 @@ describe('TodayOperationsOverviewService', () => {
           : item,
       );
       mockedFetch.mockImplementation(async (service, options) => {
-        if (options.tableId === 'tbl55d9d0575047d') {
+        if (options.tableId === 'tblDYQYihJ0CgepE') {
           return invalidMonthly;
         }
         if (!defaultImplementation) {

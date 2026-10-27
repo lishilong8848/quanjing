@@ -8,7 +8,7 @@ import {LeavePersonnelHandoverAdapter} from '../../server/modules/leave-workflow
 import type {HandoverContext} from '../../shared/personnel-handover.interface';
 
 const recordId='recFutureLeave',mutationId=`handover-${'e'.repeat(64)}`;
-const supervisor={name:'合成示例人员001',openId:'ou_future_supervisor',personRecordId:'recSupervisor',position:'设施示例人员001',buildings:['C楼']};
+const supervisor={name:'合成主管',openId:'ou_future_supervisor',personRecordId:'recSupervisor',position:'设施主管',buildings:['C楼']};
 const previous={name:'合成原经理',openId:'ou_future_previous',personRecordId:'recPreviousManager',position:'经理',buildings:['C楼']};
 const next={name:'合成接任经理',openId:'ou_future_next',personRecordId:'recNextManager',position:'经理',buildings:['C楼']};
 interface FutureInput{recordId:string;mutationId:string;dutyRecordId:string;sourceOpenId:string;sourcePersonRecordId:string;expectedRevision:number;expectedCurrentStage:LeaveWorkflowStage;expectedPlanHash:string;target:typeof next;}
@@ -60,8 +60,8 @@ describe('请休假未来经理交接：真实账本与实际worker，外部受�
     await workflow.runPendingTasks(new Date(),1);expect(gateway.sendInteractiveCard).toHaveBeenCalledWith(next.openId,expect.anything(),expect.any(String));expect(gateway.sendInteractiveCard.mock.calls.some(([id])=>id===previous.openId)).toBe(false);
     expect((await store.getStageAction(recordId,'supervisor',1))?.actorOpenId).toBe(supervisor.openId);
   });
-  it('专业申请的未来经理单独交接，专业通知及当前示例人员001保持原职责',async()=>{
-    const current=(await store.getApplication(recordId))!,professional={...supervisor,name:'合成电气示例人员001',openId:'ou_future_electrical',personRecordId:'recElectrical',position:'电气示例人员001'};
+  it('专业申请的未来经理单独交接，专业通知及当前主管保持原职责',async()=>{
+    const current=(await store.getApplication(recordId))!,professional={...supervisor,name:'合成电气主管',openId:'ou_future_electrical',personRecordId:'recElectrical',position:'电气主管'};
     const plan={...current.approvalPlan!,discipline:'electrical' as const,notificationPlan:{...current.approvalPlan!.notificationPlan,managerRecipients:[previous],professionalRecipients:[professional],finalResultRecipients:[supervisor,previous,professional]}};
     await store.setApprovalPlan(recordId,{snapshot:{...current.snapshot,position:'电气工程师'},approvalPlan:plan,resultRecipients:[supervisor,previous,professional]});
     await store.setPendingStage(recordId,{key:'supervisor',version:1,approverOpenIds:[supervisor.openId]});
@@ -69,7 +69,7 @@ describe('请休假未来经理交接：真实账本与实际worker，外部受�
     expect(await workflow.runPendingTasks(new Date(),1)).toEqual({processed:1,failed:0});expect(await adapter.reconcile(context(),receipt)).toEqual({status:'success'});
     const after=(await store.getApplication(recordId))!;expect(after.approvalPlan?.notificationPlan.professionalRecipients).toEqual([professional]);expect(after.approvalPlan?.notificationPlan.managerRecipients).toEqual([next]);expect(after.currentStage?.approverOpenIds).toEqual([supervisor.openId]);
   });
-  it('示例人员001先受理则暂拒，正常进入经理后同一原请求可恢复为当前经理交接',async()=>{
+  it('主管先受理则暂拒，正常进入经理后同一原请求可恢复为当前经理交接',async()=>{
     const request=await input();await approve();const before=readFileSync(file,'utf8');await expect(accept(request)).rejects.toThrow('同步');expect(readFileSync(file,'utf8')).toBe(before);
     await workflow.runPendingTasks(new Date(),1);expect((await store.getApplication(recordId))?.currentStage?.key).toBe('manager');
     expect((await accept(request)).status).toBe('accepted');expect((await store.getApplication(recordId))?.currentStage?.approverOpenIds).toEqual([next.openId]);
@@ -100,7 +100,7 @@ describe('请休假未来经理交接：真实账本与实际worker，外部受�
     const wrong=context();wrong.duties[0].kind='leave_supervisor';await expect(adapter.listPending(wrong)).rejects.toThrow('尚未开始');expect(readFileSync(file,'utf8')).toBe(before);
     const current=(await store.getApplication(recordId))!;current.approvalPlan!.stages[1].approvers[0].name='合成变更';await store.patchApplication(recordId,{approvalPlan:current.approvalPlan});const changed=readFileSync(file,'utf8');await expect(accept(request)).rejects.toThrow('计划已变化');expect(readFileSync(file,'utf8')).toBe(changed);
   });
-  it.each([true,false])('同时示例人员001处理和未来交接：交接先入队=%s，合法审批仅生效一次',async(handoverFirst)=>{
+  it.each([true,false])('同时主管处理和未来交接：交接先入队=%s，合法审批仅生效一次',async(handoverFirst)=>{
     const request=await input();
     const operations=handoverFirst?[accept(request),approve()]:[approve(),accept(request)];
     const results=await Promise.allSettled(operations),handover=results[handoverFirst?0:1];
@@ -112,7 +112,7 @@ describe('请休假未来经理交接：真实账本与实际worker，外部受�
     expect(gateway.sendInteractiveCard.mock.calls.filter(([id])=>id===next.openId)).toHaveLength(1);
     expect(gateway.sendInteractiveCard.mock.calls.some(([id])=>id===previous.openId)).toBe(false);
   });
-  it('示例人员001云同步在途不覆盖旧快照，原请求恢复后旧经理卡不能办理',async()=>{
+  it('主管云同步在途不覆盖旧快照，原请求恢复后旧经理卡不能办理',async()=>{
     const [item]=await adapter.listPending(context()),request=await input();await approve();
     let release!:()=>void,entered!:()=>void;
     const waiting=new Promise<void>(resolve=>{entered=resolve;}),barrier=new Promise<void>(resolve=>{release=resolve;});

@@ -67,11 +67,11 @@ async function fetchOrganizationData(forceRefresh = false) {
 const positionPriority: Record<string, number> = {
   设施运维经理: 1,
   设施运维副经理: 2,
-  设施运维示例人员001: 3,
-  弱电示例人员001: 4,
-  电气示例人员001: 5,
-  暖通示例人员001: 6,
-  消防示例人员001: 7,
+  设施运维主管: 3,
+  弱电主管: 4,
+  电气主管: 5,
+  暖通主管: 6,
+  消防主管: 7,
   综合管理: 8,
   '安全&消防工程师': 9,
   消防工程师: 10,
@@ -90,24 +90,24 @@ const roleToneMap: Record<string, { label: string; className: string }> = {
     label: '园区B角',
     className: 'border-sky-200 bg-sky-50 text-sky-700',
   },
-  设施运维示例人员001: {
-    label: '示例人员001',
+  设施运维主管: {
+    label: '主管',
     className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   },
-  弱电示例人员001: {
-    label: '弱电示例人员001',
+  弱电主管: {
+    label: '弱电主管',
     className: 'border-cyan-200 bg-cyan-50 text-cyan-700',
   },
-  电气示例人员001: {
-    label: '电气示例人员001',
+  电气主管: {
+    label: '电气主管',
     className: 'border-blue-200 bg-blue-50 text-blue-700',
   },
-  暖通示例人员001: {
-    label: '暖通示例人员001',
+  暖通主管: {
+    label: '暖通主管',
     className: 'border-teal-200 bg-teal-50 text-teal-700',
   },
-  消防示例人员001: {
-    label: '消防示例人员001',
+  消防主管: {
+    label: '消防主管',
     className: 'border-rose-200 bg-rose-50 text-rose-700',
   },
   综合管理: {
@@ -352,7 +352,7 @@ const OperationHub: React.FC<{
     <section className="rounded-2xl border border-blue-200/80 bg-gradient-to-br from-blue-50 via-slate-50 to-emerald-50 p-5 shadow-sm">
       <SectionHeader
         title="H楼运维&运营中枢"
-        subtitle="园区管理、专业示例人员001、综合运营与 FOC 中台"
+        subtitle="园区管理、专业主管、综合运营与 FOC 中台"
         count={countOrganizationPeople(people)}
         icon={Network}
       />
@@ -411,7 +411,7 @@ const BuildingCluster: React.FC<{
   onSelectPerson: (profile: OrganizationPersonProfileSummary) => void;
 }> = ({ building, people, canOpenProfile, onSelectPerson }) => {
   const sortedPeople = sortOrganizations(people);
-  const supervisor = sortedPeople.find((person) => person.position === '设施运维示例人员001');
+  const supervisor = sortedPeople.find((person) => person.position === '设施运维主管');
   const specialists = sortedPeople.filter((person) => person.id !== supervisor?.id);
 
   return (

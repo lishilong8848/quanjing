@@ -91,7 +91,7 @@ export const ONLINE_WORK_FORM_BASE_VALUES: Record<string, string> = {
   levelOneOpinion: '',
 };
 
-const DEFAULT_RISK_DISCLOSURE_PERSON_NAME = '示例人员010';
+const DEFAULT_RISK_DISCLOSURE_PERSON_NAME = '明志勇';
 
 export const ONLINE_WORK_FORM_COMMON_MEASURES = [
   '作业范围已确认，现场已完成隔离和警示',
@@ -113,7 +113,7 @@ export const ONLINE_WORK_FORM_WORK_TYPE_MEASURES: Record<
   临时用电作业: [
     '配电箱、漏保、接地保护已检查',
     '电缆走向固定，避免破损和积水',
-    '停送电示例人员019和操作范围已明确',
+    '停送电责任人和操作范围已明确',
   ],
   动火作业: [
     '可燃物已清理或隔离',
@@ -138,7 +138,7 @@ export const ONLINE_WORK_FORM_WORK_TYPE_MEASURES: Record<
   消防系统关闭作业: [
     '关闭范围、影响区域和替代措施已确认',
     '消防值守和临时应急措施已安排',
-    '恢复条件和复位示例人员019已明确',
+    '恢复条件和复位责任人已明确',
   ],
 };
 

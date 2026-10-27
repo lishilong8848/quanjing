@@ -901,7 +901,7 @@ function movementItem(
     building,
     location: '仓库',
     sourceOrReason: '测试',
-    operator: '示例人员016',
+    operator: '测试人员',
     createdAt: '2026-07-15T00:00:00.000Z',
   };
 }

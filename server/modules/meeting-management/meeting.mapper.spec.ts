@@ -7,7 +7,7 @@ describe('属地周会源字段适配', () => {
       fields: {
         日期: Date.parse('2026-03-05T00:00:00+08:00'),
         第几周: [{ text: '2026年第10周-运维周报' }],
-        链接: '[周报](https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE)',
+        链接: '[周报](https://vnet.feishu.cn/docx/abc)',
         专业线: [{ text: '电气' }, { text: '\n更换电池' }],
         本周代办: '跟进供应商',
       },
@@ -17,7 +17,7 @@ describe('属地周会源字段适配', () => {
       date: '2026-03-05',
       scope: '机房',
       nature: '管理类',
-      documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+      documentUrl: 'https://vnet.feishu.cn/docx/abc',
     });
     expect(
       item.sections.find((section) => section.key === 'professional')?.content,
@@ -42,7 +42,7 @@ describe('属地周会源字段适配', () => {
     'javascript:alert(1)',
     'https://evil.test/report',
     'https://vnet.feishu.cn.evil.test/docx/x',
-    'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+    'http://vnet.feishu.cn/docx/x',
   ])('拒绝不安全文档链接 %s', (url) => {
     expect(
       mapWeeklyMeeting({ record_id: 'recA', fields: { 链接: url } })

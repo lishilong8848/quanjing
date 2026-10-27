@@ -80,7 +80,7 @@ function buildConstruction(
     },
     deposit: { amount: null, deducted: null, balance: null },
     managers: {
-      supervisor: '楼栋示例人员001',
+      supervisor: '楼栋主管',
       safety: 'EHS',
       park: '园区经理',
       applicant: '申请人',

@@ -34,7 +34,7 @@ const EXPECTED_ADMIN_PATHS = [
   '/risk-inspection-dashboard',
   '/quality-assessment',
   '/monthly-alarm-overview',
-  'https://example.com:8787/',
+  'https://www.sm.sjhl.online:8787/',
   '/equipment-lifecycle-dashboard',
   '/equipment-ledger-management',
   '/threshold-management',
@@ -115,7 +115,7 @@ describe('global page navigation directory', () => {
     ).toEqual([
       {
         label: '孪生图谱',
-        path: 'https://example.com:8787/',
+        path: 'https://www.sm.sjhl.online:8787/',
         external: true,
       },
       {

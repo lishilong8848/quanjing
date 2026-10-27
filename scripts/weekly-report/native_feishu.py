@@ -331,7 +331,7 @@ class NativeFeishu:
         result = self.request('POST', 'docx/v1/documents', body=body)
         doc = result.get('document', {}).get('document_id')
         if not isinstance(doc, str) or not re.fullmatch('[A-Za-z0-9]+', doc): raise NativeError('api-request')
-        url = f'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE'
+        url = f'https://vnet.feishu.cn/docx/{doc}'
         try: self.write(url, xml)
         except Exception as exc: raise NativeError(getattr(exc, 'category', 'execution'), url) from exc
         return url, doc, {'data': {'result': {'status': 'success'}}}

@@ -25,7 +25,7 @@ describe('weekly field adapter and permissions', () => {
   beforeEach(() => {
     fields = {
       阿里会议待办: [{ text: '旧待办' }],
-      链接: { link: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', text: '查看周报' },
+      链接: { link: 'https://vnet.feishu.cn/docx/Old', text: '查看周报' },
     };
     request = jest.fn(async (options) => {
       if (options.url.endsWith('/fields'))
@@ -60,7 +60,7 @@ describe('weekly field adapter and permissions', () => {
     await gateway.update(
       'recExample',
       { 阿里会议待办: '旧待办' },
-      { 阿里会议待办: '新待办\r\n示例人员019：测试' },
+      { 阿里会议待办: '新待办\r\n责任人：测试' },
     );
     const writes = request.mock.calls.filter(
       (call) => call[0].method === 'PUT',
@@ -68,7 +68,7 @@ describe('weekly field adapter and permissions', () => {
     expect(writes).toHaveLength(1);
     expect(Object.keys(writes[0][0].data.fields)).toEqual(['阿里会议待办']);
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith(
-      expect.objectContaining({ tableId: 'tbl96c6dccf01af4' }),
+      expect.objectContaining({ tableId: 'tbl9GlPjdwTHIKSp' }),
     );
   });
   it('以机器人身份向指定群发送周报链接，携带稳定去重编号', async () => {
@@ -77,26 +77,26 @@ describe('weekly field adapter and permissions', () => {
     });
     expect(
       await gateway.sendWeeklyReport(
-        'oc_a584b9f72f95d94e665e51af321e516c',
+        'oc_ba4172984f3293d75bbe7e268d51ef40',
         'a'.repeat(32),
         '本周周报',
-        'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/docx/Example',
       ),
     ).toBe('om_Notification');
     const call = request.mock.calls[0][0];
     expect(call.params).toEqual({ receive_id_type: 'chat_id' });
     expect(call.data).toMatchObject({
-      receive_id: 'oc_a584b9f72f95d94e665e51af321e516c',
+      receive_id: 'oc_ba4172984f3293d75bbe7e268d51ef40',
       msg_type: 'text',
       uuid: 'a'.repeat(32),
     });
     expect(JSON.parse(call.data.content).text).toContain(
-      '请各专业示例人员019更新本周内容和待办',
+      '请各专业责任人更新本周内容和待办',
     );
   });
   it('空条目提醒使用飞书返回的记录链接，标识不符时拒绝发送', async () => {
     const link =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/RealBase?table=tblExample&record=recNew';
     request.mockResolvedValueOnce({
       data: {
         code: 0,
@@ -114,7 +114,7 @@ describe('weekly field adapter and permissions', () => {
       },
     });
     expect(await gateway.creationLink('create-12345678', 'recNew')).toBe(
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/JbZywYBfgiltYpksj2bc1HvCnPd?table=tbl9GlPjdwTHIKSp&view=vewDqqJuM7',
     );
     request.mockResolvedValueOnce({
       data: {
@@ -133,10 +133,10 @@ describe('weekly field adapter and permissions', () => {
     request.mockResolvedValueOnce({ data: { code: 230002 } });
     await expect(
       gateway.sendWeeklyReport(
-        'oc_a584b9f72f95d94e665e51af321e516c',
+        'oc_ba4172984f3293d75bbe7e268d51ef40',
         'a'.repeat(32),
         '周报',
-        'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/docx/Example',
       ),
     ).rejects.toMatchObject({ notificationRejected: true });
     expect(request).toHaveBeenCalledTimes(1);
@@ -174,7 +174,7 @@ describe('weekly field adapter and permissions', () => {
         { 阿里会议待办: '旧待办' },
         { 阿里会议待办: '新待办' },
       ),
-    ).rejects.toThrow('已被示例人员004修改');
+    ).rejects.toThrow('已被其他人修改');
     expect(request.mock.calls.some((call) => call[0].method === 'PUT')).toBe(
       false,
     );
@@ -193,11 +193,11 @@ describe('weekly field adapter and permissions', () => {
   it('uses link identity instead of displayed hyperlink text', async () => {
     await gateway.update(
       'recExample',
-      { 链接: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' },
-      { 链接: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' },
+      { 链接: 'https://vnet.feishu.cn/docx/Old' },
+      { 链接: 'https://vnet.feishu.cn/docx/New' },
     );
     expect(fields['链接']).toEqual({
-      link: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+      link: 'https://vnet.feishu.cn/docx/New',
       text: '查看周报',
     });
   });
@@ -232,7 +232,7 @@ describe('weekly field adapter and permissions', () => {
         ['oldToken'],
         ['newToken'],
       ),
-    ).rejects.toThrow('已被示例人员004修改');
+    ).rejects.toThrow('已被其他人修改');
     await expect(
       gateway.appendImages('recExample', '阿里会议待办', [], ['newToken']),
     ).rejects.toThrow('附件字段');
@@ -267,10 +267,10 @@ describe('weekly field adapter and permissions', () => {
       if (options.method === 'POST') members.push(options.data);
       return { data: { code: 0, data: { items: members } } };
     });
-    await gateway.grantDocument('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', [
+    await gateway.grantDocument('https://vnet.feishu.cn/docx/Example', [
       'ou_12345678901',
     ]);
-    await gateway.grantDocument('https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE', [
+    await gateway.grantDocument('https://vnet.feishu.cn/docx/Example', [
       'ou_12345678901',
     ]);
     expect(

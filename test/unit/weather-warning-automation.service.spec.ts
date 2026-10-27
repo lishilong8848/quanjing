@@ -57,7 +57,7 @@ const ACTIVE_SNAPSHOT: WeatherWarningSnapshot = {
 const PUBLIC_BASE_URL = 'https://app.sjhl.online/platform/';
 const CLIENT_BASE_PATH = '/nantong/';
 const LEGACY_APPROVAL_URL =
-  'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/share/base/form/shrcneofD8Ahc8650YU6hIuPpTe';
 
 const AUTOMATION_ENVIRONMENT_NAMES = [
   'FEISHU_WEATHER_WARNING_AUTOMATION_ENABLED',
@@ -1395,7 +1395,7 @@ function enableAutomation(
   process.env.FEISHU_WEATHER_WARNING_IMPORTANT_EVENT_CHAT_IDS =
     options.importantEventChatIds || 'oc_important_event_group';
   process.env.FEISHU_WEATHER_WARNING_OWNER_OPEN_ID = 'ou_ma_jinyu';
-  process.env.FEISHU_WEATHER_WARNING_OWNER_NAME = '示例人员020';
+  process.env.FEISHU_WEATHER_WARNING_OWNER_NAME = '马进宇';
   if (options.trackingEnabled === false) {
     delete process.env.WEATHER_WARNING_REGISTRATION_ENABLED;
     delete process.env.FEISHU_WEATHER_WARNING_PROGRESS_NOTIFICATIONS_ENABLED;

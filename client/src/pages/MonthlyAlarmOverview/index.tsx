@@ -25,7 +25,7 @@ import { PriorityIssues } from './PriorityIssues';
 import './styles.css';
 
 const SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tblqTFdVQNjRWKOK&view=vew8OzP7Nc';
 const BUILDINGS = ['园区', 'A', 'B', 'C', 'D', 'E'];
 const DETAIL_PAGE_SIZE = 12;
 

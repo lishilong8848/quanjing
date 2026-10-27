@@ -6,8 +6,8 @@ import { Agent as HttpsAgent } from 'node:https';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const OVERTIME_TABLE_ID = 'tblf1bbd02a2b049';
-const DEFAULT_OVERTIME_SOURCE_URL = 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+const OVERTIME_TABLE_ID = 'tblpCzmTT3EapaUY';
+const DEFAULT_OVERTIME_SOURCE_URL = 'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E';
 const DEFAULT_BASE_URL = 'https://127.0.0.1:3001';
 const DEFAULT_STATE_PATH = resolve(
   process.cwd(),
@@ -64,7 +64,7 @@ const BASE_FIELD_NAMES = [
   '加班时长',
   '加班举证',
   '加班原因',
-  '加班审批（示例人员001）',
+  '加班审批（主管）',
   '加班审批（经理）',
   '请求唯一ID',
   '请求指纹',
@@ -637,7 +637,7 @@ function assertFullOvertimeRecord(verification, record) {
   if (!hasAttachment(fields['加班举证'])) {
     throw new Error('Base 加班举证附件为空');
   }
-  for (const fieldName of ['加班审批（示例人员001）', '加班审批（经理）']) {
+  for (const fieldName of ['加班审批（主管）', '加班审批（经理）']) {
     if (fieldText(fields[fieldName]).replace(/\s+/g, '') === '同意') {
       throw new Error(`${fieldName}不得由真实自测写为同意`);
     }
@@ -890,7 +890,7 @@ async function createRealDependencies({ baseUrl, statePath }) {
   });
   const personProfileSourceUrl =
     configModule.readEnv('FEISHU_LEAVE_PERSON_PROFILE_SOURCE_URL') ||
-    `https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE`;
+    `https://vnet.feishu.cn/wiki/${personProfileModule.DEFAULT_LEAVE_PERSON_PROFILE_WIKI_TOKEN}?table=${personProfileModule.DEFAULT_LEAVE_PERSON_PROFILE_TABLE_ID}`;
   const parsedPersonProfileSource =
     configModule.parseFeishuBitableLink(personProfileSourceUrl);
   const personProfileTableId =

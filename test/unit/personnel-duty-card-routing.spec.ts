@@ -52,7 +52,7 @@ describe('统一岗位与既有卡片人员入口',()=>{
     expect(readConfiguredCardMembers('warehouse_responsible','B楼')).toEqual([]);expect(readConfiguredCardMembers('contract_notify',null)).toEqual([]);
     expect(new AccessConfigurationService().currentDutyRoutePeople('warehouse_approver',{building:'B楼'})).toEqual([]);
   });
-  it('实际请休假服务使用同一权限配置生成示例人员001和经理新路由，稳定记录ID不丢失',async()=>{
+  it('实际请休假服务使用同一权限配置生成主管和经理新路由，稳定记录ID不丢失',async()=>{
     await store.mutate(store.read().revision,'seed-current-leave-role','seed-leave',state=>{
       const rule=state.personnelDutyAssignments!.recDuty;rule.kind='leave_supervisor';
       state.personnelDutyAssignments!.recManager={...rule,dutyRecordId:'recManager',kind:'leave_manager',buildings:null,members:[{personId:`local-external-${'b'.repeat(64)}`,recordId:'recManagerPerson',openId:'ou_current_manager',name:'合成现任经理'}]};
@@ -62,7 +62,7 @@ describe('统一岗位与既有卡片人员入口',()=>{
     expect(plan.stages.map(stage=>stage.approvers[0].openId)).toEqual(['ou_current','ou_current_manager']);expect(plan.stages[0].approvers[0].personRecordId).toBe('recPerson');
   });
   it('实际服务在岗位事务与任务迁移之间拒绝旧人，新卡迁移后接任者可处理，已受理结果不被后续转岗撤销',async()=>{
-    const source={name:'合成前任',openId:'ou_old',personRecordId:'recOld',position:'设施示例人员001',buildings:['C楼']};
+    const source={name:'合成前任',openId:'ou_old',personRecordId:'recOld',position:'设施主管',buildings:['C楼']};
     const target={...source,name:'合成现任',openId:'ou_current',personRecordId:'recPerson'};
     await store.mutate(store.read().revision,'seed-current-leave-actor','seed',state=>{Object.assign(state.personnelDutyAssignments!.recDuty,{kind:'leave_supervisor',buildings:['C楼']});});
     const file=join(folder,'leave.json'),native=new LeaveWorkflowStore(file,file),gateway={sendMessage:jest.fn()};
@@ -80,17 +80,17 @@ describe('统一岗位与既有卡片人员入口',()=>{
     await store.mutate(store.read().revision,'seed-next-leave-actor','seed',state=>{state.personnelDutyAssignments!.recDuty.members=[];});
     const accepted=readFileSync(file,'utf8');expect((await service.acceptApprovalAction(current)).claimed).toBe(false);expect(readFileSync(file,'utf8')).toBe(accepted);expect(gateway.sendMessage).not.toHaveBeenCalled();
   });
-  it('兼任当前示例人员001和未来经理一次选择两个职责，保留未交接的专业通知身份',async()=>{
+  it('兼任当前主管和未来经理一次选择两个职责，保留未交接的专业通知身份',async()=>{
     await store.mutate(store.read().revision,'seed-multiple-leave-duties','seed',state=>{
       state.personnelDutyAssignments!.recDuty.kind='leave_supervisor';
       state.personnelDutyAssignments!.recManager={...structuredClone(state.personnelDutyAssignments!.recDuty),dutyRecordId:'recManager',kind:'leave_manager',buildings:null};
     });
-    const source={name:'合成兼任',openId:'ou_old',personRecordId:'recOld',position:'设施示例人员001',buildings:['B楼']},file=join(folder,'leave-multiple-duties.json'),native=new LeaveWorkflowStore(file,file);
+    const source={name:'合成兼任',openId:'ou_old',personRecordId:'recOld',position:'设施主管',buildings:['B楼']},file=join(folder,'leave-multiple-duties.json'),native=new LeaveWorkflowStore(file,file);
     await native.acceptApplication({clientMutationId:'synthetic-multiple-leave-duties',recordId:'recMultiple',snapshot:{applicantName:'合成申请人',applicantOpenId:'ou_applicant',applicantPersonRecordId:'recApplicant',building:'B楼',position:'电气工程师',leaveType:'年假',startAt:'2026-10-16T09:00:00+08:00',endAt:'2026-10-20T18:00:00+08:00',leaveHours:32,approvalDayCount:4,reason:'合成验收'}});
     await native.setApprovalPlan('recMultiple',{snapshot:(await native.getApplication('recMultiple'))!.snapshot,approvalPlan:{approvalClass:'ordinary',discipline:'electrical',approvalDayCount:4,stages:[{key:'supervisor',approvers:[source],resolutionPolicy:'first_legal_action'},{key:'manager',approvers:[source],resolutionPolicy:'first_legal_action'}],notificationPlan:{managerRecipients:[source],finalResultRecipients:[source],professionalRecipients:[source],substituteRecipients:[]}},resultRecipients:[source]});
     await native.setPendingStage('recMultiple',{key:'supervisor',version:1,approverOpenIds:[source.openId]});let task;while((task=await native.takeNextTask()))await native.completeTask(task.key,task.claimToken);
     const from={id:`local-external-${'b'.repeat(64)}`,recordId:'recOld',name:source.name,openId:source.openId,active:true,type:'employee' as const,position:source.position,systemPosition:'',buildings:['B楼' as const],specialties:[],permissionTags:[],dutyRecordIds:['recDuty','recManager']};
-    const context:HandoverContext={from,to:{...from,id:`local-external-${'a'.repeat(64)}`,recordId:'recPerson',name:'合成现任',openId:'ou_current'},directoryVersion:'c'.repeat(64),duties:[{recordId:'recDuty',name:'示例人员001职责',kind:'leave_supervisor',personnelIds:[from.id],buildings:['B楼','C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1},{recordId:'recManager',name:'经理职责',kind:'leave_manager',personnelIds:[from.id],buildings:null,specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}]};
+    const context:HandoverContext={from,to:{...from,id:`local-external-${'a'.repeat(64)}`,recordId:'recPerson',name:'合成现任',openId:'ou_current'},directoryVersion:'c'.repeat(64),duties:[{recordId:'recDuty',name:'主管职责',kind:'leave_supervisor',personnelIds:[from.id],buildings:['B楼','C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1},{recordId:'recManager',name:'经理职责',kind:'leave_manager',personnelIds:[from.id],buildings:null,specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}]};
     const workflow=new LeaveWorkflowService(native,{} as never,{} as never,undefined,new AccessConfigurationService()),adapter=new LeavePersonnelHandoverAdapter(native,new AccessConfigurationService(),workflow);
     const items=await adapter.listPending(context),future=items.find(row=>row.stageKey==='future_manager')!,current=items.find(row=>row.stageKey==='supervisor')!;expect(future).toBeDefined();expect(current).toBeDefined();
     const batch='eb761f03-468f-4a86-b971-1f074fa695cc',receipt=await adapter.acceptTransfer(context,future,handoverItemMutationId(batch,future.key));
@@ -113,7 +113,7 @@ describe('统一岗位与既有卡片人员入口',()=>{
     await store.mutate(store.read().revision,'seed-notice-manager','seed',state=>{Object.assign(state.personnelDutyAssignments!.recDuty,{kind:'leave_manager',buildings:null});});
     const file=join(folder,'leave-notice.json'),native=new LeaveWorkflowStore(file,file);
     await native.acceptApplication({clientMutationId:'synthetic-service-notice',recordId:'recNotice',snapshot:{applicantName:'合成申请人',applicantOpenId:'ou_applicant',applicantPersonRecordId:'recApplicant',building:'B楼',position:'运维值班员',leaveType:'年假',startAt:'2026-10-16T09:00:00+08:00',endAt:'2026-10-16T18:00:00+08:00',leaveHours:8,approvalDayCount:1,reason:'合成验收'}});
-    const source={name:'合成原经理',openId:'ou_old',position:'设施运维经理',buildings:['B楼']},applicant={...source,name:'合成申请人',openId:'ou_applicant',position:'运维值班员'},supervisor={...source,name:'合成原示例人员001',openId:'ou_supervisor',position:'设施示例人员001'};
+    const source={name:'合成原经理',openId:'ou_old',position:'设施运维经理',buildings:['B楼']},applicant={...source,name:'合成申请人',openId:'ou_applicant',position:'运维值班员'},supervisor={...source,name:'合成原主管',openId:'ou_supervisor',position:'设施主管'};
     await native.setApprovalPlan('recNotice',{snapshot:(await native.getApplication('recNotice'))!.snapshot,approvalPlan:{approvalClass:'ordinary',discipline:null,approvalDayCount:1,stages:[{key:'supervisor',approvers:[supervisor],resolutionPolicy:'first_legal_action'}],notificationPlan:{finalResultRecipients:[applicant,supervisor,source],professionalRecipients:[],substituteRecipients:[]}},resultRecipients:[applicant,supervisor,source]});
     await native.patchApplication('recNotice',{status:'approved'});
     const gateway={patchInteractiveCard:jest.fn(async()=>{}),updateLeaveRecord:jest.fn(async()=>{}),sendInteractiveCard:jest.fn(async(recipient:string)=>{
@@ -127,7 +127,7 @@ describe('统一岗位与既有卡片人员入口',()=>{
   });
   it.each(['approval','confirmation','confirmation_accepted','confirmation_expired'])('实际加班%s通知跟随现任，保留原受理与回执，超窗不能盲发',async mode=>{
     await store.mutate(store.read().revision,'seed-overtime-notice-manager','seed',state=>{Object.assign(state.personnelDutyAssignments!.recDuty,{kind:'overtime_manager',buildings:null});});
-    const file=join(folder,'overtime-notice.json'),native=new OvertimeWorkflowStore(file,file),source={name:'合成原经理',openId:'ou_old',position:'设施运维经理',buildings:['B楼']},supervisor={...source,name:'合成原示例人员001',openId:'ou_supervisor',position:'设施示例人员001'};
+    const file=join(folder,'overtime-notice.json'),native=new OvertimeWorkflowStore(file,file),source={name:'合成原经理',openId:'ou_old',position:'设施运维经理',buildings:['B楼']},supervisor={...source,name:'合成原主管',openId:'ou_supervisor',position:'设施主管'};
     await native.acceptApplication({clientMutationId:'synthetic-overtime-notice',snapshot:{recordId:'recOvertimeNotice',applicantName:'合成申请人',applicantOpenId:'ou_applicant',building:'B楼',position:'运维值班员',plannedStartAt:'2026-10-16T09:00:00+08:00',plannedEndAt:'2026-10-16T10:00:00+08:00',plannedHours:1,reason:'合成验收'}});
     await native.patchApplication('recOvertimeNotice',{phase:'awaiting_confirmation',approvers:[supervisor],managerRecipients:[source],professionalRecipients:[],actualApproverOpenId:supervisor.openId,actualApproverName:supervisor.name});
     if(mode!=='approval')await native.claimConfirmationSubmission({mutationId:randomUUID(),recordId:'recOvertimeNotice',actorOpenId:supervisor.openId,draft:{actualStartAt:'2026-10-16T09:00:00+08:00',actualEndAt:'2026-10-16T10:00:00+08:00',actualHours:1,disposition:'调休'}});
@@ -150,7 +150,7 @@ describe('统一岗位与既有卡片人员入口',()=>{
     await store.mutate(store.read().revision,`seed-${module}-independent-notify`,'seed',state=>{Object.assign(state.personnelDutyAssignments!.recDuty,{kind:`${module}_manager`,buildings:null});});
     const from={id:`local-external-${'b'.repeat(64)}`,recordId:'recOld',name:'合成前任',openId:'ou_old',active:false,type:'employee' as const,position:'设施运维经理',systemPosition:'',buildings:['B楼' as const],specialties:[],permissionTags:[],dutyRecordIds:['recDuty']};
     const context:HandoverContext={from,to:{...from,id:`local-external-${'a'.repeat(64)}`,recordId:'recPerson',name:'合成现任',openId:'ou_current',active:true},directoryVersion:'c'.repeat(64),duties:[{recordId:'recDuty',name:'合成经理职责',kind:`${module}_manager`,personnelIds:[from.id],buildings:null,specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}]};
-    const source={name:'合成前任',openId:'ou_old',position:'设施运维经理',buildings:['B楼']},supervisor={...source,name:'合成示例人员001',openId:'ou_supervisor',position:'设施示例人员001'},applicant={...source,name:'合成申请人',openId:'ou_applicant',position:'运维值班员'};
+    const source={name:'合成前任',openId:'ou_old',position:'设施运维经理',buildings:['B楼']},supervisor={...source,name:'合成主管',openId:'ou_supervisor',position:'设施主管'},applicant={...source,name:'合成申请人',openId:'ou_applicant',position:'运维值班员'};
     const file=join(folder,`${module}-notify-transfer.json`),configuration=new AccessConfigurationService(),gateway={sendInteractiveCard:jest.fn(async(recipient:string)=>`om_${recipient.slice(3)}`),patchInteractiveCard:jest.fn(async()=>{}),updateLeaveRecord:jest.fn(async()=>{}),updateOvertimeRecord:jest.fn(async()=>{}),readOvertimeRecordIfExists:jest.fn(async()=>({recordId:'recIndependent',fields:{}}))};
     let native:any,workflow:any,adapter:any;
     if(module==='leave'){
@@ -185,7 +185,7 @@ describe('统一岗位与既有卡片人员入口',()=>{
   });
   it('已批准请假仍待调整替班时，旧岗位卡失效，现任新卡可办理，合法受理后收权不重做',async()=>{
     await store.mutate(store.read().revision,'seed-substitute-current-supervisor','seed',state=>{state.personnelDutyAssignments!.recDuty.kind='leave_supervisor';});
-    const file=join(folder,'leave-adjustment-transfer.json'),native=new LeaveWorkflowStore(file,file),source={name:'合成前任',openId:'ou_old',personRecordId:'recOld',position:'设施示例人员001',buildings:['B楼']},candidate={name:'合成替班',openId:'ou_substitute',personRecordId:'recSubstitute',position:'运维值班员',buildings:['B楼']};
+    const file=join(folder,'leave-adjustment-transfer.json'),native=new LeaveWorkflowStore(file,file),source={name:'合成前任',openId:'ou_old',personRecordId:'recOld',position:'设施主管',buildings:['B楼']},candidate={name:'合成替班',openId:'ou_substitute',personRecordId:'recSubstitute',position:'运维值班员',buildings:['B楼']};
     await native.acceptApplication({clientMutationId:'synthetic-adjustment-transfer',recordId:'recAdjustment',snapshot:{applicantName:'合成申请人',applicantOpenId:'ou_applicant',applicantPersonRecordId:'recApplicant',building:'B楼',position:'运维值班员',leaveType:'年假',startAt:new Date(Date.now()+24*60*60_000).toISOString(),endAt:new Date(Date.now()+48*60*60_000).toISOString(),leaveHours:8,approvalDayCount:1,reason:'合成验收',substituteRequired:true,substituteCandidates:[candidate]}});
     await native.setApprovalPlan('recAdjustment',{snapshot:(await native.getApplication('recAdjustment'))!.snapshot,approvalPlan:{approvalClass:'ordinary',discipline:null,approvalDayCount:1,stages:[{key:'supervisor',approvers:[source],resolutionPolicy:'first_legal_action'}],notificationPlan:{finalResultRecipients:[source],professionalRecipients:[],substituteRecipients:[]}},resultRecipients:[source]});
     await native.setPendingStage('recAdjustment',{key:'supervisor',version:1,approverOpenIds:[source.openId]});await native.patchApplication('recAdjustment',{status:'approved'});
@@ -195,8 +195,8 @@ describe('统一岗位与既有卡片人员入口',()=>{
     const configuration=new AccessConfigurationService(),workflow=new LeaveWorkflowService(native,gateway as never,{} as never,undefined,configuration),adapter=new LeavePersonnelHandoverAdapter(native,configuration,workflow);
     const input={eventId:'synthetic-old-adjustment',recordId:'recAdjustment',expectedRevision:0,actorOpenId:'ou_old',actorName:'合成前任',messageId:'om_old_adjustment',substitutePersonRecordId:'recSubstitute'};
     const bytes=readFileSync(file,'utf8');expect((await workflow.acceptSubstituteUpdateAction(input)).claimed).toBe(false);expect(readFileSync(file,'utf8')).toBe(bytes);
-    const from={id:`local-external-${'b'.repeat(64)}`,recordId:'recOld',name:'合成前任',openId:'ou_old',active:true,type:'employee' as const,position:'设施示例人员001',systemPosition:'',buildings:['B楼' as const],specialties:[],permissionTags:[],dutyRecordIds:['recDuty']};
-    const context:HandoverContext={from,to:{...from,id:`local-external-${'a'.repeat(64)}`,recordId:'recPerson',name:'合成现任',openId:'ou_current'},directoryVersion:'c'.repeat(64),duties:[{recordId:'recDuty',name:'合成示例人员001职责',kind:'leave_supervisor',personnelIds:[from.id],buildings:['B楼','C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}]};
+    const from={id:`local-external-${'b'.repeat(64)}`,recordId:'recOld',name:'合成前任',openId:'ou_old',active:true,type:'employee' as const,position:'设施主管',systemPosition:'',buildings:['B楼' as const],specialties:[],permissionTags:[],dutyRecordIds:['recDuty']};
+    const context:HandoverContext={from,to:{...from,id:`local-external-${'a'.repeat(64)}`,recordId:'recPerson',name:'合成现任',openId:'ou_current'},directoryVersion:'c'.repeat(64),duties:[{recordId:'recDuty',name:'合成主管职责',kind:'leave_supervisor',personnelIds:[from.id],buildings:['B楼','C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}]};
     const item=(await adapter.listPending(context)).find(row=>row.stageKey==='role_notifications')!;expect(item).toBeDefined();
     const receipt=await adapter.acceptTransfer(context,item,handoverItemMutationId('eb761f03-468f-4a86-b971-1f074fa695cc',item.key));expect(await adapter.reconcile(context,receipt)).toEqual({status:'syncing'});
     expect(await workflow.runPendingTasks(new Date(),1)).toEqual({processed:1,failed:0});expect(gateway.patchInteractiveCard).toHaveBeenCalledWith('om_old_adjustment',expect.anything());expect(gateway.sendInteractiveCard).toHaveBeenCalledTimes(1);expect(gateway.sendInteractiveCard.mock.calls[0][0]).toBe('ou_current');expect(await adapter.reconcile(context,receipt)).toEqual({status:'success'});

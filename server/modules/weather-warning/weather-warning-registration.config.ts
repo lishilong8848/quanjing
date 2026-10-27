@@ -88,8 +88,8 @@ const REGISTRATION_TABLE_ID_ENV =
 const SOURCE_URL_ENV = 'FEISHU_WEATHER_WARNING_SOURCE_URL';
 const CHECK_TABLE_ID_ENV = 'FEISHU_WEATHER_WARNING_CHECK_TABLE_ID';
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
-const DEFAULT_CHECK_TABLE_ID = 'tblc4742cfc8398f';
+  'https://vnet.feishu.cn/base/Tmn8bjGnpasbLTskafbcRijvnKe?table=tbldeLoJJe6cPiHy&view=vewXWFTfcG';
+const DEFAULT_CHECK_TABLE_ID = 'tblVFWuUbjo4GHOY';
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 
 export function loadWeatherWarningRegistrationRuntimeConfig(

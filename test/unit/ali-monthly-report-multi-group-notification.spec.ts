@@ -25,10 +25,10 @@ type ServiceInternals = {
   ) => Promise<AliMonthlyReportGenerateResponse>;
 };
 
-const primaryChatId = 'oc_c79f407063dc9ca9f70cc76cb4059895';
-const additionalChatId = 'oc_eaf9c57f7995587b43342558d1f49730';
+const primaryChatId = 'oc_9961bb057de8bd715447559c5e63c4f2';
+const additionalChatId = 'oc_3bc648b9b761f24a65366a9b04b32eb2';
 const recordUrl =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/base/MliKbC3fXa8PXrsndKscmxjdn1g?table=tblAGQeQ7tpV8tWt&view=vewrHJHl3v&recordId=recvrcnAMSKGO9';
 
 const runtime: RuntimeConfigForTest = {
   configPath: '',
@@ -208,7 +208,7 @@ describe('阿里月报双群互动卡片通知', () => {
     });
   });
 
-  it('自动任务只向自动化群发送一示例人员008项汇总卡片', async () => {
+  it('自动任务只向自动化群发送一张三项汇总卡片', async () => {
     const { service, fakePost, internals } = createService([
       'success',
       'success',
@@ -238,14 +238,14 @@ describe('阿里月报双群互动卡片通知', () => {
           status: 'succeeded',
           attempts: 1,
           fileName: '超功率.xlsx',
-          recordUrl: recordUrl.replace('tblae41d7fdc6701', 'tbl82468a84ec746'),
+          recordUrl: recordUrl.replace('tblAGQeQ7tpV8tWt', 'tblkh6YCMYtS8nHa'),
         },
         {
           reportType: 'staff_roster',
           status: 'succeeded',
           attempts: 1,
           fileName: '人员变动.xlsx',
-          recordUrl: recordUrl.replace('tblae41d7fdc6701', 'tblf5fc5e5730d03'),
+          recordUrl: recordUrl.replace('tblAGQeQ7tpV8tWt', 'tbl3KED5CdvNSCwT'),
         },
       ],
     };

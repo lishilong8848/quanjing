@@ -26,10 +26,10 @@ const mockedResolve = jest.mocked(resolveBitableAppToken);
 const httpService = {} as HttpService;
 
 const TABLES = {
-  equipment: 'tblccc04f2d27416',
-  longTermMaintenance: 'tblfee06d7d6b11e',
-  keyParts: 'tbl957cc4cc0f69b',
-  maintenanceContracts: 'tblf7eedcba458d7',
+  equipment: 'tblGFIJl9QQokCm0',
+  longTermMaintenance: 'tblOnpjrcp5xR6gn',
+  keyParts: 'tblDNgWg26vJlxHB',
+  maintenanceContracts: 'tblOZ1iBgdEH4GDB',
 } as const;
 
 function recordForTable(tableId: string): BitableRecordItem {
@@ -150,7 +150,7 @@ describe('EquipmentLifecycleService', () => {
           '维护名称',
           '专业',
           '楼栋',
-          '示例人员019',
+          '责任人',
           '上次维护日期',
           '本次到期日期',
           '到期倒计时',
@@ -170,7 +170,7 @@ describe('EquipmentLifecycleService', () => {
           '设备类型',
           '专业',
           '楼栋',
-          '示例人员019',
+          '责任人',
           '上次更换时间',
           '下次更换时间',
           '状态',
@@ -189,7 +189,7 @@ describe('EquipmentLifecycleService', () => {
           '设备名称',
           '设备类型',
           '专业',
-          '示例人员019',
+          '责任人',
           '本轮截止日期',
           '合同当前状态',
         ],

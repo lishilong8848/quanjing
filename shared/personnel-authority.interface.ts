@@ -4,7 +4,7 @@ import type { AccessRole } from './access-control.interface';
 
 export const AUTHORITY_DUTY_TABLE_NAME = '01-4 岗位职责与授权';
 export const AUTHORITY_DUTY_CATALOG = [
-  { id: 'building_supervisor', label: '楼栋示例人员001', buildingRequired: true, specialtyRequired: false, singleHolder: true },
+  { id: 'building_supervisor', label: '楼栋主管', buildingRequired: true, specialtyRequired: false, singleHolder: true },
   { id: 'warehouse_approver', label: '库房审批', buildingRequired: true, specialtyRequired: false, singleHolder: false },
   { id: 'warehouse_notify', label: '库房知会', buildingRequired: true, specialtyRequired: false, singleHolder: false },
   { id: 'purchase_manager', label: '采购经理审批', buildingRequired: false, specialtyRequired: false, singleHolder: false },
@@ -13,11 +13,11 @@ export const AUTHORITY_DUTY_CATALOG = [
   { id: 'building_executor', label: '楼栋自采执行', buildingRequired: true, specialtyRequired: false, singleHolder: true },
   { id: 'contract_action', label: '合同处置', buildingRequired: false, specialtyRequired: false, singleHolder: false },
   { id: 'contract_notify', label: '合同通知', buildingRequired: false, specialtyRequired: false, singleHolder: false },
-  { id: 'leave_supervisor', label: '请休假示例人员001审批', buildingRequired: true, specialtyRequired: false, singleHolder: true },
+  { id: 'leave_supervisor', label: '请休假主管审批', buildingRequired: true, specialtyRequired: false, singleHolder: true },
   { id: 'leave_manager', label: '请休假经理审批', buildingRequired: false, specialtyRequired: false, singleHolder: false },
-  { id: 'overtime_supervisor', label: '加班示例人员001审批', buildingRequired: true, specialtyRequired: false, singleHolder: true },
+  { id: 'overtime_supervisor', label: '加班主管审批', buildingRequired: true, specialtyRequired: false, singleHolder: true },
   { id: 'overtime_manager', label: '加班经理审批', buildingRequired: false, specialtyRequired: false, singleHolder: false },
-  { id: 'professional_supervisor', label: '专业示例人员001', buildingRequired: false, specialtyRequired: true, singleHolder: false },
+  { id: 'professional_supervisor', label: '专业主管', buildingRequired: false, specialtyRequired: true, singleHolder: false },
   { id: 'professional_engineer', label: '工程师', buildingRequired: true, specialtyRequired: true, singleHolder: false },
 ] as const;
 export type AuthorityDutyKind = typeof AUTHORITY_DUTY_CATALOG[number]['id'];

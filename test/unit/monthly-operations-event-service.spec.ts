@@ -37,13 +37,13 @@ describe('事件只读接口边界', () => {
       .mocked(fetchBitableRecords)
       .mock.calls.map((call) => call[1]);
     expect(primary).toMatchObject({
-      tableId: 'tbl72e6608772279',
+      tableId: 'tblj9XJLq5QzTAqX',
       strict: true,
       allowStale: true,
       cacheTtlMs: 300000,
     });
     expect(supplement).toMatchObject({
-      tableId: 'tbl8c53fd40c1f50',
+      tableId: 'tbl07kaaLGodiTqQ',
       viewId: 'vewtj0ZiJJ',
       strict: true,
       allowStale: true,
@@ -95,7 +95,7 @@ describe('事件只读接口边界', () => {
     jest
       .mocked(fetchBitableRecords)
       .mockImplementation(async (_http, options) =>
-        options.tableId === 'tbl72e6608772279'
+        options.tableId === 'tblj9XJLq5QzTAqX'
           ? [
               {
                 record_id: 'primary',
@@ -114,11 +114,11 @@ describe('事件只读接口边界', () => {
                   事件发生时间: Date.parse('2026-04-13T21:20:00+08:00'),
                   告警描述: '方舟平台温度异常',
                   '1-回溯报告': {
-                    link: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+                    link: 'https://vnet.feishu.cn/wiki/P2klwb3Y0i8M4gk5kl7cYQ8nnbe',
                     text: '温度异常复盘',
                   },
                   '2-回溯报告': {
-                    link: 'https://example.feishu.cn/file/PUBLIC_EXAMPLE_SOURCE',
+                    link: 'https://vnet.feishu.cn/file/Ii4RbU6WGopA6GxLUPXclODln5c',
                     text: '附件复盘.docx',
                   },
                 },

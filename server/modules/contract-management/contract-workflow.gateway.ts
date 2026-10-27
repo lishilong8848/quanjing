@@ -13,7 +13,7 @@ import {
 } from '../../common/feishu/bitable-direct-read';
 
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SiW9wuy9DiIsykkTkNUcM0HfnSb?table=tblQehMrGf4zIfnt&view=vewmu8EPpy';
 const DEFAULT_WIKI_TOKEN = 'SiW9wuy9DiIsykkTkNUcM0HfnSb';
 
 interface TenantTokenState {
@@ -50,17 +50,17 @@ export class ContractWorkflowGateway {
     const [contracts, payments, organization] = await Promise.all([
       this.readTable(
         appToken,
-        readEnv('FEISHU_CONTRACT_EXECUTION_TABLE_ID') || 'tbl1171c5349e996',
+        readEnv('FEISHU_CONTRACT_EXECUTION_TABLE_ID') || 'tblWfHs0iwQh8lHj',
         '01-执行合同信息',
       ),
       this.readTable(
         appToken,
-        readEnv('FEISHU_CONTRACT_PAYMENT_TABLE_ID') || 'tbl277d0db09de0f',
+        readEnv('FEISHU_CONTRACT_PAYMENT_TABLE_ID') || 'tblYK1vdLAkpoaIC',
         '03-付款计划',
       ),
       this.readTable(
         appToken,
-        readEnv('FEISHU_CONTRACT_ORGANIZATION_TABLE_ID') || 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_ORGANIZATION_TABLE_ID',
+        readEnv('FEISHU_CONTRACT_ORGANIZATION_TABLE_ID') || 'tblRtv0XGQVTihw7',
         '组织架构',
       ),
     ]);

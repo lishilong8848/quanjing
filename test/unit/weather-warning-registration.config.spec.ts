@@ -2,19 +2,19 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { loadWeatherWarningRegistrationRuntimeConfig } from '../../server/modules/weather-warning/weather-warning-registration.config';
 
 const SOURCE_URL =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/base/appWeatherWarning?table=tblWeatherRules';
 
 describe('weather warning registration runtime config', () => {
   it('uses the existing guard-check table and dedicated registration field defaults', () => {
     const config = loadWeatherWarningRegistrationRuntimeConfig({
       FEISHU_WEATHER_WARNING_SOURCE_URL: SOURCE_URL,
-      FEISHU_WEATHER_WARNING_CHECK_TABLE_ID: 'tbl38234f0508b6d',
+      FEISHU_WEATHER_WARNING_CHECK_TABLE_ID: 'tblWeatherChecks',
     });
 
     expect(config).toEqual({
       appToken: 'appWeatherWarning',
       wikiToken: '',
-      registrationTableId: 'tbl38234f0508b6d',
+      registrationTableId: 'tblWeatherChecks',
       registrationFields: {
         date: '日期',
         checker: '检查人',
@@ -43,9 +43,9 @@ describe('weather warning registration runtime config', () => {
   it('allows every registration table and field override without changing progress fields', () => {
     const env = {
       FEISHU_WEATHER_WARNING_SOURCE_URL: SOURCE_URL,
-      FEISHU_WEATHER_WARNING_CHECK_TABLE_ID: 'tbl71f0ddbad89cb9',
+      FEISHU_WEATHER_WARNING_CHECK_TABLE_ID: 'tblProgressChecks',
       FEISHU_WEATHER_WARNING_CHECK_DEVICE_FIELD: '进度设备状态',
-      FEISHU_WEATHER_WARNING_REGISTRATION_TABLE_ID: 'tbld85f2e4a48893',
+      FEISHU_WEATHER_WARNING_REGISTRATION_TABLE_ID: 'tblRegistrations',
       FEISHU_WEATHER_WARNING_REGISTRATION_DATE_FIELD: '登记时间',
       FEISHU_WEATHER_WARNING_REGISTRATION_CHECKER_FIELD: '登记检查人',
       FEISHU_WEATHER_WARNING_REGISTRATION_MANAGER_FIELD: '登记经理',
@@ -73,7 +73,7 @@ describe('weather warning registration runtime config', () => {
 
     const config = loadWeatherWarningRegistrationRuntimeConfig(env);
 
-    expect(config.registrationTableId).toBe('tbld85f2e4a48893');
+    expect(config.registrationTableId).toBe('tblRegistrations');
     expect(config.registrationFields).toEqual({
       date: '登记时间',
       checker: '登记检查人',
@@ -104,14 +104,14 @@ describe('weather warning registration runtime config', () => {
       FEISHU_WEATHER_WARNING_SOURCE_URL: SOURCE_URL,
       FEISHU_WEATHER_WARNING_CHECK_TABLE_ID:
         'invalid-progress-table-PRIVATE_VALUE_SHOULD_NOT_LEAK',
-      FEISHU_WEATHER_WARNING_REGISTRATION_TABLE_ID: 'tbld85f2e4a48893',
+      FEISHU_WEATHER_WARNING_REGISTRATION_TABLE_ID: 'tblRegistrations',
     });
 
     expect(config).toEqual(
       expect.objectContaining({
         appToken: 'appWeatherWarning',
         wikiToken: '',
-        registrationTableId: 'tbld85f2e4a48893',
+        registrationTableId: 'tblRegistrations',
       }),
     );
   });

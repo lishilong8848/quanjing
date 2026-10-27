@@ -138,7 +138,7 @@ async function start() {
     } = require('../../server/modules/equipment-lifecycle/equipment-ledger.service');
     const snapshot = await readLatestPersistedBitableRecordSnapshot({
       appToken: 'WMcQbPn71aXwoGsNv0vcnzz2n6c',
-      tableId: 'tbld39d3db603982',
+      tableId: 'tblPIgIZ5fyEeQnY',
       tableName: '南通各机楼设备台账',
       fieldNames: EQUIPMENT_LEDGER_FIELDS,
     });

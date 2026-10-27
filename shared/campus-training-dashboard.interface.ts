@@ -155,8 +155,9 @@ export interface CampusTrainingDashboardResponse {
   courses: TrainingCourseDetail[];
   details: TrainingDashboardDetails;
   sourceUpdatedAt: string | null;
+  /** Last successful source synchronization; empty before any successful sync. */
   syncedAt: string;
-  sourceStatus: 'fresh' | 'stale';
+  sourceStatus: 'fresh' | 'refreshing' | 'stale';
   dataStatus: 'ready' | 'empty';
   errorMessage?: string;
 }

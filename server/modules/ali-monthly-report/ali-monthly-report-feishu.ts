@@ -590,7 +590,7 @@ function assertAliMonthlyReportBitableRecordUrl(value: string): string {
     )
   ) {
     throw new Error(
-      '阿里月报多维表记录地址必须使用 https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+      '阿里月报多维表记录地址必须使用 https://vnet.feishu.cn/base/',
     );
   }
 

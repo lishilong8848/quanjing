@@ -15,7 +15,7 @@ import {
 import { mapCampusCertificateDashboard } from './certificate-dashboard.mapper';
 
 const DEFAULT_WIKI_TOKEN = 'Rz4GwoB8Fi4WyokVcCPcmWJMnle';
-const DEFAULT_TABLE_ID = 'tblce45d88e70ea3';
+const DEFAULT_TABLE_ID = 'tbl9NBxImAt3kzx2';
 const SOURCE_NAME = '园区持证正式表';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const STALE_ERROR_MESSAGE = '源数据同步失败，已展示上次成功结果';

@@ -121,7 +121,7 @@ describe('InventoryOutboundWorkflowService async submission', () => {
     directory = mkdtempSync(join(tmpdir(), 'inventory-outbound-async-'));
     ledgerPath = join(directory, 'ledger.json');
     process.env.FEISHU_WAREHOUSE_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/QmxAbhXNJaA9YKsbfZyclzhGnSd';
     delete process.env.FEISHU_WAREHOUSE_APP_TOKEN;
     process.env.FEISHU_WAREHOUSE_INVENTORY_TABLE_ID = 'tbl_inventory';
     process.env.FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID = 'tbl_outbound';
@@ -287,7 +287,7 @@ describe('InventoryOutboundWorkflowService async submission', () => {
               : [inventoryRecord()],
       );
       fixture.warehouseRoleDirectory.resolveApprovers.mockResolvedValue([
-        { openId: 'ou_new_responsible', name: '新示例人员019' },
+        { openId: 'ou_new_responsible', name: '新责任人' },
       ]);
       await expect(
         fixture.service.getTaskStatus(
@@ -300,7 +300,7 @@ describe('InventoryOutboundWorkflowService async submission', () => {
         task: {
           status: 'completed',
           result: {
-            movement: { operator: 'A楼示例人员019', name: '测试滤芯', unit: '个' },
+            movement: { operator: 'A楼责任人', name: '测试滤芯', unit: '个' },
           },
         },
       });
@@ -348,7 +348,7 @@ describe('InventoryOutboundWorkflowService async submission', () => {
     );
 
     const task = (await ledger.findByTaskId(accepted.taskId))?.task;
-    expect(task?.result?.movement.operator).toBe('A楼示例人员019');
+    expect(task?.result?.movement.operator).toBe('A楼责任人');
     expect(gateway.createRecord).toHaveBeenCalledTimes(1);
     expect(approvalService.registerPending).toHaveBeenCalledTimes(1);
   });
@@ -3118,7 +3118,7 @@ function createService(
     resolveApprovers: jest
       .fn()
       .mockResolvedValue([
-        { openId: 'ou_warehouse_responsible', name: 'A楼示例人员019' },
+        { openId: 'ou_warehouse_responsible', name: 'A楼责任人' },
       ]),
     resolveNotificationRecipients: jest
       .fn()

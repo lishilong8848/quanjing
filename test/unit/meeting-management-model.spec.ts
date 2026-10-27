@@ -63,7 +63,7 @@ describe('会议清单本地筛选', () => {
           {
             kind: 'meeting',
             label: '会议链接',
-            url: 'https://example.feishu.cn/vc/PUBLIC_EXAMPLE_SOURCE',
+            url: 'https://vnet.feishu.cn/vc/A',
           },
         ],
       },

@@ -66,15 +66,15 @@ export function ThresholdAdjustmentForm({
     : context.applicant?.openId || '';
   const buildingApprovers = context.roles.filter(
     (p) =>
-      ['设施运维示例人员001', 'H楼值班示例人员001'].includes(p.position) &&
+      ['设施运维主管', 'H楼值班主管'].includes(p.position) &&
       p.buildings.includes(record.building),
   );
   const professionalApprovers = context.roles.filter(
     (p) =>
       [
-        `${record.profession}示例人员001`,
-        `${record.profession}专业示例人员001`,
-        `${record.profession}示例人员001工程师`,
+        `${record.profession}主管`,
+        `${record.profession}专业主管`,
+        `${record.profession}主管工程师`,
       ].includes(p.position) && p.professions.includes(record.profession),
   );
   const eligible =
@@ -133,7 +133,7 @@ export function ThresholdAdjustmentForm({
         <DialogHeader>
           <DialogTitle>阈值调整申请</DialogTitle>
           <DialogDescription className="sr-only">
-            填写新阈值、预计调整时间与原因，楼长和专业示例人员001审批后由工程师确认完成。
+            填写新阈值、预计调整时间与原因，楼长和专业主管审批后由工程师确认完成。
           </DialogDescription>
         </DialogHeader>
         <form
@@ -227,7 +227,7 @@ export function ThresholdAdjustmentForm({
               </strong>
             </div>
             <div>
-              <span>专业示例人员001审批</span>
+              <span>专业主管审批</span>
               <strong>
                 {professionalApprovers.map((p) => p.name).join('、') ||
                   '未配置'}
@@ -324,7 +324,7 @@ export function ThresholdAdjustmentHistory({
                   {a.stages
                     .map(
                       (s) =>
-                        `${s.role === 'building' ? '楼长' : '专业示例人员001'} ${s.approver.name}：${s.decision ? (s.decision.action === 'approve' ? '通过' : '驳回') : '待审批'}`,
+                        `${s.role === 'building' ? '楼长' : '专业主管'} ${s.approver.name}：${s.decision ? (s.decision.action === 'approve' ? '通过' : '驳回') : '待审批'}`,
                     )
                     .join(' · ')}
                 </p>

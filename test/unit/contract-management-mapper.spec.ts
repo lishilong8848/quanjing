@@ -4,7 +4,7 @@ describe('contract management mapper', () => {
   it('builds lifecycle, value, payment and risk summaries from linked contract tables', () => {
     const dashboard = buildContractManagementDashboard({
       generatedAt: '2026-07-11T06:00:00.000Z',
-      sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      sourceUrl: 'https://vnet.feishu.cn/wiki/contract',
       now: new Date('2026-07-11T06:00:00.000Z'),
       frameworkContracts: [
         {
@@ -155,7 +155,7 @@ describe('contract management mapper', () => {
   it('builds expired-contract payment follow-ups from payment-plan records', () => {
     const dashboard = buildContractManagementDashboard({
       generatedAt: '2026-07-13T06:00:00.000Z',
-      sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      sourceUrl: 'https://vnet.feishu.cn/wiki/contract',
       now: new Date('2026-07-13T06:00:00.000Z'),
       frameworkContracts: [],
       suppliers: [],
@@ -266,7 +266,7 @@ describe('contract management mapper', () => {
     );
     const dashboard = buildContractManagementDashboard({
       generatedAt: '2026-07-15T01:00:00.000Z',
-      sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      sourceUrl: 'https://vnet.feishu.cn/wiki/contract',
       now: new Date('2026-07-15T01:00:00.000Z'),
       frameworkContracts: [],
       suppliers: [],
@@ -313,7 +313,7 @@ describe('contract management mapper', () => {
     }));
     const dashboard = buildContractManagementDashboard({
       generatedAt: '2026-07-15T01:00:00.000Z',
-      sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      sourceUrl: 'https://vnet.feishu.cn/wiki/contract',
       now: new Date('2026-07-15T01:00:00.000Z'),
       frameworkContracts: [],
       suppliers,

@@ -17,7 +17,7 @@ export interface PersonProfileReadPlanOptions {
   travelViewId?: string;
 }
 
-export const DEFAULT_LEAVE_PERSON_PROFILE_TABLE_ID = 'tblf9cb8328bad8b';
+export const DEFAULT_LEAVE_PERSON_PROFILE_TABLE_ID = 'tblATnYxuleJpyVl';
 export const DEFAULT_LEAVE_PERSON_PROFILE_WIKI_TOKEN =
   'G7oUwGdwaiTmimk8i2ecGTWOn4d';
 export const PERSON_PROFILE_CACHE_TTL_MS = 4 * 60 * 60 * 1000;

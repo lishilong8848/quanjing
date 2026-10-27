@@ -150,14 +150,14 @@ const createSchedule = (
   building: '1号楼',
   team: 'A班',
   shift: '白班',
-  dutyStaffActual: ['示例人员008'],
+  dutyStaffActual: ['张三'],
   ...overrides,
 });
 
 const createRequest = (
   overrides: Partial<LeaveRequestImpactRequest> = {},
 ): LeaveRequestImpactRequest => ({
-  leaveStaffName: '示例人员008',
+  leaveStaffName: '张三',
   startAt: '2026-08-03T00:00',
   endAt: '2026-08-04T00:00',
   ...overrides,
@@ -360,11 +360,11 @@ describe('calculateLeaveRequestSubstituteRule', () => {
         createSchedule({
           team: '长白',
           shift: '白班',
-          dutyStaffActual: ['示例人员008'],
+          dutyStaffActual: ['张三'],
         }),
         createSchedule({
           recordId: 'same-window-candidate',
-          dutyStaffActual: ['示例人员013'],
+          dutyStaffActual: ['李四'],
         }),
       ],
       createRequest(),
@@ -372,8 +372,8 @@ describe('calculateLeaveRequestSubstituteRule', () => {
     );
 
     expect(rule.requiresSubstitute).toBe(true);
-    expect(isLeaveSubstituteStaffBlocked(rule, '示例人员008')).toBe(true);
-    expect(isLeaveSubstituteStaffBlocked(rule, '示例人员013')).toBe(true);
+    expect(isLeaveSubstituteStaffBlocked(rule, '张三')).toBe(true);
+    expect(isLeaveSubstituteStaffBlocked(rule, '李四')).toBe(true);
   });
 
   it('allows another same-day long-white employee for a policy-scoped long-white applicant', () => {
@@ -555,11 +555,11 @@ describe('calculateLeaveRequestSubstituteRule', () => {
     );
 
     expect(rule.requiresSubstitute).toBe(true);
-    for (const name of ['示例人员008', '前夜人员', '后夜人员', '跨楼人员']) {
+    for (const name of ['张三', '前夜人员', '后夜人员', '跨楼人员']) {
       expect(isLeaveSubstituteStaffBlocked(rule, name)).toBe(true);
     }
     expect(isLeaveSubstituteStaffBlocked(rule, '安全人员')).toBe(false);
-    expect(isLeaveSubstituteStaffBlocked(rule, '示例人员008一')).toBe(false);
+    expect(isLeaveSubstituteStaffBlocked(rule, '张三一')).toBe(false);
   });
 
   it('allows same-day long-white staff to substitute for an ordinary white shift', () => {
@@ -785,7 +785,7 @@ describe('calculateLeaveRequestSubstituteRule', () => {
           recordId: 'unknown-previous-day',
           scheduleDate: '2026-08-02',
           shift: '中班',
-          dutyStaffActual: ['示例人员017 赵六'],
+          dutyStaffActual: ['王五 赵六'],
         }),
       ],
       createRequest({
@@ -794,9 +794,9 @@ describe('calculateLeaveRequestSubstituteRule', () => {
       }),
     );
 
-    expect(isLeaveSubstituteStaffBlocked(rule, '示例人员017')).toBe(true);
+    expect(isLeaveSubstituteStaffBlocked(rule, '王五')).toBe(true);
     expect(isLeaveSubstituteStaffBlocked(rule, '赵六')).toBe(true);
-    expect(isLeaveSubstituteStaffBlocked(rule, '示例人员017一')).toBe(false);
+    expect(isLeaveSubstituteStaffBlocked(rule, '王五一')).toBe(false);
   });
 
   it('keeps atomic compound names when an unseparated field is encountered first', () => {
@@ -805,7 +805,7 @@ describe('calculateLeaveRequestSubstituteRule', () => {
         createSchedule(),
         createSchedule({
           recordId: 'compound-candidate',
-          dutyStaffActual: ['示例人员017赵六', '示例人员017 赵六'],
+          dutyStaffActual: ['王五赵六', '王五 赵六'],
         }),
       ],
       createRequest({
@@ -815,9 +815,9 @@ describe('calculateLeaveRequestSubstituteRule', () => {
     );
 
     expect(rule.blockedStaffNames).toEqual([
-      '示例人员008',
-      '示例人员017',
-      '示例人员017赵六',
+      '张三',
+      '王五',
+      '王五赵六',
       '赵六',
     ]);
   });
@@ -828,7 +828,7 @@ describe('calculateLeaveRequestSubstituteRule', () => {
         createSchedule(),
         createSchedule({
           recordId: 'compound-candidate',
-          dutyStaffActual: ['示例人员017 赵六', '示例人员017赵六'],
+          dutyStaffActual: ['王五 赵六', '王五赵六'],
         }),
       ],
       createRequest({
@@ -838,9 +838,9 @@ describe('calculateLeaveRequestSubstituteRule', () => {
     );
 
     expect(rule.blockedStaffNames).toEqual([
-      '示例人员008',
-      '示例人员017',
-      '示例人员017赵六',
+      '张三',
+      '王五',
+      '王五赵六',
       '赵六',
     ]);
   });
@@ -895,17 +895,17 @@ describe('createLeaveRequestTimeCandidates', () => {
           scheduleDate: '2026-08-16',
           team: 'A班',
           shift: '夜班',
-          dutyStaffActual: ['示例人员008'],
+          dutyStaffActual: ['张三'],
         }),
         createSchedule({
           recordId: 'other-white',
           scheduleDate: '2026-08-17',
           team: 'B班',
           shift: '白班',
-          dutyStaffActual: ['示例人员013'],
+          dutyStaffActual: ['李四'],
         }),
       ],
-      { leaveStaffName: '示例人员008' },
+      { leaveStaffName: '张三' },
     );
     const shiftRanges = (
       candidates as typeof candidates & {
@@ -958,7 +958,7 @@ describe('createLeaveRequestTimeCandidates', () => {
           shift: '白班',
         }),
       ],
-      { leaveStaffName: '示例人员008' },
+      { leaveStaffName: '张三' },
     );
 
     expect(candidates.startOptions).not.toEqual(
@@ -989,10 +989,10 @@ describe('createLeaveRequestTimeCandidates', () => {
       }),
     ];
     const allCandidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
     });
     const selectedCandidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
       selectedStartAt: '2026-08-02T23:00',
     });
 
@@ -1014,7 +1014,7 @@ describe('createLeaveRequestTimeCandidates', () => {
   it('uses white-shift work segments and skips the lunch break', () => {
     const schedules = [createSchedule({ shift: '白班' })];
     const candidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
       selectedStartAt: '2026-08-03T10:00',
     });
 
@@ -1031,20 +1031,20 @@ describe('createLeaveRequestTimeCandidates', () => {
         createSchedule({
           building: '110站',
           shift: '白班',
-          dutyStaffActual: ['示例人员008 示例人员013'],
+          dutyStaffActual: ['张三 李四'],
         }),
       ],
-      { leaveStaffName: '示例人员008' },
+      { leaveStaffName: '张三' },
     );
     const otherPerson = createLeaveRequestTimeCandidates(
       [
         createSchedule({
           building: '110站',
           shift: '白班',
-          dutyStaffActual: ['示例人员008一 示例人员013'],
+          dutyStaffActual: ['张三一 李四'],
         }),
       ],
-      { leaveStaffName: '示例人员008' },
+      { leaveStaffName: '张三' },
     );
 
     expect(candidates.fullShiftRanges).toEqual([
@@ -1068,10 +1068,10 @@ describe('createLeaveRequestTimeCandidates', () => {
       }),
     ];
     const allCandidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
     });
     const selectedCandidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
       selectedStartAt: '2026-05-02T04:00',
     });
 
@@ -1102,7 +1102,7 @@ describe('createLeaveRequestTimeCandidates', () => {
           shift: '白班',
         }),
       ],
-      { leaveStaffName: '示例人员008' },
+      { leaveStaffName: '张三' },
     );
 
     expect(candidates.startOptions).not.toEqual(
@@ -1133,7 +1133,7 @@ describe('createLeaveRequestTimeCandidates', () => {
           shift: '白班',
         }),
       ],
-      { leaveStaffName: '示例人员008' },
+      { leaveStaffName: '张三' },
     );
 
     expect(candidates).toEqual({
@@ -1150,10 +1150,10 @@ describe('createLeaveRequestTimeCandidates', () => {
       createSchedule({ recordId: 'unknown', shift: '中班' }),
     ];
     const allCandidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
     });
     const selectedCandidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
       selectedStartAt: '2026-08-03T09:00',
     });
 
@@ -1173,10 +1173,10 @@ describe('createLeaveRequestTimeCandidates', () => {
       }),
     ];
     const allCandidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
     });
     const selectedCandidates = createLeaveRequestTimeCandidates(schedules, {
-      leaveStaffName: '示例人员008',
+      leaveStaffName: '张三',
       selectedStartAt: '2026-08-03T09:00',
     });
 

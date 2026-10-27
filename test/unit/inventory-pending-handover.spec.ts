@@ -128,7 +128,7 @@ describe('出库未决议审批交接真实账本', () => {
     } finally { if (originalApp === undefined) delete process.env.FEISHU_APP_ID; else process.env.FEISHU_APP_ID = originalApp; }
   });
   it('真实gateway仅写当前审批快照，按OpenID语义回读；不一致拒绝，写成功后重试不重复PUT，已有决定不写', async () => {
-    const overrides: Record<string, string> = { FEISHU_APP_ID: 'cli_synthetic_handover', FEISHU_APP_SECRET: 'synthetic-test-only', FEISHU_WAREHOUSE_APP_TOKEN: 'synthetic_app_token', FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID: 'tblabd97393f2b0eac28' };
+    const overrides: Record<string, string> = { FEISHU_APP_ID: 'cli_synthetic_handover', FEISHU_APP_SECRET: 'synthetic-test-only', FEISHU_WAREHOUSE_APP_TOKEN: 'synthetic_app_token', FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID: 'tblSyntheticOutbound' };
     const saved = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]])); Object.assign(process.env, overrides);
     try {
       const replacement = { ...snapshot, version: 2, approvers: [{ openId: input.target.openId, name: input.target.name }] };

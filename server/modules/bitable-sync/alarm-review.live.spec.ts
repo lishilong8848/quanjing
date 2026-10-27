@@ -13,7 +13,7 @@ live('explicit isolated Feishu alarm-review acceptance', () => {
     try {
       await gateway.preflight();
       phase = 'responsible-user';
-      const userId = await gateway.resolveResponsibleUserId('PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID');
+      const userId = await gateway.resolveResponsibleUserId('ou_a6644e62a43b916c6bc26148cf74f208');
       phase = 'first-result';
       const first = await gateway.syncRecord(ids[0], '人工复核无问题', userId, 'unreviewed');
       expect(first.受理描述).toEqual('TEST原受理描述不得改变');

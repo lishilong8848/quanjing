@@ -11,7 +11,7 @@ const resolveLeave = (value: unknown, resolve: unknown) => (leaveRules as unknow
 const resolveOvertime = (value: unknown, resolve: unknown, approved = true) => (overtimeRules as unknown as { resolveCurrentOvertimeNotificationRecipients(value: unknown, resolve: unknown, approved: boolean): { openId: string }[] }).resolveCurrentOvertimeNotificationRecipients(value, resolve, approved);
 
 describe('岗位通知按各自职责解析，申请人和替班身份保持', () => {
-  it('请休假独立经理、示例人员001、专业通知跟随现任，原快照不被改写', () => {
+  it('请休假独立经理、主管、专业通知跟随现任，原快照不被改写', () => {
     const input = leave(), before = JSON.stringify(input), read = jest.fn(resolver);
     expect(resolveLeave(input, read).map(row => row.openId).sort()).toEqual(['ou_applicant', 'ou_shared', 'ou_substitute', 'ou_new_leave_supervisor', 'ou_new_leave_manager', 'ou_new_professional_supervisor'].sort());
     expect(read.mock.calls).toContainEqual(['professional_supervisor', { building: ['B楼'], specialty: '电气' }]); expect(JSON.stringify(input)).toBe(before);

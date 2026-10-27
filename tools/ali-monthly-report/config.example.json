@@ -3,13 +3,13 @@
   "feishu_app_id": "",
   "feishu_app_secret": "",
   "feishu_app_token": "",
-  "ali_alarm_source_url": "https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE",
+  "ali_alarm_source_url": "https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tblD7hi70s6U6rlU&view=vewG7OKFEg",
   "ali_alarm_template_path": "resources/EA118机房2026年3月告警分析表.xlsx",
-  "ali_staff_source_url": "https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE",
-  "alarm_report_table_id": "tblae41d7fdc6701",
-  "alarm_report_view_id": "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID",
-  "high_power_table_id": "tbl82468a84ec746",
-  "high_power_view_id": "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID",
-  "staff_report_table_id": "tblf5fc5e5730d03",
-  "staff_report_view_id": "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID"
+  "ali_staff_source_url": "https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg?table=tblOu75UtJTDNHIM&view=vewrQcypV4",
+  "alarm_report_table_id": "tblAGQeQ7tpV8tWt",
+  "alarm_report_view_id": "vewrHJHl3v",
+  "high_power_table_id": "tblkh6YCMYtS8nHa",
+  "high_power_view_id": "vewrHJHl3v",
+  "staff_report_table_id": "tbl3KED5CdvNSCwT",
+  "staff_report_view_id": "vewrHJHl3v"
 }

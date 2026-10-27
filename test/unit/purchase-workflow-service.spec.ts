@@ -1851,7 +1851,7 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
         {
           openId: 'ou_warehouse',
-          name: '库房示例人员019',
+          name: '库房责任人',
           positions: [],
           buildings: ['H楼'],
         },
@@ -2289,8 +2289,8 @@ describe('PurchaseWorkflowService', () => {
       ]),
       resolveBuildingSupervisorAsApp: jest.fn().mockResolvedValue({
         openId: 'ou_supervisor_a',
-        name: 'A楼示例人员001',
-        positions: ['楼栋示例人员001'],
+        name: 'A楼主管',
+        positions: ['楼栋主管'],
         buildings: ['A楼'],
       }),
       resolvePurchaseAdminAsApp: jest.fn(),
@@ -3234,13 +3234,13 @@ describe('PurchaseWorkflowService', () => {
       listExecutionRecordsAsApp: jest.fn().mockResolvedValue([]),
       resolveConfiguredApproversAsApp: jest.fn().mockResolvedValue([]),
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
-        { openId: 'ou_responsible_1', name: '示例人员019甲' },
+        { openId: 'ou_responsible_1', name: '责任人甲' },
         { openId: 'invalid-name-value', name: '错误姓名值' },
-        { openId: 'ou_responsible_1', name: '示例人员019甲重复' },
-        { openId: 'ou_responsible_2', name: '示例人员019乙' },
+        { openId: 'ou_responsible_1', name: '责任人甲重复' },
+        { openId: 'ou_responsible_2', name: '责任人乙' },
       ]),
       resolveInboundManagerNotificationUsersAsApp: jest.fn().mockResolvedValue([
-        { openId: 'ou_responsible_2', name: '示例人员019乙兼管理人' },
+        { openId: 'ou_responsible_2', name: '责任人乙兼管理人' },
         { openId: 'ou_manager_notify', name: '管理人' },
         { openId: 'invalid-manager-value', name: '错误管理人值' },
       ]),
@@ -3321,7 +3321,7 @@ describe('PurchaseWorkflowService', () => {
       listExecutionRecordsAsApp: jest.fn().mockResolvedValue([]),
       resolveConfiguredApproversAsApp: jest.fn().mockResolvedValue([]),
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
-        { openId: '示例人员008', name: '示例人员008' },
+        { openId: '张三', name: '张三' },
         { openId: '', name: '未维护' },
       ]),
       resolveInboundManagerNotificationUsersAsApp: jest
@@ -3426,7 +3426,7 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest
         .fn()
         .mockResolvedValue([
-          { openId: 'ou_responsible', name: '库房示例人员019员' },
+          { openId: 'ou_responsible', name: '库房责任人员' },
         ]),
       resolveInboundManagerNotificationUsersAsApp: jest
         .fn()
@@ -3606,13 +3606,13 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
         {
           openId: 'ou_inbound_responsible_1',
-          name: '示例人员019甲',
+          name: '责任人甲',
           positions: [],
           buildings: ['H楼'],
         },
         {
           openId: 'ou_inbound_responsible_2',
-          name: '示例人员019乙',
+          name: '责任人乙',
           positions: [],
           buildings: ['H楼'],
         },
@@ -3681,7 +3681,7 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
         {
           openId: 'ou_inbound_responsible',
-          name: '入库示例人员019',
+          name: '入库责任人',
           positions: [],
           buildings: ['H楼'],
         },
@@ -3782,19 +3782,19 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
         {
           openId: 'ou_shared',
-          name: '兼任示例人员019',
+          name: '兼任责任人',
           positions: [],
           buildings: ['H楼'],
         },
         {
           openId: 'ou_responsible_only',
-          name: '示例人员019乙',
+          name: '责任人乙',
           positions: [],
           buildings: ['H楼'],
         },
         {
           openId: 'ou_shared',
-          name: '重复示例人员019',
+          name: '重复责任人',
           positions: [],
           buildings: ['H楼'],
         },
@@ -3942,7 +3942,7 @@ describe('PurchaseWorkflowService', () => {
         resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
           {
             openId: 'ou_inbound_responsible',
-            name: 'H楼入库示例人员019',
+            name: 'H楼入库责任人',
             positions: [],
             buildings: ['H楼'],
           },
@@ -4368,7 +4368,7 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
         {
           openId: 'ou_requester',
-          name: '入库示例人员019',
+          name: '入库责任人',
           positions: [],
           buildings: ['H楼'],
         },
@@ -4616,13 +4616,13 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
         {
           openId: 'ou_inbound_responsible_1',
-          name: '示例人员019甲',
+          name: '责任人甲',
           positions: [],
           buildings: ['H楼'],
         },
         {
           openId: 'ou_inbound_responsible_2',
-          name: '示例人员019乙',
+          name: '责任人乙',
           positions: [],
           buildings: ['H楼'],
         },
@@ -4630,7 +4630,7 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundManagerNotificationUsersAsApp: jest.fn().mockResolvedValue([
         {
           openId: 'ou_inbound_responsible_1',
-          name: '示例人员019甲兼管理人',
+          name: '责任人甲兼管理人',
           positions: [],
           buildings: ['H楼'],
         },
@@ -4763,7 +4763,7 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn().mockResolvedValue([
         {
           openId: 'ou_inbound_responsible',
-          name: '入库示例人员019',
+          name: '入库责任人',
           positions: [],
           buildings: ['H楼'],
         },

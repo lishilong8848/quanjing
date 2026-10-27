@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { LeaveWorkflowStore, type LeavePersonnelHandoverInput } from '../../server/modules/leave-workflow/leave-workflow.store';
-const source={name:'合成前任',openId:'ou_synthetic_old',personRecordId:'rec_old',position:'设施示例人员001',buildings:['C楼']};
-const target={name:'合成接任',openId:'ou_synthetic_new',personRecordId:'rec_new',position:'设施示例人员001',buildings:['C楼']};
+const source={name:'合成前任',openId:'ou_synthetic_old',personRecordId:'rec_old',position:'设施主管',buildings:['C楼']};
+const target={name:'合成接任',openId:'ou_synthetic_new',personRecordId:'rec_new',position:'设施主管',buildings:['C楼']};
 const input=():LeavePersonnelHandoverInput=>({recordId:'rec_synthetic_leave',mutationId:`handover-${'a'.repeat(64)}`,dutyRecordId:'rec_synthetic_duty',sourceOpenId:source.openId,expectedStage:{key:'supervisor',version:1,approverOpenIds:[source.openId]},target});
 const action=()=>({eventId:'synthetic-action-001',recordId:'rec_synthetic_leave',stageKey:'supervisor' as const,stageVersion:1,actorOpenId:source.openId,actorName:source.name,action:'approve' as const});
 describe('请休假模块内岗位转交CAS（合成数据）',()=>{

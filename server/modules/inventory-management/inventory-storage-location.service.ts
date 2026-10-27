@@ -35,7 +35,7 @@ import {
 } from './inventory-workflow.gateway';
 
 const STORAGE_LOCATION_TABLE_NAME = '配置库房货架名称';
-const STORAGE_LOCATION_TABLE_ID_FALLBACK = 'tbla1c285ee74476';
+const STORAGE_LOCATION_TABLE_ID_FALLBACK = 'tbl98EPSzfPIxkDG';
 const STORAGE_LOCATION_COMPANY = '南通承宏';
 const STORAGE_LOCATION_CACHE_TTL_MS = 30_000;
 const COMPLETED_MUTATION_TTL_MS = 5 * 60_000;

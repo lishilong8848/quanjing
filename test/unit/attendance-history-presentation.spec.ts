@@ -11,7 +11,7 @@ const items: AttendanceHistoryItem[] = [
     key: 'h-1',
     date: '2026-09-03',
     building: 'H楼',
-    name: '示例人员008',
+    name: '张三',
     shiftLabel: '白班',
     direction: 'OnDuty',
     expectedAt: '2026-09-03 09:00',
@@ -23,7 +23,7 @@ const items: AttendanceHistoryItem[] = [
     key: 'b-3',
     date: '2026-09-06',
     building: 'B楼',
-    name: '示例人员017',
+    name: '王五',
     shiftLabel: '夜班',
     direction: 'OffDuty',
     expectedAt: '2026-09-06 09:00',
@@ -35,7 +35,7 @@ const items: AttendanceHistoryItem[] = [
     key: 'b-1',
     date: '2026-09-04',
     building: 'B楼',
-    name: '示例人员013',
+    name: '李四',
     shiftLabel: '白班',
     direction: 'OffDuty',
     expectedAt: '2026-09-04 18:00',
@@ -47,7 +47,7 @@ const items: AttendanceHistoryItem[] = [
     key: 'b-2',
     date: '2026-09-05',
     building: 'B楼',
-    name: '示例人员017',
+    name: '王五',
     shiftLabel: '夜班',
     direction: 'OnDuty',
     expectedAt: '2026-09-05 18:00',
@@ -99,7 +99,7 @@ describe('attendance history presentation', () => {
     const missing = filterAttendanceHistoryItems(items, 'missing');
     expect(missing).toEqual([items[3]]);
     expect(buildAttendanceHistoryRankings(missing)).toEqual({
-      people: [{ name: '示例人员017', buildings: ['B楼'], count: 1 }],
+      people: [{ name: '王五', buildings: ['B楼'], count: 1 }],
       buildings: [{ building: 'B楼', peopleCount: 1, count: 1 }],
     });
   });

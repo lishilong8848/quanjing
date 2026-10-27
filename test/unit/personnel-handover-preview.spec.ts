@@ -2,8 +2,8 @@ import { accountPermissionTemplate, previewPermissionInheritance, pendingHandove
 import type { ManagedAccount } from '../../shared/access-configuration.interface';
 import type { PendingDuty } from '../../shared/personnel-handover.interface';
 
-const person = (patch: Partial<ManagedAccount> = {}): ManagedAccount => ({ id:'synthetic-chief',kind:'feishu',name:'原示例人员001样例',role:'building_admin',building:'C楼',buildings:['C楼'],enabled:true,deleted:false,version:5,source:'configuration',...patch });
-const entry = (patch: Partial<PendingDuty> = {}): PendingDuty => ({ key:'leave:synthetic-record:supervisor',module:'leave',recordId:'synthetic-record',title:'合成待办',dutyRecordId:'synthetic-duty',phase:'approval',status:'pending',stageKey:'supervisor',version:'stage-3',recipients:[{ name:'原示例人员001样例',openId:'ou_synthetic_former' }],...patch });
+const person = (patch: Partial<ManagedAccount> = {}): ManagedAccount => ({ id:'synthetic-chief',kind:'feishu',name:'原主管样例',role:'building_admin',building:'C楼',buildings:['C楼'],enabled:true,deleted:false,version:5,source:'configuration',...patch });
+const entry = (patch: Partial<PendingDuty> = {}): PendingDuty => ({ key:'leave:synthetic-record:supervisor',module:'leave',recordId:'synthetic-record',title:'合成待办',dutyRecordId:'synthetic-duty',phase:'approval',status:'pending',stageKey:'supervisor',version:'stage-3',recipients:[{ name:'原主管样例',openId:'ou_synthetic_former' }],...patch });
 describe('岗位交接完整权限预览', () => {
   it('权限模板使用明确白名单，凭证、身份和私人字段不会进入继承', () => {
     const original = { ...person(),passwordHash:'synthetic-never-copy',password:'synthetic-never-copy',identityNumber:'synthetic-never-copy',openId:'ou_synthetic_former' };
@@ -18,7 +18,7 @@ describe('岗位交接完整权限预览', () => {
     expect(result.conflicts).toEqual([]); expect(result.after.role).toBe('building_admin'); expect(result.after.pagePaths).toEqual(source.pagePaths); expect(result.after.personalRules).toEqual(source.personalRules);
     expect(result.after.buildings).toEqual(['C楼']);
   });
-  it('同角色楼栋示例人员001保留新人原有楼栋，不删除已有任职', () => {
+  it('同角色楼栋主管保留新人原有楼栋，不删除已有任职', () => {
     const result = previewPermissionInheritance(accountPermissionTemplate(person()),accountPermissionTemplate(person({ building:'B楼',buildings:['B楼'] })));
     expect(result.conflicts).toEqual([]); expect(result.after.buildings).toEqual(['B楼','C楼']);
   });

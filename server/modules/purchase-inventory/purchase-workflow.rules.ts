@@ -215,7 +215,7 @@ function canStart(
     (building) =>
       normalizeBuilding(building) === normalizeBuilding(record.building),
   );
-  if (user.positions.includes('楼栋示例人员001')) {
+  if (user.positions.includes('楼栋主管')) {
     return (
       normalizeMethod(record.purchaseMethod) === '需求自采' &&
       method === '需求自采' &&
@@ -223,7 +223,7 @@ function canStart(
     );
   }
   return (
-    user.positions.some((position) => position.includes('示例人员001')) && sameBuilding
+    user.positions.some((position) => position.includes('主管')) && sameBuilding
   );
 }
 

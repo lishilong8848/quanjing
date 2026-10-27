@@ -22,7 +22,7 @@ const proof={startedAt:new Date().toISOString(),passed:false,checks:[],errors:[]
  const management=await dialog.locator('.meeting-content-text').innerText();assert(management.includes('970')&&management.includes('A楼'));assert(!management.includes('1、电气专业线'));
  await page.waitForFunction(()=>Number(getComputedStyle(document.querySelector('[role="dialog"]')).opacity)>=0.999);await page.screenshot({path:path.join(out,'week40-management.png')});
  await dialog.getByRole('button',{name:'上周周会待办',exact:true}).click();const todos=await dialog.locator('.meeting-content-text').innerText();assert(todos.trim().length>0);await page.screenshot({path:path.join(out,'week40-todos.png')});
- const detail=await (await fetch(api+'/api/meeting-management/records/recvwKLPD56d2R')).json();assert.equal(detail.documentState,'ready');assert.equal(detail.meeting.documentUrl,'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE');
+ const detail=await (await fetch(api+'/api/meeting-management/records/recvwKLPD56d2R')).json();assert.equal(detail.documentState,'ready');assert.equal(detail.meeting.documentUrl,'https://vnet.feishu.cn/docx/U80NdM3T8o2MiHxzdyPcER1VntS');
  proof.original={id:detail.meeting.id,documentState:detail.documentState,sections:detail.meeting.sections.map(s=>({key:s.key,origin:s.origin||'table',chars:s.content.length,sha256:crypto.createHash('sha256').update(s.content).digest('hex')}))};
  proof.checks.push('真实第40周原文：管理线、上周周会待办补读成功；不混入专业线；默认全部内容；原始周报链接恢复');
  await dialog.getByRole('button',{name:'关闭',exact:true}).click();await page.setViewportSize({width:390,height:844});await page.goto(ui+'/meeting-management/nantong-weekly');await page.getByRole('heading',{name:'周报工作台'}).waitFor();

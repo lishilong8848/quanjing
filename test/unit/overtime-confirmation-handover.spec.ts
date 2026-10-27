@@ -8,8 +8,8 @@ import { issueOvertimeConfirmationTicket, verifyOvertimeConfirmationTicket } fro
 import { OvertimePersonnelHandoverAdapter } from '../../server/modules/overtime-workflow/overtime-personnel-handover.adapter';
 import type { HandoverContext } from '../../shared/personnel-handover.interface';
 
-const source = { name: '合成前任', openId: 'ou_synthetic_old', position: '设施示例人员001', buildings: ['C楼'] };
-const target = { name: '合成接任', openId: 'ou_synthetic_new', personRecordId: 'recNewFixture', position: '设施示例人员001', buildings: ['C楼'] };
+const source = { name: '合成前任', openId: 'ou_synthetic_old', position: '设施主管', buildings: ['C楼'] };
+const target = { name: '合成接任', openId: 'ou_synthetic_new', personRecordId: 'recNewFixture', position: '设施主管', buildings: ['C楼'] };
 const snapshot = { recordId: 'recConfirmationFixture', applicantName: '合成申请人', applicantOpenId: 'ou_synthetic_applicant', building: 'C楼', position: '运维值班员', plannedStartAt: '2026-10-01T09:00:00+08:00', plannedEndAt: '2026-10-01T17:00:00+08:00', plannedHours: 8, reason: '合成验收' };
 const oldCard = { recipientOpenId: source.openId, messageId: 'om_synthetic_confirmation', businessKey: `overtime:${snapshot.recordId}:confirmation:initial` };
 const draft = { actualStartAt: snapshot.plannedStartAt, actualHours: 8, disposition: '调休' as const };
@@ -109,7 +109,7 @@ describe('加班已批准待确认的责任交接', () => {
   it('真实确认adapter提供独立执行阶段，路由完成不冒充新卡投递成功', async () => {
     await store.enqueueTask({ businessKey: 'synthetic-route-evidence', recordId: input.recordId, kind: 'deliver_approval_cards', payload: { routeKind: 'building_supervisor' } });
     const person = (value: typeof source, recordId: string, marker: string, active: boolean) => ({ id: `local-external-${marker.repeat(64)}`, recordId, name: value.name, openId: value.openId, active, type: 'employee' as const, position: value.position, systemPosition: '', buildings: ['C楼' as const], specialties: [], permissionTags: [], dutyRecordIds: [input.dutyRecordId] });
-    const context: HandoverContext = { from: person(source, input.sourcePersonRecordId, 'a', false), to: person(target, target.personRecordId, 'b', true), directoryVersion: 'synthetic-directory', duties: [{ recordId: input.dutyRecordId, name: 'C楼示例人员001', kind: 'overtime_supervisor', personnelIds: [`local-external-${'a'.repeat(64)}`], buildings: ['C楼'], specialties: null, enabled: true, startsAt: 0, endsAt: null, parentDutyIds: [], version: 1 }] };
+    const context: HandoverContext = { from: person(source, input.sourcePersonRecordId, 'a', false), to: person(target, target.personRecordId, 'b', true), directoryVersion: 'synthetic-directory', duties: [{ recordId: input.dutyRecordId, name: 'C楼主管', kind: 'overtime_supervisor', personnelIds: [`local-external-${'a'.repeat(64)}`], buildings: ['C楼'], specialties: null, enabled: true, startsAt: 0, endsAt: null, parentDutyIds: [], version: 1 }] };
     const adapter = new OvertimePersonnelHandoverAdapter(store, { canUseFeishuBusinessIdentity: () => true } as never, { isEnabled: () => true } as never);
     const item = (await adapter.listPending(context)).find(entry => entry.stageKey === 'confirmation')!;
     expect(item).toMatchObject({ phase: 'execution', status: 'pending', recipients: [{ name: source.name, openId: source.openId }] });

@@ -23,7 +23,7 @@ describe('weather warning automation config', () => {
       FEISHU_WEATHER_WARNING_IMPORTANT_EVENT_CHAT_IDS:
         'oc_warning_group_b,oc_important_event;oc_important_event',
       FEISHU_WEATHER_WARNING_OWNER_OPEN_ID: 'ou_ma_jinyu',
-      FEISHU_WEATHER_WARNING_OWNER_NAME: '示例人员020',
+      FEISHU_WEATHER_WARNING_OWNER_NAME: '马进宇',
       FEISHU_WEATHER_WARNING_POLL_INTERVAL_MS: '900000',
       FEISHU_WEATHER_WARNING_REMINDER_INTERVAL_MS: '25200000',
       FEISHU_WEATHER_WARNING_AUTOMATION_STATE_PATH: 'D:/state/weather.json',
@@ -59,7 +59,7 @@ describe('weather warning automation config', () => {
           key: 'owner',
           receiveIdType: 'open_id',
           receiveId: 'ou_ma_jinyu',
-          displayName: '示例人员020',
+          displayName: '马进宇',
           audience: 'owner',
         },
       ],

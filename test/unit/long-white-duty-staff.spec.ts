@@ -97,7 +97,7 @@ describe('buildLongWhiteDutyStaffByBuilding', () => {
       {
         building: 'building_a',
         buildingName: 'A楼',
-        staff: ['示例人员009', '汪根尚', '卢俊钳', '何洪'],
+        staff: ['施小东', '汪根尚', '卢俊钳', '何洪'],
         leaveStaff: [],
         substituteStaff: [],
         vacancySubstituteStaff: [],
@@ -120,7 +120,7 @@ describe('buildLongWhiteDutyStaffByBuilding', () => {
       result.map((building) => [building.building, building.staff]),
     );
 
-    expect(byBuilding.get('building_a')).toEqual(['示例人员009', '汪根尚', '何洪']);
+    expect(byBuilding.get('building_a')).toEqual(['施小东', '汪根尚', '何洪']);
     expect(byBuilding.get('building_d')).toEqual([
       '陶必亮',
       '彭怀响',
@@ -143,7 +143,7 @@ describe('buildLongWhiteDutyStaffByBuilding', () => {
       {
         building: 'building_a',
         buildingName: 'A楼',
-        staff: ['示例人员009'],
+        staff: ['施小东'],
         leaveStaff: [],
         substituteStaff: [],
       },
@@ -175,7 +175,7 @@ describe('buildLongWhiteDutyStaffByBuilding', () => {
       {
         building: 'building_a',
         buildingName: 'A楼',
-        staff: ['示例人员009'],
+        staff: ['施小东'],
         leaveStaff: [],
         substituteStaff: [],
       },
@@ -184,7 +184,7 @@ describe('buildLongWhiteDutyStaffByBuilding', () => {
       {
         building: 'building_a',
         buildingName: 'A楼',
-        staff: ['示例人员009'],
+        staff: ['施小东'],
         leaveStaff: [],
         substituteStaff: [],
       },

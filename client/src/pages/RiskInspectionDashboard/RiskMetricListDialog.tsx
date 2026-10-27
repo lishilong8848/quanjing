@@ -261,7 +261,7 @@ export function RiskMetricListDialog({
             <Input
               type="search"
               value={query}
-              placeholder="搜索描述、楼栋、专业、示例人员019、日期或状态"
+              placeholder="搜索描述、楼栋、专业、责任人、日期或状态"
               onChange={(event) => handleSearch(event.currentTarget.value)}
             />
           </label>

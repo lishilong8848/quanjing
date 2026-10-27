@@ -158,7 +158,7 @@ describe('AliMonthlyReportScheduler', () => {
                 updatedAt: julyAttempt.toISOString(),
                 fileName: 'alarm.xlsx',
                 recordUrl:
-                  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+                  'https://vnet.feishu.cn/base/app?recordId=july-alarm',
               },
               over_power: {
                 status: 'failed',
@@ -172,7 +172,7 @@ describe('AliMonthlyReportScheduler', () => {
                 updatedAt: julyAttempt.toISOString(),
                 fileName: 'staff.xlsx',
                 recordUrl:
-                  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+                  'https://vnet.feishu.cn/base/app?recordId=july-staff',
               },
             },
           },
@@ -202,7 +202,7 @@ describe('AliMonthlyReportScheduler', () => {
           ],
           logs: [],
           bitableRecordUrls: [
-            `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`,
+            `https://vnet.feishu.cn/base/app?recordId=${year}-${month}-${reportType}`,
           ],
         }),
       ),

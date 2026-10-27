@@ -277,25 +277,25 @@ describe('contract creation field rules', () => {
     expect(
       buildSupplierRecordFields(
         valuesByName(definition, {
-          联系人: '示例人员008',
+          联系人: '张三',
           公司单位: '南通测试供应商',
-          联系电话: '13800009626',
+          联系电话: '13800000000',
           邮箱地址: 'test@example.com',
           园区对接人: 'ou_liaison',
         }),
         definition,
       ),
     ).toEqual({
-      联系人: '示例人员008',
+      联系人: '张三',
       公司单位: '南通测试供应商',
-      联系电话: '13800009626',
+      联系电话: '13800000000',
       邮箱地址: 'test@example.com',
       园区对接人: [{ id: 'ou_liaison' }],
     });
 
     expect(() =>
       buildSupplierRecordFields(
-        valuesByName(definition, { 联系人: '示例人员008' }),
+        valuesByName(definition, { 联系人: '张三' }),
         definition,
       ),
     ).toThrow('公司单位不能为空');

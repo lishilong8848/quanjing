@@ -64,7 +64,7 @@ import { DutyScheduleController } from './duty-schedule.controller';
 
 const overtimeRequest = {
   clientMutationId: 'overtime-request-11111111-1111-4111-8111-111111111111',
-  staffName: '示例人员008',
+  staffName: '张三',
   startAt: '2026-08-13T18:00:00+08:00',
   endAt: '2026-08-14T02:00:00+08:00',
   reason: '配合设备维护',

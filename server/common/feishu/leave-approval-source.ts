@@ -28,7 +28,7 @@ import {
 } from './bitable-direct-read';
 
 const DEFAULT_LEAVE_REQUEST_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E';
 const LEAVE_APPROVAL_CACHE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_LEAVE_APPROVAL_LOCAL_MAX_AGE_MS = 30 * 60 * 1000;
 

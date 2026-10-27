@@ -13,7 +13,7 @@ describe('SystemMonthlyReportPackageService', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it('packages the selected month COS finals once and notifies 示例人员020 with the signed link', async () => {
+  it('packages the selected month COS finals once and notifies 马进宇 with the signed link', async () => {
     let uploaded = Buffer.alloc(0);
     const archive = {
       listArchivedFinals: jest.fn().mockReturnValue([
@@ -48,7 +48,7 @@ describe('SystemMonthlyReportPackageService', () => {
     const accepted = service.accept(
       { clientMutationId: 'mutation-package-001', year: 2026, month: 7 },
       ['南通-B', '南通-C'],
-      { openId: 'ou_ma', name: '示例人员020' },
+      { openId: 'ou_ma', name: '马进宇' },
       'editor:local',
     );
     expect(accepted.status).toBe('accepted');
@@ -105,7 +105,7 @@ describe('SystemMonthlyReportPackageService', () => {
     const accepted = service.accept(
       { clientMutationId: 'mutation-package-002', year: 2026, month: 7 },
       ['南通-B', '南通-C'],
-      { openId: 'ou_ma', name: '示例人员020' },
+      { openId: 'ou_ma', name: '马进宇' },
       'editor:local',
     );
     await service.waitForIdle();
@@ -148,7 +148,7 @@ describe('SystemMonthlyReportPackageService', () => {
     const accepted = service.accept(
       { clientMutationId: 'mutation-package-003', year: 2026, month: 7 },
       ['南通-B'],
-      { openId: 'ou_ma', name: '示例人员020' },
+      { openId: 'ou_ma', name: '马进宇' },
       'editor:local',
     );
     await service.waitForIdle();

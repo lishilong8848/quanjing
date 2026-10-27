@@ -79,7 +79,7 @@ describe('Feishu card callback WebSocket SDK compatibility', () => {
       'card.action.trigger': handler,
     });
     const client = new WSClient({
-      appId: 'cli_9372d3d558dc6116',
+      appId: 'cli_0000000000000000',
       appSecret: 'test-only-secret',
       autoReconnect: false,
       loggerLevel: LoggerLevel.error,
@@ -201,7 +201,7 @@ describe('Feishu card callback WebSocket SDK compatibility', () => {
       'card.action.trigger': (payload: unknown) => router.handle(payload),
     });
     const client = new WSClient({
-      appId: 'cli_9372d3d558dc6116',
+      appId: 'cli_0000000000000000',
       appSecret: 'test-only-secret',
       autoReconnect: false,
       loggerLevel: LoggerLevel.error,

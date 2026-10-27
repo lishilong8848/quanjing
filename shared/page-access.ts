@@ -69,7 +69,7 @@ export const PAGE_ACCESS_CATALOG = [
     "group": "safety"
   },
   {
-    "path": "https://example.com:8787/",
+    "path": "https://www.sm.sjhl.online:8787/",
     "label": "孪生图谱",
     "group": "equipment"
   },

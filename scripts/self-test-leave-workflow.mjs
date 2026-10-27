@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const LEAVE_TABLE_ID = 'tblf1bbd02a2b049';
+const LEAVE_TABLE_ID = 'tblpCzmTT3EapaUY';
 const LEAVE_TABLE_NAME = '【勿动】员工请休假';
 const MARKER_PREFIX = 'CODEX-SELFTEST-LEAVE-WORKFLOW';
 const HOUR_MS = 60 * 60 * 1_000;
@@ -384,7 +384,7 @@ async function resolveLeaveAppToken(configModule, directModule, httpService) {
     configModule.readEnv('FEISHU_LEAVE_REQUEST_SOURCE_URL', [
       'FEISHU_LEAVE_SUBSTITUTE_SOURCE_URL',
     ]) ||
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+    'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E';
   const parsed = configModule.parseFeishuBitableLink(sourceUrl);
   const appToken = await directModule.resolveBitableAppToken(httpService, {
     appToken:

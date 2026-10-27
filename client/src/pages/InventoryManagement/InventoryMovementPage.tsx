@@ -215,7 +215,7 @@ const TYPE_META: Record<
 > = {
   inbound: {
     title: '入库管理',
-    description: '查看物品入库数量、楼栋库位、入库示例人员019和登记状态',
+    description: '查看物品入库数量、楼栋库位、入库责任人和登记状态',
     actionLabel: '办理入库',
     icon: ArrowDownToLine,
     tone: 'bg-emerald-500 shadow-emerald-200',
@@ -3943,7 +3943,7 @@ function MovementRecords({
               <th className="px-4 py-3">规格型号</th>
               <th className="px-4 py-3">来源楼栋 / 库位</th>
               <th className="px-4 py-3">业务明细</th>
-              <th className="px-4 py-3">示例人员019员</th>
+              <th className="px-4 py-3">责任人员</th>
               <th className="px-4 py-3 text-right">数量</th>
               <th className="px-4 py-3">状态</th>
               <th className="px-5 py-3">发生时间</th>
@@ -4022,7 +4022,7 @@ function MovementRecords({
                     <span className="block truncate">
                       {item.operator ||
                         (type === 'inbound'
-                          ? '入库示例人员019待补充'
+                          ? '入库责任人待补充'
                           : '经办人待补充')}
                     </span>
                     {type !== 'inbound' && (
@@ -4167,7 +4167,7 @@ function MovementRecords({
                 </span>
                 <span className="flex items-center gap-1.5">
                   <UserRound className="h-3.5 w-3.5 text-blue-500" />
-                  {item.operator || '经办示例人员019待补充'}
+                  {item.operator || '经办责任人待补充'}
                   {type !== 'inbound' &&
                     ` · 申请 ${item.applicant || '待补充'}`}
                 </span>

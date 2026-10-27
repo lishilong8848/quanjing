@@ -23,11 +23,11 @@ async function main() {
       const input = dialog.locator('#leave-staff-name');
       assert.equal(await input.getAttribute('readonly'), null);
       await input.fill('验收');
-      await dialog.getByRole('button', { name: '验收110示例人员003', exact: true }).waitFor();
+      await dialog.getByRole('button', { name: '验收110人员甲', exact: true }).waitFor();
       assert.equal(await dialog.getByRole('button', { name: '验收员工甲', exact: true }).count(), 0);
       const started = Date.now();
-      await dialog.getByRole('button', { name: '验收110示例人员003', exact: true }).click();
-      await page.waitForFunction(() => document.querySelector('#leave-staff-name')?.value === '验收110示例人员003');
+      await dialog.getByRole('button', { name: '验收110人员甲', exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('#leave-staff-name')?.value === '验收110人员甲');
       const selectionMs = Date.now() - started;
       await dialog.getByText('110站值班人员', { exact: true }).waitFor();
       assert((await dialog.innerText()).includes('110站值班人员'));
@@ -48,7 +48,7 @@ async function main() {
         assert.equal((await failed).status(), 400);
         await dialog.getByText('提交失败，已保留当前填写内容，可修改后重试。', { exact: true }).waitFor();
         assert.equal(await dialog.locator('#leave-reason').inputValue(), '隔离验收：110差旅申请');
-        assert.equal(await input.inputValue(), '验收110示例人员003');
+        assert.equal(await input.inputValue(), '验收110人员甲');
         await page.request.get(`${origin}/qa/result/success`);
         const succeeded = page.waitForResponse(response => response.url().endsWith('/leave-request') && response.request().method() === 'POST');
         await dialog.getByRole('button', { name: '提交', exact: true }).click();
@@ -56,7 +56,7 @@ async function main() {
         const submissions = (await (await page.request.get(`${origin}/qa/report`)).json()).filter(item => item.submission === true);
         assert.equal(submissions.length, 2);
         assert.equal(submissions[0].clientMutationId, submissions[1].clientMutationId);
-        assert(submissions.every(item => item.name === '验收110示例人员003'));
+        assert(submissions.every(item => item.name === '验收110人员甲'));
         checks.push({ view: 'leave-submit', failurePreservedDraft: true, retryReusedMutation: true });
       }
 
@@ -65,9 +65,9 @@ async function main() {
       await overtime.waitFor();
       const search = overtime.getByPlaceholder('输入姓名快速匹配');
       await search.fill('验收');
-      await overtime.getByRole('button', { name: /验收110示例人员003/ }).waitFor();
+      await overtime.getByRole('button', { name: /验收110人员甲/ }).waitFor();
       assert.equal(await overtime.getByRole('button', { name: /^验收员工甲/ }).count(), 0);
-      await overtime.getByRole('button', { name: /验收110示例人员003/ }).click();
+      await overtime.getByRole('button', { name: /验收110人员甲/ }).click();
       await overtime.getByText('110站值班人员', { exact: true }).waitFor();
       assert((await overtime.innerText()).includes('110站值班人员'));
       assert(!(await overtime.innerText()).includes('未匹配到登录人员'));

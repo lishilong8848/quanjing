@@ -7,7 +7,7 @@
   "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/fzgeh7nuhfboznulog/bitable.svg",
   "paramsSchema": {},
   "formValue": {
-    "tableID": "tbl48bcc5bf85c44",
+    "tableID": "tblS3x6aazHbvAck",
     "fields": [
       {
         "name": "值班编号",
@@ -89,7 +89,7 @@
       }
     ],
     "owner": "7310140364520734723",
-    "appToken": "PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN"
+    "appToken": "KdCZbSL5CaTErKsFwFucddA5nYd"
   },
   "createdAt": 1770197542076,
   "updatedAt": 1770197713273,

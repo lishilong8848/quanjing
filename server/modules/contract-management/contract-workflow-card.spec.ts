@@ -9,7 +9,7 @@ jest.mock('../../common/feishu/bitable-direct-read', () => ({
 import { ContractWorkflowService } from './contract-workflow.service';
 
 describe('ContractWorkflowService interactive contract notifications', () => {
-  const testReceiver = 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID';
+  const testReceiver = 'ou_a6644e62a43b916c6bc26148cf74f208';
 
   const createStore = () => ({
     recentLogs: jest.fn().mockResolvedValue([]),
@@ -19,7 +19,7 @@ describe('ContractWorkflowService interactive contract notifications', () => {
   });
 
   const createSource = () => ({
-    sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+    sourceUrl: 'https://vnet.feishu.cn/wiki/wiki-token',
     contracts: [],
     payments: [],
     organization: [
@@ -27,7 +27,7 @@ describe('ContractWorkflowService interactive contract notifications', () => {
         record_id: 'org-manager',
         fields: {
           职位: '机房经理',
-          示例人员001: [{ id: 'ou_manager', name: '合同经理' }],
+          主管: [{ id: 'ou_manager', name: '合同经理' }],
         },
       },
     ],

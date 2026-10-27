@@ -36,7 +36,7 @@ const sourceUrl =
     'FEISHU_CHANGE_CALENDAR_SOURCE_URL',
     'FEISHU_CHANGE_MANAGEMENT_SOURCE_URL',
   ) ||
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/JhiVwgfoIimAqEk8YwEc09sknGd?table=tblBvg6wCYSX3hcg&view=vewew3vfZT';
 let baseToken = firstEnv(
   'FEISHU_CALENDAR_CHANGE_APP_TOKEN',
   'FEISHU_CHANGE_CALENDAR_APP_TOKEN',

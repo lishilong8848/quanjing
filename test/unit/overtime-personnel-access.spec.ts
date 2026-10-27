@@ -6,7 +6,7 @@ import { OvertimeWorkflowService } from '../../server/modules/overtime-workflow/
 import { OvertimeWorkflowStore } from '../../server/modules/overtime-workflow/overtime-workflow.store';
 import { feishuIdentityFingerprint } from '../../server/common/access/feishu-access-approved-grants';
 
-const actor = { name: '合成审批人', openId: 'ou_synthetic_approver', position: '设施示例人员001' };
+const actor = { name: '合成审批人', openId: 'ou_synthetic_approver', position: '设施主管' };
 const snapshot = { recordId: 'rec_synthetic_overtime', applicantName: '合成申请人', applicantOpenId: 'ou_synthetic_applicant', building: 'B楼', position: '运维值班员', plannedStartAt: '2026-08-13T09:00:00+08:00', plannedEndAt: '2026-08-13T17:00:00+08:00', plannedHours: 8, reason: '合成验收' };
 const action = { eventId: 'synthetic-approval', recordId: snapshot.recordId, action: 'approve' as const, actorOpenId: actor.openId, messageId: 'om_synthetic_approval' };
 const submission = { recordId: snapshot.recordId, ticket: 'synthetic-ticket', mutationId: 'synthetic-confirmation', actualStartAt: '2026-08-13T09:00:00+08:00', actualHours: 8, disposition: 'overtime_pay' as const };

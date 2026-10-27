@@ -22,7 +22,7 @@ function visibleText(value: unknown): string[] {
 describe('阿里月报飞书互动卡片', () => {
   it('构造手动上传成功卡片并用按钮打开资料管理记录', () => {
     const recordUrl =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/MliKbC3fXa8PXrsndKscmxjdn1g?table=tbl3KED5CdvNSCwT&view=vewrHJHl3v&recordId=rec_test';
     const card = buildAliMonthlyReportManualSuccessCard({
       year: 2026,
       month: 7,
@@ -60,9 +60,9 @@ describe('阿里月报飞书互动卡片', () => {
   });
 
   it.each([
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://vnet.feishu.cn/base/base_token',
+    'https://vnet.feishu.cn/base/base_token?table=tbl_test',
+    'https://vnet.feishu.cn/base/base_token?recordId=rec_test',
   ])('拒绝未指向具体多维表记录的地址：%s', (recordUrl) => {
     expect(() =>
       buildAliMonthlyReportManualSuccessCard({
@@ -78,11 +78,11 @@ describe('阿里月报飞书互动卡片', () => {
   it('构造三项全部成功的自动任务卡片并提供三个记录按钮', () => {
     const urls = {
       alarm:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/base_alarm?table=tbl_alarm&recordId=rec_alarm',
       power:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/base_power?table=tbl_power&recordId=rec_power',
       staff:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/base_staff?table=tbl_staff&recordId=rec_staff',
     };
     const card = buildAliMonthlyReportAutomationCard({
       year: 2026,
@@ -162,14 +162,14 @@ describe('阿里月报飞书互动卡片', () => {
           status: 'success',
           fileName: '告警分析.xlsx',
           recordUrl:
-            'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+            'https://vnet.feishu.cn/base/base_alarm?table=tbl_alarm&recordId=rec_alarm',
         },
         {
           type: 'over_power',
           status: 'success',
           fileName: '超功率.xlsx',
           recordUrl:
-            'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+            'https://vnet.feishu.cn/base/base_power?table=tbl_power&recordId=rec_power',
         },
         {
           type: 'staff_roster',
@@ -252,7 +252,7 @@ describe('阿里月报飞书互动卡片', () => {
       reportTypeLabel: '告警[伪造入口](https://evil.example)',
       fileName: '**伪造加粗**.xlsx',
       recordUrl:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/base_alarm?table=tbl_alarm&recordId=rec_alarm',
       completedAt: '`2026-08-03 13:13`',
     });
 
@@ -265,15 +265,15 @@ describe('阿里月报飞书互动卡片', () => {
   });
 
   it.each([
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'http://vnet.feishu.cn/base/base_alarm?table=tbl_alarm&recordId=rec_alarm',
     'https://evil.example/base/base_alarm?table=tbl_alarm&recordId=rec_alarm',
     'https://vnet.feishu.cn.evil.example/base/base_alarm?table=tbl_alarm&recordId=rec_alarm',
-    'https://user:user-c91a1be5@example.com/base/base_alarm?table=tbl_alarm&recordId=rec_alarm',
-    'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-    'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+    'https://user:password@vnet.feishu.cn/base/base_alarm?table=tbl_alarm&recordId=rec_alarm',
+    'https://vnet.feishu.cn/wiki/base_alarm?table=tbl_alarm&recordId=rec_alarm',
+    'https://vnet.feishu.cn/base/***?table=tbl_alarm&recordId=rec_alarm',
+    'https://vnet.feishu.cn/base/base_alarm?table=tbl_alarm&recordId=rec_alarm#fragment',
+    'https://vnet.feishu.cn/base/base_alarm?table=tbl_one&table=tbl_two&recordId=rec_alarm',
+    'https://vnet.feishu.cn/base/base_alarm?table=tbl_alarm&recordId=rec_one&recordId=rec_two',
   ])('拒绝非白名单或含歧义参数的多维表地址：%s', (recordUrl) => {
     expect(() =>
       buildAliMonthlyReportManualSuccessCard({

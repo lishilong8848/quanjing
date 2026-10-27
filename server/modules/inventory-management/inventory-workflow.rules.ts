@@ -24,36 +24,36 @@ export interface PurchaseAutomationAction {
 
 const PURCHASE_RECIPIENTS: Record<PurchaseBuilding, string[]> = {
   A楼: [
-    'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-    'PUBLIC_EXAMPLE_FEISHU_ACCESS_BUILDING_ADMIN_A_OPEN_IDS',
-    'ou_b4fe57da4d5fd0420c31dcbbebdc855e',
+    'ou_6d8059fdf5a524ceaf964076187dae8f',
+    'ou_32ff59c86bbadabb6c22c21f0ad249ec',
+    'ou_98fd35eb79d3f290280b9ddf6eacd2f5',
   ],
   B楼: [
-    'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-    'PUBLIC_EXAMPLE_FEISHU_ACCESS_BUILDING_ADMIN_B_OPEN_IDS',
+    'ou_6d8059fdf5a524ceaf964076187dae8f',
+    'ou_0c3cee3752565ff30bc38a1ddb20a1aa',
   ],
   C楼: [
-    'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-    'PUBLIC_EXAMPLE_FEISHU_ACCESS_BUILDING_ADMIN_C_OPEN_IDS',
+    'ou_6d8059fdf5a524ceaf964076187dae8f',
+    'ou_1b45c51fec99162ce1e78bd2f06aeedf',
   ],
   D楼: [
-    'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-    'PUBLIC_EXAMPLE_FEISHU_ACCESS_BUILDING_ADMIN_D_OPEN_IDS',
+    'ou_6d8059fdf5a524ceaf964076187dae8f',
+    'ou_6e9ab06be2174a56908c289a4c4926fa',
   ],
   E楼: [
-    'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-    'PUBLIC_EXAMPLE_FEISHU_ACCESS_BUILDING_ADMIN_E_OPEN_IDS',
+    'ou_6d8059fdf5a524ceaf964076187dae8f',
+    'ou_ed5a06724bca67ebe08aa94e5505c882',
   ],
   H楼: [
-    'ou_9c63b3e37ad95f93afe98d98514ed0ab',
-    'PUBLIC_EXAMPLE_FEISHU_ACCESS_INVENTORY_ADMIN_H_OPEN_IDS',
+    'ou_6d8059fdf5a524ceaf964076187dae8f',
+    'ou_5a4c9222affb2062a1f0d4f167181121',
   ],
 };
 
 const ABCDE_BUILDINGS: PurchaseBuilding[] = ['A楼', 'B楼', 'C楼', 'D楼', 'E楼'];
 const EXCLUDED_ABCDE_REQUESTERS = new Set([
-  'ou_d22c6190a18a9d6df49fa72565e120f7',
-  'PUBLIC_EXAMPLE_FEISHU_ACCESS_CONSTRUCTION_ADMIN_OPEN_IDS',
+  'ou_0e3ade873ee4d95533919427546c100b',
+  'ou_4fa470cbe21075fb274583fdf0dee727',
 ]);
 
 export function isInventoryWorkflowCode(value: string): value is InventoryWorkflowCode {

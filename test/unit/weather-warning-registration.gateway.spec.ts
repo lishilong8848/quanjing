@@ -14,7 +14,7 @@ function resetManagerSourceEnv() {
   }
   Object.assign(mockManagerSourceEnv, {
     FEISHU_PURCHASE_INVENTORY_APP_TOKEN: 'app-organization',
-    FEISHU_PURCHASE_ORGANIZATION_TABLE_ID: 'tbl17984dac9b51',
+    FEISHU_PURCHASE_ORGANIZATION_TABLE_ID: 'tblOrganization',
   });
 }
 
@@ -27,7 +27,7 @@ jest.mock('../../server/common/config/external-services.config', () => ({
       ? {
           appToken: 'app-manager-from-url',
           wikiToken: '',
-          tableId: 'tblc2e6e837af4eaf',
+          tableId: 'tblManagerFromUrl',
           viewId: '',
         }
       : {
@@ -50,7 +50,7 @@ jest.mock(
     loadWeatherWarningRegistrationRuntimeConfig: () => ({
       appToken: 'app-from-link',
       wikiToken: '',
-      registrationTableId: 'tbld85f2e4a48893',
+      registrationTableId: 'tblRegistrations',
       registrationFields: {
         checker: '检查人',
         manager: '机房经理',
@@ -90,7 +90,7 @@ describe('WeatherWarningRegistrationGateway', () => {
     expect(post).toHaveBeenCalledTimes(3);
     for (const call of [post.mock.calls[1], post.mock.calls[2]]) {
       expect(call[0]).toContain(
-        '/apps/app-actual/tables/tbld85f2e4a48893/records/search',
+        '/apps/app-actual/tables/tblRegistrations/records/search',
       );
       expect(call[1]).toEqual({ field_names: ['检查人', '机房经理'] });
       expect(call[2]).toEqual(
@@ -119,7 +119,7 @@ describe('WeatherWarningRegistrationGateway', () => {
     expect(post).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledTimes(1);
     expect(get.mock.calls[0][0]).toContain(
-      '/apps/app-organization/tables/tbl17984dac9b51/records',
+      '/apps/app-organization/tables/tblOrganization/records',
     );
     expect(get.mock.calls[0][0]).not.toContain('/search');
     expect(get.mock.calls[0][1]).toEqual(
@@ -139,7 +139,7 @@ describe('WeatherWarningRegistrationGateway', () => {
     delete mockManagerSourceEnv.FEISHU_PURCHASE_INVENTORY_APP_TOKEN;
     delete mockManagerSourceEnv.FEISHU_PURCHASE_ORGANIZATION_TABLE_ID;
     mockManagerSourceEnv.FEISHU_WEATHER_WARNING_MANAGER_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/app-manager-from-url?table=tblManagerFromUrl';
     const post = jest.fn().mockResolvedValueOnce(tenantTokenResponse());
     const get = jest
       .fn()
@@ -151,13 +151,13 @@ describe('WeatherWarningRegistrationGateway', () => {
     );
 
     expect(get.mock.calls[0][0]).toContain(
-      '/apps/app-manager-from-url/tables/tblc2e6e837af4eaf/records',
+      '/apps/app-manager-from-url/tables/tblManagerFromUrl/records',
     );
   });
 
   it('keeps a dedicated manager Base URL together instead of mixing purchase fallback values', async () => {
     mockManagerSourceEnv.FEISHU_WEATHER_WARNING_MANAGER_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/app-manager-from-url?table=tblManagerFromUrl';
     const post = jest.fn().mockResolvedValueOnce(tenantTokenResponse());
     const get = jest
       .fn()
@@ -169,10 +169,10 @@ describe('WeatherWarningRegistrationGateway', () => {
     );
 
     expect(get.mock.calls[0][0]).toContain(
-      '/apps/app-manager-from-url/tables/tblc2e6e837af4eaf/records',
+      '/apps/app-manager-from-url/tables/tblManagerFromUrl/records',
     );
     expect(get.mock.calls[0][0]).not.toContain('app-organization');
-    expect(get.mock.calls[0][0]).not.toContain('tbl17984dac9b51');
+    expect(get.mock.calls[0][0]).not.toContain('tblOrganization');
   });
 
   it('uploads a sanitized image as a bitable_file under the resolved app token', async () => {
@@ -461,7 +461,7 @@ describe('WeatherWarningRegistrationGateway', () => {
 
     expect(post).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining('/tables/tbld85f2e4a48893/records'),
+      expect.stringContaining('/tables/tblRegistrations/records'),
       { fields },
       expect.objectContaining({
         params: {
@@ -801,7 +801,7 @@ describe('WeatherWarningRegistrationGateway', () => {
     expect(invalidateBitableRecordCache).toHaveBeenCalledTimes(1);
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-actual',
-      tableId: 'tbld85f2e4a48893',
+      tableId: 'tblRegistrations',
     });
   });
 
@@ -919,8 +919,8 @@ function organizationManagerSearchResponse() {
             record_id: 'rec-manager',
             fields: {
               职位: '设施运维副经理',
-              示例人员001: [{ id: 'ou_manager', name: '经理' }],
-              '示例人员001（文本）': '经理',
+              主管: [{ id: 'ou_manager', name: '经理' }],
+              '主管（文本）': '经理',
             },
           },
         ],

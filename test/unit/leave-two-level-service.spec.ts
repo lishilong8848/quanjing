@@ -48,6 +48,59 @@ describe('two-level leave service flow', () => {
     expect(sync.getCachedLeaveRequestImpactSchedules).not.toHaveBeenCalled();
     expect((await store.getApplication(data().application.recordId))?.status).toBe('supervisor_pending');
   });
+
+  it.each([false, true])('keeps the real card callback responsive with cold ledger state and queued background I/O (large=%s)', async large => {
+    const file = join(directory, 'ledger.json');
+    if (large) {
+      const ledger = JSON.parse(await readFile(file, 'utf8')), base = ledger.applications[0];
+      const people = Array.from({ length: 160 }, (_, i) => ({ personRecordId: `rec_background_${i}`, name: `TEST_${i}`, openId: `ou_background_${i}`, position: '运维值班员', buildings: ['C楼'] }));
+      ledger.applications.push(...Array.from({ length: 236 }, (_, i) => ({ ...base, key: `leave:rec_historical_${i}`, recordId: `rec_historical_${i}`, clientMutationId: `historical_${i}`, snapshot: { ...base.snapshot, substituteCandidates: people, candidateSets: [{ shiftKey: data().selection.shiftKey, candidates: people }] }, stageCards: [] })));
+      await writeFile(file, JSON.stringify(ledger), 'utf8');
+    }
+    const ledgerBytes = Buffer.byteLength(await readFile(file, 'utf8'));
+    if (large) expect(ledgerBytes).toBeGreaterThan(9_000_000);
+    store = new LeaveWorkflowStore(file);
+    service = new LeaveWorkflowService(store, gateway as never, sync, detail, { canUseFeishuBusinessIdentity: () => true } as never);
+    const activation = currentHotfixActivation(); activation.completeBootstrap(); await activation.refresh();
+    const unused = { isEnabled: () => false } as never;
+    const router = new FeishuCardActionRouter(unused, service, unused, unused, unused, unused, unused, undefined, { canUseFeishuBusinessIdentity: () => true } as never);
+    const wake = jest.spyOn(service, 'runPendingTasks').mockResolvedValue({ processed: 0, failed: 0 });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const active = (store as any).enqueue(() => gate, false);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const background = Array.from({ length: 6 }, () =>
+      (store as any).enqueue(async () => {
+        await readFile(file, 'utf8');
+        await new Promise<void>(resolve => setTimeout(resolve, 500));
+      }, false));
+    const selection = data().selection;
+    const payload = { event_type: 'card.action.trigger', event_id: 'evt_queued', operator: { open_id: 'ou_supervisor' }, context: { open_message_id: 'om_test_two_level' }, action: { tag: 'button', name: 'leave_approve_submit:rec_leave_two_level:supervisor:1:g1:r1', form_value: {
+      [`leave_shift_substitute_${Buffer.from(selection.shiftKey).toString('base64url')}`]: primary.personRecordId,
+      [`leave_shift_backfill_${Buffer.from(JSON.stringify([selection.shiftKey, primary.personRecordId, selection.originalPostSignature])).toString('base64url')}`]: backup.personRecordId,
+    } } };
+    const start = performance.now();
+    const request = router.handle(payload);
+    release();
+    const response = await request, elapsedMs = performance.now() - start;
+    await Promise.all([active, ...background]);
+    const replay = await router.handle({ ...payload, event_id: 'evt_queued_retry' });
+    const action = await store.getStageAction(data().application.recordId, 'supervisor', 1);
+    expect(action).not.toBeNull();
+    expect(replay.card?.type).toBe('raw');
+    expect((JSON.parse(await readFile(file, 'utf8'))).actions).toHaveLength(1);
+    expect(elapsedMs).toBeLessThan(large ? 2500 : 1500);
+    expect(response.toast.type).toBe('info');
+    expect(response.card?.type).toBe('raw');
+    expect(JSON.stringify(response.card)).not.toContain('form_action_type');
+    expect(JSON.stringify(response.card)).toContain('"disabled":true');
+    if (process.env.NT_LEAVE_RESPONSE_REPORT) await writeFile(process.env.NT_LEAVE_RESPONSE_REPORT + (large ? '.large.json' : ''), JSON.stringify({
+      elapsedMs, ledgerBytes, coldStore: true, warning: response.toast.content.includes('处理时间较长'), rawCard: response.card?.type === 'raw',
+      acceptedExactlyOnce: true, queuedBackgroundOperations: 6, simulatedIoPerOperationMs: 500,
+      realNetworkCalls: 0,
+    }, null, 2), { flag: 'wx' });
+    wake.mockRestore();
+  }, 15000);
   it('logs bounded approval timing only after the durable decision without exposing event or reason', async () => {
     const log = jest.spyOn((service as any).logger, 'log').mockImplementation(() => undefined);
     const result = await service.acceptApprovalAction({
@@ -140,7 +193,7 @@ describe('two-level leave service flow', () => {
   });
   it('attributes a later final rejection to its real approver rather than the old-stage approver', async () => {
     const recordId = data().application.recordId;
-    await store.claimStageAction({ ...viewInput(), stageKey: 'supervisor', eventId: 'test-review-final-actor', action: 'approve', actorName: 'TEST 示例人员001', shiftAssignments: data().assignments });
+    await store.claimStageAction({ ...viewInput(), stageKey: 'supervisor', eventId: 'test-review-final-actor', action: 'approve', actorName: 'TEST 主管', shiftAssignments: data().assignments });
     await store.setPendingStage(recordId, { key: 'manager', version: 2, approverOpenIds: ['ou_manager'] });
     await store.recordStageCardDelivery(recordId, { recipientOpenId: 'ou_manager', messageId: 'om_final_manager', businessKey: `leave:${recordId}:stage:manager:2:ou_manager` });
     await store.claimStageAction({ ...viewInput(), stageKey: 'manager', stageVersion: 2, actorOpenId: 'ou_manager', messageId: 'om_final_manager', eventId: 'test-review-final-manager', action: 'reject', actorName: 'TEST 经理', rejectionReason: 'TEST 经理驳回原因' });
@@ -148,7 +201,7 @@ describe('two-level leave service flow', () => {
     const card = JSON.stringify(await service.renderApprovalCardView(viewInput() as any));
     expect(card).toContain('TEST 经理');
     expect(card).toContain('TEST 经理驳回原因');
-    expect(card).not.toContain('TEST 示例人员001');
+    expect(card).not.toContain('TEST 主管');
   });
   it('rejects another actor or message after the original stage has completed', async () => {
     await store.claimStageAction({ ...viewInput(), stageKey: 'supervisor', eventId: 'test-review-owner', action: 'reject', rejectionReason: 'TEST 原因' });
@@ -232,7 +285,7 @@ describe('two-level leave service flow', () => {
     const tasks = await reopened.listTasks();
     expect(tasks.filter(task => task.kind === 'sync_stage_action_cards')).toHaveLength(1);
     expect(await reopened.takeNextTask()).toMatchObject({ kind: 'sync_stage_action_cards', payload: { stageKey: 'supervisor', stageVersion: 1 } });
-    expect(await reopened.getStageAction(input.recordId, 'supervisor', 1)).toMatchObject({ actorName: '示例人员001' });
+    expect(await reopened.getStageAction(input.recordId, 'supervisor', 1)).toMatchObject({ actorName: '主管' });
   });
   it('locks the original stage card before any slow cloud application or schedule task', async () => {
     const initial = await store.takeNextTask();
@@ -257,7 +310,7 @@ describe('two-level leave service flow', () => {
     expect(replay.claimed).toBe(false);
     expect(replay.card).toMatchObject({ header: { title: { content: '请休假申请已通过' } } });
     const content = JSON.stringify(replay.card);
-    expect(content).toContain('示例人员001');
+    expect(content).toContain('主管');
     expect(content).not.toContain('其他审批人');
     expect(content).not.toContain('处理人：审批人');
   });
@@ -283,7 +336,7 @@ describe('two-level leave service flow', () => {
       await (service as any).processTask(task, new Date());
       const card = gateway.patchInteractiveCard.mock.calls[0][1];
       expect(card).toMatchObject({ header: { title: { content: '请休假申请已通过' } } });
-      expect(JSON.stringify(card)).toContain('处理人：示例人员001');
+      expect(JSON.stringify(card)).toContain('处理人：主管');
       expect(JSON.parse(await readFile(path, 'utf8')).actions).toHaveLength(1);
       await reopened.completeTask(task!.key, task!.claimToken);
       await reopened.onModuleInit();
@@ -368,7 +421,7 @@ describe('two-level leave service flow', () => {
   it('does not drop backup selection when carrying forward the previous approval stage arrangement', async () => {
     const application = (await store.getApplication(data().application.recordId))!;
     application.snapshot.shiftAssignments = data().assignments;
-    const assignments = (service as any).resolveSubmittedShiftAssignments(application, [], data().candidateSets, 'ou_supervisor', '示例人员001', false);
+    const assignments = (service as any).resolveSubmittedShiftAssignments(application, [], data().candidateSets, 'ou_supervisor', '主管', false);
     expect(assignments[0].originalPostBackfills).toEqual(data().assignments[0].originalPostBackfills);
   });
   it('shows both assignments in the business summary', () => {

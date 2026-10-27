@@ -63,7 +63,7 @@ class DocumentConfirmationTests(unittest.TestCase):
     def test_report_structure_matches_verified_template(self):
         data = bridge.report.NantongWeeklyData(
             title='验收周报', start_date='2026-10-01', end_date='2026-10-07', week_number=41,
-            meeting_todos=['检查水泵（待办人：示例人员020）'],
+            meeting_todos=['检查水泵（待办人：马进宇）'],
         )
         xml, _ = bridge.report.render_docx_xml(data)
         for heading in ['一、本周待办', '阿里周会待办', '上周内部周会待办', '二、本周周会内容',
@@ -71,7 +71,7 @@ class DocumentConfirmationTests(unittest.TestCase):
             self.assertIn(heading, xml)
         self.assertEqual(xml.count('二、效率（变更、维护、演练）'), 6)
         self.assertNotIn('维护A类/类', xml)
-        self.assertIn('待办人：示例人员020', xml)
+        self.assertIn('待办人：马进宇', xml)
 
     def test_v3_numbered_styled_sections_remain_readable_next_week(self):
         source = '<h1><span text-color="purple">三、专业线</span></h1><h2>电气专业线</h2><p>检查母联开关</p><h1><span text-color="green">四、运营线</span></h1><p>成本支出：本月维保费用</p>'
@@ -120,8 +120,8 @@ class DocumentConfirmationTests(unittest.TestCase):
             bridge.require_complete_write({'data': {'result': {'status': 'partial_success'}}})
 
     def test_changed_markup_with_same_text_is_confirmed(self):
-        with patch.object(bridge.report, 'run_lark_cli', return_value={'data': {'document': {'content': '<h1 id="a">周报</h1><p><b>示例人员019</b>：示例人员020</p>'}}}):
-            bridge.verify_document('doc', '<h1>周报</h1><p>示例人员019：示例人员020</p>', 'bot')
+        with patch.object(bridge.report, 'run_lark_cli', return_value={'data': {'document': {'content': '<h1 id="a">周报</h1><p><b>责任人</b>：马进宇</p>'}}}):
+            bridge.verify_document('doc', '<h1>周报</h1><p>责任人：马进宇</p>', 'bot')
 
     def test_missing_content_fails_confirmation(self):
         with patch.object(bridge.report, 'run_lark_cli', return_value={'data': {'document': {'content': '<p>空文档</p>'}}}):

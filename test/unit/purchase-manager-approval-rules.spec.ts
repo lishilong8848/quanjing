@@ -37,7 +37,7 @@ describe('purchase manager approval Base rules', () => {
         purchaser: {
           ...purchaser,
           openId: 'ou_building_supervisor',
-          name: 'H楼示例人员001',
+          name: 'H楼主管',
         },
       }),
     ).toEqual({

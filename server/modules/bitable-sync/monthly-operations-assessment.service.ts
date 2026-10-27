@@ -14,7 +14,7 @@ import { mapAssessment } from './monthly-operations-assessment.model';
 import { mapOpenRisks } from './monthly-operations-open-risks.model';
 export const ASSESSMENT_SOURCES = {
   risk: {
-    tableId: 'tbl863dea72c2e81',
+    tableId: 'tblkSEwsxqGKQDIw',
     tableName: '智航风险排查',
     fieldNames: [
       '风险排查编码',
@@ -29,7 +29,7 @@ export const ASSESSMENT_SOURCES = {
     ],
   },
   drill: {
-    tableId: 'tbl3c13aafddd198',
+    tableId: 'tbleCzxRd2yF7lT7',
     tableName: '智航演练',
     fieldNames: [
       '编码',
@@ -52,7 +52,7 @@ export const ASSESSMENT_SOURCES = {
     ],
   },
   event: {
-    tableId: 'tbl3a6abd79ebe36',
+    tableId: 'tbl06hMoUMdGVEvn',
     tableName: '智航事件',
     fieldNames: [
       '事件ID',
@@ -78,12 +78,12 @@ export const ASSESSMENT_SOURCES = {
     ],
   },
   inspection: {
-    tableId: 'tblf51376b595c94',
+    tableId: 'tblTXHrDH4Mv0971',
     tableName: '智航巡检',
   },
 } as const;
 const OPEN_RISK_SOURCE = {
-  tableId: 'tbl07ee68bd218ee',
+  tableId: 'tblviRG8ZDfY7AnF',
   viewId: 'vew7yV6HbG',
   tableName: '智航OPEN风险项',
   fieldNames: [
@@ -97,7 +97,7 @@ const OPEN_RISK_SOURCE = {
   ],
 } as const;
 const RISK_INSPECTION_SOURCE = {
-  tableId: 'tbl64acce602916f',
+  tableId: 'tblNddknaoXp2ASG',
   tableName: '智航风险排查明细',
   fieldNames: [
     '风险编号',

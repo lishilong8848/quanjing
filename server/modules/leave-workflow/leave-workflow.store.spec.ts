@@ -23,6 +23,64 @@ describe('LeaveWorkflowStore', () => {
     await expect(store.takeNextTask()).resolves.toMatchObject({ kind: 'route_application' });
   });
 
+  it('lets a card read overtake queued background ledger work without interrupting an active write', async () => {
+    await store.acceptApplication(application());
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const order: string[] = [];
+    const running = (store as any).enqueue(async () => { order.push('write-start'); await gate; order.push('write-end'); });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const background = Array.from({ length: 8 }, (_, i) =>
+      (store as any).enqueue(async () => { order.push(`background-${i}`); }, false));
+    const callback = store.getApplication('rec_leave_1').then(row => { order.push('card'); return row; });
+    release();
+    await Promise.all([running, ...background, callback]);
+    expect(order.slice(0, 3)).toEqual(['write-start', 'write-end', 'card']);
+    expect(await callback).not.toBeNull();
+  });
+
+  it('bounds the priority burst and continues the ledger queue after a failed operation', async () => {
+    await store.acceptApplication(application());
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const order: string[] = [];
+    const running = (store as any).enqueue(() => gate);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const background = (store as any).enqueue(async () => { order.push('background'); }, false);
+    const callbacks = Array.from({ length: 8 }, (_, i) =>
+      store.getApplication('rec_leave_1').then(() => { order.push(`card-${i}`); }));
+    release();
+    await Promise.all([running, background, ...callbacks]);
+    expect(order.indexOf('background')).toBeGreaterThan(0);
+    expect(order.indexOf('background')).toBeLessThanOrEqual(4);
+    await expect((store as any).enqueue(async () => { throw Error('synthetic'); }, true)).rejects.toThrow('synthetic');
+    await expect(store.getApplication('rec_leave_1')).resolves.not.toBeNull();
+  });
+
+  it('does not overtake a business mutation already queued before the card read', async () => {
+    await store.acceptApplication(application());
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const running = (store as any).enqueue(() => gate, false);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const update = store.patchApplication('rec_leave_1', { lastError: 'new business state' });
+    const read = store.getApplication('rec_leave_1');
+    release();
+    await Promise.all([running, update]);
+    expect((await read)?.lastError).toBe('new business state');
+  });
+
+  it('normalizes only the requested application on reads but validates all records on mutations', async () => {
+    await store.acceptApplication(application());
+    await store.acceptApplication({ ...application(), recordId: 'rec_leave_2', clientMutationId: 'other-request' });
+    const normalize = jest.spyOn(store as any, 'normalizeApplicationForRead');
+    await store.getApplication('rec_leave_1');
+    expect(normalize.mock.calls.map(([entry]) => (entry as { recordId: string }).recordId)).toEqual(['rec_leave_1']);
+    normalize.mockClear();
+    await store.patchApplication('rec_leave_1', { lastError: 'write-check' });
+    expect(normalize.mock.calls.map(([entry]) => (entry as { recordId: string }).recordId).sort()).toEqual(['rec_leave_1', 'rec_leave_2']);
+  });
+
   it('reuses exact-input normalization without sharing mutable application state', async () => {
     await store.acceptApplication(application());
     const dates = jest.spyOn(Date.prototype, 'toISOString');
@@ -31,7 +89,7 @@ describe('LeaveWorkflowStore', () => {
     dates.mockClear();
     first.snapshot.applicantName = 'MUTATED';
     const next = (await store.getApplication('rec_leave_1'))!;
-    expect(next.snapshot.applicantName).toBe('示例人员008');
+    expect(next.snapshot.applicantName).toBe('张三');
     expect(dates).not.toHaveBeenCalled();
   });
 
@@ -41,12 +99,70 @@ describe('LeaveWorkflowStore', () => {
     const filesystem = require('node:fs/promises'), file = join(directory, 'ledger.json');
     const before = await filesystem.stat(file);
     const content = await readFile(file, 'utf8');
-    await writeFile(file, content.replace('示例人员008', '示例人员013'), 'utf8');
+    await writeFile(file, content.replace('张三', '李四'), 'utf8');
     await filesystem.utimes(file, before.atime, before.mtime);
     expect((await filesystem.stat(file)).size).toBe(before.size);
-    expect((await store.getApplication('rec_leave_1'))!.snapshot.applicantName).toBe('示例人员013');
+    expect((await store.getApplication('rec_leave_1'))!.snapshot.applicantName).toBe('李四');
     await writeFile(file, content.replace('2026-08-17T18:00:00+08:00', '2026-08-16T18:00:00+08:00'), 'utf8');
     await expect(store.getApplication('rec_leave_1')).rejects.toThrow('请休假结束时间不能早于开始时间');
+  });
+
+  it('observes deleted, corrupt and recreated ledgers after warming the read snapshot', async () => {
+    await store.acceptApplication(application());
+    const file = join(directory, 'ledger.json'), original = await readFile(file, 'utf8');
+    await store.getApplication('rec_leave_1');
+    await rm(file);
+    expect(await store.getApplication('rec_leave_1')).toBeNull();
+    await writeFile(file, '{invalid', 'utf8');
+    await expect(store.getApplication('rec_leave_1')).rejects.toThrow();
+    await writeFile(file, original.replace('张三', '李四'), 'utf8');
+    expect((await store.getApplication('rec_leave_1'))?.snapshot.applicantName).toBe('李四');
+  });
+
+  it('does not leak an uncommitted task lease into the cached ledger after save failure', async () => {
+    await store.acceptApplication(application());
+    const file = join(directory, 'ledger.json'), original = await readFile(file, 'utf8');
+    const rename = jest.spyOn(require('node:fs/promises'), 'rename').mockRejectedValue(new Error('synthetic disk failure'));
+    try { await expect(store.takeNextTask()).rejects.toThrow('synthetic disk failure'); }
+    finally { rename.mockRestore(); }
+    expect(await readFile(file, 'utf8')).toBe(original);
+    expect(await store.listTasks()).toEqual([expect.objectContaining({ status: 'pending', attempts: 0, claimToken: '' })]);
+    expect(await store.takeNextTask()).toMatchObject({ status: 'processing', attempts: 1 });
+  });
+
+  it('still validates a corrupt unrelated application before committing from a warm read snapshot', async () => {
+    await store.acceptApplication(application());
+    await store.acceptApplication({ ...application(), recordId: 'rec_leave_2', clientMutationId: 'second' });
+    const file = join(directory, 'ledger.json'), ledger = JSON.parse(await readFile(file, 'utf8'));
+    ledger.applications[1].snapshot.endAt = '2026-08-16T18:00:00+08:00';
+    const original = JSON.stringify(ledger); await writeFile(file, original, 'utf8');
+    expect(await store.getApplication('rec_leave_1')).not.toBeNull();
+    await expect(store.patchApplication('rec_leave_1', { lastError: 'must not commit' })).rejects.toThrow('请休假结束时间不能早于开始时间');
+    expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
+  it('preserves external edits and JSON escaping when another application is saved from a warm snapshot', async () => {
+    await store.acceptApplication(application());
+    await store.acceptApplication({ ...application(), recordId: 'rec_leave_2', clientMutationId: 'second' });
+    await store.listApplications();
+    const file = join(directory, 'ledger.json'), original = await readFile(file, 'utf8');
+    await writeFile(file, original.replace('张三', '李四'), 'utf8');
+    const message = '中文 "quote" \\ slash\nline }],"tasks":[]';
+    await store.patchApplication('rec_leave_2', { lastError: message });
+    await store.enqueueTask({ recordId: 'rec_leave_2', businessKey: 'escaped-task', kind: 'sync_leave_shift_details', payload: { message } });
+    const reopened = new LeaveWorkflowStore(file);
+    expect((await reopened.getApplication('rec_leave_1'))?.snapshot.applicantName).toBe('李四');
+    expect((await reopened.getApplication('rec_leave_2'))?.lastError).toBe(message);
+    expect((await reopened.listTasks()).find(task => task.businessKey === 'escaped-task')?.payload.message).toBe(message);
+  });
+
+  it('does not retain a parsed ledger over the snapshot memory limit', async () => {
+    await store.acceptApplication(application());
+    const file = join(directory, 'ledger.json'), ledger = JSON.parse(await readFile(file, 'utf8'));
+    ledger.unusedMetadata = 'x'.repeat(16 * 1024 * 1024 + 1);
+    await writeFile(file, JSON.stringify(ledger), 'utf8');
+    expect(await store.getApplication('rec_leave_1')).not.toBeNull();
+    expect((store as any).ledgerReadCache).toBeNull();
   });
 
   it('prevents starvation of due detail tasks by repeatedly failing routing tasks', async () => {
@@ -252,9 +368,9 @@ describe('LeaveWorkflowStore', () => {
           key: 'supervisor' as const,
           approvers: [
             {
-              name: '示例人员006',
+              name: '周海祥',
               openId: 'ou_station_supervisor',
-              position: '电气示例人员001',
+              position: '电气主管',
               buildings: ['110站'],
             },
           ],
@@ -521,19 +637,19 @@ describe('LeaveWorkflowStore', () => {
         substituteRequired: true,
         substitutePersonRecordId: 'rec_substitute_old',
         substituteOpenId: 'ou_substitute_old',
-        substituteName: '示例人员013',
+        substituteName: '李四',
         substituteRevision: 0,
         substituteCandidates: [
           {
             personRecordId: 'rec_substitute_old',
-            name: '示例人员013',
+            name: '李四',
             openId: 'ou_substitute_old',
             position: '长白',
             buildings: ['D楼'],
           },
           {
             personRecordId: 'rec_substitute_new',
-            name: '示例人员017',
+            name: '王五',
             openId: '',
             position: '实习生（备岗）',
             buildings: ['E楼'],
@@ -547,19 +663,19 @@ describe('LeaveWorkflowStore', () => {
         substituteRequired: true,
         substitutePersonRecordId: 'rec_substitute_old',
         substituteOpenId: 'ou_substitute_old',
-        substituteName: '示例人员013',
+        substituteName: '李四',
         substituteRevision: 0,
         substituteCandidates: [
           {
             personRecordId: 'rec_substitute_old',
-            name: '示例人员013',
+            name: '李四',
             openId: 'ou_substitute_old',
             position: '长白',
             buildings: ['D楼'],
           },
           {
             personRecordId: 'rec_substitute_new',
-            name: '示例人员017',
+            name: '王五',
             openId: '',
             position: '实习生（备岗）',
             buildings: ['E楼'],
@@ -575,9 +691,9 @@ describe('LeaveWorkflowStore', () => {
             key: 'supervisor',
             approvers: [
               {
-                name: '示例人员001',
+                name: '主管',
                 openId: 'ou_supervisor',
-                position: '设施运维示例人员001',
+                position: '设施运维主管',
                 buildings: ['D楼'],
               },
             ],
@@ -598,7 +714,7 @@ describe('LeaveWorkflowStore', () => {
       recordId: 'rec_leave_1',
       expectedRevision: 0,
       actorOpenId: 'ou_supervisor',
-      actorName: '示例人员001',
+      actorName: '主管',
       messageId: '',
       substitutePersonRecordId: 'rec_substitute_new',
     });
@@ -607,7 +723,7 @@ describe('LeaveWorkflowStore', () => {
       recordId: 'rec_leave_1',
       expectedRevision: 0,
       actorOpenId: 'ou_supervisor',
-      actorName: '示例人员001',
+      actorName: '主管',
       messageId: '',
       substitutePersonRecordId: 'rec_substitute_old',
     });
@@ -617,12 +733,12 @@ describe('LeaveWorkflowStore', () => {
       entry: {
         snapshot: {
           substitutePersonRecordId: 'rec_substitute_new',
-          substituteName: '示例人员017',
+          substituteName: '王五',
           substituteRevision: 1,
           substituteUpdatedByOpenId: 'ou_supervisor',
         },
       },
-      update: { previousSubstituteName: '示例人员013', substituteName: '示例人员017' },
+      update: { previousSubstituteName: '李四', substituteName: '王五' },
     });
     expect(stale).toMatchObject({ accepted: false, reason: 'stale_revision' });
     await expect(store.listTasks()).resolves.toContainEqual(
@@ -682,7 +798,7 @@ describe('LeaveWorkflowStore', () => {
         substituteCandidates: [
           {
             personRecordId: 'rec_substitute',
-            name: '示例人员013',
+            name: '李四',
             openId: 'ou_substitute',
             position: '实习生（备岗）',
             buildings: ['D楼'],
@@ -732,13 +848,13 @@ describe('LeaveWorkflowStore', () => {
       accepted: true,
       action: {
         substitutePersonRecordId: 'rec_substitute',
-        substituteName: '示例人员013',
+        substituteName: '李四',
       },
       entry: {
         snapshot: {
           substituteOpenId: 'ou_substitute',
           substitutePersonRecordId: 'rec_substitute',
-          substituteName: '示例人员013',
+          substituteName: '李四',
         },
         resultRecipients: [
           expect.objectContaining({ openId: 'ou_substitute' }),
@@ -761,7 +877,7 @@ describe('LeaveWorkflowStore', () => {
       stageKey: 'supervisor',
       stageVersion: 1,
       actorOpenId: 'ou_supervisor',
-      actorName: '示例人员001',
+      actorName: '主管',
       action: 'approve',
       eventId: 'evt_multi_shift_approve',
       shiftAssignments: multiShift.snapshot.shiftGroups.map((group, index) =>
@@ -805,7 +921,7 @@ describe('LeaveWorkflowStore', () => {
         stageKey: 'supervisor',
         stageVersion: 1,
         actorOpenId: 'ou_supervisor',
-        actorName: '示例人员001',
+        actorName: '主管',
         action: 'approve',
         eventId: 'evt_long_white_missing_decision',
       }),
@@ -840,7 +956,7 @@ describe('LeaveWorkflowStore', () => {
       stageKey: 'supervisor',
       stageVersion: 1,
       actorOpenId: 'ou_supervisor',
-      actorName: '示例人员001',
+      actorName: '主管',
       action: 'approve',
       eventId: 'evt_long_white_no_substitute',
       substituteRequired: false,
@@ -885,9 +1001,9 @@ describe('LeaveWorkflowStore', () => {
             key: 'supervisor',
             approvers: [
               {
-                name: '示例人员001',
+                name: '主管',
                 openId: 'ou_supervisor',
-                position: '设施运维示例人员001',
+                position: '设施运维主管',
                 buildings: ['A楼'],
               },
             ],
@@ -912,7 +1028,7 @@ describe('LeaveWorkflowStore', () => {
         recordId: 'rec_leave_1',
         expectedRevision: 0,
         actorOpenId: 'ou_supervisor',
-        actorName: '示例人员001',
+        actorName: '主管',
         shiftAssignments: swapped,
       }),
       store.claimSubstituteUpdate({
@@ -920,7 +1036,7 @@ describe('LeaveWorkflowStore', () => {
         recordId: 'rec_leave_1',
         expectedRevision: 0,
         actorOpenId: 'ou_supervisor',
-        actorName: '示例人员001',
+        actorName: '主管',
         shiftAssignments: initialAssignments,
       }),
     ]);
@@ -975,7 +1091,7 @@ describe('LeaveWorkflowStore', () => {
 
 const substituteZhang = {
   personRecordId: 'rec_zhang',
-  name: '示例人员008',
+  name: '张三',
   openId: 'ou_zhang',
   position: '运维值班员',
   buildings: ['A楼'],
@@ -983,7 +1099,7 @@ const substituteZhang = {
 
 const substituteLi = {
   personRecordId: 'rec_li',
-  name: '示例人员013',
+  name: '李四',
   openId: 'ou_li',
   position: '运维值班员',
   buildings: ['B楼'],
@@ -1008,7 +1124,7 @@ function assignment(
     substituteName: substitute.name,
     substituteOpenId: substitute.openId,
     updatedByOpenId: 'ou_supervisor',
-    updatedByName: '示例人员001',
+    updatedByName: '主管',
     updatedAt: '2026-08-25T10:00:00.000Z',
   };
 }
@@ -1085,7 +1201,7 @@ function application() {
     clientMutationId: 'leave-client-mutation-1',
     recordId: 'rec_leave_1',
     snapshot: {
-      applicantName: '示例人员008',
+      applicantName: '张三',
       applicantOpenId: 'ou_applicant',
       building: 'A楼',
       position: '运维值班员',

@@ -52,7 +52,7 @@ describe('risk inspection detail model', () => {
       expect.arrayContaining([
         { label: '问题描述', value: aliIssue.description, wide: true },
         { label: '楼栋', value: 'C楼' },
-        { label: '示例人员019', value: '张建国' },
+        { label: '责任人', value: '张建国' },
         { label: '逾期情况', value: '已逾期 9 天' },
         { label: '方舟登记', value: '未登记' },
       ]),

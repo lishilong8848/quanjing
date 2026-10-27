@@ -44,7 +44,7 @@ const CLIENT_BASE_PATH = '/nantong/';
 const TEST_REGISTRATION_URL =
   'https://app.sjhl.online/platform/nantong/monthly-schedule?weatherGuardRegistration=1&warningId=high-temperature-orange&source=test-card';
 const LEGACY_APPROVAL_URL =
-  'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/share/base/form/shrcneofD8Ahc8650YU6hIuPpTe';
 
 const ACTIVE_SNAPSHOT: WeatherWarningSnapshot = {
   status: 'active',
@@ -173,7 +173,7 @@ function createService(
     getRuntimeConfig: jest.fn().mockReturnValue({
       testRecipient:
         options.recipient === undefined
-          ? { openId: CONFIGURED_OPEN_ID, displayName: '示例人员020' }
+          ? { openId: CONFIGURED_OPEN_ID, displayName: '马进宇' }
           : options.recipient,
     }),
   };
@@ -669,7 +669,7 @@ describe('WeatherWarningNotificationService', () => {
 
   it.each([
     ['missing', null],
-    ['invalid', { openId: 'oc_no-fallback-group', displayName: '示例人员020' }],
+    ['invalid', { openId: 'oc_no-fallback-group', displayName: '马进宇' }],
   ] as const)(
     'fails closed when the configured recipient is %s',
     async (_caseName, recipient) => {

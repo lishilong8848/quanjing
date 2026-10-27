@@ -1758,7 +1758,7 @@ function WorkApplicationTemplateForm({
               />
             </TemplateRow>
             <tr>
-              <TemplateLabel>现场示例人员019</TemplateLabel>
+              <TemplateLabel>现场责任人</TemplateLabel>
               <TemplateCell colSpan={2}>
                 <OnsiteStaffSingleSelect
                   valueId={values.siteResponsibleId}
@@ -2098,7 +2098,7 @@ function OnsiteStaffSingleSelect({
         .catch((error) => {
           if (controller.signal.aborted) return;
           setItems([]);
-          setMessage(getOnlineFormErrorMessage(error, '现场示例人员019加载失败'));
+          setMessage(getOnlineFormErrorMessage(error, '现场责任人加载失败'));
         })
         .finally(() => {
           if (!controller.signal.aborted) {
@@ -2127,7 +2127,7 @@ function OnsiteStaffSingleSelect({
             onChange(null);
           }
         }}
-        placeholder="搜索现场示例人员019"
+        placeholder="搜索现场责任人"
         className="h-9 border-slate-200 bg-white pl-8 text-sm focus-visible:ring-blue-200"
       />
       {open && (
@@ -3253,7 +3253,7 @@ function renderWorkApplicationHtml(
         <td class="inline-cell">施工人数：${renderInlineBlank(values.constructionCount, 'blank blank-short')}</td>
       </tr>
       <tr>
-        <td colspan="3" class="inline-cell">现场示例人员019：${renderInlineBlank(values.siteResponsible, 'blank blank-wide')}</td>
+        <td colspan="3" class="inline-cell">现场责任人：${renderInlineBlank(values.siteResponsible, 'blank blank-wide')}</td>
         <td colspan="2" class="inline-cell">联系电话：${renderInlineBlank(values.siteResponsiblePhone)}</td>
         <td></td>
       </tr>

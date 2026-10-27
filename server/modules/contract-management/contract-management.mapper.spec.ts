@@ -9,7 +9,7 @@ function executionContract(recordId: string, endDate: string) {
       合同金额: 10000,
       合同开始日期: '2026-01-01',
       合同结束日期: endDate,
-      跟进人: [{ name: '示例人员008' }],
+      跟进人: [{ name: '张三' }],
       专业类别: '电气',
     },
   };
@@ -548,7 +548,7 @@ describe('contract management mapper', () => {
       合同名称: '配电设备执行合同',
       合同编号: 'ZX-001',
       合同公司: '南通配电有限公司',
-      跟进人: [{ name: '示例人员013' }],
+      跟进人: [{ name: '李四' }],
       框架引用: [{ record_ids: ['framework-1', 'missing-framework'] }],
     };
     const expiredLinked = executionContract('expired-linked', '2026-06-30');
@@ -557,7 +557,7 @@ describe('contract management mapper', () => {
       合同名称: '历史配电执行合同',
       合同编号: 'ZX-002',
       合同公司: '南通历史设备有限公司',
-      跟进人: [{ name: '示例人员017' }],
+      跟进人: [{ name: '王五' }],
       框架引用: [{ record_ids: ['framework-1'] }],
     };
     const sameNameButUnlinked = executionContract(
@@ -651,7 +651,7 @@ describe('contract management mapper', () => {
           amount: 10000,
           status: 'active',
           supplier: '南通配电有限公司',
-          owner: '示例人员013',
+          owner: '李四',
           endDate: '2026-12-31',
         },
         {
@@ -661,7 +661,7 @@ describe('contract management mapper', () => {
           amount: 10000,
           status: 'expired',
           supplier: '南通历史设备有限公司',
-          owner: '示例人员017',
+          owner: '王五',
           endDate: '2026-06-30',
         },
       ],
@@ -798,7 +798,7 @@ describe('contract management mapper', () => {
           fields: {
             公司单位: '南通服务有限公司',
             联系人: '张经理',
-            联系电话: '13800008135',
+            联系电话: '13800000001',
             园区对接人: [{ name: '曹李培' }],
             关联合同编号: [{ record_ids: ['active-contract'] }],
           },
@@ -808,7 +808,7 @@ describe('contract management mapper', () => {
           fields: {
             公司单位: '南通服务有限公司',
             联系人: '李经理',
-            联系电话: '13800002356',
+            联系电话: '13800000002',
             园区对接人: [{ name: '周海洋' }],
             关联合同编号: [{ record_ids: ['expired-contract'] }],
           },
@@ -850,8 +850,8 @@ describe('contract management mapper', () => {
     ).toMatchObject({
       directoryEntryCount: 2,
       contacts: [
-        { name: '李经理', phone: '13800002356' },
-        { name: '张经理', phone: '13800008135' },
+        { name: '李经理', phone: '13800000002' },
+        { name: '张经理', phone: '13800000001' },
       ],
       parkLiaisons: ['曹李培', '周海洋'],
       activeContractCount: 1,

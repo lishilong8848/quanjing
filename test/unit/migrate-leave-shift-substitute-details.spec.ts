@@ -36,15 +36,15 @@ describe('migrate leave shift substitute details', () => {
             items: [
               {
                 record_id: 'rec_person_li',
-                fields: { 姓名: '示例人员013', open_id: 'ou_li' },
+                fields: { 姓名: '李四', open_id: 'ou_li' },
               },
               {
                 record_id: 'rec_person_zhang_1',
-                fields: { 姓名: '示例人员008', open_id: 'ou_zhang_1' },
+                fields: { 姓名: '张三', open_id: 'ou_zhang_1' },
               },
               {
                 record_id: 'rec_person_zhang_2',
-                fields: { 姓名: '示例人员008', open_id: 'ou_zhang_2' },
+                fields: { 姓名: '张三', open_id: 'ou_zhang_2' },
               },
             ],
             has_more: false,
@@ -60,25 +60,25 @@ describe('migrate leave shift substitute details', () => {
           },
         });
       }
-      const leaveId = /\/tables\/tblf1bbd02a2b049\/records\/([^/]+)$/u.exec(
+      const leaveId = /\/tables\/tblpCzmTT3EapaUY\/records\/([^/]+)$/u.exec(
         url.pathname,
       )?.[1];
       if (leaveId) {
         const fieldsById: Record<string, Record<string, unknown>> = {
           rec_migratable: {
             系统影响排班记录ID: 'schedule_day、schedule_night',
-            '替班人员（填姓名）': '示例人员013',
+            '替班人员（填姓名）': '李四',
           },
           rec_missing_impact: {
-            '替班人员（填姓名）': '示例人员013',
+            '替班人员（填姓名）': '李四',
           },
           rec_ambiguous: {
             系统影响排班记录ID: 'schedule_day',
-            '替班人员（填姓名）': '示例人员008',
+            '替班人员（填姓名）': '张三',
           },
           rec_unknown_shift: {
             系统影响排班记录ID: 'schedule_unknown',
-            '替班人员（填姓名）': '示例人员013',
+            '替班人员（填姓名）': '李四',
           },
         };
         return send(response, {

@@ -8,9 +8,9 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
-const CHECKLIST_URL = 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+const CHECKLIST_URL = 'https://vnet.feishu.cn/wiki/Hs4fwlplAijAgskmBnkcEDMvnKc';
 const LEGACY_APPROVAL_URL =
-  'https://example.feishu.cn/share/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/share/base/form/shrcneofD8Ahc8650YU6hIuPpTe';
 const REGISTRATION_URL =
   'https://app.sjhl.online/nantong/monthly-schedule?weatherGuardRegistration=1&warningId=warning-high-temperature-orange&source=feishu-card';
 

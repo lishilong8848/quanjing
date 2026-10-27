@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { PrivilegedAccessPrincipal } from '../../../shared/access-control.interface';
 
-export const APPROVED_FEISHU_APP_ID = 'cli_0831564613853b26';
+export const APPROVED_FEISHU_APP_ID = 'cli_a9d1c9fe9d381cee';
 
 export const APPROVED_FEISHU_GRANTS = [
   {

@@ -1,0 +1,14 @@
+@import 'tailwindcss' source(none);
+@import '@lark-apaas/client-toolkit/lib/override.css';
+@import 'tw-animate-css';
+@import '../../../client/src/tailwind-theme.css';
+@config '../../visual/fixture-tailwind.config.ts';
+@source '../../../client/src/components/ui';
+@source '../../../client/src/pages/TrainingCertificationManagement';
+@source '../../../client/src/pages/CampusTrainingDashboard';
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+}

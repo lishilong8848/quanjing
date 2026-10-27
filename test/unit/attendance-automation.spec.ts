@@ -245,7 +245,7 @@ describe('attendance automation expectation plan', () => {
       date: '2026-08-30',
       schedules: [previousNight, currentWhite],
       longWhiteBuildings: [
-        { building: 'building_a', buildingName: 'A楼', staff: ['示例人员008'] },
+        { building: 'building_a', buildingName: 'A楼', staff: ['张三'] },
       ],
     });
     const offDutyPlan = buildAttendanceExpectationPlan({
@@ -269,7 +269,7 @@ describe('attendance automation expectation plan', () => {
     ).toEqual([
       ['潘佩胜', 'OffDuty', '2026-08-30 09:00:00', 'substitute'],
       ['顾晓磊', 'OnDuty', '2026-08-30 09:00:00', 'substitute'],
-      ['示例人员008', 'OnDuty', '2026-08-30 09:00:00', 'on_duty'],
+      ['张三', 'OnDuty', '2026-08-30 09:00:00', 'on_duty'],
     ]);
     expect(plan.excludedCount).toBe(2);
   });
@@ -280,7 +280,7 @@ describe('attendance automation expectation plan', () => {
       date: '2026-08-30',
       schedules: [previousNight, currentWhite],
       longWhiteBuildings: [
-        { building: 'building_a', buildingName: 'A楼', staff: ['示例人员008'] },
+        { building: 'building_a', buildingName: 'A楼', staff: ['张三'] },
       ],
     });
     const evening = buildFinalAttendanceExpectationPlan({
@@ -288,7 +288,7 @@ describe('attendance automation expectation plan', () => {
       date: '2026-08-30',
       schedules: [previousNight, currentWhite],
       longWhiteBuildings: [
-        { building: 'building_a', buildingName: 'A楼', staff: ['示例人员008'] },
+        { building: 'building_a', buildingName: 'A楼', staff: ['张三'] },
       ],
     });
 
@@ -298,7 +298,7 @@ describe('attendance automation expectation plan', () => {
       expect.arrayContaining([
         [currentWhite.dutyStaffActual[0], 'OnDuty'],
         [previousNight.dutyStaffActual[0], 'OffDuty'],
-        ['示例人员008', 'OnDuty'],
+        ['张三', 'OnDuty'],
       ]),
     );
     expect(
@@ -306,7 +306,7 @@ describe('attendance automation expectation plan', () => {
     ).toEqual(
       expect.arrayContaining([
         [currentWhite.dutyStaffActual[0], 'OffDuty'],
-        ['示例人员008', 'OffDuty'],
+        ['张三', 'OffDuty'],
       ]),
     );
   });
@@ -427,11 +427,11 @@ describe('attendance automation expectation plan', () => {
       id: 'leave-with-substitute',
       recordId: 'leave-with-substitute',
       dutyCode: 'leave-with-substitute',
-      dutyStaffReference: ['陈思凯', '示例人员012'],
-      dutyStaffActual: ['陈思凯', '示例人员012'],
-      leaveStaff: ['陈思凯', '示例人员012'],
-      substituteStaff: ['示例人员011', '王强'],
-      actualDutyStaff: '陈思凯、示例人员012',
+      dutyStaffReference: ['陈思凯', '曹雷'],
+      dutyStaffActual: ['陈思凯', '曹雷'],
+      leaveStaff: ['陈思凯', '曹雷'],
+      substituteStaff: ['曹毅', '王强'],
+      actualDutyStaff: '陈思凯、曹雷',
     };
 
     const plan = buildAttendanceExpectationPlan({
@@ -442,7 +442,7 @@ describe('attendance automation expectation plan', () => {
     });
 
     expect(plan.expectations.map((item) => item.name)).toEqual([
-      '示例人员011',
+      '曹毅',
       '王强',
     ]);
     expect(
@@ -457,12 +457,12 @@ describe('attendance automation expectation plan', () => {
       id: 'travel-with-substitute',
       recordId: 'travel-with-substitute',
       dutyCode: 'travel-with-substitute',
-      dutyStaffReference: ['差旅人员', '示例人员015'],
-      dutyStaffActual: ['差旅人员', '示例人员015', '替班人员'],
+      dutyStaffReference: ['差旅人员', '正常人员'],
+      dutyStaffActual: ['差旅人员', '正常人员', '替班人员'],
       leaveStaff: [],
       substituteStaff: ['替班人员'],
       travelStaff: ['差旅人员'],
-      actualDutyStaff: '差旅人员、示例人员015、替班人员',
+      actualDutyStaff: '差旅人员、正常人员、替班人员',
     };
 
     const plan = buildAttendanceExpectationPlan({
@@ -473,7 +473,7 @@ describe('attendance automation expectation plan', () => {
     });
 
     expect(plan.expectations.map((item) => item.name)).toEqual([
-      '示例人员015',
+      '正常人员',
       '替班人员',
     ]);
     expect(plan.expectations.some((item) => item.name === '差旅人员')).toBe(
@@ -805,11 +805,11 @@ describe('attendance anomaly card', () => {
       date: '2026-08-31',
       fetchedAt: '2026-08-31 09:30',
       label: '09:30 个人',
-      recipientName: '示例人员011',
+      recipientName: '曹毅',
       anomalies: [
         {
           key: 'cao-off',
-          name: '示例人员011',
+          name: '曹毅',
           building: 'C楼',
           shiftLabel: '夜班',
           direction: 'OffDuty',
@@ -819,7 +819,7 @@ describe('attendance anomaly card', () => {
         },
         {
           key: 'cao-on',
-          name: '示例人员011',
+          name: '曹毅',
           building: 'C楼',
           shiftLabel: '白班',
           direction: 'OnDuty',
@@ -842,7 +842,7 @@ describe('attendance anomaly card', () => {
       );
     });
 
-    expect(serialized).toContain('示例人员011');
+    expect(serialized).toContain('曹毅');
     expect(serialized).toContain('2 项考勤异常');
     expect(serialized).toContain('上班卡');
     expect(serialized).toContain('下班卡');

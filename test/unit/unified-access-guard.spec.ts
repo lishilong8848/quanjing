@@ -1215,7 +1215,7 @@ describe('UnifiedAccessGuard', () => {
 
   it.each([
     'ftp://integration.test/api/probe',
-    'http://user:user-f246ba97@example.com/api/probe',
+    'http://user:pass@integration.test/api/probe',
     'http://integration.test/api\\probe',
     '/api/probe#fragment',
   ])(
@@ -1276,7 +1276,7 @@ describe('UnifiedAccessGuard', () => {
     '/api/purchase-inventory/%ZZ',
     '/api/purchase-inventory/%E0%A4%A',
     'http://integration.test/api/other/../purchase-inventory/dashboard',
-    'http://user:user-f246ba97@example.com/api/purchase-inventory/dashboard',
+    'http://user:pass@integration.test/api/purchase-inventory/dashboard',
     'http://integration.test/api/purchase-inventory/dashboard#fragment',
     'ftp://integration.test/api/purchase-inventory/dashboard',
     'http://[::1',
@@ -1895,7 +1895,7 @@ describe('UnifiedAccessGuard Nest HTTP integration', () => {
     ['ftp absolute-form', 'ftp://integration.test/api/probe', 403],
     [
       'absolute-form userinfo',
-      'http://user:user-f246ba97@example.com/api/probe',
+      'http://user:pass@integration.test/api/probe',
       403,
     ],
     ['absolute-form backslash', 'http://integration.test/api\\probe', 403],

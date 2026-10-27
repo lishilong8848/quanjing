@@ -65,7 +65,7 @@ describe('月览变更只读服务与依赖注入', () => {
     expect(read).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        tableId: 'tbl8f743982e48e1',
+        tableId: 'tblBvg6wCYSX3hcg',
         strict: true,
         allowStale: false,
         forceRefresh: true,
@@ -127,7 +127,7 @@ describe('月览变更只读服务与依赖注入', () => {
     expect(read).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        tableId: 'tbl74dea197c9c1b',
+        tableId: 'tbl2cJuTBqRdIm8Z',
         fieldNames: ZHIHANG_PROGRESS_SOURCE.fieldNames,
         forceRefresh: true,
         strict: true,

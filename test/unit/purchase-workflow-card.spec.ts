@@ -46,7 +46,7 @@ describe('buildPurchaseApprovalCard', () => {
   it('builds a Feishu JSON 2.0 approval card with exact callback values', () => {
     const input = {
       executionRecordId: 'rec_exec_01-A',
-      requester: '示例人员008',
+      requester: '张三',
       building: 'H楼',
       title: '温湿度传感器',
       quantity: 3,
@@ -82,7 +82,7 @@ describe('buildPurchaseApprovalCard', () => {
     const content = collectContent(card).join('\n');
     for (const expected of [
       '申请人',
-      '示例人员008',
+      '张三',
       '楼栋',
       'H楼',
       '物品',
@@ -175,7 +175,7 @@ describe('buildPurchaseApprovalCard', () => {
   it('renders 未提供 for empty optional approval fields', () => {
     const input = {
       executionRecordId: 'rec_empty_fields',
-      requester: '示例人员008',
+      requester: '张三',
       building: 'H楼',
       title: '温湿度传感器',
       quantity: 3,
@@ -200,7 +200,7 @@ describe('buildPurchaseApprovalCard', () => {
       expect(() =>
         buildPurchaseApprovalCard({
           executionRecordId,
-          requester: '示例人员008',
+          requester: '张三',
           building: 'H楼',
           title: '传感器',
           quantity: 1,
@@ -222,7 +222,7 @@ describe('buildResolvedPurchaseApprovalCard', () => {
     (decision, decisionLabel) => {
       const input = {
         executionRecordId: 'rec_exec_01-A',
-        requester: '示例人员008',
+        requester: '张三',
         building: 'H楼',
         title: '温湿度传感器',
         quantity: 3,
@@ -236,7 +236,7 @@ describe('buildResolvedPurchaseApprovalCard', () => {
       };
       const card = buildResolvedPurchaseApprovalCard(input, {
         decision,
-        actorName: '示例人员013',
+        actorName: '李四',
         processedAt: '2026-07-17 10:45',
       });
 
@@ -244,7 +244,7 @@ describe('buildResolvedPurchaseApprovalCard', () => {
       const content = collectContent(card).join('\n');
       for (const expected of [
         '申请人',
-        '示例人员008',
+        '张三',
         '楼栋',
         'H楼',
         '物品',
@@ -266,7 +266,7 @@ describe('buildResolvedPurchaseApprovalCard', () => {
         '处理结果',
         decisionLabel,
         '处理人',
-        '示例人员013',
+        '李四',
         '处理时间',
         '2026-07-17 10:45',
       ]) {

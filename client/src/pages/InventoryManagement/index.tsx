@@ -1313,7 +1313,7 @@ function AlertAndStocktake({
                       className="mt-2 h-1.5 bg-slate-100"
                     />
                     <p className="mt-2 truncate text-[11px] text-slate-400">
-                      {item.responsible || '示例人员019待配置'}
+                      {item.responsible || '责任人待配置'}
                     </p>
                   </div>
                 ))}

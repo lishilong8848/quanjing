@@ -6,13 +6,13 @@ const person = (record_id: string, name: string, openId: string, fields = {}) =>
 describe('统一人员目录只读影子快照', () => {
   it('保留离职人员用于交接，但不加入在职成员授权', () => {
     const result = buildSiteMemberDirectory([
-      person('recFormer', '原示例人员001', 'ou_former', { 岗位: '设施运维示例人员001', '机楼/专业': ['C楼'], '离职/异动情况': '已离职' }),
-      person('recNew', '接任示例人员001', 'ou_new', { 岗位: '设施运维示例人员001', 体系岗位: '运维示例人员001', '机楼/专业': ['C楼'], 权限身份: ['楼栋管理员'] }),
+      person('recFormer', '原主管', 'ou_former', { 岗位: '设施运维主管', '机楼/专业': ['C楼'], '离职/异动情况': '已离职' }),
+      person('recNew', '接任主管', 'ou_new', { 岗位: '设施运维主管', 体系岗位: '运维主管', '机楼/专业': ['C楼'], 权限身份: ['楼栋管理员'] }),
     ], ...source);
     expect(result.members).toHaveLength(1);
     expect(result).toMatchObject({ authorityPeople: [
-      { recordId: 'recFormer', name: '原示例人员001', active: false, buildings: ['C楼'] },
-      { recordId: 'recNew', name: '接任示例人员001', active: true, buildings: ['C楼'], position: '设施运维示例人员001', permissionTags: ['楼栋管理员'] },
+      { recordId: 'recFormer', name: '原主管', active: false, buildings: ['C楼'] },
+      { recordId: 'recNew', name: '接任主管', active: true, buildings: ['C楼'], position: '设施运维主管', permissionTags: ['楼栋管理员'] },
     ] });
   });
   it('值班账号和协作人员单独分类；关联只保留record ID且不读取凭据', () => {

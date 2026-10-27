@@ -45,7 +45,7 @@ export class OvertimeApprovalRoutingError extends Error {
 
 const MANAGER_POSITIONS = new Set(['设施运维经理', '设施运维副经理']);
 const H_DUTY_POSITIONS = new Set(['运维值班员', '运维值班长']);
-const LEADERSHIP_PATTERN = /(示例人员001|经理|站长)/u;
+const LEADERSHIP_PATTERN = /(主管|经理|站长)/u;
 const STANDARD_BUILDINGS = new Set(['A楼', 'B楼', 'C楼', 'D楼', 'E楼']);
 
 export function resolveOvertimeProfessionalRecipients(
@@ -64,7 +64,7 @@ export function resolveOvertimeProfessionalRecipients(
   for (const record of records) {
     const person = normalizePerson(record);
     if (
-      [`${discipline}示例人员001`, `${discipline}专业示例人员001`].includes(
+      [`${discipline}主管`, `${discipline}专业主管`].includes(
         person.position,
       ) &&
       person.openId &&
@@ -76,7 +76,7 @@ export function resolveOvertimeProfessionalRecipients(
   if (!recipients.size) {
     throw new OvertimeApprovalRoutingError(
       'PROFESSIONAL_SUPERVISOR_NOT_FOUND',
-      `未找到有飞书账号的${discipline}专业示例人员001，无法发送加班结果知会`,
+      `未找到有飞书账号的${discipline}专业主管，无法发送加班结果知会`,
     );
   }
   return [...recipients.values()];
@@ -104,10 +104,10 @@ export function resolveOvertimeApprovalRoute(
         records,
         'station_110_electrical_supervisor',
         (record) =>
-          normalizeCompactLabel(record.position) === '电气示例人员001' &&
+          normalizeCompactLabel(record.position) === '电气主管' &&
           record.buildings.map(normalizeBuilding).includes('110站'),
-        '包含110站的“电气示例人员001”',
-        '110站普通人员按电气示例人员001组织记录路由',
+        '包含110站的“电气主管”',
+        '110站普通人员按电气主管组织记录路由',
         input.resolveDuty,
       );
     }
@@ -121,7 +121,7 @@ export function resolveOvertimeApprovalRoute(
           normalizeCompactLabel(record.position) === '值班账号' &&
           record.buildings.map(normalizeBuilding).includes('H楼'),
         'H楼“值班账号”',
-        'H楼值班人员按H楼值班账号记录的示例人员001字段路由',
+        'H楼值班人员按H楼值班账号记录的主管字段路由',
         input.resolveDuty,
       );
     }
@@ -139,7 +139,7 @@ export function resolveOvertimeApprovalRoute(
           normalizeCompactLabel(record.position) === '值班账号' &&
           record.buildings.map(normalizeBuilding).includes(building),
         `${building}“值班账号”`,
-        `${building}普通人员按楼栋值班账号记录的示例人员001字段路由`,
+        `${building}普通人员按楼栋值班账号记录的主管字段路由`,
         input.resolveDuty,
       );
     }
@@ -188,7 +188,7 @@ function routeViaOrganizationRecord(
   if (targetNames.size === 0) {
     throw new OvertimeApprovalRoutingError(
       'APPROVER_NOT_FOUND',
-      `${targetLabel}组织记录缺少示例人员001字段，无法确定加班审批人`,
+      `${targetLabel}组织记录缺少主管字段，无法确定加班审批人`,
     );
   }
   if (targetNames.size > 1) {
@@ -227,7 +227,7 @@ function routeToManagerGroup(
   if (managerNames.length === 0) {
     throw new OvertimeApprovalRoutingError(
       'APPROVER_NOT_FOUND',
-      '机房经理组织记录缺少示例人员001字段，无法确定加班审批人',
+      '机房经理组织记录缺少主管字段，无法确定加班审批人',
     );
   }
   const resolvedManagers = managerNames.map((name) =>
@@ -236,7 +236,7 @@ function routeToManagerGroup(
   assertNamesResolveUniquely(resolvedManagers);
   return finalizeRoute(
     'manager_group',
-    '示例人员001、经理、H楼非值班或示例人员004员由机房经理组审批',
+    '主管、经理、H楼非值班或其他人员由机房经理组审批',
     applicant,
     resolvedManagers,
   );

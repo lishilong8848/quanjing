@@ -22,7 +22,7 @@ describe('construction personnel check text', () => {
       },
       {
         recordId: 'recCrew2',
-        name: '示例人员008伟',
+        name: '张三伟',
         constructionCode: 'SG260505-1029',
         overviewRecordIds: [],
         phone: null,
@@ -68,7 +68,7 @@ describe('construction personnel check text', () => {
     );
 
     expect(text).toBe(
-      '已核对施工人员台账；今日参与施工（3人）：张鹏（低压电工证、高处作业证）、示例人员008伟（低压电工证）、王成龙（高处作业证）',
+      '已核对施工人员台账；今日参与施工（3人）：张鹏（低压电工证、高处作业证）、张三伟（低压电工证）、王成龙（高处作业证）',
     );
     expect(text).not.toContain('未参与施工');
     expect(text).not.toContain('杨建设');
@@ -101,7 +101,7 @@ describe('construction personnel check text', () => {
     const crewMembers: ConstructionCrewMemberItem[] = [
       {
         recordId: 'recCrewExpired',
-        name: '示例人员013',
+        name: '李四',
         constructionCode: 'SG260505-1041',
         overviewRecordIds: [],
         phone: null,
@@ -145,7 +145,7 @@ describe('construction personnel check text', () => {
       },
       {
         recordId: 'recCrewFuture',
-        name: '示例人员017',
+        name: '王五',
         constructionCode: 'SG260505-1041',
         overviewRecordIds: [],
         phone: null,

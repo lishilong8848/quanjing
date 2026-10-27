@@ -82,7 +82,7 @@ const timer = setTimeout(() => {
   if (process.argv.includes('--probe-v3')) {
     const token = await getTenantAccessToken(http);
     const result = await http.axiosRef.get(
-      'https://open.feishu.cn/open-apis/base/v3/bases/RR4Sbm81xaII07sW0kacCb9xnih/tables/tblfaa7c2608349c/records',
+      'https://open.feishu.cn/open-apis/base/v3/bases/RR4Sbm81xaII07sW0kacCb9xnih/tables/tblschT48zXwigUG/records',
       {
         params: { field_id: 'fldHtTMpGm', limit: 200, offset: 0 },
         headers: { Authorization: `Bearer ${token}` },

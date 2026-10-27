@@ -30,7 +30,7 @@ import {
 } from './equipment-lifecycle.mapper';
 
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/base/WMcQbPn71aXwoGsNv0vcnzz2n6c?table=tblOnpjrcp5xR6gn&view=vewiWIAXKq';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 interface EquipmentLifecycleTableConfig {
@@ -50,7 +50,7 @@ const TABLE_CONFIGS: EquipmentLifecycleTableConfig[] = [
     tableName: '设备生命周期管理表',
     tableIdEnv: 'FEISHU_EQUIPMENT_LIFECYCLE_EQUIPMENT_TABLE_ID',
     viewIdEnv: 'FEISHU_EQUIPMENT_LIFECYCLE_EQUIPMENT_VIEW_ID',
-    defaultTableId: 'tblccc04f2d27416',
+    defaultTableId: 'tblGFIJl9QQokCm0',
     defaultViewId: 'vewEnxNvZL',
     fieldNames: [
       '描述',
@@ -71,14 +71,14 @@ const TABLE_CONFIGS: EquipmentLifecycleTableConfig[] = [
     tableName: '长周期维护项',
     tableIdEnv: 'FEISHU_EQUIPMENT_LIFECYCLE_LONG_TERM_MAINTENANCE_TABLE_ID',
     viewIdEnv: 'FEISHU_EQUIPMENT_LIFECYCLE_LONG_TERM_MAINTENANCE_VIEW_ID',
-    defaultTableId: 'tblfee06d7d6b11e',
+    defaultTableId: 'tblOnpjrcp5xR6gn',
     defaultViewId: 'vewiWIAXKq',
     fieldNames: [
       '描述',
       '维护名称',
       '专业',
       '楼栋',
-      '示例人员019',
+      '责任人',
       '上次维护日期',
       '本次到期日期',
       '到期倒计时',
@@ -92,7 +92,7 @@ const TABLE_CONFIGS: EquipmentLifecycleTableConfig[] = [
     tableName: '关键器件更换预警',
     tableIdEnv: 'FEISHU_EQUIPMENT_LIFECYCLE_KEY_PARTS_TABLE_ID',
     viewIdEnv: 'FEISHU_EQUIPMENT_LIFECYCLE_KEY_PARTS_VIEW_ID',
-    defaultTableId: 'tbl957cc4cc0f69b',
+    defaultTableId: 'tblDNgWg26vJlxHB',
     defaultViewId: 'vewMtCv73j',
     fieldNames: [
       '描述',
@@ -100,7 +100,7 @@ const TABLE_CONFIGS: EquipmentLifecycleTableConfig[] = [
       '设备类型',
       '专业',
       '楼栋',
-      '示例人员019',
+      '责任人',
       '上次更换时间',
       '下次更换时间',
       '状态',
@@ -112,7 +112,7 @@ const TABLE_CONFIGS: EquipmentLifecycleTableConfig[] = [
     tableName: '维护合同',
     tableIdEnv: 'FEISHU_EQUIPMENT_LIFECYCLE_MAINTENANCE_CONTRACTS_TABLE_ID',
     viewIdEnv: 'FEISHU_EQUIPMENT_LIFECYCLE_MAINTENANCE_CONTRACTS_VIEW_ID',
-    defaultTableId: 'tblf7eedcba458d7',
+    defaultTableId: 'tblOZ1iBgdEH4GDB',
     defaultViewId: 'vewwBIXJAu',
     fieldNames: [
       '描述',
@@ -121,7 +121,7 @@ const TABLE_CONFIGS: EquipmentLifecycleTableConfig[] = [
       '设备名称',
       '设备类型',
       '专业',
-      '示例人员019',
+      '责任人',
       '本轮截止日期',
       '合同当前状态',
     ],

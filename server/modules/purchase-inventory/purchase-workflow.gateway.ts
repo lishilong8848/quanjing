@@ -77,13 +77,13 @@ interface WarehouseRecipientSnapshot {
 }
 
 const COMPREHENSIVE_PURCHASE_POSITION = '综合管理';
-const BUILDING_SUPERVISOR_POSITIONS = new Set(['设施运维示例人员001', '楼栋示例人员001']);
+const BUILDING_SUPERVISOR_POSITIONS = new Set(['设施运维主管', '楼栋主管']);
 const SHANGHAI_UTC_OFFSET_MS = 8 * 60 * 60 * 1_000;
 const WAREHOUSE_RECIPIENT_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export class InboundResponsibleUsersNotConfiguredException extends ServiceUnavailableException {
   constructor(building: string) {
-    super(`${clean(building) || '目标楼栋'}未配置有效的库房示例人员019员`);
+    super(`${clean(building) || '目标楼栋'}未配置有效的库房责任人员`);
   }
 }
 
@@ -801,7 +801,7 @@ export class PurchaseWorkflowGateway {
   ): Promise<PurchaseWorkflowUser> {
     const normalizedBuilding = normalizeBuilding(building);
     const configured = readConfiguredCardMembers('building_executor', normalizeConfiguredBuilding(building),specialty||undefined);
-    if (configured) return configuredWorkflowUser(configured[0], '设施运维示例人员001', building);
+    if (configured) return configuredWorkflowUser(configured[0], '设施运维主管', building);
     if (!normalizedBuilding) {
       throw new BadRequestException('目标楼栋不能为空');
     }
@@ -827,12 +827,12 @@ export class PurchaseWorkflowGateway {
     );
     if (!matches.length) {
       throw new ServiceUnavailableException(
-        `${clean(building) || '目标楼栋'}未配置唯一设施运维示例人员001`,
+        `${clean(building) || '目标楼栋'}未配置唯一设施运维主管`,
       );
     }
     if (matches.length > 1) {
       throw new ConflictException(
-        `${clean(building) || '目标楼栋'}配置了多个设施运维示例人员001`,
+        `${clean(building) || '目标楼栋'}配置了多个设施运维主管`,
       );
     }
     return matches[0];
@@ -884,9 +884,9 @@ export class PurchaseWorkflowGateway {
       const positions = warehouseRecordRoles(fields);
       if (roleAware && !positions.some(isWarehouseManagerRole)) continue;
       for (const fieldName of [
-        '示例人员001',
+        '主管',
         '库房管理人',
-        '库房示例人员019员',
+        '库房责任人员',
         '类别号管理人员（负责人最好为1人）',
       ]) {
         for (const candidate of extractUsers(fields[fieldName])) {
@@ -931,7 +931,7 @@ export class PurchaseWorkflowGateway {
   ): Promise<PurchaseWorkflowUser[]> {
     const normalizedBuilding = normalizeBuilding(building);
     const configured = readConfiguredCardMembers('warehouse_notify', normalizeConfiguredBuilding(building));
-    if (configured) return configured.map(person => configuredWorkflowUser(person, '设施运维示例人员001', building));
+    if (configured) return configured.map(person => configuredWorkflowUser(person, '设施运维主管', building));
     if (!normalizedBuilding) {
       throw new BadRequestException('目标楼栋不能为空');
     }
@@ -1691,7 +1691,7 @@ function resolveWarehouseManagerSource(): {
     viewId:
       readEnv('FEISHU_WAREHOUSE_MANAGER_VIEW_ID') ||
       managerSource.viewId ||
-      (tableId === 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_MANAGER_TABLE_ID' ? 'vew0gRV4Jr' : ''),
+      (tableId === 'tblWg8gr341c0HzF' ? 'vew0gRV4Jr' : ''),
   };
 }
 
@@ -1707,10 +1707,10 @@ function mapOrganizationRecordUsers(
   record: BitableRecordItem,
 ): PurchaseWorkflowUser[] {
   const fields = record.fields || {};
-  const people = ['示例人员001', '人员', '姓名']
+  const people = ['主管', '人员', '姓名']
     .map((fieldName) => extractUsers(fields[fieldName]))
     .find((users) => users.length);
-  const fallbackName = text(fields, ['示例人员001（文本）', '姓名']);
+  const fallbackName = text(fields, ['主管（文本）', '姓名']);
   const positions = extractDisplayValues(fields['职位']);
   const buildings = extractDisplayValues(fields['楼栋/专业']);
   return (people || []).map((user) => ({
@@ -2216,7 +2216,7 @@ function mapWarehouseRecipientAssignments(
       };
       assignments.set(key, assignment);
       for (const [fieldName, users] of [
-        ['库房示例人员019员', assignment.responsibleUsers],
+        ['库房责任人员', assignment.responsibleUsers],
         ['库房管理人', assignment.managerUsers],
       ] as const) {
         for (const candidate of extractUsers(fields[fieldName])) {

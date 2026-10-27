@@ -30,7 +30,7 @@ export class AlarmReviewService implements OnModuleInit, OnModuleDestroy {
     const request = normalizeAlarmReviewRequest(input);
     const directory = await this.people.getCachedActivePersonnelDirectory();
     const person = directory.personnel.find((entry) => entry.recordId === request.responsibleRecordId && entry.openId);
-    if (!person) throw new BadRequestException('请选择可关联飞书身份的在职示例人员019');
+    if (!person) throw new BadRequestException('请选择可关联飞书身份的在职责任人');
     return this.store.create(request, person.name, person.openId, principal);
   }
   status(id: string, role: AccessRole, principal: string): AlarmReviewTask {

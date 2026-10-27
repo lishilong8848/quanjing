@@ -9,33 +9,33 @@ import type {
 } from './overtime-workflow.types';
 
 const people = {
-  applicant: person('示例人员008', 'ou_zhangsan', '运维值班员', ['A楼']),
-  aLead: person('示例人员009', 'ou_shi', '设施运维示例人员001', ['A楼'], ['示例人员009']),
-  bLead: person('陈继猛', 'ou_chen', '设施运维示例人员001', ['B楼'], ['陈继猛']),
-  cLead: person('孙婷婷', 'ou_sun', '设施运维示例人员001', ['C楼'], ['孙婷婷']),
-  dLead: person('陶必亮', 'ou_tao', '设施运维示例人员001', ['D楼'], ['陶必亮']),
-  eLead: person('陈凯', 'ou_kai', '设施运维示例人员001', ['E楼'], ['陈凯']),
-  hLead: person('周庆庆', 'ou_zhou', 'H楼值班示例人员001', ['H楼'], ['周庆庆']),
+  applicant: person('张三', 'ou_zhangsan', '运维值班员', ['A楼']),
+  aLead: person('施小东', 'ou_shi', '设施运维主管', ['A楼'], ['施小东']),
+  bLead: person('陈继猛', 'ou_chen', '设施运维主管', ['B楼'], ['陈继猛']),
+  cLead: person('孙婷婷', 'ou_sun', '设施运维主管', ['C楼'], ['孙婷婷']),
+  dLead: person('陶必亮', 'ou_tao', '设施运维主管', ['D楼'], ['陶必亮']),
+  eLead: person('陈凯', 'ou_kai', '设施运维主管', ['E楼'], ['陈凯']),
+  hLead: person('周庆庆', 'ou_zhou', 'H楼值班主管', ['H楼'], ['周庆庆']),
   electricalLead: person(
-    '示例人员006',
+    '周海祥',
     'ou_zhou_hai',
-    '电气示例人员001',
+    '电气主管',
     ['A楼', '110站'],
-    ['示例人员006'],
+    ['周海祥'],
   ),
   manager: person(
-    '示例人员014',
+    '梅冰冰',
     'ou_manager',
     '设施运维经理',
     ['全园区'],
-    ['示例人员014'],
+    ['梅冰冰'],
   ),
   deputy: person(
-    '示例人员020',
+    '马进宇',
     'ou_deputy',
     '设施运维副经理',
     ['全园区'],
-    ['示例人员020'],
+    ['马进宇'],
   ),
 };
 
@@ -49,7 +49,7 @@ const directory: OvertimeOrganizationRecord[] = [
   people.electricalLead,
   people.manager,
   people.deputy,
-  valueAccount('A楼', '示例人员009'),
+  valueAccount('A楼', '施小东'),
   valueAccount('B楼', '陈继猛'),
   valueAccount('C楼', '孙婷婷'),
   valueAccount('D楼', '陶必亮'),
@@ -59,12 +59,12 @@ const directory: OvertimeOrganizationRecord[] = [
 
 describe('resolveOvertimeApprovalRoute', () => {
   it.each([
-    ['A楼', '示例人员009'],
+    ['A楼', '施小东'],
     ['B楼', '陈继猛'],
     ['C楼', '孙婷婷'],
     ['D楼', '陶必亮'],
     ['E楼', '陈凯'],
-  ])('%s 普通人员路由至该楼值班账号记录的示例人员001', (building, expected) => {
+  ])('%s 普通人员路由至该楼值班账号记录的主管', (building, expected) => {
     const route = resolve({
       ...people.applicant,
       buildings: [building],
@@ -75,7 +75,7 @@ describe('resolveOvertimeApprovalRoute', () => {
   });
 
   it.each(['运维值班员', '运维值班长'])(
-    'H楼%s路由至H楼值班账号记录的示例人员001',
+    'H楼%s路由至H楼值班账号记录的主管',
     (position) => {
       const route = resolve({
         ...people.applicant,
@@ -88,7 +88,7 @@ describe('resolveOvertimeApprovalRoute', () => {
     },
   );
 
-  it('110普通人员路由至包含110站的电气示例人员001记录的示例人员001', () => {
+  it('110普通人员路由至包含110站的电气主管记录的主管', () => {
     const route = resolve({
       ...people.applicant,
       position: '110值班人员',
@@ -96,14 +96,14 @@ describe('resolveOvertimeApprovalRoute', () => {
     });
 
     expect(route.kind).toBe('station_110_electrical_supervisor');
-    expect(route.approverNames).toEqual(['示例人员006']);
+    expect(route.approverNames).toEqual(['周海祥']);
   });
 
   it.each([
-    ['A楼设施运维示例人员001', '设施运维示例人员001', ['A楼']],
+    ['A楼设施运维主管', '设施运维主管', ['A楼']],
     ['H楼非值班人员', '暖通工程师', ['H楼']],
-    ['专业示例人员001', '电气示例人员001', ['A楼', '110站']],
-    ['示例人员004员', '综合管理', ['全园区']],
+    ['专业主管', '电气主管', ['A楼', '110站']],
+    ['其他人员', '综合管理', ['全园区']],
   ])('%s路由至机房经理组', (_label, position, buildings) => {
     const route = resolve({
       ...people.applicant,
@@ -112,13 +112,13 @@ describe('resolveOvertimeApprovalRoute', () => {
     });
 
     expect(route.kind).toBe('manager_group');
-    expect(route.approverNames).toEqual(['示例人员014', '示例人员020']);
+    expect(route.approverNames).toEqual(['梅冰冰', '马进宇']);
   });
 
   it('按openId去重经理组成员并剔除申请人，禁止自审', () => {
     const duplicateManager = {
       ...people.manager,
-      name: '示例人员014（重复记录）',
+      name: '梅冰冰（重复记录）',
     };
     const route = resolveOvertimeApprovalRoute({
       applicant: {
@@ -129,7 +129,7 @@ describe('resolveOvertimeApprovalRoute', () => {
     });
 
     expect(route.approvers).toEqual([
-      expect.objectContaining({ name: '示例人员014', openId: 'ou_manager' }),
+      expect.objectContaining({ name: '梅冰冰', openId: 'ou_manager' }),
     ]);
   });
 
@@ -151,7 +151,7 @@ describe('resolveOvertimeApprovalRoute', () => {
     );
   });
 
-  it('示例人员001姓名在人员目录中不唯一时拒绝猜测', () => {
+  it('主管姓名在人员目录中不唯一时拒绝猜测', () => {
     expect(() =>
       resolveOvertimeApprovalRoute({
         applicant: people.applicant,
@@ -163,7 +163,7 @@ describe('resolveOvertimeApprovalRoute', () => {
     ).toThrow(
       new OvertimeApprovalRoutingError(
         'APPROVER_NAME_NOT_UNIQUE',
-        '审批人“示例人员009”在组织架构中存在多条不同人员记录，无法唯一解析',
+        '审批人“施小东”在组织架构中存在多条不同人员记录，无法唯一解析',
       ),
     );
   });
@@ -173,13 +173,13 @@ describe('resolveOvertimeApprovalRoute', () => {
       resolveOvertimeApprovalRoute({
         applicant: people.applicant,
         organizationRecords: directory.map((entry) =>
-          entry.name === '示例人员009' ? { ...entry, openId: '' } : entry,
+          entry.name === '施小东' ? { ...entry, openId: '' } : entry,
         ),
       }),
     ).toThrow(
       new OvertimeApprovalRoutingError(
         'APPROVER_NOT_FOUND',
-        '审批人“示例人员009”缺少飞书账号，无法发送加班审批卡',
+        '审批人“施小东”缺少飞书账号，无法发送加班审批卡',
       ),
     );
   });
@@ -201,11 +201,11 @@ describe('resolveOvertimeApprovalRoute', () => {
     );
   });
 
-  it('值班账号与示例人员001不是同一人时严格取示例人员001字段，不向公共值班账号发卡', () => {
+  it('值班账号与主管不是同一人时严格取主管字段，不向公共值班账号发卡', () => {
     const route = resolve(people.applicant);
 
     expect(route.approvers).toEqual([
-      expect.objectContaining({ name: '示例人员009', openId: 'ou_shi' }),
+      expect.objectContaining({ name: '施小东', openId: 'ou_shi' }),
     ]);
     expect(route.approvers).not.toEqual(
       expect.arrayContaining([
@@ -214,7 +214,7 @@ describe('resolveOvertimeApprovalRoute', () => {
     );
   });
 
-  it('目标值班账号记录缺少示例人员001字段时拒绝猜测', () => {
+  it('目标值班账号记录缺少主管字段时拒绝猜测', () => {
     expect(() =>
       resolveOvertimeApprovalRoute({
         applicant: people.applicant,
@@ -227,7 +227,7 @@ describe('resolveOvertimeApprovalRoute', () => {
     ).toThrow(
       new OvertimeApprovalRoutingError(
         'APPROVER_NOT_FOUND',
-        'A楼“值班账号”组织记录缺少示例人员001字段，无法确定加班审批人',
+        'A楼“值班账号”组织记录缺少主管字段，无法确定加班审批人',
       ),
     );
   });

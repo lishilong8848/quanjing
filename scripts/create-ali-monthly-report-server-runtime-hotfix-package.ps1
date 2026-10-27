@@ -326,8 +326,8 @@ try {
   $compiledServiceMarkers = @(
     'ali-monthly-report-packages',
     'PYTHONPATH',
-    'user-b54e355d@example.com',
-    'user-20a3f7b8@example.com'
+    'ma.jinyu@vnet.com',
+    'liu.xiaoxing2-wb@sne.vnet.com'
   )
   foreach ($marker in $compiledServiceMarkers) {
     if ($compiledService -notmatch [regex]::Escape($marker)) {
@@ -344,8 +344,8 @@ try {
     '',
     '- 超功耗工作簿同时作为正文数据源和唯一 Excel 附件，避免错误附加告警分析文件。',
     '- 包内已预装并验证 CPython 3.12 / Windows x64 依赖；服务会自动加载 python/ali-monthly-report-packages，不执行在线 pip。',
-    '- 默认收件人为 user-b54e355d@example.com 和 user-20a3f7b8@example.com。',
-    '- user-7e80d4ec@example.com 仅显示在邮件正文抄送名单中，不加入默认收件人和实际投递地址。',
+    '- 默认收件人为 ma.jinyu@vnet.com 和 liu.xiaoxing2-wb@sne.vnet.com。',
+    '- mei.bingbing@vnet.com 仅显示在邮件正文抄送名单中，不加入默认收件人和实际投递地址。',
     '- 旧环境变量或配置中的自定义邮箱会保留，同时自动补齐两名默认收件人；正文专用抄送地址不会进入实际投递名单。',
     '- 自动任务仅在每月 3 日 09:00 生成上月文件；每月 5 日 09:00 仅补跑上月未完成项，服务重启和其他日期不会触发补跑。',
     '',

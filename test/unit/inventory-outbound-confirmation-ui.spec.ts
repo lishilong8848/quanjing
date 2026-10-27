@@ -51,7 +51,7 @@ function movement(
     location: 'A-01',
     reason: '机房监测补点',
     operator: '',
-    applicant: '示例人员008',
+    applicant: '张三',
     status: '待库房确认',
     occurredAt: '2026-08-11T01:30:00.000Z',
     expectedReturnAt: null,

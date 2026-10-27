@@ -49,7 +49,7 @@ import {
 } from './weather-warning-test-send';
 
 const CHECKLIST_DOWNLOAD_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/Hs4fwlplAijAgskmBnkcEDMvnKc';
 
 const CHECK_ITEMS = [
   { key: 'device', label: '设备安全' },
@@ -311,7 +311,7 @@ export function WeatherWarningTestCardDialog({
         setConfirmationOpen(false);
         setPhase('sent');
         toast.dismiss(toastId);
-        toast.success(result.message || '天气预警测试卡片已发送给示例人员020。');
+        toast.success(result.message || '天气预警测试卡片已发送给马进宇。');
         return;
       }
 
@@ -451,7 +451,7 @@ export function WeatherWarningTestCardDialog({
                   <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
                     <PreviewMetric
                       label="接收人"
-                      value={preview.recipientName || '示例人员020'}
+                      value={preview.recipientName || '马进宇'}
                     />
                     <PreviewMetric label="发送身份" value="系统机器人" />
                     <PreviewMetric
@@ -652,7 +652,7 @@ export function WeatherWarningTestCardDialog({
                   <>
                     <p>
                       将以“系统机器人”身份，仅发送给
-                      {preview?.recipientName || '示例人员020'}进行测试。
+                      {preview?.recipientName || '马进宇'}进行测试。
                     </p>
                     <p>
                       戒备等级：{preview?.snapshot.guardLevel || '暂未匹配'}

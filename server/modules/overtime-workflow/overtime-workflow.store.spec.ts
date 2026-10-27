@@ -9,7 +9,7 @@ import {
 
 const SNAPSHOT = {
   recordId: 'rec_overtime_1',
-  applicantName: '示例人员008',
+  applicantName: '张三',
   applicantOpenId: 'ou_applicant',
   building: 'A楼',
   position: '运维值班员',
@@ -337,13 +337,13 @@ describe('OvertimeWorkflowStore', () => {
       phase: 'approval_pending',
       approvers: [
         {
-          name: '示例人员009',
+          name: '施小东',
           openId: 'ou_approver_1',
-          position: '示例人员001',
+          position: '主管',
           buildings: ['A楼'],
         },
         {
-          name: '示例人员014',
+          name: '梅冰冰',
           openId: 'ou_approver_2',
           position: '经理',
           buildings: [],
@@ -407,13 +407,13 @@ describe('OvertimeWorkflowStore', () => {
       phase: 'approval_pending',
       approvers: [
         {
-          name: '示例人员009',
+          name: '施小东',
           openId: 'ou_approver_1',
-          position: '示例人员001',
+          position: '主管',
           buildings: ['A楼'],
         },
         {
-          name: '示例人员014',
+          name: '梅冰冰',
           openId: 'ou_approver_2',
           position: '经理',
           buildings: [],
@@ -461,9 +461,9 @@ describe('OvertimeWorkflowStore', () => {
       snapshot: SNAPSHOT,
     });
     const approver = {
-      name: '示例人员009',
+      name: '施小东',
       openId: 'ou_approver_1',
-      position: '示例人员001',
+      position: '主管',
       buildings: ['A楼'],
     };
     const delivery = {

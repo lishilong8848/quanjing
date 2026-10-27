@@ -14,7 +14,7 @@ const { getTenantAccessToken } = require('../../server/common/feishu/bitable-dir
   }
   const http = new HttpService();
   const access = await getTenantAccessToken(http);
-  const response = await http.axiosRef.post('https://open.feishu.cn/open-apis/base/v3/bases/Ku17b5rmgaULYJsioBpcHl0Xnqd/tables/tbl96c6dccf01af4/records/batch_get', { record_id_list: ['recvwKLPD56d2R'] }, { headers: { Authorization: `Bearer ${access}` }, timeout: 10000 });
+  const response = await http.axiosRef.post('https://open.feishu.cn/open-apis/base/v3/bases/Ku17b5rmgaULYJsioBpcHl0Xnqd/tables/tbl9GlPjdwTHIKSp/records/batch_get', { record_id_list: ['recvwKLPD56d2R'] }, { headers: { Authorization: `Bearer ${access}` }, timeout: 10000 });
   console.log(JSON.stringify({ api: 'v3-read', code: response.data.code, data: response.data.data }));
   const doc = await http.axiosRef.get('https://open.feishu.cn/open-apis/docx/v1/documents/U80NdM3T8o2MiHxzdyPcER1VntS/blocks', { headers: { Authorization: `Bearer ${access}` }, params: { page_size: 500 }, timeout: 10000 });
   console.log(JSON.stringify({ api: 'doc-blocks', code: doc.data.code, count: doc.data.data?.items?.length, page: doc.data.data?.has_more, first: doc.data.data?.items?.slice(0, 3) }));

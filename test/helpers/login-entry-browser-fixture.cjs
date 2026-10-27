@@ -2,7 +2,7 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'nt-login-entry-fixture-'));
 process.env.ACCESS_CONFIGURATION_FILE = path.join(temporary, 'configuration.json');
 process.env.FEISHU_LOCAL_CACHE_DIR = temporary;
-process.env.FEISHU_APP_ID = 'cli_0831564613853b26'; process.env.FEISHU_APP_SECRET = 'synthetic-fixture-only';
+process.env.FEISHU_APP_ID = 'cli_a9d1c9fe9d381cee'; process.env.FEISHU_APP_SECRET = 'synthetic-fixture-only';
 process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:43213';
 process.env.LOCAL_ACCESS_SESSION_SECRET = crypto.randomBytes(32).toString('base64');
 require('reflect-metadata');
@@ -27,7 +27,7 @@ const { EquipmentLedgerController } = require('../../server/modules/equipment-li
 const configuration = new AccessConfigurationService(), access = new UnifiedAccessService(configuration);
 const actor = configuration.localTargets().find(item => item.principal.role === 'admin').principal;
 let externalEmployees = [];
-const directory = { read: async () => ({ externalEmployees, appId: process.env.FEISHU_APP_ID, personnelComplete: true, snapshotAt: Date.now(), people: PROFESSIONAL_DEFAULTS.map(person => ({ ...person, source: 'employee' })), employees: PROFESSIONAL_DEFAULTS.map(person => ({ ...person, position: '专业示例人员001', specialties: person.specialties.join('、'), inactive: false })) }), assertKnown: async () => {} };
+const directory = { read: async () => ({ externalEmployees, appId: process.env.FEISHU_APP_ID, personnelComplete: true, snapshotAt: Date.now(), people: PROFESSIONAL_DEFAULTS.map(person => ({ ...person, source: 'employee' })), employees: PROFESSIONAL_DEFAULTS.map(person => ({ ...person, position: '专业主管', specialties: person.specialties.join('、'), inactive: false })) }), assertKnown: async () => {} };
 const sync = new AccessPersonnelSyncService(configuration, directory);
 const configController = new AccessConfigurationController(configuration, directory, access, {}, sync);
 const accessController = new UnifiedAccessController(access, {});

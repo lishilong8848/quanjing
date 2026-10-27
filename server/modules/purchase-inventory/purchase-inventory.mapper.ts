@@ -287,13 +287,13 @@ function buildRequests(
             '当前审批人',
             '审批人',
             '审批负责人',
-            '审批示例人员001',
+            '审批主管',
           ]) ||
           text(submissionFields, [
             '当前审批人',
             '审批人',
             '审批负责人',
-            '审批示例人员001',
+            '审批主管',
           ]);
         const executionComparisonField = '是否满足三家比价（线下）';
         const comparisonSatisfied = Object.prototype.hasOwnProperty.call(
@@ -424,7 +424,7 @@ function resolveApprovalTarget(
   namedApprovalTarget: string,
 ): string {
   if (stage !== 'approval') return '';
-  return namedApprovalTarget || '运维经理（示例人员020 / 示例人员014，任一审批）';
+  return namedApprovalTarget || '运维经理（马进宇 / 梅冰冰，任一审批）';
 }
 
 function buildEmployeeBuildingIndex(

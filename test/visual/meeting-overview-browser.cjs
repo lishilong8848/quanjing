@@ -152,7 +152,7 @@ async function main() {
     );
     await page.getByLabel('关闭', { exact: true }).click();
     check(
-      '最新真实待办、日期回溯提示、示例人员019与涉及人员分开、周报摘要及原记录下钻',
+      '最新真实待办、日期回溯提示、责任人与涉及人员分开、周报摘要及原记录下钻',
     );
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({

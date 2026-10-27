@@ -1,10 +1,10 @@
 import { assertLeaveHandoverCoverage, assertOvertimeHandoverCoverage, assertPriorHandoverClosed } from '../../server/common/access/personnel-handover.coverage';
 import type { HandoverContext } from '../../shared/personnel-handover.interface';
 
-const person=(id:string,openId:string)=>({id,openId,recordId:'rec'+id,name:id,active:true,type:'employee' as const,position:'示例人员001',systemPosition:'',buildings:['C楼' as const],specialties:[],permissionTags:[],dutyRecordIds:[]});
+const person=(id:string,openId:string)=>({id,openId,recordId:'rec'+id,name:id,active:true,type:'employee' as const,position:'主管',systemPosition:'',buildings:['C楼' as const],specialties:[],permissionTags:[],dutyRecordIds:[]});
 const from=person('old','ou_old'),to=person('new','ou_new');
-const context:HandoverContext={from,to,directoryVersion:'fixture',duties:[{recordId:'recDuty',name:'C楼示例人员001',kind:'building_supervisor',personnelIds:[to.id],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}]};
-const source={name:from.name,openId:from.openId!,position:'示例人员001',buildings:['C楼']},other={...source,name:'其他',openId:'ou_other'};
+const context:HandoverContext={from,to,directoryVersion:'fixture',duties:[{recordId:'recDuty',name:'C楼主管',kind:'building_supervisor',personnelIds:[to.id],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1}]};
+const source={name:from.name,openId:from.openId!,position:'主管',buildings:['C楼']},other={...source,name:'其他',openId:'ou_other'};
 type Leave=Parameters<typeof assertLeaveHandoverCoverage>[1];
 type Overtime=Parameters<typeof assertOvertimeHandoverCoverage>[1];
 const leave=():Leave=>({recordId:'recLeave',snapshot:{building:'C楼'},status:'supervisor_pending',currentStage:{key:'supervisor',version:1,approverOpenIds:[source.openId]},approvalPlan:{approvalClass:'ordinary',discipline:null,approvalDayCount:1,stages:[{key:'supervisor',approvers:[source],resolutionPolicy:'first_legal_action'}],notificationPlan:{finalResultRecipients:[source],professionalRecipients:[],substituteRecipients:[]}},resultRecipients:[source]});
@@ -23,7 +23,7 @@ describe('实际两模块交接范围闭合门禁',()=>{
     const app=leave();app.approvalPlan!.stages.push({key:'manager',approvers:[source],resolutionPolicy:'first_legal_action'});
     expect(()=>assertLeaveHandoverCoverage(context,app,[])).toThrow('尚未开始');
   });
-  it('过去已审批的示例人员001历史保留，但未完成独立通知必须明确阻断',()=>{
+  it('过去已审批的主管历史保留，但未完成独立通知必须明确阻断',()=>{
     const app=leave();app.currentStage={key:'manager',version:2,approverOpenIds:[other.openId]};app.approvalPlan!.stages.push({key:'manager',approvers:[other],resolutionPolicy:'first_legal_action'});app.status='manager_pending';
     expect(()=>assertLeaveHandoverCoverage(context,app,[])).toThrow('独立通知');
     app.resultRecipients=[];app.approvalPlan!.notificationPlan.finalResultRecipients=[];expect(()=>assertLeaveHandoverCoverage(context,app,[])).not.toThrow();

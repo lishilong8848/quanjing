@@ -8,7 +8,7 @@ const principal = { role: 'admin', purchaseBuilding: null };
 const person = {
   recordId: 'test-person',
   openId: 'ou_test',
-  name: '示例人员016',
+  name: '测试人员',
   building: 'H楼',
   employeeNo: 'T1',
   position: '',

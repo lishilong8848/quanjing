@@ -14,7 +14,7 @@ describe('two-level backup notifications and final card visibility', () => {
   });
   it('shows both posts in the read-only final card rather than only the first substitute', () => {
     const data = fixture();
-    const card = buildLeaveTerminalCard({ ...data.cardContext, shiftAssignments: data.assignments, outcome: 'approved', actorName: '示例人员001', message: '审批通过' });
+    const card = buildLeaveTerminalCard({ ...data.cardContext, shiftAssignments: data.assignments, outcome: 'approved', actorName: '主管', message: '审批通过' });
     const text = JSON.stringify(card);
     expect(text).toContain('原岗补位'); expect(text).toContain(backup.name); expect(text).toContain('C楼');
     expect(text).not.toContain('form_action_type');
@@ -30,7 +30,7 @@ describe('two-level backup notifications and final card visibility', () => {
     const gateway = { sendInteractiveCard: jest.fn(async (recipient: string, card: Record<string, unknown>) => { sent.push({ recipient, card }); return `om_two_level_notice_${sent.length}`; }) };
     const sync = { getCachedActivePersonnelDirectory: jest.fn(async () => ({ personnel: [applicant, primary, backup, replacement] })) };
     const service: any = new LeaveWorkflowService(store as never, gateway as never, sync as never);
-    await service.deliverSubstituteChangeNotifications(app, { previousSubstituteOpenId: '', previousSubstitutePersonRecordId: '', previousSubstituteName: '', substituteOpenId: '', substitutePersonRecordId: '', substituteName: '', previousShiftAssignments: data.assignments, shiftAssignments: current, actorName: '示例人员001' }, 'test-two-level-backup-change');
+    await service.deliverSubstituteChangeNotifications(app, { previousSubstituteOpenId: '', previousSubstitutePersonRecordId: '', previousSubstituteName: '', substituteOpenId: '', substitutePersonRecordId: '', substituteName: '', previousShiftAssignments: data.assignments, shiftAssignments: current, actorName: '主管' }, 'test-two-level-backup-change');
     const old = sent.find(row => row.recipient === backup.openId)!.card;
     const next = sent.find(row => row.recipient === replacement.openId)!.card;
     expect(JSON.stringify(old)).toContain('原替班安排已取消');
@@ -39,7 +39,7 @@ describe('two-level backup notifications and final card visibility', () => {
     expect(JSON.stringify(next)).toContain(backup.name);
     expect(JSON.stringify(next)).toContain(replacement.name);
     const count = sent.length;
-    await service.deliverSubstituteChangeNotifications(app, { previousSubstituteOpenId: '', previousSubstitutePersonRecordId: '', previousSubstituteName: '', substituteOpenId: '', substitutePersonRecordId: '', substituteName: '', previousShiftAssignments: data.assignments, shiftAssignments: current, actorName: '示例人员001' }, 'test-two-level-backup-change');
+    await service.deliverSubstituteChangeNotifications(app, { previousSubstituteOpenId: '', previousSubstitutePersonRecordId: '', previousSubstituteName: '', substituteOpenId: '', substitutePersonRecordId: '', substituteName: '', previousShiftAssignments: data.assignments, shiftAssignments: current, actorName: '主管' }, 'test-two-level-backup-change');
     expect(sent).toHaveLength(count);
   });
 });

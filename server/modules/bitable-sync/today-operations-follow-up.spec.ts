@@ -149,13 +149,13 @@ describe('unified today operations follow-up', () => {
   it('uses the canonical Nantong host for the follow-up page', () => {
     const url = new URL(
       buildTodayOperationsFollowUpUrl(
-        'https://example.com:3001/',
+        'https://www.sm.sjhl.online:3001/',
         'abc.DEF',
       ),
     );
 
     expect(url.origin + url.pathname).toBe(
-      'https://example.com:3001/attendance-anomaly-follow-up',
+      'https://sm.sjhl.online:3001/attendance-anomaly-follow-up',
     );
   });
 

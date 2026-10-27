@@ -28,7 +28,7 @@ describe('采购、变更总结、月报复用登录本人', () => {
     expect(resolveCurrentApplicant).toHaveBeenCalledWith(principal, 'H楼');
   });
 
-  it('签收等普通人员搜索仍保留示例人员004员候选', async () => {
+  it('签收等普通人员搜索仍保留其他人员候选', async () => {
     const controller = Object.assign(Object.create(PurchaseInventoryController.prototype), {
       accessPolicy: { assertRequestedBuilding: () => 'H楼' },
       applicationService: { resolveCurrentApplicant: jest.fn().mockResolvedValue(own), searchApplicants: jest.fn().mockResolvedValue([other, own]) },
@@ -61,7 +61,7 @@ describe('采购、变更总结、月报复用登录本人', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ submitterName: '本人甲' }), fingerprint, accounts[0]);
   });
 
-  it('月报忽略示例人员004员遗留 cookie，直接使用登录本人', async () => {
+  it('月报忽略其他人员遗留 cookie，直接使用登录本人', async () => {
     const principal = { ...accounts[1], role: 'guest' } as AccessPrincipal;
     const subject = { kind: 'person', person: { id: 'person_own', name: '本人甲', openId: 'ou_own' }, principalFingerprint: 'own-fingerprint' };
     const identity = { resolvePrincipal: jest.fn().mockResolvedValue(subject), resolve: jest.fn().mockReturnValue({ ...subject, person: { id: 'person_other', name: '他人乙' } }) };

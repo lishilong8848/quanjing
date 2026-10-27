@@ -76,14 +76,14 @@ describe('PurchaseApplicationService catalog reads', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.FEISHU_PURCHASE_INVENTORY_SOURCE_URL =
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
-    process.env.FEISHU_ITEM_CATEGORY_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_ITEM_CATEGORY_TABLE_ID';
-    process.env.FEISHU_PURCHASE_SUBMISSION_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID';
-    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID';
+      'https://vnet.feishu.cn/wiki/SiW9wuy9DiIsykkTkNUcM0HfnSb';
+    process.env.FEISHU_ITEM_CATEGORY_TABLE_ID = 'tblhdbfhazvxIlmX';
+    process.env.FEISHU_PURCHASE_SUBMISSION_TABLE_ID = 'tblIfmOB4VTUMmMh';
+    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'tblKmajonrdwW7Z0';
     process.env.FEISHU_ACTIVE_EMPLOYEE_SOURCE_URL =
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
-    process.env.FEISHU_ACTIVE_EMPLOYEE_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID';
-    process.env.FEISHU_ACTIVE_EMPLOYEE_VIEW_ID = 'PUBLIC_EXAMPLE_FEISHU_ORG_VIEW_ID';
+      'https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg';
+    process.env.FEISHU_ACTIVE_EMPLOYEE_TABLE_ID = 'tblOu75UtJTDNHIM';
+    process.env.FEISHU_ACTIVE_EMPLOYEE_VIEW_ID = 'vewrQcypV4';
     (resolveBitableAppToken as jest.Mock).mockResolvedValue('app-token');
   });
 
@@ -162,7 +162,7 @@ describe('PurchaseApplicationService catalog reads', () => {
       expect.anything(),
       expect.objectContaining({
         appToken: 'app-token',
-        tableId: 'PUBLIC_EXAMPLE_FEISHU_ITEM_CATEGORY_TABLE_ID',
+        tableId: 'tblhdbfhazvxIlmX',
       }),
     );
     expect(result).toEqual([
@@ -296,8 +296,8 @@ describe('PurchaseApplicationService catalog reads', () => {
       expect.anything(),
       expect.objectContaining({
         appToken: 'app-token',
-        tableId: 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID',
-        viewId: 'PUBLIC_EXAMPLE_FEISHU_ORG_VIEW_ID',
+        tableId: 'tblOu75UtJTDNHIM',
+        viewId: 'vewrQcypV4',
       }),
     );
     expect(result).toEqual([
@@ -528,7 +528,7 @@ describe('PurchaseApplicationService catalog reads', () => {
       }),
     );
     const createCall = httpService.axiosRef.post.mock.calls.find(([url]) =>
-      String(url).endsWith('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID/records'),
+      String(url).endsWith('/tables/tblKmajonrdwW7Z0/records'),
     );
     expect(createCall?.[1].fields).toEqual(
       expect.objectContaining({
@@ -613,7 +613,7 @@ describe('PurchaseApplicationService catalog reads', () => {
       expect(status.task).not.toHaveProperty('result');
       expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
         appToken: 'app-token',
-        tableId: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID',
+        tableId: 'tblKmajonrdwW7Z0',
       });
 
       expect(
@@ -801,7 +801,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     );
     expect(uploadCalls).toHaveLength(0);
     const createCall = httpService.axiosRef.post.mock.calls.find(([url]) =>
-      String(url).endsWith('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID/records'),
+      String(url).endsWith('/tables/tblKmajonrdwW7Z0/records'),
     );
     expect(createCall?.[1].fields).not.toHaveProperty(
       '三方比价依据（邮件/报价单）',
@@ -972,7 +972,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     ).toHaveLength(1);
     expect(
       httpService.axiosRef.post.mock.calls.filter(([url]) =>
-        String(url).endsWith('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID/records'),
+        String(url).endsWith('/tables/tblKmajonrdwW7Z0/records'),
       ),
     ).toHaveLength(0);
   });
@@ -1024,7 +1024,7 @@ describe('PurchaseApplicationService catalog reads', () => {
       .map(([url]) => String(url))
       .filter((url) => url.endsWith('/records'));
     expect(recordCreateUrls).toEqual([
-      expect.stringContaining('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID/records'),
+      expect.stringContaining('/tables/tblKmajonrdwW7Z0/records'),
     ]);
     expect(result.created).toEqual([
       {
@@ -1037,7 +1037,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     expect(invalidateBitableRecordCache).toHaveBeenCalledTimes(1);
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-token',
-      tableId: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID',
+      tableId: 'tblKmajonrdwW7Z0',
     });
   });
 
@@ -1121,7 +1121,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     const previousVerificationToken =
       process.env.FEISHU_PURCHASE_CARD_VERIFICATION_TOKEN;
     process.env.PURCHASE_WORKFLOW_PROGRAM_ENABLED = 'false';
-    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID';
+    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'tblKmajonrdwW7Z0';
     process.env.PURCHASE_WORKFLOW_APPROVER_OPEN_IDS = '';
     process.env.PURCHASE_WORKFLOW_PURCHASE_ADMIN_OPEN_ID = '';
     process.env.FEISHU_PURCHASE_CARD_VERIFICATION_TOKEN = '';
@@ -1579,7 +1579,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     }
     const createCalls = httpService.axiosRef.post.mock.calls.filter(([url]) =>
       String(url).includes(
-        '/bitable/v1/apps/app-token/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID/records',
+        '/bitable/v1/apps/app-token/tables/tblKmajonrdwW7Z0/records',
       ),
     );
     expect(createCalls).toHaveLength(2);
@@ -1618,7 +1618,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     );
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-token',
-      tableId: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID',
+      tableId: 'tblKmajonrdwW7Z0',
     });
     const uploadCall = httpService.axiosRef.post.mock.calls.find(([url]) =>
       String(url).includes('/drive/v1/medias/upload_all'),
@@ -1689,7 +1689,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     const previousExecutionTable =
       process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID;
     process.env.PURCHASE_WORKFLOW_PROGRAM_ENABLED = 'false';
-    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID';
+    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'tblKmajonrdwW7Z0';
     let submissionIndex = 0;
     let executionIndex = 0;
     const httpService = {
@@ -1704,7 +1704,7 @@ describe('PurchaseApplicationService catalog reads', () => {
               },
             });
           }
-          if (url.includes('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID/')) {
+          if (url.includes('/tables/tblIfmOB4VTUMmMh/')) {
             expect(body).toEqual({
               fields: expect.objectContaining({
                 '提交成功（无需点击🚫）': false,
@@ -1718,7 +1718,7 @@ describe('PurchaseApplicationService catalog reads', () => {
               },
             });
           }
-          if (url.includes('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID/')) {
+          if (url.includes('/tables/tblKmajonrdwW7Z0/')) {
             executionIndex += 1;
             expect(body).toEqual({
               fields: expect.objectContaining({
@@ -2044,7 +2044,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     const previousExecutionTable =
       process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID;
     process.env.PURCHASE_WORKFLOW_PROGRAM_ENABLED = 'false';
-    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID';
+    process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID = 'tblKmajonrdwW7Z0';
     let executionIndex = 0;
     const httpService = {
       axiosRef: {
@@ -2058,10 +2058,10 @@ describe('PurchaseApplicationService catalog reads', () => {
               },
             });
           }
-          if (url.includes('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID/')) {
+          if (url.includes('/tables/tblIfmOB4VTUMmMh/')) {
             throw new Error('采购提交表不应接收新增记录');
           }
-          if (url.includes('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID/')) {
+          if (url.includes('/tables/tblKmajonrdwW7Z0/')) {
             executionIndex += 1;
             if (executionIndex === 2) {
               return Promise.resolve({
@@ -2171,10 +2171,10 @@ describe('PurchaseApplicationService catalog reads', () => {
     expect(result.warnings).toEqual([]);
 
     const submissionBodies = httpService.axiosRef.post.mock.calls
-      .filter(([url]) => String(url).includes('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID/'))
+      .filter(([url]) => String(url).includes('/tables/tblIfmOB4VTUMmMh/'))
       .map(([, body]) => body);
     const executionBodies = httpService.axiosRef.post.mock.calls
-      .filter(([url]) => String(url).includes('/tables/PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID/'))
+      .filter(([url]) => String(url).includes('/tables/tblKmajonrdwW7Z0/'))
       .map(([, body]) => body);
     expect(submissionBodies).toHaveLength(0);
     expect(executionBodies).toHaveLength(2);

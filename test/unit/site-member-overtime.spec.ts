@@ -14,9 +14,9 @@ describe('成员加班只能为本人申请', () => {
       resolveLeaveRequestStaff: identity, validateOvertimeRequestScreenshot: writes,
       withOvertimeRequestMutationIdempotency: writes,
     });
-    await expect(service.createOvertimeRequest({ ...payload, staffName: '站内示例人员003' }, undefined, station))
+    await expect(service.createOvertimeRequest({ ...payload, staffName: '站内人员甲' }, undefined, station))
       .rejects.toThrow('站内稳定身份核验');
-    expect(identity).toHaveBeenCalledWith('站内示例人员003', undefined, station);
+    expect(identity).toHaveBeenCalledWith('站内人员甲', undefined, station);
     expect(writes).not.toHaveBeenCalled();
   });
   it('控制器拒绝他人姓名，本人稳定身份传给服务，其他角色调用保持原样', async () => {

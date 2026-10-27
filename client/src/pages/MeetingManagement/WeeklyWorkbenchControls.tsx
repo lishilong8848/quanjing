@@ -131,14 +131,14 @@ export function WeeklyWorkbenchControls({
             {
               key: 'ali',
               title: '阿里待办',
-              detail: '待办内容 · 示例人员019 · 附件',
+              detail: '待办内容 · 责任人 · 附件',
               Icon: ListTodo,
               reason: todoReason,
             },
             {
               key: 'local',
               title: '属地周会待办',
-              detail: '待办内容 · 示例人员019 · 附件',
+              detail: '待办内容 · 责任人 · 附件',
               Icon: ClipboardList,
               reason: todoReason,
             },

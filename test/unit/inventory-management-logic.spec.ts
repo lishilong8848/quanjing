@@ -41,7 +41,7 @@ describe('inventory management logic', () => {
         difference: -8,
         unit: '件',
         value: 1200,
-        owners: ['示例人员008'],
+        owners: ['张三'],
         riskTone: 'critical',
       },
     ] satisfies PurchaseInventoryAlertItem[];
@@ -63,12 +63,12 @@ describe('inventory management logic', () => {
         quantity: 12,
         status: '已入库',
         sourceOrReason: '采购入库',
-        operator: '示例人员008',
+        operator: '张三',
         createdAt: '2026-07-10T02:00:00.000Z',
       },
     ] satisfies PurchaseInventoryMovementItem[];
 
-    expect(filterInventoryMovements(movements, '示例人员008')).toHaveLength(1);
+    expect(filterInventoryMovements(movements, '张三')).toHaveLength(1);
     expect(filterInventoryMovements(movements, '采购入库')).toHaveLength(1);
     expect(filterInventoryMovements(movements, '出库')).toHaveLength(0);
   });

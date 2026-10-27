@@ -606,7 +606,7 @@ const CONSTRUCTION_FORM_AUDIT_REQUIREMENT_DETAILS = [
   {
     keywords: ['作业申请单审核要点', '作业申请单'],
     summary:
-      '核对作业项目、作业日期、有效期合规、作业单位、负责人/现场示例人员019电话、作业人员身份信息和人数、作业地点/内容、材料堆放点、特殊作业勾选、能源切断/停用设备、现场负责人/EHS/FM或IM驻场示例人员001签字。',
+      '核对作业项目、作业日期、有效期合规、作业单位、负责人/现场责任人电话、作业人员身份信息和人数、作业地点/内容、材料堆放点、特殊作业勾选、能源切断/停用设备、现场负责人/EHS/FM或IM驻场主管签字。',
   },
   {
     keywords: ['特殊作业培训表审核要点', '培训表'],
@@ -2256,7 +2256,7 @@ const CONSTRUCTION_APPLICATION_DOCUMENT_LABELS = [
   '作业方负责人',
   '联系电话',
   '施工人数',
-  '现场示例人员019',
+  '现场责任人',
   '作业人员身份证号及资质证书',
   '作业地点',
   '作业内容描述',
@@ -2276,7 +2276,7 @@ const CONSTRUCTION_APPLICATION_REQUIRED_DOCUMENT_FIELDS = [
   { key: '作业日期', label: '作业日期' },
   { key: '作业单位', label: '作业单位' },
   { key: '作业方负责人', label: '作业方负责人' },
-  { key: '现场示例人员019', label: '现场示例人员019' },
+  { key: '现场责任人', label: '现场责任人' },
   { key: '施工人数', label: '施工人数' },
   { key: '作业人员身份证号及资质证书', label: '作业人员' },
   { key: '作业地点', label: '作业地点' },
@@ -5031,7 +5031,7 @@ function mapConstructionOverviewRecord(
     ),
     remainingDays: extractNumberValue(fields.施工剩余天数),
     approval: {
-      supervisor: extractDisplayText(fields.示例人员001审批) || null,
+      supervisor: extractDisplayText(fields.主管审批) || null,
       ehsNotified: extractCheckboxApprovalStatus(
         pickField(fields, EHS_NOTIFIED_FIELDS),
         '已知会',
@@ -5062,7 +5062,7 @@ function mapConstructionOverviewRecord(
       balance: extractNumberValue(fields.结余),
     },
     managers: {
-      supervisor: extractDisplayText(fields['施工审批人（楼栋示例人员001）']) || null,
+      supervisor: extractDisplayText(fields['施工审批人（楼栋主管）']) || null,
       safety: extractDisplayText(fields.安全负责人) || null,
       park: extractDisplayText(fields.园区负责人) || null,
       applicant: extractDisplayText(fields.施工申请人) || null,

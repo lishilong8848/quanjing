@@ -9,7 +9,7 @@ const appId = 'cli_station_fixture';
 const principal: AccessPrincipal = { role: 'guest', purchaseBuilding: null,
   accountId: `feishu-${feishuIdentityFingerprint(appId, 'ou_station_shared')}`,
   displayName: '南通基地-110kV变电站值班' };
-const station: BitableRecordItem = { record_id: 'recStation', fields: { 姓名: '站内示例人员003', '机楼/专业': ['110站'],
+const station: BitableRecordItem = { record_id: 'recStation', fields: { 姓名: '站内人员甲', '机楼/专业': ['110站'],
   员工姓名: [{ id: 'ou_station_shared', name: principal.displayName }] } };
 const other: BitableRecordItem = { record_id: 'recOther', fields: { 姓名: '其他楼人员', '机楼/专业': ['B楼'] } };
 
@@ -17,7 +17,7 @@ describe('110站公共账号申请边界', () => {
   it('请休假、差旅和加班使用可选择模式，其他业务继续本人绑定', () => {
     for (const action of ['提交请休假或差旅申请', '提交加班申请']) {
       expect(resolveWorkforceRequestApplicant(principal, true, action)).toEqual({ mode: 'manual' });
-      expect(bindWorkforceRequestApplicant('站内示例人员003', principal, true, action)).toBe('站内示例人员003');
+      expect(bindWorkforceRequestApplicant('站内人员甲', principal, true, action)).toBe('站内人员甲');
     }
     expect(resolveSelfServiceApplicant(principal, true, '提交变更申请')).toEqual({ mode: 'automatic', name: principal.displayName });
   });
@@ -39,7 +39,7 @@ describe('110站公共账号申请边界', () => {
       expect(() => assertStation110WorkforceIdentity(actor, 'cli_other', [station], station)).toThrow('110站');
     }
     expect(() => assertStation110WorkforceIdentity(principal, appId, [], station)).toThrow('110站');
-    const personal = { ...station, fields: { ...station.fields, 员工姓名: [{ id: 'ou_station_shared', name: '站内示例人员003' }] } };
+    const personal = { ...station, fields: { ...station.fields, 员工姓名: [{ id: 'ou_station_shared', name: '站内人员甲' }] } };
     expect(() => assertStation110WorkforceIdentity(principal, appId, [personal], personal)).toThrow('110站');
   });
   it('公共账号关联跨楼栋、离职人员、无记录身份均明确拒绝', () => {
@@ -50,7 +50,7 @@ describe('110站公共账号申请边界', () => {
     expect(() => assertStation110WorkforceIdentity(principal, appId, [station], { fields: station.fields })).toThrow('110站');
   });
   it('未登录不能申请，普通个人账号不可代他人申请', () => {
-    expect(() => bindWorkforceRequestApplicant('站内示例人员003', principal, false, '提交申请')).toThrow('请先登录');
+    expect(() => bindWorkforceRequestApplicant('站内人员甲', principal, false, '提交申请')).toThrow('请先登录');
     expect(() => bindWorkforceRequestApplicant('他人', { ...principal, displayName: '本人' }, true, '提交申请')).toThrow('当前登录本人');
   });
 });

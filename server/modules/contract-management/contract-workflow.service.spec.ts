@@ -38,7 +38,7 @@ describe('ContractWorkflowService contract-created notification', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-07-15T01:00:00.000Z'));
     const gateway = {
       readSource: jest.fn().mockResolvedValue({
-        sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        sourceUrl: 'https://vnet.feishu.cn/wiki/wiki-token',
         contracts: [
           {
             record_id: 'rec_contract',
@@ -115,7 +115,7 @@ describe('ContractWorkflowService contract-created notification', () => {
     }));
     const gateway = {
       readSource: jest.fn().mockResolvedValue({
-        sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        sourceUrl: 'https://vnet.feishu.cn/wiki/wiki-token',
         contracts: [
           {
             record_id: 'rec_contract',
@@ -177,7 +177,7 @@ describe('ContractWorkflowService contract-created notification', () => {
     const processed = new Set<string>();
     const gateway = {
       readSource: jest.fn().mockResolvedValue({
-        sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        sourceUrl: 'https://vnet.feishu.cn/wiki/wiki-token',
         contracts: [
           {
             record_id: 'rec_contract',
@@ -204,7 +204,7 @@ describe('ContractWorkflowService contract-created notification', () => {
           {
             fields: {
               职位: '机房经理',
-              示例人员001: [{ id: 'ou_manager', name: '机房经理' }],
+              主管: [{ id: 'ou_manager', name: '机房经理' }],
             },
           },
         ],
@@ -246,7 +246,7 @@ describe('ContractWorkflowService contract-created notification', () => {
   it('notifies managers and the execution owner after durable creation', async () => {
     const gateway = {
       readSource: jest.fn().mockResolvedValue({
-        sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        sourceUrl: 'https://vnet.feishu.cn/wiki/wiki-token?table=tbl-framework',
         contracts: [],
         payments: [],
         organization: [
@@ -254,7 +254,7 @@ describe('ContractWorkflowService contract-created notification', () => {
             record_id: 'org-manager',
             fields: {
               职位: '机房经理',
-              示例人员001: [{ id: 'ou_manager', name: '合同经理' }],
+              主管: [{ id: 'ou_manager', name: '合同经理' }],
             },
           },
         ],
@@ -281,7 +281,7 @@ describe('ContractWorkflowService contract-created notification', () => {
       name: 'UPS 维保合同',
       code: 'VNET-2026-001',
       supplier: '测试供应商',
-      ownerNames: ['示例人员008'],
+      ownerNames: ['张三'],
       ownerOpenIds: ['ou_owner', 'ou_manager'],
       specialty: '电气',
       amount: 128000,
@@ -323,14 +323,14 @@ describe('ContractWorkflowService contract-created notification', () => {
   it('returns an explicit partial result when one recipient fails', async () => {
     const gateway = {
       readSource: jest.fn().mockResolvedValue({
-        sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        sourceUrl: 'https://vnet.feishu.cn/wiki/wiki-token',
         contracts: [],
         payments: [],
         organization: [
           {
             fields: {
               职位: '机房经理',
-              示例人员001: [{ id: 'ou_manager', name: '合同经理' }],
+              主管: [{ id: 'ou_manager', name: '合同经理' }],
             },
           },
         ],
@@ -382,14 +382,14 @@ describe('ContractWorkflowService contract-created notification', () => {
   it('notifies managers and the payment owner after a follow-up action', async () => {
     const gateway = {
       readSource: jest.fn().mockResolvedValue({
-        sourceUrl: 'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        sourceUrl: 'https://vnet.feishu.cn/wiki/wiki-token',
         contracts: [],
         payments: [],
         organization: [
           {
             fields: {
               职位: '机房经理',
-              示例人员001: [{ id: 'ou_manager', name: '合同经理' }],
+              主管: [{ id: 'ou_manager', name: '合同经理' }],
             },
           },
         ],

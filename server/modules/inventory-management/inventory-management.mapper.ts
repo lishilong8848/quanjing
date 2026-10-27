@@ -423,7 +423,7 @@ function buildManagerIndex(
     if (buildingName === '未配置') continue;
     result.set(
       buildingName,
-      dedupe(extractDisplayValues(pickField(fields, ['库房示例人员019员']))),
+      dedupe(extractDisplayValues(pickField(fields, ['库房责任人员']))),
     );
   }
   return result;
@@ -602,7 +602,7 @@ function buildMovements(
         operator: text(
           fields,
           inbound
-            ? ['示例人员019', '入库示例人员019', '经办人']
+            ? ['责任人', '入库责任人', '经办人']
             : outbound && status === '待审批'
               ? ['出库当前审批人', '经办人']
               : ['经办人'],
@@ -784,7 +784,7 @@ function buildStocktakeSummaries(
         completed,
         completionRate: percentage(completed, total),
         responsible:
-          (record ? text(record.fields, ['示例人员019']) : '') ||
+          (record ? text(record.fields, ['责任人']) : '') ||
           (managers.get(buildingName) || []).join('、'),
       };
     });

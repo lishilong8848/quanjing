@@ -65,7 +65,7 @@ export function buildInventoryOutboundSupersededCard(
     {
       tag: 'markdown',
       content:
-        '<font color="red">库房示例人员019员已变更，本卡已失效；申请已重新路由给当前库房示例人员019员。</font>',
+        '<font color="red">库房责任人员已变更，本卡已失效；申请已重新路由给当前库房责任人员。</font>',
     },
     disabledApprovalActionRow(),
   ]);

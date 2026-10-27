@@ -12,9 +12,9 @@ import {
 } from '../../common/feishu/bitable-direct-read';
 
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SiW9wuy9DiIsykkTkNUcM0HfnSb?table=tblQehMrGf4zIfnt&view=vewmu8EPpy';
 const DEFAULT_WIKI_TOKEN = 'SiW9wuy9DiIsykkTkNUcM0HfnSb';
-const DEFAULT_EXECUTION_TABLE_ID = 'tbl1171c5349e996';
+const DEFAULT_EXECUTION_TABLE_ID = 'tblWfHs0iwQh8lHj';
 const EXPIRY_DISPOSITION_FIELD = '合同到期处置';
 
 interface TenantTokenState {

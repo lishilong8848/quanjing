@@ -74,7 +74,7 @@ describe('change drill report Base field migration', () => {
 
   it('targets the real linked drill report table and uses Windows-safe JSON files', () => {
     const source = readFileSync(script, 'utf8');
-    expect(source).toContain('tbl73b701bc3e2a1');
+    expect(source).toContain('tblZZHIJCY3f551K');
     expect(source).toContain('FEISHU_CHANGE_DRILL_REPORT_TABLE_ID');
     expect(source).toContain('JhiVwgfoIimAqEk8YwEc09sknGd');
     expect(source).toContain("'+url-resolve'");

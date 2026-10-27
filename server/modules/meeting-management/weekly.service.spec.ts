@@ -207,7 +207,7 @@ describe('weekly phased synchronization', () => {
       creationLink: jest
         .fn()
         .mockResolvedValue(
-          'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/base/QaBase?table=tblExample&record=recCreated',
         ),
     };
     engine = {
@@ -221,7 +221,7 @@ describe('weekly phased synchronization', () => {
               professional: '专业',
               operations: '运营',
             }
-          : { documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' },
+          : { documentUrl: 'https://vnet.feishu.cn/docx/Example' },
       ),
     };
     const meetings = {
@@ -326,7 +326,7 @@ describe('weekly phased synchronization', () => {
       assignee: {
         kind: 'employee' as const,
         openId: 'ou_12345678901',
-        name: '示例人员008',
+        name: '张三',
       },
     };
     const result = await Promise.race([
@@ -369,10 +369,10 @@ describe('weekly phased synchronization', () => {
     await tick();
     expect(gateway.sendWeeklyReport).toHaveBeenCalledTimes(1);
     expect(gateway.sendWeeklyReport).toHaveBeenCalledWith(
-      'oc_a584b9f72f95d94e665e51af321e516c',
+      'oc_ba4172984f3293d75bbe7e268d51ef40',
       expect.any(String),
       expect.any(String),
-      'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/docx/Example',
     );
     expect(service.job(command.clientMutationId).notification).toMatchObject({
       status: 'success',
@@ -446,14 +446,14 @@ describe('weekly phased synchronization', () => {
     await tick();
     expect(gateway.sendWeeklyReport).toHaveBeenCalledTimes(1);
     expect(gateway.sendWeeklyReport.mock.calls[0][3]).toBe(
-      'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/docx/Example',
     );
     service.store.accept(
       'generate',
       {
         ...command,
         clientMutationId: 'regenerate-12345678',
-        expectedDocumentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE',
+        expectedDocumentUrl: 'https://vnet.feishu.cn/docx/Existing',
       },
       'actor',
     );
@@ -602,7 +602,7 @@ describe('weekly phased synchronization', () => {
         ],
       },
     };
-    await expect(service.save(save, 'actor')).rejects.toThrow('示例人员019不在');
+    await expect(service.save(save, 'actor')).rejects.toThrow('责任人不在');
   });
   it('仅更新待办不改已有取消状态，并实际同步正文', async () => {
     service.store.accept(

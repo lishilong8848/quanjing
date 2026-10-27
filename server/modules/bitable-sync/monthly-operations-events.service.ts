@@ -23,7 +23,7 @@ import {
 } from './monthly-operations-resources.model';
 import { mergeMonthlyEventSources } from './monthly-operations-events.model';
 export const MONTHLY_EVENT_SOURCE = {
-  tableId: 'tbl72e6608772279',
+  tableId: 'tblj9XJLq5QzTAqX',
   tableName: '月览事件',
   fieldNames: [
     '事件编号',
@@ -48,7 +48,7 @@ export const MONTHLY_EVENT_SOURCE = {
   ],
 } as const;
 export const MONTHLY_EVENT_PRIORITY_SOURCE = {
-  tableId: 'tbl8c53fd40c1f50',
+  tableId: 'tbl07kaaLGodiTqQ',
   viewId: 'vewtj0ZiJJ',
   tableName: '重点事件补充',
   fieldNames: [

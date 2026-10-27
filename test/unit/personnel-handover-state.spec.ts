@@ -8,7 +8,7 @@ import type { AuthorityPerson } from '../../shared/personnel-authority.interface
 import type { PersonnelHandoverPreview } from '../../shared/personnel-handover.interface';
 import { accountPermissionTemplate, previewPermissionInheritance } from '../../server/common/access/personnel-handover.preview';
 
-const authorityPerson = (id: string, active: boolean): AuthorityPerson => ({ id,recordId:`rec-${id}`,name:`合成人员-${id}`,openId:`ou_synthetic_${id}`,active,type:'employee',position:'设施示例人员001',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:['synthetic-duty'] });
+const authorityPerson = (id: string, active: boolean): AuthorityPerson => ({ id,recordId:`rec-${id}`,name:`合成人员-${id}`,openId:`ou_synthetic_${id}`,active,type:'employee',position:'设施主管',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:['synthetic-duty'] });
 function content(): PreviewContent {
   const source = accountPermissionTemplate({ id:'synthetic-old',kind:'feishu',name:'合成前任',role:'building_admin',building:'C楼',enabled:false,deleted:false,version:3,source:'configuration' });
   const target = accountPermissionTemplate({ id:'synthetic-new',kind:'feishu',name:'合成接任',role:'site_member',building:null,enabled:true,deleted:false,version:2,source:'configuration' });

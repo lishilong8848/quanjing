@@ -37,7 +37,7 @@ describe('system monthly report Feishu attachment download', () => {
     expect(url.searchParams.get('file_tokens')).toBe('box-final-token');
     expect(JSON.parse(url.searchParams.get('extra') || '{}')).toEqual({
       bitablePerm: {
-        tableId: 'tbl6d8113872958f',
+        tableId: 'tblLIBwoSBUiXxES',
         attachments: {
           'fld-final-report': {
             'rec-final-b': ['box-final-token'],

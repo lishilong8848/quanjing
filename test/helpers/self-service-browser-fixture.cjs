@@ -14,7 +14,7 @@ const app = express();
 app.use(express.json({ limit: '5mb' }));
 app.post('/__innerapi__/*', (_req, res) => res.status(204).end());
 const names = ['验收员工甲', '验收员工乙', ...Array.from({ length: 1200 }, (_, i) => `验收人员${i}`)];
-const stationNames = ['验收110示例人员003', '验收110人员乙'];
+const stationNames = ['验收110人员甲', '验收110人员乙'];
 const stationRecords = stationNames.map((name, i) => ({ record_id: `recQAStation${i}`, fields: {
   姓名: name, '机楼/专业': ['110站'], 员工姓名: [{ id: 'ou_station_shared', name: '南通基地-110kV变电站值班' }],
 } }));
@@ -28,7 +28,7 @@ const actors = {
   station: { role: 'guest', purchaseBuilding: null, accountId: 'feishu-' + require('node:crypto').createHash('sha256').update('cli_station_fixture\0ou_station_shared').digest('hex'), displayName: '南通基地-110kV变电站值班' },
   guest: { role: 'guest', purchaseBuilding: null },
   feishu: { role: 'admin', purchaseBuilding: null, accountId: 'feishu-' + 'a'.repeat(64), displayName: names[0] },
-  external: { role: 'guest', purchaseBuilding: null, accountId: 'local-external-' + require('node:crypto').createHash('sha256').update(JSON.stringify(['cli_station_fixture', 'canonicalPersonApp', 'tbl122d1a08645adab', 'recBrowserExternal'])).digest('hex'), displayName: names[1] },
+  external: { role: 'guest', purchaseBuilding: null, accountId: 'local-external-' + require('node:crypto').createHash('sha256').update(JSON.stringify(['cli_station_fixture', 'canonicalPersonApp', 'tblCanonicalPerson', 'recBrowserExternal'])).digest('hex'), displayName: names[1] },
   member: { role: 'site_member', purchaseBuilding: null, accountId: 'feishu-' + 'e'.repeat(64), displayName: names[0] },
   legacy: { role: 'admin', purchaseBuilding: null, accountId: 'local-admin', displayName: '管理员' },
   missing: { role: 'admin', purchaseBuilding: null, accountId: 'feishu-' + 'c'.repeat(64) },
@@ -104,7 +104,7 @@ app.post('/api/duty-schedules/leave-request', require('multer')().array('screens
     assertStationApplicant(actor, name);
     if (actor === 'external') {
       require('../../server/common/access/self-service-applicant').assertSelfServicePersonnelIdentity(actors.external, {
-        appId: 'cli_station_fixture', appToken: 'canonicalPersonApp', tableId: 'tbl122d1a08645adab', recordId: 'recBrowserExternal', openId: 'ou_external',
+        appId: 'cli_station_fixture', appToken: 'canonicalPersonApp', tableId: 'tblCanonicalPerson', recordId: 'recBrowserExternal', openId: 'ou_external',
       });
     }
     observations.push({ submission: true, name, clientMutationId: request.clientMutationId, outcome: resultMode, applicantMode: resolveLeaveRequestApplicant(actors[actor], actor !== 'guest').mode });
@@ -140,7 +140,7 @@ app.post('/api/bitable/mbti-assessment/submit', (req, res) => {
     const value = req.body;
     if (value.audience === 'active') {
       value.name = bindSelfServiceApplicant(value.name, actors[actor], actor !== 'guest');
-      if (actor !== 'legacy' && value.recordId !== personOf(actor).recordId) throw new Error('示例人员016必须为当前登录本人');
+      if (actor !== 'legacy' && value.recordId !== personOf(actor).recordId) throw new Error('测试人员必须为当前登录本人');
     }
     const type = getAttachedBankDisplayType(scoreAttachedBank(value.version, value.answers));
     observations.push({ submission: 'mbti', actor, name: value.name, recordId: value.recordId, clientMutationId: value.clientMutationId, outcome: resultMode });

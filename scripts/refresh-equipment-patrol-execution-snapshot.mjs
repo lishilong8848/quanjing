@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 
 const sourceUrl =
   process.env.FEISHU_EQUIPMENT_PATROL_EXECUTION_SOURCE_URL ||
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/D01TwFPyXiJBY6kCBDZcMCGLnSe?table=tbl0XK1iQ1P6VY5Y&view=vewcI3Ssfv';
 const cli =
   process.platform === 'win32'
     ? execFileSync(
@@ -60,7 +60,7 @@ const args = [
   '--base-token',
   resolved.data.base_token,
   '--table-id',
-  'tblabdb9db3e6ddc',
+  'tbl0XK1iQ1P6VY5Y',
   '--limit',
   '200',
   '--format',

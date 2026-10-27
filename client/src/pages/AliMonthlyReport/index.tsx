@@ -103,7 +103,7 @@ function getFeishuDeliveryLabel(delivery: FeishuDeliveryPresentation): string {
   const recipientId = delivery.chatId ?? delivery.targetId ?? '';
 
   if (recipientType === 'user') {
-    return recipientName || '示例人员020';
+    return recipientName || '马进宇';
   }
   if (recipientType === 'chat') {
     return recipientName || `会话群 ${recipientId}`;
@@ -425,7 +425,7 @@ export default function AliMonthlyReportPage() {
       setResult(data);
       revealGeneratedFiles();
       if (data.feishuMessage?.sent) {
-        toast.success('四项文件已打包并已发送会话群和示例人员020');
+        toast.success('四项文件已打包并已发送会话群和马进宇');
       } else {
         toast.warning(data.message || '四项文件已打包，飞书通知未发送成功');
       }

@@ -145,7 +145,7 @@ describe('DutyScheduleController routes', () => {
           id: 'rec-change-private',
           bitableRecordId: 'rec-change-private',
           title: 'UPS 维护',
-          submitterName: '示例人员008',
+          submitterName: '张三',
           workflowStatus: '内部审批已通过',
           planDocuments: [
             {
@@ -198,7 +198,7 @@ describe('DutyScheduleController routes', () => {
       accessRole: 'duty_editor',
     });
     expect(editor.changes[0]).toMatchObject({
-      submitterName: '示例人员008',
+      submitterName: '张三',
       planDocuments: [{ fileToken: 'private-plan-token' }],
       delayReason: '内部延期原因',
       delayEvidence: [{ fileToken: 'private-proof-token' }],
@@ -345,7 +345,7 @@ describe('DutyScheduleController routes', () => {
     const screenshot = { fieldname: 'screenshot' };
     const payload = {
       clientMutationId: 'overtime-request-controller-test',
-      staffName: '示例人员008',
+      staffName: '张三',
       reason: '测'.repeat(2000),
     };
     await handler.call(controller, JSON.stringify(payload), [screenshot], {

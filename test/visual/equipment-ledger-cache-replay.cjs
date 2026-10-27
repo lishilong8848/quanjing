@@ -40,7 +40,7 @@ fs.mkdirSync(replayOutput, { recursive: true });
     fs.readFileSync(path.join(output, 'source-evidence.json'), 'utf8'),
   );
   const snapshot = await readLatestPersistedBitableRecordSnapshot({
-    tableId: 'tbld39d3db603982',
+    tableId: 'tblPIgIZ5fyEeQnY',
     tableName: '南通各机楼设备台账',
     appToken: 'WMcQbPn71aXwoGsNv0vcnzz2n6c',
     fieldNames: EQUIPMENT_LEDGER_FIELDS,

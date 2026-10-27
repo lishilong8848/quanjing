@@ -5,8 +5,8 @@ import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {createRequire} from 'node:module';
 
-export const APP_ID='cli_0831564613853b26';
-export const RECIPIENT='PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID';
+export const APP_ID='cli_a9d1c9fe9d381cee';
+export const RECIPIENT='ou_a6644e62a43b916c6bc26148cf74f208';
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
 const check=(yes,message)=>{if(!yes)throw Error(message);};

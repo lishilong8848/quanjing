@@ -55,7 +55,7 @@ import { PurchaseManagerApprovalService } from './purchase-manager-approval.serv
 
 const CATALOG_CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const DEFAULT_ACTIVE_EMPLOYEE_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg?table=tblOu75UtJTDNHIM&view=vewrQcypV4';
 const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 50 * 1024 * 1024;
 const MAX_RETAINED_SUBMISSION_TASKS = 100;

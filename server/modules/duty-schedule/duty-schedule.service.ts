@@ -1071,7 +1071,7 @@ const LEAVE_REQUEST_MUTATION_COMPLETED_MAX_ENTRIES = 500;
 const LEAVE_REQUEST_MUTATION_UNKNOWN_MAX_ENTRIES = 500;
 const LEAVE_REQUEST_MUTATION_PREPARED_WRITE_TTL_MS = 24 * 60 * 60 * 1000;
 const LEAVE_REQUEST_SCREENSHOT_MAX_BYTES = 10 * 1024 * 1024;
-const OVERTIME_REQUEST_TABLE_ID = 'tblf1bbd02a2b049';
+const OVERTIME_REQUEST_TABLE_ID = 'tblpCzmTT3EapaUY';
 const OVERTIME_REQUEST_MUTATION_ID_PREFIX = 'overtime-request-';
 const OVERTIME_REQUEST_MUTATION_ID_MAX_LENGTH = 128;
 const OVERTIME_REQUEST_STAFF_NAME_MAX_LENGTH = 2000;
@@ -1666,7 +1666,7 @@ export class DutyScheduleService {
       'FEISHU_CHANGE_MANAGEMENT_SOURCE_URL',
     ],
     defaultSourceUrl:
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/JhiVwgfoIimAqEk8YwEc09sknGd?table=tblBvg6wCYSX3hcg&view=vewew3vfZT',
     appTokenEnv: 'FEISHU_CALENDAR_CHANGE_APP_TOKEN',
     appTokenAliases: [
       'FEISHU_CHANGE_CALENDAR_APP_TOKEN',
@@ -1689,7 +1689,7 @@ export class DutyScheduleService {
     ],
   });
   private readonly changeDrillReportTableId =
-    readEnv('FEISHU_CHANGE_DRILL_REPORT_TABLE_ID') || 'tbl73b701bc3e2a1';
+    readEnv('FEISHU_CHANGE_DRILL_REPORT_TABLE_ID') || 'tblZZHIJCY3f551K';
   private readonly changeDrillReportTableName =
     readEnv('FEISHU_CHANGE_DRILL_REPORT_TABLE_NAME') || '变更关单需提交附件';
   private readonly focusIncidentConfig = readBitableSourceConfig({
@@ -1729,7 +1729,7 @@ export class DutyScheduleService {
       'FEISHU_CUSTOMER_RELATED_URL',
     ],
     defaultSourceUrl:
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblEBCFp7UuUFkFv&view=vew8yvnP9V',
     appTokenEnv: 'FEISHU_CUSTOMER_MATTER_APP_TOKEN',
     appTokenAliases: ['FEISHU_CUSTOMER_RELATED_APP_TOKEN'],
     wikiTokenEnv: 'FEISHU_CUSTOMER_MATTER_WIKI_TOKEN',
@@ -1802,7 +1802,7 @@ export class DutyScheduleService {
         'FEISHU_CONSTRUCTION_FORM_AUDIT_REQUIREMENT_SOURCE_URL',
       ],
       defaultSourceUrl:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/X9CwbB3zhaLK7JsQZVZcFR9fnTf?table=tblSoK80m57QrVLj&view=vewf08XZPM',
       appTokenEnv: 'FEISHU_CONSTRUCTION_PERMIT_AUDIT_REQUIREMENT_APP_TOKEN',
       appTokenAliases: ['FEISHU_CONSTRUCTION_FORM_AUDIT_REQUIREMENT_APP_TOKEN'],
       wikiTokenEnv: 'FEISHU_CONSTRUCTION_PERMIT_AUDIT_REQUIREMENT_WIKI_TOKEN',
@@ -1815,7 +1815,7 @@ export class DutyScheduleService {
       viewIdAliases: ['FEISHU_CONSTRUCTION_FORM_AUDIT_REQUIREMENT_VIEW_ID'],
     });
   private readonly constructionChangeLinkTableId =
-    readEnv('FEISHU_CONSTRUCTION_CHANGE_LINK_TABLE_ID') || 'PUBLIC_EXAMPLE_FEISHU_CONSTRUCTION_CHANGE_LINK_TABLE_ID';
+    readEnv('FEISHU_CONSTRUCTION_CHANGE_LINK_TABLE_ID') || 'tbl37f82JHmHkvJ3';
   private readonly constructionChangeLinkTableName =
     readEnv('FEISHU_CONSTRUCTION_CHANGE_LINK_TABLE_NAME') || '施工变更关联底表';
   private readonly longWhiteDutyConfig = readBitableSourceConfig({
@@ -1823,7 +1823,7 @@ export class DutyScheduleService {
     sourceUrlEnv: 'FEISHU_LONG_WHITE_DUTY_SOURCE_URL',
     sourceUrlAliases: ['FEISHU_LONG_WHITE_ON_DUTY_SOURCE_URL'],
     defaultSourceUrl:
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblRV9KeWFh9xCkm&view=vewl3Fg9vD',
     appTokenEnv: 'FEISHU_LONG_WHITE_DUTY_APP_TOKEN',
     appTokenAliases: ['FEISHU_LONG_WHITE_ON_DUTY_APP_TOKEN'],
     wikiTokenEnv: 'FEISHU_LONG_WHITE_DUTY_WIKI_TOKEN',
@@ -1841,7 +1841,7 @@ export class DutyScheduleService {
       'FEISHU_ORGANIZATION_SOURCE_URL',
     ],
     defaultSourceUrl:
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg?table=tblOu75UtJTDNHIM&view=vewrQcypV4',
     appTokenEnv: 'FEISHU_PERSONNEL_MOVEMENT_APP_TOKEN',
     appTokenAliases: ['FEISHU_ORG_APP_TOKEN', 'FEISHU_ORGANIZATION_APP_TOKEN'],
     wikiTokenEnv: 'FEISHU_PERSONNEL_MOVEMENT_WIKI_TOKEN',
@@ -1863,7 +1863,7 @@ export class DutyScheduleService {
     const config = readBitableSourceConfig({
       tableName: '请休假人员资料',
       sourceUrlEnv: 'FEISHU_LEAVE_PERSON_PROFILE_SOURCE_URL',
-      defaultSourceUrl: `https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE`,
+      defaultSourceUrl: `https://vnet.feishu.cn/wiki/${DEFAULT_LEAVE_PERSON_PROFILE_WIKI_TOKEN}?table=${DEFAULT_LEAVE_PERSON_PROFILE_TABLE_ID}`,
       appTokenEnv: 'FEISHU_LEAVE_PERSON_PROFILE_APP_TOKEN',
       appTokenAliases: [
         'FEISHU_LEAVE_SUBSTITUTE_APP_TOKEN',
@@ -1889,7 +1889,7 @@ export class DutyScheduleService {
     sourceUrlEnv: 'FEISHU_LEAVE_SUBSTITUTE_SOURCE_URL',
     sourceUrlAliases: ['FEISHU_LEAVE_REQUEST_SOURCE_URL'],
     defaultSourceUrl:
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E',
     appTokenEnv: 'FEISHU_LEAVE_SUBSTITUTE_APP_TOKEN',
     appTokenAliases: ['FEISHU_LEAVE_REQUEST_APP_TOKEN'],
     wikiTokenEnv: 'FEISHU_LEAVE_SUBSTITUTE_WIKI_TOKEN',
@@ -1908,7 +1908,7 @@ export class DutyScheduleService {
         'FEISHU_EXCEPTION_TRACKING_SOURCE_URL',
       ],
       defaultSourceUrl:
-        'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblCGU1ry3tanQ20&view=vewX0MdewN',
       appTokenEnv: 'FEISHU_EXCEPTION_FOLLOW_UP_APP_TOKEN',
       appTokenAliases: [
         'FEISHU_EXCEPTION_FOLLOWUP_APP_TOKEN',
@@ -1930,11 +1930,11 @@ export class DutyScheduleService {
         'FEISHU_EXCEPTION_TRACKING_VIEW_ID',
       ],
     });
-    if (configured.tableId !== 'tbl2dc861b191a7f') {
+    if (configured.tableId !== 'tblMK8wzLlFKbTlP') {
       return configured;
     }
     const unifiedSourceUrl =
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblCGU1ry3tanQ20&view=vewX0MdewN';
     const unifiedLink = parseFeishuBitableLink(unifiedSourceUrl);
     return {
       ...configured,
@@ -1947,7 +1947,7 @@ export class DutyScheduleService {
   private readonly leaveSubstituteRepairChatId =
     readEnv('FEISHU_LEAVE_SUBSTITUTE_REPAIR_CHAT_ID', [
       'FEISHU_SUBSTITUTE_REPAIR_CHAT_ID',
-    ]) || 'oc_c79f407063dc9ca9f70cc76cb4059895';
+    ]) || 'oc_9961bb057de8bd715447559c5e63c4f2';
   private readonly constructionCrewRosterNotificationChatId =
     readEnv('FEISHU_CONSTRUCTION_MANAGEMENT_LISTEN_CHAT_ID', [
       'FEISHU_CONSTRUCTION_LISTEN_CHAT_ID',
@@ -14749,7 +14749,7 @@ export class DutyScheduleService {
     professionalPrincipal?: AccessPrincipal,
   ): Promise<ConstructionFollowupCreateResponse> {
     if (accessRole === 'professional_admin') {
-      if (!isProfessionalBusinessPrincipal(professionalPrincipal)) throw new Error('专业示例人员001身份缺失');
+      if (!isProfessionalBusinessPrincipal(professionalPrincipal)) throw new Error('专业主管身份缺失');
       await this.authorizeProfessionalConstruction(professionalPrincipal, request.constructionRecordId);
       if (request.followupRecordId) await this.authorizeProfessionalConstruction(professionalPrincipal, request.followupRecordId, 'followup');
     }
@@ -14937,7 +14937,7 @@ export class DutyScheduleService {
     professionalPrincipal?: AccessPrincipal,
   ): Promise<ConstructionFollowupCreateResponse> {
     if (accessRole === 'professional_admin') {
-      if (!isProfessionalBusinessPrincipal(professionalPrincipal)) throw new Error('专业示例人员001身份缺失');
+      if (!isProfessionalBusinessPrincipal(professionalPrincipal)) throw new Error('专业主管身份缺失');
       await this.authorizeProfessionalConstruction(professionalPrincipal, request.constructionRecordId);
       if (request.followupRecordId) await this.authorizeProfessionalConstruction(professionalPrincipal, request.followupRecordId, 'followup');
     }
@@ -21636,7 +21636,7 @@ export class DutyScheduleService {
           '实施人',
           '实施人员',
           '负责人',
-          '示例人员019',
+          '责任人',
           'Owner',
         ]),
         '',
@@ -23246,7 +23246,7 @@ export class DutyScheduleService {
 
     return {
       ...this.constructionOverviewConfig,
-      tableId: 'tblad8457ea715d1',
+      tableId: 'tblgJT6SXjjw7iYN',
       viewId: '',
       tableName: '施工人员台账',
       sourceUrl: '',
@@ -23736,7 +23736,7 @@ export class DutyScheduleService {
             '负责人',
             '跟进人',
             '处理人',
-            '示例人员019',
+            '责任人',
             '值班长',
             'Owner',
           ]),

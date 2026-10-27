@@ -122,7 +122,7 @@ describe('legacy contract OCR deployment cleanup', () => {
 
   it('rejects registry URLs with credentials but allows a normal registry URL', () => {
     const credentialResult = runNpmConfigurationGuard(
-      'registry=https://user:user-8a4cc9ae@example.com/\n',
+      'registry=https://user:pass@registry.example/\n',
     );
     const normalResult = runNpmConfigurationGuard(
       'registry=https://registry.npmjs.org/\n',

@@ -33,7 +33,7 @@ function validRequest(
     companyName: '南通承宏云计算有限公司',
     position: '运维实习生',
     identityNumber: '110101199001010015',
-    phone: '13800007889',
+    phone: '19900001234',
     entryDate: '2026-08-15',
     education: '本科',
     graduateSchool: '自动化测试院校',
@@ -103,7 +103,7 @@ describe('employee onboarding contract and rules', () => {
       公司名称: '南通承宏云计算有限公司',
       岗位: '运维实习生',
       身份证号: '11010519491231002X',
-      联系方式: '13800007889',
+      联系方式: '19900001234',
       入职日期: Date.UTC(2026, 7, 14, 16),
       学历: '本科',
       毕业院校: '自动化测试院校',
@@ -286,13 +286,13 @@ describe('employee onboarding contract and rules', () => {
       const ruleError = error as EmployeeOnboardingRuleError;
       expect(ruleError.message).toBe('不支持的请求字段');
       expect(ruleError.message).not.toContain(maliciousKey);
-      expect(ruleError.message).not.toContain('13800007889');
+      expect(ruleError.message).not.toContain('19900001234');
       expect(ruleError.message).not.toContain('\n');
       expect(ruleError.issues).toEqual([
         { field: 'request', message: '不支持的请求字段' },
       ]);
       expect(JSON.stringify(ruleError.issues)).not.toContain(maliciousKey);
-      expect(JSON.stringify(ruleError.issues)).not.toContain('13800007889');
+      expect(JSON.stringify(ruleError.issues)).not.toContain('19900001234');
       expect(JSON.stringify(ruleError.issues)).not.toContain('\\n');
     }
   });
@@ -422,16 +422,16 @@ describe('employee onboarding contract and rules', () => {
       '消防工程师',
       '安全&消防工程师',
       '设施运维副经理',
-      '电气示例人员001',
-      '暖通示例人员001',
-      '弱电示例人员001',
-      '设施运维示例人员001',
+      '电气主管',
+      '暖通主管',
+      '弱电主管',
+      '设施运维主管',
       '运维值班员',
       '110值班人员',
-      '消防示例人员001',
+      '消防主管',
       'FOC',
       '110站站长',
-      'H楼值班示例人员001',
+      'H楼值班主管',
     ]);
     expect(EMPLOYEE_ONBOARDING_EDUCATIONS).toEqual([
       '本科',
@@ -502,6 +502,6 @@ describe('employee onboarding contract and rules', () => {
 
     const acceptResponse = (_value: EmployeeOnboardingCreateResponse) => true;
     // @ts-expect-error confirmed responses must not expose form PII
-    expect(acceptResponse({ ...response, phone: '13800007889' })).toBe(true);
+    expect(acceptResponse({ ...response, phone: '19900001234' })).toBe(true);
   });
 });

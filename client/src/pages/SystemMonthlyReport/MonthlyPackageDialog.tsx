@@ -164,7 +164,7 @@ export function MonthlyPackageDialog({
               ) : null}
               <p className="mt-2 flex items-center gap-1 text-xs text-slate-500">
                 <Send className="h-3.5 w-3.5" />
-                {task.notified ? '下载链接已推送给示例人员020' : '链接推送未完成'}
+                {task.notified ? '下载链接已推送给马进宇' : '链接推送未完成'}
               </p>
             </div>
           ) : task?.status === 'error' || error ? (

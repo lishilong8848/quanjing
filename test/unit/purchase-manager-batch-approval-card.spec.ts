@@ -112,7 +112,7 @@ describe('purchase manager batch approval Card 2.0', () => {
               choice: 'comprehensive' as const,
             })),
           },
-          { actorName: '示例人员020', processedAt: '2026-09-21T02:20:00.000Z' },
+          { actorName: '马进宇', processedAt: '2026-09-21T02:20:00.000Z' },
         ),
     ],
   ])('在%s卡片中仅为单一采购显示原因', (_label, buildCard) => {
@@ -153,7 +153,7 @@ describe('purchase manager batch approval Card 2.0', () => {
           rejectionReason: '预算不通过',
         })),
       },
-      { actorName: '示例人员020', processedAt: '2026-09-21T06:45:00.000Z' },
+      { actorName: '马进宇', processedAt: '2026-09-21T06:45:00.000Z' },
     );
     const partial = buildResolvedPurchaseManagerBatchApprovalCard(
       {
@@ -172,7 +172,7 @@ describe('purchase manager batch approval Card 2.0', () => {
           },
         ],
       },
-      { actorName: '示例人员020', processedAt: '2026-09-21T06:46:00.000Z' },
+      { actorName: '马进宇', processedAt: '2026-09-21T06:46:00.000Z' },
     );
 
     expect(rejected).toMatchObject({
@@ -371,7 +371,7 @@ describe('purchase manager batch approval Card 2.0', () => {
         ],
       },
       {
-        actorName: '示例人员020',
+        actorName: '马进宇',
         processedAt: '2026-09-12T07:11:59.759Z',
       },
     );

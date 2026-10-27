@@ -116,21 +116,21 @@ const DUTY_POSITIONS = new Set([
   '运维值班长',
   '值班员',
   '值班长',
-  'H楼值班示例人员001',
+  'H楼值班主管',
 ]);
-const MANDATORY_LONG_WHITE_SUBSTITUTE_POSITIONS = new Set(['H楼值班示例人员001']);
+const MANDATORY_LONG_WHITE_SUBSTITUTE_POSITIONS = new Set(['H楼值班主管']);
 const DIRECT_MANAGER_POSITIONS = new Set([
   '综合管理',
   '消防工程师',
   '安全&消防工程师',
   '安全消防工程师',
-  '设施运维示例人员001',
-  '设施示例人员001',
-  'H楼值班示例人员001',
-  '电气示例人员001',
-  '暖通示例人员001',
-  '弱电示例人员001',
-  '消防示例人员001',
+  '设施运维主管',
+  '设施主管',
+  'H楼值班主管',
+  '电气主管',
+  '暖通主管',
+  '弱电主管',
+  '消防主管',
 ]);
 
 export function buildLeaveApprovalPlan(
@@ -245,7 +245,7 @@ function resolveOrdinarySupervisor(
   if (names.length) return resolvePeopleByNames(applicant, records, names);
   throw new LeaveApprovalRoutingError(
     'ROUTE_TARGET_NOT_FOUND',
-    '未找到申请人的直属示例人员001配置，无法确定请休假审批人',
+    '未找到申请人的直属主管配置，无法确定请休假审批人',
   );
 }
 
@@ -304,10 +304,10 @@ function resolveProfessionalRecipients(
   discipline: Exclude<LeaveDiscipline, null>,
 ): LeaveRoutePerson[] {
   const allowedPositions = {
-    electrical: new Set(['电气示例人员001', '电气专业示例人员001']),
-    hvac: new Set(['暖通示例人员001', '暖通专业示例人员001']),
-    weak_current: new Set(['弱电示例人员001', '弱电专业示例人员001']),
-    fire: new Set(['消防示例人员001', '消防专业示例人员001']),
+    electrical: new Set(['电气主管', '电气专业主管']),
+    hvac: new Set(['暖通主管', '暖通专业主管']),
+    weak_current: new Set(['弱电主管', '弱电专业主管']),
+    fire: new Set(['消防主管', '消防专业主管']),
   }[discipline];
   const candidates = records
     .filter((record) => allowedPositions.has(record.position))
@@ -316,7 +316,7 @@ function resolveProfessionalRecipients(
   if (!result.length) {
     throw new LeaveApprovalRoutingError(
       'PROFESSIONAL_SUPERVISOR_NOT_FOUND',
-      '未找到对应专业示例人员001，无法安全发送请休假结果知会',
+      '未找到对应专业主管，无法安全发送请休假结果知会',
     );
   }
   return result;
@@ -634,7 +634,7 @@ function classifyApprovalClass(person: LeaveRoutePerson): LeaveApprovalClass {
   if (is110StationChief(person)) return 'ordinary';
   if (
     DIRECT_MANAGER_POSITIONS.has(position) ||
-    /(示例人员001|经理|站长)/u.test(position)
+    /(主管|经理|站长)/u.test(position)
   ) {
     return 'manager_direct';
   }

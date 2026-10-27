@@ -847,7 +847,7 @@ function RiskTable({
                 </TableHead>
                 <TableHead>发现时间</TableHead>
                 <TableHead>截止日期</TableHead>
-                <TableHead>示例人员019</TableHead>
+                <TableHead>责任人</TableHead>
                 <TableHead>{overdue ? '逾期天数' : '处置状态'}</TableHead>
               </TableRow>
             </TableHeader>

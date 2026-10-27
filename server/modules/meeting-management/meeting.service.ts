@@ -25,7 +25,7 @@ import type { PreparedActionEdit } from '../../../shared/weekly-workspace.interf
 
 export const WEEKLY_MEETING_SOURCE = {
   appToken: 'Ku17b5rmgaULYJsioBpcHl0Xnqd',
-  tableId: 'tbl96c6dccf01af4',
+  tableId: 'tbl9GlPjdwTHIKSp',
   viewId: 'vewDqqJuM7',
   tableName: '01 【周报】南通运维周报收集库',
   automaticFields: true,

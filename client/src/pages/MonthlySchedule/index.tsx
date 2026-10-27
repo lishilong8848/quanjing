@@ -268,6 +268,7 @@ import {
 } from './leave-request-submit';
 import {
   deduplicateScheduleDateKeysByMonth,
+  getAdjacentScheduleMonthDateKeys,
   getLeaveScheduleCoverageDateKeys,
   resolveLeaveScheduleForceRefresh,
 } from './leave-request-schedule-coverage';
@@ -869,7 +870,11 @@ function mergeSchedulesByRecord(
       ].join('|');
     merged.set(key, schedule);
   });
-  return Array.from(merged.values());
+  const result = Array.from(merged.values());
+  return result.length === currentSchedules.length &&
+    result.every((schedule, index) => schedule === currentSchedules[index])
+    ? currentSchedules
+    : result;
 }
 
 function getMonthEndDateKey(dateKey: string): string {
@@ -1698,7 +1703,7 @@ function getDutyRoleRank(profile?: NantongOrganization): number {
   if (
     position.includes('值班长') ||
     position.includes('站长') ||
-    position.includes('示例人员001')
+    position.includes('主管')
   )
     return 0;
   if (position.includes('值班员')) return 1;
@@ -3708,8 +3713,8 @@ function TodayEngineersOnDuty({
 
               // 各楼栋置顶人员配置
               const pinnedNames: Record<string, string[]> = {
-                building_h: ['示例人员014', '示例人员020'],
-                building_a: ['示例人员009'],
+                building_h: ['梅冰冰', '马进宇'],
+                building_a: ['施小东'],
                 building_b: ['陈继猛'],
                 building_c: ['杨占山'],
                 building_d: ['陶必亮'],
@@ -3758,7 +3763,7 @@ function TodayEngineersOnDuty({
                           />
                         </div>
                       ))}
-                      {/* 示例人员004员 */}
+                      {/* 其他人员 */}
                       {otherPersons.map((name, index) => (
                         <div
                           key={index}
@@ -4659,16 +4664,11 @@ function MonthlySchedulePageContent() {
         const key = `${year}-${month}`;
         monthMap.set(key, { year, month, key });
       }
-      const [businessYear, businessMonth] = businessDateKey
-        .split('-')
-        .map(Number);
-      const businessMonthKey = `${businessYear}-${businessMonth}`;
-      monthMap.set(businessMonthKey, {
-        year: businessYear,
-        month: businessMonth,
-        key: businessMonthKey,
-      });
-      for (const dateKey of options.additionalDateKeys || []) {
+      // Leave options always cover three months, independent of the viewed date.
+      for (const dateKey of [
+        ...getAdjacentScheduleMonthDateKeys(businessDateKey),
+        ...(options.additionalDateKeys || []),
+      ]) {
         const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(dateKey);
         if (!match) continue;
         const year = Number(match[1]);
@@ -10826,7 +10826,7 @@ function MonthlySchedulePageContent() {
                 className="flex-shrink-0 transition-opacity hover:opacity-80"
               >
                 <img
-                  src="https://example.feishu.cn/aily/PUBLIC_EXAMPLE_SOURCE"
+                  src="https://miaoda.feishu.cn/aily/api/v1/feisuda/attachments/24f756a2-a583-4438-b8b8-6f4cdb736595/raw"
                   alt="VNET"
                   className="h-10 w-auto"
                 />
@@ -11698,7 +11698,7 @@ function MonthlySchedulePageContent() {
                     onChange={(event) =>
                       setExceptionFollowUpHandling(event.target.value)
                     }
-                    placeholder="填写已采取的处理方式、示例人员019、后续措施或确认结论"
+                    placeholder="填写已采取的处理方式、责任人、后续措施或确认结论"
                     className="min-h-28 resize-y border-slate-200 bg-white text-sm focus-visible:ring-blue-200"
                   />
                 </div>

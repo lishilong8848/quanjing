@@ -14,12 +14,12 @@ describe('public person profile privacy contract', () => {
         created_time: 1_700_000_000_000,
         last_modified_time: 1_710_000_000_000,
         fields: {
-          姓名: '示例人员020',
-          员工姓名: [{ id: 'ou_private_contact_123', name: '示例人员020' }],
+          姓名: '马进宇',
+          员工姓名: [{ id: 'ou_private_contact_123', name: '马进宇' }],
           '机楼/专业': 'H楼',
           岗位: '设施运维副经理',
           班次: '长白',
-          联系方式: '13800009626',
+          联系方式: '13800000000',
           照片: [{ file_token: 'file_secret' }],
         },
       },
@@ -30,17 +30,17 @@ describe('public person profile privacy contract', () => {
     expect(response).toEqual({
       organizations: [
         {
-          supervisorText: '示例人员020',
+          supervisorText: '马进宇',
           position: '设施运维副经理',
           buildingsSpecialties: ['H楼'],
           shift: '长白',
         },
       ],
-      changeRequestSubmitters: ['示例人员020'],
+      changeRequestSubmitters: ['马进宇'],
     });
     const serialized = JSON.stringify(response);
     expect(serialized).not.toContain('rec_real_secret');
-    expect(serialized).not.toContain('13800009626');
+    expect(serialized).not.toContain('13800000000');
     expect(serialized).not.toContain('file_secret');
     expect(serialized).not.toContain('ou_private_contact_123');
     expect(serialized).not.toContain('applink.feishu.cn');
@@ -133,12 +133,12 @@ describe('public person profile privacy contract', () => {
       {
         record_id: 'rec_real_secret',
         fields: {
-          姓名: '示例人员020',
-          员工姓名: [{ id: 'ou_private_contact_123', name: '示例人员020' }],
+          姓名: '马进宇',
+          员工姓名: [{ id: 'ou_private_contact_123', name: '马进宇' }],
           '机楼/专业': 'H楼',
           岗位: '设施运维副经理',
           班次: '长白',
-          联系方式: '13800009626',
+          联系方式: '13800000000',
           照片: [{ file_token: 'file_secret' }],
         },
       },
@@ -149,8 +149,8 @@ describe('public person profile privacy contract', () => {
     expect(response.organizations).toEqual([
       expect.objectContaining({
         recordId: 'rec_real_secret',
-        supervisorText: '示例人员020',
-        phone: '13800009626',
+        supervisorText: '马进宇',
+        phone: '13800000000',
         photoUrl:
           '/api/bitable/employee-photo/rec_real_secret?scope=leave',
         feishuChatUrl:
@@ -209,7 +209,7 @@ describe('public person profile privacy contract', () => {
       {
         record_id: 'rec_local_profile',
         fields: {
-          姓名: '示例人员020',
+          姓名: '马进宇',
           '机楼/专业': 'H楼',
           岗位: '设施运维副经理',
           班次: '长白',
@@ -223,7 +223,7 @@ describe('public person profile privacy contract', () => {
     await expect(service.getPersonProfiles(false, 'leave')).resolves.toEqual({
       organizations: [
         expect.objectContaining({
-          supervisorText: '示例人员020',
+          supervisorText: '马进宇',
           position: '设施运维副经理',
         }),
       ],

@@ -669,7 +669,7 @@ describe('ensure-purchase-inventory-config.mjs', () => {
     },
     {
       missingRole: 'notification manager',
-      fields: ['楼栋', '库房示例人员019员'],
+      fields: ['楼栋', '库房责任人员'],
     },
   ])('repairs an invalid dedicated warehouse role source when $missingRole is missing', async ({ fields }) => {
     const root = createRoot();
@@ -730,7 +730,7 @@ describe('ensure-purchase-inventory-config.mjs', () => {
       ) {
         return json(
           response,
-          fieldPage(['楼栋', '库房示例人员019员', '库房管理人']),
+          fieldPage(['楼栋', '库房责任人员', '库房管理人']),
         );
       }
       return json(response, { code: 404 }, 404);
@@ -786,7 +786,7 @@ describe('ensure-purchase-inventory-config.mjs', () => {
       ) {
         return json(
           response,
-          fieldPage(['楼栋', '库房示例人员019员', '库房管理人']),
+          fieldPage(['楼栋', '库房责任人员', '库房管理人']),
         );
       }
       return json(response, { code: 404 }, 404);
@@ -852,7 +852,7 @@ describe('ensure-purchase-inventory-config.mjs', () => {
       ) {
         return json(
           response,
-          fieldPage(['楼栋', '库房示例人员019员', '库房管理人']),
+          fieldPage(['楼栋', '库房责任人员', '库房管理人']),
         );
       }
       return json(response, { code: 404 }, 404);
@@ -965,8 +965,8 @@ describe('ensure-purchase-inventory-config.mjs', () => {
               {
                 record_id: 'rec_manager',
                 fields: {
-                  示例人员001: [{ id: 'ou_discovered_manager', name: '示例人员020' }],
-                  '示例人员001（文本）': '示例人员020',
+                  主管: [{ id: 'ou_discovered_manager', name: '马进宇' }],
+                  '主管（文本）': '马进宇',
                   职位: ['设施运维经理'],
                 },
               },
@@ -1022,29 +1022,29 @@ describe('ensure-purchase-inventory-config.mjs', () => {
               {
                 record_id: 'rec_purchase_admin',
                 fields: {
-                  示例人员001: [
+                  主管: [
                     {
                       id: 'ou_discovered_purchase_admin',
                       name: '曹李培',
                     },
                   ],
-                  '示例人员001（文本）': '曹李培',
+                  '主管（文本）': '曹李培',
                   职位: ['综合管理'],
                 },
               },
               {
                 record_id: 'rec_same_name_wrong_position',
                 fields: {
-                  示例人员001: [{ id: 'ou_wrong_position', name: '曹李培' }],
-                  '示例人员001（文本）': '曹李培',
+                  主管: [{ id: 'ou_wrong_position', name: '曹李培' }],
+                  '主管（文本）': '曹李培',
                   职位: ['采购管理'],
                 },
               },
               {
                 record_id: 'rec_same_position_wrong_name',
                 fields: {
-                  示例人员001: [{ id: 'ou_wrong_name', name: '示例人员004' }],
-                  '示例人员001（文本）': '示例人员004',
+                  主管: [{ id: 'ou_wrong_name', name: '其他人' }],
+                  '主管（文本）': '其他人',
                   职位: ['综合管理'],
                 },
               },
@@ -1091,7 +1091,7 @@ describe('ensure-purchase-inventory-config.mjs', () => {
             items: ['ou_purchase_admin_one', 'ou_purchase_admin_two'].map(
               (id) => ({
                 fields: {
-                  示例人员001: [{ id, name: '曹李培' }],
+                  主管: [{ id, name: '曹李培' }],
                   职位: ['综合管理'],
                 },
               }),
@@ -1137,7 +1137,7 @@ describe('ensure-purchase-inventory-config.mjs', () => {
           data: {
             items: ['ou_manager_one', 'ou_manager_two'].map((id) => ({
               fields: {
-                示例人员001: [{ id, name: '同名经理' }],
+                主管: [{ id, name: '同名经理' }],
                 职位: ['设施运维经理'],
               },
             })),
@@ -1450,7 +1450,7 @@ function handleDefaultManagerValidation(
   ) {
     json(
       response,
-      fieldPage(['楼栋', '库房示例人员019员', '库房管理人']),
+      fieldPage(['楼栋', '库房责任人员', '库房管理人']),
     );
     return true;
   }

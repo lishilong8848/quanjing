@@ -7,8 +7,8 @@ import {
   type PersistedBitableRecordSnapshot,
 } from '@server/common/feishu/bitable-direct-read';
 
-export const DEFAULT_ACTIVE_PERSONNEL_TABLE_ID = 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID';
-export const DEFAULT_ACTIVE_PERSONNEL_VIEW_ID = 'PUBLIC_EXAMPLE_FEISHU_ORG_VIEW_ID';
+export const DEFAULT_ACTIVE_PERSONNEL_TABLE_ID = 'tblOu75UtJTDNHIM';
+export const DEFAULT_ACTIVE_PERSONNEL_VIEW_ID = 'vewrQcypV4';
 
 export const ACTIVE_PERSONNEL_BUILDINGS = [
   'A',
@@ -125,7 +125,7 @@ export function buildActivePersonnelDirectory(
       buildings,
       supervisorNames: [
         ...new Set(
-          extractDisplayValues(pickField(fields, ['示例人员001']))
+          extractDisplayValues(pickField(fields, ['主管']))
             .map((value) => value.trim())
             .filter(Boolean),
         ),

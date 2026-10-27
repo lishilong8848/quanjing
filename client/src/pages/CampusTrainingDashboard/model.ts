@@ -329,7 +329,9 @@ export function isCampusTrainingDashboardResponse(
     isTrainingDashboardDetails(value.details) &&
     isStringOrNull(value.sourceUpdatedAt) &&
     typeof value.syncedAt === 'string' &&
-    (value.sourceStatus === 'fresh' || value.sourceStatus === 'stale') &&
+    (value.sourceStatus === 'fresh' ||
+      value.sourceStatus === 'refreshing' ||
+      value.sourceStatus === 'stale') &&
     (value.dataStatus === 'ready' || value.dataStatus === 'empty') &&
     (value.errorMessage === undefined || typeof value.errorMessage === 'string')
   );

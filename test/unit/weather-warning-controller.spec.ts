@@ -522,7 +522,7 @@ describe('WeatherWarningController', () => {
     });
     notificationService.getTestPreview.mockResolvedValue({
       success: true,
-      recipientName: '示例人员020',
+      recipientName: '马进宇',
       senderName: '系统机器人',
       canSend: true,
       snapshot: rawSnapshot,
@@ -536,7 +536,7 @@ describe('WeatherWarningController', () => {
     expect(notificationService.getTestPreview).toHaveBeenCalledWith();
     expect(result).toEqual({
       success: true,
-      recipientName: '示例人员020',
+      recipientName: '马进宇',
       senderName: '系统机器人',
       canSend: true,
       snapshot: {
@@ -997,7 +997,7 @@ describe('WeatherWarningNotificationService preview and test request gateway', (
       getRuntimeConfig: jest.fn(() => ({
         testRecipient: {
           openId: 'ou_private_test_recipient',
-          displayName: '示例人员020',
+          displayName: '马进宇',
         },
       })),
     };
@@ -1015,7 +1015,7 @@ describe('WeatherWarningNotificationService preview and test request gateway', (
     });
     expect(result).toEqual({
       success: true,
-      recipientName: '示例人员020',
+      recipientName: '马进宇',
       senderName: '系统机器人',
       canSend: true,
       snapshot: {

@@ -52,7 +52,7 @@ function createDashboard(): ContractManagementDashboard {
     contractType: '服务合同',
     specialty: '其他',
     supplier: '测试供应商',
-    owner: '示例人员016',
+    owner: '测试人员',
     startDate: '2026-01-01',
     endDate: '2026-07-01',
     status: 'expired',
@@ -72,7 +72,7 @@ function createDashboard(): ContractManagementDashboard {
     contractRecordId: 'contract-1',
     contractName: '测试合同',
     contractCode: 'HT-001',
-    owner: '示例人员016',
+    owner: '测试人员',
     contractAmount: 1000,
     contractEndDate: '2026-07-01',
     reason: 'missing_plan',
@@ -96,7 +96,7 @@ function createDashboard(): ContractManagementDashboard {
     status: '未付款',
     risk: 'overdue',
     daysUntilDue: -28,
-    owner: '示例人员016',
+    owner: '测试人员',
   };
   return {
     generatedAt: 'initial-dashboard',

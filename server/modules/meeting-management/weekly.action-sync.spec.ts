@@ -16,7 +16,7 @@ describe('待办单项同步闭环', () => {
     actionId: 'recExample:current-actions:0',
     expectedContent: '检查液位',
     content: '检查液位并调整',
-    assignee: { kind: 'employee', name: '示例人员020', openId: 'ou_12345678901' },
+    assignee: { kind: 'employee', name: '马进宇', openId: 'ou_12345678901' },
   };
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'weekly-action-test-'));
@@ -28,7 +28,7 @@ describe('待办单项同步闭环', () => {
         .mockResolvedValue({ 本周代办: '1. 检查液位\n2. 相邻事项' }),
       people: jest
         .fn()
-        .mockResolvedValue([{ name: '示例人员020', openId: 'ou_12345678901' }]),
+        .mockResolvedValue([{ name: '马进宇', openId: 'ou_12345678901' }]),
       update,
     };
     service = new WeeklyService(
@@ -54,7 +54,7 @@ describe('待办单项同步闭环', () => {
     expect(update).toHaveBeenCalledWith(
       'recExample',
       { 本周代办: '1. 检查液位\n2. 相邻事项' },
-      { 本周代办: '1. 检查液位并调整（示例人员019：示例人员020）\n2. 相邻事项' },
+      { 本周代办: '1. 检查液位并调整（责任人：马进宇）\n2. 相邻事项' },
     );
     expect((await service.editAction(command, 'qa')).status).toBe('success');
     expect(update).toHaveBeenCalledTimes(1);
@@ -86,7 +86,7 @@ describe('待办单项同步闭环', () => {
           clientMutationId: 'fake-12345678',
           assignee: {
             kind: 'employee',
-            name: '示例人员004',
+            name: '其他人',
             openId: 'ou_99999999999',
           },
         },

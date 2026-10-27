@@ -50,7 +50,7 @@ export class AccessConfigurationService implements OnModuleInit {
         if (previous?.role === 'professional_admin') continue;
         if (previous) this.preservePermission(current,previous);
         current.accounts[account.id] = { ...account, version: (previous?.version || account.version) + (previous ? 1 : 0) };
-        this.audit(current, { role: 'admin', purchaseBuilding: null, displayName: '授权初始化' }, account.name, '初始化专业示例人员001', previous ? describe(previous) : '无授权', describe(current.accounts[account.id]));
+        this.audit(current, { role: 'admin', purchaseBuilding: null, displayName: '授权初始化' }, account.name, '初始化专业主管', previous ? describe(previous) : '无授权', describe(current.accounts[account.id]));
       }
       current.professionalDefaultsAppId = appId;
     });
@@ -181,7 +181,7 @@ export class AccessConfigurationService implements OnModuleInit {
         const enabled = account.enabled;
         if (!person.inactive && account.role === 'professional_admin') {
           const fromTable = normalizeProfessionalScope(person.specialties);
-          if (!person.position || !fromTable.length) throw new ServiceUnavailableException('专业示例人员001岗位或专业未维护，保留现有授权');
+          if (!person.position || !fromTable.length) throw new ServiceUnavailableException('专业主管岗位或专业未维护，保留现有授权');
           if (account.personnelSpecialties !== undefined && account.personnelSpecialties !== person.specialties) specialties = fromTable;
         }
         const authorizationChanged = account.name !== person.name || account.enabled !== enabled || JSON.stringify(account.specialties) !== JSON.stringify(specialties);
@@ -492,7 +492,7 @@ function describe(account: StoredAccount): string {
   return `${account.deleted ? '已删除' : account.enabled ? '启用' : '停用'} · ${roleName(account.role)} · ${[account.buildings?.join('、') || account.building, account.specialties?.join('、')].filter(Boolean).join(' · ') || '全基地'}${rules ? ` · ${rules}` : ''}`;
 }
 function cardRoleName(code: CardRoleCode): string {
-  return { purchase_manager: '采购经理审批', purchase_approvers: '旧采购审批人员', purchase_executor: '综合采购执行人', building_executor: '楼栋自采执行人', warehouse_responsible: '库房示例人员019员', warehouse_notify: '库房管理知会人', contract_notify: '合同通知人员' }[code];
+  return { purchase_manager: '采购经理审批', purchase_approvers: '旧采购审批人员', purchase_executor: '综合采购执行人', building_executor: '楼栋自采执行人', warehouse_responsible: '库房责任人员', warehouse_notify: '库房管理知会人', contract_notify: '合同通知人员' }[code];
 }
 export function readConfiguredCardMembers(code: CardRoleCode, building: string | null, specialty?: unknown): ConfigurationPerson[] | null {
   return readCurrentPersonnelDutyMembers(CARD_PERSONNEL_DUTIES[code], { building, ...(specialty === undefined ? {} : { specialty }) });

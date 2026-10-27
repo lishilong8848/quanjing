@@ -7,7 +7,7 @@ import { authorityRecordIds } from './personnel-authority.people';
 import { buildPersonnelPositionDuties, type PersonnelPositionBinding } from './personnel-authority.positions';
 
 export const AUTHORITY_DUTY_FIELDS = ['职责名称','职责类型','在任人员','楼栋范围','专业范围','权限角色','启用','生效时间','结束时间','任职版本','上级职责'] as const;
-const roles: Record<string, AccessRole> = { 基地成员: 'site_member', 专业示例人员001: 'professional_admin', 专业工程师: 'professional_engineer', 管理员: 'admin', 子管理员: 'editor', 楼栋示例人员001: 'building_admin', 库房管理员: 'inventory_admin', '采购与合同管理员': 'purchase_admin', 采购申请人: 'purchase_applicant', 施工管理员: 'construction_admin', 值班编辑: 'duty_editor', 采供存管理员: 'supply_chain_admin' };
+const roles: Record<string, AccessRole> = { 基地成员: 'site_member', 专业主管: 'professional_admin', 专业工程师: 'professional_engineer', 管理员: 'admin', 子管理员: 'editor', 楼栋主管: 'building_admin', 库房管理员: 'inventory_admin', '采购与合同管理员': 'purchase_admin', 采购申请人: 'purchase_applicant', 施工管理员: 'construction_admin', 值班编辑: 'duty_editor', 采供存管理员: 'supply_chain_admin' };
 function timestamp(value: unknown, fallback: number | null): number | null | undefined {
   if (value === undefined || value === null || value === '') return fallback;
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000 ? value : undefined;

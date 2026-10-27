@@ -83,7 +83,7 @@ async function main() {
     const imageNames = new Map();
     const notifications = [];
     gateway.creationLink = async (_id, recordId) =>
-      `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`;
+      `https://vnet.feishu.cn/base/QaBase?record=${recordId}`;
     let notificationFailures = 0;
     gateway.sendWeeklyReport = async (chatId, uuid, title, documentUrl) => {
       if (mode === 'notification-fail' && notificationFailures++ === 0)
@@ -132,7 +132,7 @@ async function main() {
         Date.now() + 20000,
       );
     gateway.people = async () => [
-      { openId: 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID', name: '示例人员020' },
+      { openId: 'ou_a6644e62a43b916c6bc26148cf74f208', name: '马进宇' },
     ];
     gateway.record = async (id) => {
       if (mode === 'weekly-delay')
@@ -152,7 +152,7 @@ async function main() {
         );
       if (matches(desired)) return;
       if (!matches(expected))
-        throw new Error('周报内容已被示例人员004修改，请重新打开核对');
+        throw new Error('周报内容已被其他人修改，请重新打开核对');
       rows.set(id, { ...row, ...desired });
     };
     gateway.ensureCreationField = async () => undefined;
@@ -174,7 +174,7 @@ async function main() {
       const actual = gateway.attachmentTokens(row[field]);
       if (JSON.stringify(actual) === JSON.stringify(desired)) return;
       if (JSON.stringify(actual) !== JSON.stringify([...expected].sort()))
-        throw new Error('会议图片已被示例人员004修改');
+        throw new Error('会议图片已被其他人修改');
       rows.set(id, {
         ...row,
         [field]: desired.map((file_token) => ({
@@ -223,7 +223,7 @@ async function main() {
             operations: '运营线验收',
             title: '验收周报',
           }
-        : { documentUrl: 'https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE' };
+        : { documentUrl: 'https://vnet.feishu.cn/docx/QaWeeklyDocument' };
     if (process.env.WEEKLY_QA_UNCERTAIN_DATE) {
       const endDate = process.env.WEEKLY_QA_UNCERTAIN_DATE;
       const {

@@ -4,8 +4,8 @@ import { listChangeRequestSubmitters } from '../../server/modules/bitable-sync/c
 const record = (id: number) => ({
   record_id: `rec${id}`,
   fields: {
-    姓名: `示例人员016${id}`,
-    员工姓名: [{ id: `ou_test${id}`, name: `示例人员016${id}` }],
+    姓名: `测试人员${id}`,
+    员工姓名: [{ id: `ou_test${id}`, name: `测试人员${id}` }],
   },
 });
 
@@ -55,7 +55,7 @@ describe('change request people service', () => {
       (await service.searchChangeRequestPeople('测试')).people.map(
         (person) => person.name,
       ),
-    ).toEqual(['示例人员0161']);
+    ).toEqual(['测试人员1']);
     await expect(
       service.searchChangeRequestPeople('张'.repeat(65)),
     ).rejects.toThrow('最多');
@@ -65,14 +65,14 @@ describe('change request people service', () => {
     const { internals, records } = fixture();
     const id = listChangeRequestSubmitters([records[1]])[0].id;
     await expect(
-      internals.resolveChangeRequestSubmitter('示例人员0161', id),
+      internals.resolveChangeRequestSubmitter('测试人员1', id),
     ).resolves.toEqual({ userId: 'ou_test1' });
     await expect(
-      internals.resolveChangeRequestSubmitter('示例人员0162', id),
+      internals.resolveChangeRequestSubmitter('测试人员2', id),
     ).rejects.toThrow('身份');
     internals.readActiveChangeRequestUserIds.mockResolvedValue(new Set());
     await expect(
-      internals.resolveChangeRequestSubmitter('示例人员0161', id),
+      internals.resolveChangeRequestSubmitter('测试人员1', id),
     ).rejects.toThrow('在职');
   });
 
@@ -90,7 +90,7 @@ describe('change request people service', () => {
     const { internals, records } = fixture();
     const request = {
       clientMutationId: 'change-request-123e4567-e89b-42d3-a456-426614174000',
-      submitterName: '示例人员0161',
+      submitterName: '测试人员1',
       submitterId: listChangeRequestSubmitters([records[1]])[0].id,
       nature: '标准变更',
       summary: 'TEST',

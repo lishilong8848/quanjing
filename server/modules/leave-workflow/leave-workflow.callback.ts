@@ -100,7 +100,7 @@ export function parseLeaveLongConnectionCardAction(
     throw new BadRequestException('飞书卡片动作标签无效');
   if (String(action.name || '').startsWith('leave_substitute_review_update_submit:')) {
     const parsed = parseSubstituteUpdateFormAction({ ...action, name: String(action.name).replace(/^leave_substitute_review_update_submit:/, 'leave_substitute_update_submit:') });
-    if (parsed?.kind === 'adjustment_no_change') return finishParsedAction(event, parsed);
+    if (parsed?.kind === 'adjustment_no_change') return finishParsedAction(event, { kind: 'adjustment_view' as const, view: 'review' as const, recordId: parsed.recordId, expectedRevision: parsed.expectedRevision, shiftSelections: [] });
     if (!parsed?.shiftSelections) throw new BadRequestException('替班调整核对表单无效');
     return finishParsedAction(event, { kind: 'adjustment_view' as const, view: 'review' as const, recordId: parsed.recordId, expectedRevision: parsed.expectedRevision, shiftSelections: parsed.shiftSelections });
   }

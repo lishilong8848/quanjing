@@ -28,13 +28,13 @@ const snapshot: InventoryOutboundApprovalSnapshot = {
   location: 'H-2F-226储存间01-0F',
   reason: '设备检修现场使用',
   appliedAt: '2026-08-26T10:30:00+08:00',
-  approvers: [{ openId: 'ou_manager', name: '示例人员009' }],
+  approvers: [{ openId: 'ou_manager', name: '施小东' }],
 };
 
 const approvedDecision: InventoryOutboundApprovalDecision = {
   action: 'approve',
   actorOpenId: 'ou_manager',
-  actorName: '示例人员009',
+  actorName: '施小东',
   messageId: 'om_outbound_approval_1',
   eventId: 'ws_inventory_outbound_approve',
   decidedAt: '2026-08-26T10:35:00+08:00',
@@ -119,7 +119,7 @@ describe('inventory outbound approval cards', () => {
       } else {
         expect(serialized).toContain('库存已扣减并完成正式出库');
       }
-      expect(serialized).toContain('示例人员009');
+      expect(serialized).toContain('施小东');
       expect(buttons).toHaveLength(2);
       expect(buttons.map(buttonText)).toEqual(['同意', '驳回']);
       expect(buttons.every((button) => button.disabled === true)).toBe(true);
@@ -184,7 +184,7 @@ describe('inventory outbound approval cards', () => {
       buildInventoryOutboundSupersededCard(snapshot, 2),
     );
     expect(serialized).toContain('审批已失效');
-    expect(serialized).toContain('已重新路由给当前库房示例人员019员');
+    expect(serialized).toContain('已重新路由给当前库房责任人员');
     expect(serialized).not.toContain('callback');
   });
 });

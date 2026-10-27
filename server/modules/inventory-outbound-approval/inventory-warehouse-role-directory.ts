@@ -55,7 +55,7 @@ interface WarehouseRoleRecord {
 
 export class InventoryWarehouseApproversNotConfiguredError extends ServiceUnavailableException {
   constructor(building: WarehouseBuilding) {
-    super(`${building}未配置有效的库房示例人员019员`);
+    super(`${building}未配置有效的库房责任人员`);
   }
 }
 
@@ -125,7 +125,7 @@ export class InventoryWarehouseRoleDirectory {
     } else if (!forceRefresh && this.cache) {
       void this.refresh().catch(() => undefined);
       throw new ServiceUnavailableException(
-        `${building}库房示例人员019员权限缓存已过期，正在后台刷新，请重试`,
+        `${building}库房责任人员权限缓存已过期，正在后台刷新，请重试`,
       );
     } else {
       records = await this.refresh();
@@ -211,7 +211,7 @@ export async function readWarehouseRoleRecords(
     ...(viewId ? { viewId } : {}),
     tableName: '库存楼栋管理员',
     automaticFields: true,
-    fieldNames: ['楼栋', '库房示例人员019员', '库房管理人'],
+    fieldNames: ['楼栋', '库房责任人员', '库房管理人'],
     cacheTtlMs: 0,
     forceRefresh: true,
     allowStale: false,
@@ -234,7 +234,7 @@ function resolveApproversFromRecords(
       const previous = users.get(candidate.openId);
       users.set(candidate.openId, {
         openId: candidate.openId,
-        name: previous?.name || candidate.name || '库房示例人员019员',
+        name: previous?.name || candidate.name || '库房责任人员',
       });
     }
   }
@@ -354,7 +354,7 @@ function normalizeRecords(records: BitableRecordItem[]): WarehouseRoleRecord[] {
     const fields = isPlainObject(record.fields) ? record.fields : {};
     return {
       buildings: warehouseRecordBuildings(fields),
-      responsibleUsers: extractUsers(fields['库房示例人员019员']),
+      responsibleUsers: extractUsers(fields['库房责任人员']),
       managerUsers: extractUsers(fields['库房管理人']),
     };
   });

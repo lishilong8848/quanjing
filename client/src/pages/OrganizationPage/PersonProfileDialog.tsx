@@ -280,7 +280,7 @@ export function PersonProfileDialog({
                     }
                   />
                   <IdentityMeta
-                    label="直属示例人员001"
+                    label="直属主管"
                     value={detail?.supervisorName}
                   />
                 </div>

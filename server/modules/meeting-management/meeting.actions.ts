@@ -60,7 +60,7 @@ export function parseActionSection(
     const content = item.content;
     const owner =
       content.match(
-        /(?:示例人员019|负责人|示例人员019员|责任部门)[:：]\s*([^\s，,。；;（）()]+)/,
+        /(?:责任人|负责人|责任人员|责任部门)[:：]\s*([^\s，,。；;（）()]+)/,
       )?.[1] ||
       content.match(/由([\u4e00-\u9fa5]{2,4})负责/)?.[1] ||
       null;
@@ -92,7 +92,7 @@ export function parseActionSection(
     ].filter(
       (person) =>
         person !== responsible &&
-        !/(?:供应商|厂商|厂家|部门|单位|公司|班组|团队|客户|现场|示例人员001|人员|各楼)/.test(
+        !/(?:供应商|厂商|厂家|部门|单位|公司|班组|团队|客户|现场|主管|人员|各楼)/.test(
           person,
         ),
     );

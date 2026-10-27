@@ -7,7 +7,7 @@ import { buildLeaveSubstituteAdjustmentCard } from '../../server/modules/leave-w
 import { parseLeaveLongConnectionCardAction } from '../../server/modules/leave-workflow/leave-workflow.callback';
 import { FeishuCardActionRouter } from '../../server/modules/purchase-inventory/feishu-card-action.router';
 import { currentHotfixActivation } from '../../server/common/hotfix-runtime-activation';
-import { applicant, backup, fixture, primary, replacement } from './fixtures/leave-two-level';
+import { applicant, backup, fixture, primary, replacement, schedules } from './fixtures/leave-two-level';
 
 const recordId = fixture().application.recordId;
 const messageId = 'om_test_empty_adjustment';
@@ -22,10 +22,18 @@ function nodes(value: any): any[] {
   if (!value || typeof value !== 'object') return [];
   return [value, ...Object.values(value).flatMap(nodes)];
 }
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(ready => { resolve = ready; });
+  return { promise, resolve };
+}
 
 describe('optional leave adjustment empty-form contract', () => {
-  it.each(prefixes.flatMap(prefix => [undefined, {}].map(formValue => [prefix, formValue] as const)))('treats an untouched %s form (%p) as no change', (prefix, formValue) => {
-    expect(parseLeaveLongConnectionCardAction(event(actionName(prefix), formValue))).toMatchObject({ kind: 'adjustment_no_change', recordId, expectedRevision: 3, actorOpenId: 'ou_supervisor', messageId });
+  it.each([undefined, {}])('reviews the current assignments when the review form is untouched (%p)', formValue => {
+    expect(parseLeaveLongConnectionCardAction(event(actionName(prefixes[0]), formValue))).toMatchObject({ kind: 'adjustment_view', view: 'review', shiftSelections: [], recordId, expectedRevision: 3, actorOpenId: 'ou_supervisor', messageId });
+  });
+  it.each([undefined, {}])('keeps an untouched final optional submission as no change (%p)', formValue => {
+    expect(parseLeaveLongConnectionCardAction(event(actionName(prefixes[1]), formValue))).toMatchObject({ kind: 'adjustment_no_change', recordId, expectedRevision: 3, actorOpenId: 'ou_supervisor', messageId });
   });
   it.each(prefixes)('preserves actual selections in legacy r0 %s forms', prefix => {
     const parsed = parseLeaveLongConnectionCardAction(event(actionName(prefix, 'g2:r0'), { [field()]: replacement.personRecordId }));
@@ -61,7 +69,7 @@ describe('optional leave adjustment empty-form contract', () => {
 
 describe('empty adjustment real Router/Service/Store isolation', () => {
   let directory: string, file: string, store: LeaveWorkflowStore, service: LeaveWorkflowService, router: FeishuCardActionRouter;
-  let gateway: { patchInteractiveCard: jest.Mock }, sync: any, background: jest.SpyInstance, claim: jest.SpyInstance, previousAppId: string | undefined;
+  let gateway: { patchInteractiveCard: jest.Mock }, sync: any, background: jest.SpyInstance, claim: jest.SpyInstance, viewPatches: jest.SpyInstance, previousAppId: string | undefined;
   beforeEach(async () => {
     previousAppId = process.env.FEISHU_APP_ID;
     process.env.FEISHU_APP_ID = 'cli_empty_adjustment_synthetic';
@@ -74,15 +82,16 @@ describe('empty adjustment real Router/Service/Store isolation', () => {
     await store.recordSubstituteAdjustmentCardDelivery(recordId, { recipientOpenId: 'ou_supervisor', messageId, businessKey: `leave:${recordId}:substitute-adjustment:3:ou_supervisor` });
     gateway = { patchInteractiveCard: jest.fn().mockResolvedValue(undefined) };
     const personnel = [applicant, primary, backup, replacement].map(person => ({ ...person, recordId: person.personRecordId, employeeNo: null, systemPosition: '', supervisorNames: [] }));
-    sync = { getCachedLeaveRequestImpactSchedules: jest.fn(), getCachedActivePersonnelDirectory: jest.fn().mockResolvedValue({ personnel, selectablePersonnel: personnel }) };
+    sync = { getCachedLeaveRequestImpactSchedules: jest.fn().mockResolvedValue(structuredClone(schedules)), getCachedActivePersonnelDirectory: jest.fn().mockResolvedValue({ personnel, selectablePersonnel: personnel }) };
     service = new LeaveWorkflowService(store, gateway as never, sync, {} as never, { canUseFeishuBusinessIdentity: () => true } as never);
     background = jest.spyOn(service, 'runPendingTasks').mockResolvedValue({ processed: 0, failed: 0 });
     claim = jest.spyOn(store, 'claimSubstituteUpdate');
+    viewPatches = jest.spyOn(service, 'patchSubstituteAdjustmentCardView');
     const unused = { isEnabled: () => false } as never;
     router = new FeishuCardActionRouter(unused, service, unused, unused, unused, unused, unused, undefined, { canUseFeishuBusinessIdentity: () => true } as never);
   });
   afterEach(async () => {
-    background.mockRestore(); claim.mockRestore();
+    background.mockRestore(); claim.mockRestore(); viewPatches.mockRestore();
     if (previousAppId === undefined) delete process.env.FEISHU_APP_ID; else process.env.FEISHU_APP_ID = previousAppId;
     if (!resolve(directory).startsWith(resolve(tmpdir()) + sep) || !directory.includes('leave-empty-adjustment-owned-')) throw Error('Unsafe cleanup');
     await rm(directory, { recursive: true, force: true });
@@ -94,10 +103,142 @@ describe('empty adjustment real Router/Service/Store isolation', () => {
     expect(sync.getCachedLeaveRequestImpactSchedules).not.toHaveBeenCalled();
     expect(sync.getCachedActivePersonnelDirectory).not.toHaveBeenCalled();
   }
-  it.each(prefixes.flatMap(prefix => [undefined, {}].map(formValue => [prefix, formValue] as const)))('returns no-change info for %s (%p) with identical ledger bytes', async (prefix, formValue) => {
-    const before = await readFile(file), payload = event(actionName(prefix), formValue);
+  async function prepareOtherLegalAdjustment() {
+    const application = (await store.getApplication(recordId))!;
+    const plan = structuredClone(application.approvalPlan!);
+    const other = { ...plan.stages[0].approvers[0], openId: 'ou_other_supervisor', name: '另一审批人' };
+    plan.stages[0].approvers.push(other);
+    await store.patchApplication(recordId, { approvalPlan: plan });
+    const otherMessageId = 'om_test_other_adjustment';
+    await store.recordSubstituteAdjustmentCardDelivery(recordId, { recipientOpenId: other.openId, messageId: otherMessageId, businessKey: `leave:${recordId}:substitute-adjustment:3:${other.openId}` });
+    return () => service.acceptSubstituteUpdateAction({ eventId: 'test-other-legal-adjustment', recordId, expectedRevision: 3,
+      actorOpenId: other.openId, actorName: other.name, messageId: otherMessageId,
+      shiftSelections: [{ shiftKey: fixture().selection.shiftKey, substitutePersonRecordId: replacement.personRecordId }] });
+  }
+  it.each([undefined, {}])('keeps a final untouched optional submission (%p) as no change with identical ledger bytes', async formValue => {
+    const before = await readFile(file), payload = event(actionName(prefixes[1]), formValue);
     for (let index = 0; index < 2; index++) expect(await router.handle(payload)).toEqual({ toast: { type: 'info', content: '未选择调整人员，未提交变更' } });
     await expectNoSideEffects(before);
+  });
+  it.each([
+    [undefined, primary.personRecordId],
+    [{}, primary.personRecordId],
+    [{ [field()]: replacement.personRecordId }, replacement.personRecordId],
+  ] as const)('opens review for %p using the current or explicitly selected person', async (formValue, expectedPerson) => {
+    const before = await readFile(file);
+    const response = await router.handle(event(actionName(prefixes[0]), formValue));
+    expect(response.toast?.type).toBe('info');
+    expect(response.card).toBeUndefined();
+    expect(viewPatches).toHaveBeenCalledTimes(1);
+    await Promise.all(viewPatches.mock.results.map(result => result.value));
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1);
+    const [patchedMessageId, card] = gateway.patchInteractiveCard.mock.calls[0];
+    expect(patchedMessageId).toBe(messageId);
+    expect(nodes(card).find(row => row.tag === 'select_static' && row.name === field()).initial_option).toBe(expectedPerson);
+    expect(nodes(card).find(row => row.form_action_type === 'submit').name).toBe(actionName(prefixes[1], 'g1:r1'));
+    if (expectedPerson === primary.personRecordId) {
+      expect(nodes(card).find(row => row.placeholder?.content === '选择原岗补位人员').initial_option).toBe(backup.personRecordId);
+    }
+    expect(await readFile(file)).toEqual(before);
+    expect(claim).not.toHaveBeenCalled();
+    expect(background).not.toHaveBeenCalled();
+  });
+  it('refuses the stale editor when another legal adjustment advances revision during the cache read', async () => {
+    const adjust = await prepareOtherLegalAdjustment();
+    const cacheStarted = deferred(), releaseCache = deferred();
+    sync.getCachedLeaveRequestImpactSchedules.mockImplementationOnce(async () => {
+      cacheStarted.resolve(); await releaseCache.promise; return structuredClone(schedules);
+    });
+    const reviewing = router.handle(event(actionName(prefixes[0]), {}));
+    try {
+      await Promise.race([cacheStarted.promise, reviewing.then(() => { throw new Error('Review finished before the controlled cache read'); })]);
+      expect((await adjust()).claimed).toBe(true);
+      const acceptedBytes = await readFile(file);
+      releaseCache.resolve();
+      const response = await reviewing;
+      expect(response.card).toBeUndefined();
+      expect(viewPatches).toHaveBeenCalledTimes(1);
+      const outcomes = await Promise.allSettled(viewPatches.mock.results.map(result => result.value));
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]).toMatchObject({ status: 'rejected', reason: { message: '该替班调整卡片已失效或无处理权限' } });
+      expect(gateway.patchInteractiveCard).not.toHaveBeenCalled();
+      expect(await readFile(file)).toEqual(acceptedBytes);
+      expect((await store.getApplication(recordId))!.snapshot).toMatchObject({ assignmentRevision: 4,
+        shiftAssignments: [{ substitutePersonRecordId: replacement.personRecordId }] });
+      expect(claim).toHaveBeenCalledTimes(1);
+      expect(background).not.toHaveBeenCalled();
+    } finally {
+      releaseCache.resolve(); await reviewing;
+      await Promise.allSettled(viewPatches.mock.results.map(result => result.value));
+    }
+  });
+  it('patches the latest readonly terminal after revision changes while the old review PATCH is in flight', async () => {
+    const adjust = await prepareOtherLegalAdjustment();
+    const patchStarted = deferred(), releasePatch = deferred();
+    let displayedCard: unknown;
+    gateway.patchInteractiveCard.mockImplementation(async (_messageId, card) => { displayedCard = card; });
+    gateway.patchInteractiveCard.mockImplementationOnce(async (_messageId, card) => {
+      patchStarted.resolve(); await releasePatch.promise; displayedCard = card;
+    });
+    const reviewing = router.handle(event(actionName(prefixes[0]), {}));
+    try {
+      await reviewing;
+      expect(viewPatches).toHaveBeenCalledTimes(1);
+      await Promise.race([patchStarted.promise, Promise.allSettled(viewPatches.mock.results.map(result => result.value)).then(() => { throw new Error('Review PATCH finished before the controlled gateway call'); })]);
+      const accepted = await adjust();
+      expect(accepted.claimed).toBe(true);
+      const acceptedBytes = await readFile(file);
+      releasePatch.resolve();
+      await Promise.all(viewPatches.mock.results.map(result => result.value));
+      expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2);
+      expect(gateway.patchInteractiveCard.mock.calls.map(call => call[0])).toEqual([messageId, messageId]);
+      expect(JSON.stringify(gateway.patchInteractiveCard.mock.calls[0][1])).toContain('form_action_type');
+      expect(displayedCard).toEqual(accepted.card);
+      expect(JSON.stringify(displayedCard)).toContain('替班调整已提交');
+      expect(JSON.stringify(displayedCard)).not.toContain('form_action_type');
+      expect(await readFile(file)).toEqual(acceptedBytes);
+      expect(claim).toHaveBeenCalledTimes(1);
+      expect(background).not.toHaveBeenCalled();
+    } finally {
+      releasePatch.resolve(); await reviewing;
+      await Promise.allSettled(viewPatches.mock.results.map(result => result.value));
+    }
+  });
+  it('keeps primary and original-post backfill unchanged for concurrent duplicate empty reviews without creating tasks', async () => {
+    const before = await readFile(file), original = (await store.getApplication(recordId))!.snapshot.shiftAssignments;
+    const cacheStarted = deferred(), releaseCache = deferred();
+    sync.getCachedLeaveRequestImpactSchedules.mockImplementation(async () => {
+      cacheStarted.resolve(); await releaseCache.promise; return structuredClone(schedules);
+    });
+    const payload = event(actionName(prefixes[0]), {});
+    const reviewing = [router.handle(payload), router.handle(payload)];
+    const settled = [false, false];
+    reviewing.forEach((review, index) => { void review.then(() => { settled[index] = true; }, () => { settled[index] = true; }); });
+    try {
+      await Promise.race([cacheStarted.promise, ...reviewing.map(review => review.then(() => { throw new Error('A review finished before the controlled cache read'); }))]);
+      expect(settled).toEqual([false, false]);
+      expect(sync.getCachedLeaveRequestImpactSchedules).toHaveBeenCalledTimes(1);
+      releaseCache.resolve();
+      const responses = await Promise.all(reviewing);
+      expect(responses.every(response => response.toast?.type === 'info' && response.card === undefined)).toBe(true);
+      expect(responses[0]).toEqual(responses[1]);
+      expect(viewPatches).toHaveBeenCalledTimes(1);
+      await Promise.all(viewPatches.mock.results.map(result => result.value));
+      expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1);
+      expect(sync.getCachedLeaveRequestImpactSchedules).toHaveBeenCalledTimes(1);
+      for (const [patchedMessageId, card] of gateway.patchInteractiveCard.mock.calls) {
+        expect(patchedMessageId).toBe(messageId);
+        expect(nodes(card).find(row => row.tag === 'select_static' && row.name === field()).initial_option).toBe(primary.personRecordId);
+        expect(nodes(card).find(row => row.placeholder?.content === '选择原岗补位人员').initial_option).toBe(backup.personRecordId);
+      }
+      expect(await readFile(file)).toEqual(before);
+      expect((await store.getApplication(recordId))!.snapshot.shiftAssignments).toEqual(original);
+      expect(claim).not.toHaveBeenCalled();
+      expect(background).not.toHaveBeenCalled();
+    } finally {
+      releaseCache.resolve(); await Promise.all(reviewing);
+      await Promise.allSettled(viewPatches.mock.results.map(result => result.value));
+    }
   });
   it.each(['revision', 'actor', 'message', 'status', 'terminal', 'delivery'] as const)('rejects empty submissions with invalid %s without any mutation', async kind => {
     const payload = event(actionName(), {});

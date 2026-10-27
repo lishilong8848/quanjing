@@ -6,6 +6,7 @@ import type {
 } from '../../../shared/campus-training-dashboard.interface';
 import type { BitableRecordItem } from '../../common/feishu/bitable-direct-read';
 import { mapTrainingDashboardDetails } from './training-dashboard.details';
+import { TRAINING_ACTIVE_EMPLOYEE_TEXT_FIELD } from './training-dashboard.fields';
 
 export interface TrainingDashboardSources {
   activeStats: BitableRecordItem[];
@@ -126,6 +127,10 @@ export function mapCampusTrainingDashboard(
   syncedAt: string,
   passScore = DEFAULT_TRAINING_PASS_SCORE,
 ): CampusTrainingDashboardResponse {
+  sources = {
+    ...sources,
+    activeScores: sources.activeScores.map(normalizeActiveScoreEmployee),
+  };
   const stats = sources.activeStats.map(mapActiveStat);
   const plans = sources.activePlans.map(mapActivePlan);
   const newHirePeople = mapNewHirePeople(sources.newHireScores);
@@ -382,6 +387,31 @@ function extractNewHireIdentity(fields: Record<string, unknown>): {
     stableId,
     name,
     normalizedName: normalizePersonName(name),
+  };
+}
+
+function normalizeActiveScoreEmployee(
+  record: BitableRecordItem,
+): BitableRecordItem {
+  const fields = record.fields || {};
+  const name = normalizePersonName(
+    unwrap(fields[TRAINING_ACTIVE_EMPLOYEE_TEXT_FIELD]).join(''),
+  );
+  if (!name) return record;
+
+  // A legacy ID is usable only when this row proves it belongs to the new name.
+  const matchingIdentities = extractIdentities(fields['员工'])
+    .filter(
+      (identity) =>
+        identity.stableId && normalizePersonName(identity.name) === name,
+    )
+    .map((identity) => ({ id: identity.stableId, name }));
+  return {
+    ...record,
+    fields: {
+      ...fields,
+      员工: matchingIdentities.length > 0 ? matchingIdentities : name,
+    },
   };
 }
 

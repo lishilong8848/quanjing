@@ -189,7 +189,7 @@ describe('buildTodayOperationsScheduleConsistencySnapshot', () => {
         {
           ...leaveApproval.requests[0],
           recordId: 'rec_leave_recent',
-          leaveStaff: ['示例人员017'],
+          leaveStaff: ['王五'],
           impactedScheduleRecordIds: ['rec_a_white_20260830'],
           approvedAt: '2026-08-30T01:01:00.000Z',
         },

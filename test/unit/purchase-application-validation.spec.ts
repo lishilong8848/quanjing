@@ -62,7 +62,7 @@ function validRequest(): PurchaseApplicationBatchRequest {
       applicantOpenId: 'ou_applicant_ma',
       applicantName: '马金玉',
       applicantEmployeeNo: 'NT-001',
-      applicantPosition: '值班示例人员001',
+      applicantPosition: '值班主管',
       applicantBuilding: 'H楼',
       building: 'H楼',
       specialty: '电气',

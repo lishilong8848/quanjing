@@ -56,7 +56,7 @@ export function weeklyTodoText(meeting: WeeklyMeetingInput): string {
   return meeting.todos
     .map(
       (todo, i) =>
-        `${i + 1}. ${todo.content}（示例人员019：${todo.ownerName || '待明确'}；截止：${todo.dueDate || '未设置'}；状态：${todo.status === 'done' ? '已完成' : '待办'}）`,
+        `${i + 1}. ${todo.content}（责任人：${todo.ownerName || '待明确'}；截止：${todo.dueDate || '未设置'}；状态：${todo.status === 'done' ? '已完成' : '待办'}）`,
     )
     .join('\n');
 }
@@ -109,13 +109,13 @@ export function validateWeeklyMeeting(
       typeof todo.ownerOpenId !== 'string' ||
       (todo.ownerOpenId && !/^ou_[A-Za-z0-9]{10,100}$/.test(todo.ownerOpenId))
     )
-      return '示例人员019标识无效';
+      return '责任人标识无效';
     if (
       typeof todo.ownerName !== 'string' ||
       todo.ownerName.length > 100 ||
       Boolean(todo.ownerName) !== Boolean(todo.ownerOpenId)
     )
-      return '请从人员列表选择示例人员019';
+      return '请从人员列表选择责任人';
     if (
       typeof todo.dueDate !== 'string' ||
       (todo.dueDate && !validWeeklyDate(todo.dueDate))

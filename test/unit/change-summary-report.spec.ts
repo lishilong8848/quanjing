@@ -32,7 +32,7 @@ const validDocument = (
 
 const validRequest = (): ChangeSummaryReportCreateRequest => ({
   clientMutationId: VALID_MUTATION_ID,
-  submitterName: '示例人员020',
+  submitterName: '马进宇',
   changeRecordId: 'recAbCdEf1234567890',
   summaryDocuments: [validDocument()],
 });
@@ -103,7 +103,7 @@ describe('change summary report shared contract', () => {
     const source = {
       ...validRequest(),
       clientMutationId: `  ${VALID_MUTATION_ID}  `,
-      submitterName: '  示例人员020  ',
+      submitterName: '  马进宇  ',
       changeRecordId: '  recAbCdEf1234567890  ',
       summaryDocuments: [
         {
@@ -168,7 +168,7 @@ describe('change summary report shared contract', () => {
 
   it('requires a trimmed submitter name of 1-64 Unicode characters', () => {
     expect(
-      errorFields({ ...validRequest(), submitterName: '  示例人员020  ' }),
+      errorFields({ ...validRequest(), submitterName: '  马进宇  ' }),
     ).not.toContain('submitterName');
     expect(errorFields({ ...validRequest(), submitterName: '   ' })).toContain(
       'submitterName',

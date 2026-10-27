@@ -30,12 +30,12 @@ const MIN_POLL_INTERVAL_MS = 1_000;
 const MAX_POLL_INTERVAL_MS = 3_600_000;
 const MIN_ENCRYPT_KEY_LENGTH = 8;
 const MAX_CONFIGURATION_VALUE_LENGTH = 4_096;
-const DEFAULT_MANAGER_APPROVER_NAME = '示例人员020';
+const DEFAULT_MANAGER_APPROVER_NAME = '马进宇';
 const MANAGER_POSITIONS = new Set(['设施运维经理', '设施运维副经理']);
 const DEFAULT_PURCHASE_ADMIN_NAME = '曹李培';
 const PURCHASE_ADMIN_POSITIONS = new Set(['综合管理']);
 const WAREHOUSE_MANAGER_TABLE_NAME = '配置楼栋负责人';
-const WAREHOUSE_APPROVAL_REQUIRED_FIELDS = ['楼栋', '库房示例人员019员'];
+const WAREHOUSE_APPROVAL_REQUIRED_FIELDS = ['楼栋', '库房责任人员'];
 const WAREHOUSE_NOTIFICATION_REQUIRED_FIELDS = ['库房管理人'];
 
 const TABLE_SIGNATURE = [
@@ -500,10 +500,10 @@ async function resolveManagerOpenIdFromOrganizationBase(client, environment) {
     if (!positions.some((position) => MANAGER_POSITIONS.has(position)))
       continue;
     const textNames = extractDisplayValues(
-      fields['示例人员001（文本）'] ?? fields['姓名'],
+      fields['主管（文本）'] ?? fields['姓名'],
     ).map(normalizePersonName);
     for (const user of extractUsers(
-      fields['示例人员001'] ?? fields['人员'] ?? fields['姓名'],
+      fields['主管'] ?? fields['人员'] ?? fields['姓名'],
     )) {
       const names = [...textNames, normalizePersonName(user.name)].filter(
         Boolean,
@@ -550,10 +550,10 @@ async function resolvePurchaseAdminOpenIdFromOrganizationBase(
       continue;
     }
     const textNames = extractDisplayValues(
-      fields['示例人员001（文本）'] ?? fields['姓名'],
+      fields['主管（文本）'] ?? fields['姓名'],
     ).map(normalizePersonName);
     for (const user of extractUsers(
-      fields['示例人员001'] ?? fields['人员'] ?? fields['姓名'],
+      fields['主管'] ?? fields['人员'] ?? fields['姓名'],
     )) {
       const names = [...textNames, normalizePersonName(user.name)].filter(
         Boolean,
@@ -824,7 +824,7 @@ async function discoverWarehouseManagerTable(client, environment) {
     if (!(error instanceof PublicError)) throw error;
   }
   throw new PublicError(
-    'Automatic warehouse approval-role source discovery requires exactly one valid warehouse role table named 配置楼栋负责人 with fields 楼栋, 库房示例人员019员, and 库房管理人 in the shared warehouse Base.',
+    'Automatic warehouse approval-role source discovery requires exactly one valid warehouse role table named 配置楼栋负责人 with fields 楼栋, 库房责任人员, and 库房管理人 in the shared warehouse Base.',
   );
 }
 

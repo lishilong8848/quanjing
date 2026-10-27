@@ -57,7 +57,7 @@ function createConfigService(
 
 describe('阿里月报默认邮件收件人', () => {
   const expectedDefaultRecipients =
-    'user-b54e355d@example.com; user-20a3f7b8@example.com';
+    'ma.jinyu@vnet.com; liu.xiaoxing2-wb@sne.vnet.com';
 
   it('服务器未配置环境变量和本地配置时返回两名默认收件人', async () => {
     await withRecipientEnv({}, async () => {
@@ -65,7 +65,7 @@ describe('阿里月报默认邮件收件人', () => {
 
       expect(config.defaultEmailRecipient).toBe(expectedDefaultRecipients);
       expect(config.defaultEmailRecipient).not.toContain(
-        'user-7e80d4ec@example.com',
+        'mei.bingbing@vnet.com',
       );
     });
   });
@@ -73,7 +73,7 @@ describe('阿里月报默认邮件收件人', () => {
   it('服务器遗留单邮箱配置仍补齐新增默认收件人', async () => {
     await withRecipientEnv({}, async () => {
       const config = await createConfigService({
-        recipient: 'user-b54e355d@example.com',
+        recipient: 'ma.jinyu@vnet.com',
       }).getConfig();
 
       expect(config.defaultEmailRecipient).toBe(expectedDefaultRecipients);
@@ -82,22 +82,22 @@ describe('阿里月报默认邮件收件人', () => {
 
   it('显式环境变量保留自定义邮箱并补齐两名默认收件人', async () => {
     await withRecipientEnv(
-      { ALI_MONTHLY_REPORT_EMAIL_RECIPIENT: 'user-618fcdcd@example.com' },
+      { ALI_MONTHLY_REPORT_EMAIL_RECIPIENT: 'configured@vnet.com' },
       async () => {
         const config = await createConfigService().getConfig();
 
         expect(config.defaultEmailRecipient).toBe(
-          `user-618fcdcd@example.com; ${expectedDefaultRecipients}`,
+          `configured@vnet.com; ${expectedDefaultRecipients}`,
         );
       },
     );
   });
 
-  it('遗留环境变量或手工发送列表中的示例人员014只保留在正文，不进入投递名单', async () => {
+  it('遗留环境变量或手工发送列表中的梅冰冰只保留在正文，不进入投递名单', async () => {
     await withRecipientEnv(
       {
         ALI_MONTHLY_REPORT_EMAIL_RECIPIENT:
-          'user-b54e355d@example.com; user-adb19fdd@example.com; user-20a3f7b8@example.com',
+          'ma.jinyu@vnet.com; MEI.BINGBING@vnet.com; liu.xiaoxing2-wb@sne.vnet.com',
       },
       async () => {
         const service = createConfigService();
@@ -107,27 +107,27 @@ describe('阿里月报默认邮件收件人', () => {
         expect(config.defaultEmailRecipient).toBe(expectedDefaultRecipients);
         expect(
           internals.normalizeRecipient(
-            'user-b54e355d@example.com; user-7e80d4ec@example.com; user-20a3f7b8@example.com',
+            'ma.jinyu@vnet.com; mei.bingbing@vnet.com; liu.xiaoxing2-wb@sne.vnet.com',
           ),
         ).toBe(expectedDefaultRecipients);
         expect(() =>
-          internals.normalizeRecipient('user-7e80d4ec@example.com'),
+          internals.normalizeRecipient('mei.bingbing@vnet.com'),
         ).toThrow('收件人邮箱不能为空');
       },
     );
   });
 
-  it('遗留文件配置中的示例人员014不会进入页面默认收件人', async () => {
+  it('遗留文件配置中的梅冰冰不会进入页面默认收件人', async () => {
     await withRecipientEnv({}, async () => {
       const config = await createConfigService({
-        recipient: 'user-b54e355d@example.com; user-7e80d4ec@example.com',
+        recipient: 'ma.jinyu@vnet.com; mei.bingbing@vnet.com',
       }).getConfig();
 
       expect(config.defaultEmailRecipient).toBe(expectedDefaultRecipients);
     });
   });
 
-  it('旧邮件工具只在正文抄送行展示示例人员014，不加入默认收件人', () => {
+  it('旧邮件工具只在正文抄送行展示梅冰冰，不加入默认收件人', () => {
     const emailAppSource = readFileSync(
       resolve(
         process.cwd(),
@@ -137,14 +137,14 @@ describe('阿里月报默认邮件收件人', () => {
     );
 
     expect(emailAppSource).toContain(
-      'DEFAULT_RECIPIENT = "user-b54e355d@example.com; user-20a3f7b8@example.com"',
+      'DEFAULT_RECIPIENT = "ma.jinyu@vnet.com; liu.xiaoxing2-wb@sne.vnet.com"',
     );
-    expect(emailAppSource).toContain('user-20a3f7b8@example.com');
+    expect(emailAppSource).toContain('liu.xiaoxing2-wb@sne.vnet.com');
     expect(emailAppSource).toContain(
-      "示例人员014 &lt;user-7e80d4ec@example.com&gt;",
+      "梅冰冰 &lt;mei.bingbing@vnet.com&gt;",
     );
     expect(
       emailAppSource.match(/DEFAULT_RECIPIENT\s*=\s*"([^"]*)"/)?.[1],
-    ).not.toContain('user-7e80d4ec@example.com');
+    ).not.toContain('mei.bingbing@vnet.com');
   });
 });

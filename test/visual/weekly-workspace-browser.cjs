@@ -86,8 +86,8 @@ async function main() {
       .getByLabel('事宜 1', { exact: true })
       .fill('验收：检查冷却系统');
     await dialog
-      .getByLabel('示例人员019', { exact: true })
-      .selectOption('PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID');
+      .getByLabel('责任人', { exact: true })
+      .selectOption('ou_a6644e62a43b916c6bc26148cf74f208');
     await dialog.getByLabel('截止日期', { exact: true }).fill('2026-10-09');
     await dialog.getByLabel('计划会议日期', { exact: true }).fill('2026-10-07');
     await dialog.getByLabel('实际会议日期', { exact: true }).fill('2026-10-07');
@@ -104,9 +104,9 @@ async function main() {
     assert.equal(proof.postCount - posts, 1);
     await page
       .locator('.weekly-latest')
-      .getByText('示例人员019：示例人员020', { exact: true })
+      .getByText('责任人：马进宇', { exact: true })
       .waitFor();
-    check('PC待办事宜/示例人员019/截止日、重复点击仅一次提交、后台成功终态');
+    check('PC待办事宜/责任人/截止日、重复点击仅一次提交、后台成功终态');
 
     await page
       .getByRole('button', { name: '属地周会／待办', exact: true })
@@ -261,8 +261,8 @@ async function main() {
       .getByLabel('事宜 1', { exact: true })
       .fill('手机验收：长事宜'.repeat(15));
     await page
-      .getByLabel('示例人员019', { exact: true })
-      .selectOption('PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID');
+      .getByLabel('责任人', { exact: true })
+      .selectOption('ou_a6644e62a43b916c6bc26148cf74f208');
     const overflow = await page
       .getByRole('dialog')
       .evaluate((node) => node.scrollWidth - node.clientWidth);
@@ -284,7 +284,7 @@ async function main() {
       path: path.join(output, 'workbench-mobile.png'),
       fullPage: true,
     });
-    check('390px手机表单、长事宜、示例人员019、清晰关闭且无横向溢出');
+    check('390px手机表单、长事宜、责任人、清晰关闭且无横向溢出');
     const reads = proof.formReads;
     for (let i = 0; i < 10; i++) {
       await instrument(page);
@@ -329,8 +329,8 @@ async function main() {
         todos: Array.from({ length: 100 }, (_, i) => ({
           id: `item-${i + 1}`,
           content: `容量验收事宜${i + 1}`,
-          ownerOpenId: 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID',
-          ownerName: '示例人员020',
+          ownerOpenId: 'ou_a6644e62a43b916c6bc26148cf74f208',
+          ownerName: '马进宇',
           dueDate: '2026-10-15',
           status: 'pending',
         })),

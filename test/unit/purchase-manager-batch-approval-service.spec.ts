@@ -1794,7 +1794,7 @@ describe('purchase manager batch approval service', () => {
               current.purchaseMethod,
             status: (patch['采购流程'] as string) || current.status,
             purchaserOpenId: purchaser || current.purchaserOpenId,
-            purchaserName: purchaser ? '示例人员009' : current.purchaserName,
+            purchaserName: purchaser ? '施小东' : current.purchaserName,
             warehouseConfirmed:
               patch['库房确认'] === undefined
                 ? current.warehouseConfirmed
@@ -1805,8 +1805,8 @@ describe('purchase manager batch approval service', () => {
       resolvePurchaseAdminAsApp: jest.fn(),
       resolveBuildingSupervisorAsApp: jest.fn(async () => ({
         openId: 'ou_supervisor_a',
-        name: '示例人员009',
-        positions: ['设施运维示例人员001'],
+        name: '施小东',
+        positions: ['设施运维主管'],
         buildings: ['A楼'],
       })),
       resolveUserAsApp: jest.fn(),
@@ -1864,7 +1864,7 @@ describe('purchase manager batch approval service', () => {
       status: '审批通过（待下单）',
       purchaseMethod: '需求自采',
       purchaserOpenId: 'ou_supervisor_a',
-      purchaserName: '示例人员009',
+      purchaserName: '施小东',
     });
   });
 });

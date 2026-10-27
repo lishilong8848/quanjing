@@ -37,11 +37,11 @@ MANUAL_LOG_FILE = RUNTIME_LOG_DIR / "nantong_weekly_report_manual.log"
 LARK_CLI_BIN_DEFAULT = "lark-cli.cmd"
 
 BASE_TOKEN = "Ku17b5rmgaULYJsioBpcHl0Xnqd"
-TEMPLATE_DOC_URL = "https://example.feishu.cn/docx/PUBLIC_EXAMPLE_SOURCE"
-WEEKLY_TABLE_ID = "tbl96c6dccf01af4"
+TEMPLATE_DOC_URL = "https://vnet.feishu.cn/docx/Yhfldltc3oTUoyx1aBxcmkDOnYe"
+WEEKLY_TABLE_ID = "tbl9GlPjdwTHIKSp"
 WEEKLY_ALI_TODOS_FIELD = "阿里会议待办"
 WEEKLY_INTERNAL_TODOS_FIELD = "上周周会待办"
-MEETING_TABLE_ID = "tbl90ecbefe10c0b"
+MEETING_TABLE_ID = "tblblYJDITX8udMw"
 MEETING_LINK_FIELD = "\u5999\u8bb0\u94fe\u63a5"
 MEETING_TODOS_FIELD = "\u4ee3\u529e\u4e8b\u9879"
 MEETING_CREATED_FIELD = "\u521b\u5efa\u65f6\u95f4"
@@ -55,17 +55,17 @@ ALI_TODOS_ATTACHMENT_LEGACY_FIELD = "阿里待办截图"
 ALI_TODOS_TEXT_FIELD = "阿里待办事项"
 ALI_TODOS_ATTACHMENT_FIELD_ID = "fldhVs5z28"
 ALI_TODOS_TEXT_FIELD_ID = "fldMKNUOO7"
-CHANGE_TABLE_ID = "tbl5c504ae9decf2"
-EVENT_TABLE_ID = "tbl39af909364aab"
-ALI_DRILL_TABLE_ID = "tbl980395d192b05"
-ALI_WEEKLY_DRILL_TABLE_ID = "tblbca17d39cb1e0"
-PLANNED_DRILL_TABLE_ID = "tblb4d3a541a8c1f"
-MAINTENANCE_TABLE_ID = "tbldb6fdaed2fed6"
-ABNORMAL_MAINTENANCE_TABLE_ID = "tbl034226e2335e0"
-CABINET_CAPACITY_TABLE_ID = "tbl4b0b5dfb56a00"
-CABINET_HANDOVER_TABLE_ID = "tbl3611fb223d397"
-EOP_TABLE_ID = "tbl622568f8db661"
-PURCHASE_SUMMARY_TABLE_ID = "tbl93282b19ab82b"
+CHANGE_TABLE_ID = "tblX2mo56iSxiTSm"
+EVENT_TABLE_ID = "tbl1Hvrpx1IOYdjG"
+ALI_DRILL_TABLE_ID = "tblMaj4fxndLqSao"
+ALI_WEEKLY_DRILL_TABLE_ID = "tbljHRndF3XysoKn"
+PLANNED_DRILL_TABLE_ID = "tblpwAbee6FHAqEM"
+MAINTENANCE_TABLE_ID = "tblqNoimlRn4RLCF"
+ABNORMAL_MAINTENANCE_TABLE_ID = "tblsAB59u2XymHlR"
+CABINET_CAPACITY_TABLE_ID = "tblNPn9TWQc8PH0f"
+CABINET_HANDOVER_TABLE_ID = "tblmMgXr4jOCM59t"
+EOP_TABLE_ID = "tblvGQPKeYwlBfH8"
+PURCHASE_SUMMARY_TABLE_ID = "tblxGyNnjEmlTPC5"
 
 BUILDINGS = ("A楼", "B楼", "C楼", "D楼", "E楼", "110站")
 PROFESSIONS = ("电气", "暖通", "弱电", "消防", "EHS&消防")
@@ -85,7 +85,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "base_identity": "bot",
     "notes_identity": "user",
     "message_identity": "bot",
-    "chat_id": "oc_c79f407063dc9ca9f70cc76cb4059895",
+    "chat_id": "oc_9961bb057de8bd715447559c5e63c4f2",
     "template_doc_url": TEMPLATE_DOC_URL,
     "base_token": BASE_TOKEN,
     "report_parent_position": "my_library",
@@ -95,7 +95,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "abnormal_maintenance_view_id": "vew83NsZof",
     "ali_weekly_drills_view_id": "vewsNYKZET",
     "drill_source_base_token": "IrIibPkUOa6udGsMhu2cbOqhnWg",
-    "drill_source_table_id": "tbl3c13aafddd198",
+    "drill_source_table_id": "tbleCzxRd2yF7lT7",
     "drill_source_view_id": "vew0UNl8ZR",
     "previous_report_seed_doc_url": "",
     "previous_report_seed_period": "",

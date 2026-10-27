@@ -13,9 +13,9 @@ export function buildPersonnelPositionDuties(people: readonly AuthorityPerson[],
   for (const person of people) {
     if (!person.active || person.type !== 'employee') continue;
     const labels = [person.position, person.systemPosition].flatMap(value => value.split(/[、,，;；]/u)).map(value => value.trim()).filter(Boolean);
-    const buildingLead = labels.some(value => ['设施运维示例人员001','运维示例人员001','H楼值班示例人员001','110站站长'].includes(value));
-    const professionalLead = labels.filter(value => value === '专业示例人员001' || /^(电气|供配电|暖通|弱电|消防|EHS|安全|土建)(专业)?示例人员001$/iu.test(value));
-    const engineers = labels.filter(value => /工程师/u.test(value) && !/示例人员001|经理|总监|负责人/u.test(value) &&
+    const buildingLead = labels.some(value => ['设施运维主管','运维主管','H楼值班主管','110站站长'].includes(value));
+    const professionalLead = labels.filter(value => value === '专业主管' || /^(电气|供配电|暖通|弱电|消防|EHS|安全|土建)(专业)?主管$/iu.test(value));
+    const engineers = labels.filter(value => /工程师/u.test(value) && !/主管|经理|总监|负责人/u.test(value) &&
       (value === '工程师' || /电气|供配电|暖通|弱电|消防|EHS|安全|土建/iu.test(value) || person.specialties.length > 0));
     const manager = labels.some(value => ['设施运维经理','设施运维副经理'].includes(value));
     const purchaseExecutor = labels.includes('综合管理');
@@ -38,11 +38,11 @@ export function buildPersonnelPositionDuties(people: readonly AuthorityPerson[],
       if (!duty.personnelIds.includes(person.id)) duty.personnelIds.push(person.id);
     };
     if (buildingLead) {
-      if (!person.buildings.length) problem(person, '楼栋示例人员001的楼栋尚未明确，请核对');
+      if (!person.buildings.length) problem(person, '楼栋主管的楼栋尚未明确，请核对');
       for (const building of person.buildings) { add('building_supervisor',[building],null); add('building_executor',[building],null); add('warehouse_approver',[building],null); }
     }
     if (professionalLead.length || engineers.length && !buildingLead && !manager) {
-      const positionScopes = (professionalLead.includes('专业示例人员001') ? labels : professionalLead.length ? professionalLead : engineers).map(label => normalizeProfessionalScope(label.match(/电气|供配电|暖通|弱电|消防|EHS|安全|土建/giu) || []));
+      const positionScopes = (professionalLead.includes('专业主管') ? labels : professionalLead.length ? professionalLead : engineers).map(label => normalizeProfessionalScope(label.match(/电气|供配电|暖通|弱电|消防|EHS|安全|土建/giu) || []));
       const scopes = positionScopes.filter(scope => scope.length), specialty = scopes[0] || person.specialties;
       if (!specialty.length || scopes.some(scope => JSON.stringify(scope) !== JSON.stringify(specialty)) || person.specialties.some(scope => !specialty.includes(scope))) problem(person, '岗位与专业不一致或专业未明确，请核对');
       else if (professionalLead.length) for (const value of specialty) add('professional_supervisor',null,[value]);

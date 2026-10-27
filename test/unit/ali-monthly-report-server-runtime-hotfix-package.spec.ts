@@ -98,7 +98,7 @@ describe('Ali monthly report server runtime hotfix package', () => {
   it('documents a power workbook attachment and a visible-only Mei copy recipient', () => {
     expect(script).toContain('超功耗工作簿同时作为正文数据源和唯一 Excel 附件');
     expect(script).toContain(
-      'user-7e80d4ec@example.com 仅显示在邮件正文抄送名单中，不加入默认收件人和实际投递地址',
+      'mei.bingbing@vnet.com 仅显示在邮件正文抄送名单中，不加入默认收件人和实际投递地址',
     );
     expect(script).toContain(
       '旧环境变量或配置中的自定义邮箱会保留，同时自动补齐两名默认收件人',

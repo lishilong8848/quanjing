@@ -161,7 +161,7 @@ describe('RiskInspectionService', () => {
     });
     expect(mockedFetch).toHaveBeenCalledWith(httpService, {
       appToken: 'resolved-ali-app-token',
-      tableId: 'tbl528acb0145973',
+      tableId: 'tblcTPsC1Z057ic8',
       viewId: 'vewD2Rmoz3',
       tableName: '现场风险检查-Ali',
       cacheTtlMs: 300_000,
@@ -176,7 +176,7 @@ describe('RiskInspectionService', () => {
 
   test('reads the monthly quality wiki view with the exact table and view ids', async () => {
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'tbl2bcfc537c2302') {
+      if (options.tableId === 'tblNXLt8mIDaaB2e') {
         return [monthlyQualityRatingRecord('rating-1')];
       }
       return [monthlyQualityRecord('quality-1')];
@@ -206,12 +206,12 @@ describe('RiskInspectionService', () => {
     ).toEqual(
       expect.arrayContaining([
         {
-          tableId: 'tbl995a202f637ee',
+          tableId: 'tbl2ukkCV1Fjh149',
           viewId: 'vewPxuzNcN',
           forceRefresh: true,
         },
         {
-          tableId: 'tbl2bcfc537c2302',
+          tableId: 'tblNXLt8mIDaaB2e',
           viewId: 'vewtVt4UKI',
           forceRefresh: true,
         },
@@ -306,7 +306,7 @@ describe('RiskInspectionService', () => {
       axiosRef: { get: axiosGet },
     } as unknown as HttpService;
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'tbl2bcfc537c2302') {
+      if (options.tableId === 'tblNXLt8mIDaaB2e') {
         return [monthlyQualityRatingRecord('rating-1')];
       }
       return [
@@ -446,7 +446,7 @@ describe('RiskInspectionService', () => {
     });
     expect(mockedFetch).toHaveBeenCalledWith(httpService, {
       appToken: 'E8bybwfd6a3kAKsBPmCc2WA0nch',
-      tableId: 'tbl59899bfa825ba',
+      tableId: 'tblskUG3o7nbJAoJ',
       tableName: '交叉互查互纠',
       cacheTtlMs: 300_000,
       forceRefresh: false,
@@ -461,7 +461,7 @@ describe('RiskInspectionService', () => {
 
   test('reads all three cross-inspection guide tables and returns a paged catalog', async () => {
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'tblb434ca9548528') {
+      if (options.tableId === 'tblaK4n3JtsWDV3V') {
         return [
           {
             record_id: 'system-guide',
@@ -473,7 +473,7 @@ describe('RiskInspectionService', () => {
           },
         ];
       }
-      if (options.tableId === 'tbl83174d3ae2e32') {
+      if (options.tableId === 'tblZkw7z0DmCnMGl') {
         return [
           {
             record_id: 'ali-guide',
@@ -485,7 +485,7 @@ describe('RiskInspectionService', () => {
           },
         ];
       }
-      if (options.tableId === 'tbl645137e7274a5') {
+      if (options.tableId === 'tblPqIuib8UjoNMp') {
         return [
           {
             record_id: 'environment-guide',
@@ -524,14 +524,14 @@ describe('RiskInspectionService', () => {
       mockedFetch.mock.calls.map(([, options]) => options.tableId),
     ).toEqual(
       expect.arrayContaining([
-        'tblb434ca9548528',
-        'tbl83174d3ae2e32',
-        'tbl645137e7274a5',
+        'tblaK4n3JtsWDV3V',
+        'tblZkw7z0DmCnMGl',
+        'tblPqIuib8UjoNMp',
       ]),
     );
     expect(
       mockedFetch.mock.calls.filter(([, options]) =>
-        ['tblb434ca9548528', 'tbl83174d3ae2e32', 'tbl645137e7274a5'].includes(
+        ['tblaK4n3JtsWDV3V', 'tblZkw7z0DmCnMGl', 'tblPqIuib8UjoNMp'].includes(
           options.tableId,
         ),
       ),
@@ -587,7 +587,7 @@ describe('RiskInspectionService', () => {
 
   test('keeps fresh issue records when the rating source has no usable data', async () => {
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'tbl2bcfc537c2302') {
+      if (options.tableId === 'tblNXLt8mIDaaB2e') {
         throw new Error('rating source unavailable');
       }
       return [monthlyQualityRecord('quality-fresh')];
@@ -608,7 +608,7 @@ describe('RiskInspectionService', () => {
 
   test('keeps the Ali source available when cross-inspection has no usable data', async () => {
     mockedFetch.mockImplementation(async (_httpService, options) => {
-      if (options.tableId === 'tbl59899bfa825ba') {
+      if (options.tableId === 'tblskUG3o7nbJAoJ') {
         throw new Error('cross source unavailable');
       }
       return [riskRecord('ali-independent')];

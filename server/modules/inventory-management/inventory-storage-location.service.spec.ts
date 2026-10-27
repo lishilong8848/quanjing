@@ -53,7 +53,7 @@ describe('InventoryStorageLocationService', () => {
 
     expect(gateway.searchRecords).toHaveBeenCalledWith({
       appToken: 'warehouse-app',
-      tableId: 'tbla1c285ee74476',
+      tableId: 'tbl98EPSzfPIxkDG',
       tableName: '配置库房货架名称',
       filter: {
         conjunction: 'and',
@@ -83,7 +83,7 @@ describe('InventoryStorageLocationService', () => {
     ).resolves.toEqual(expect.objectContaining({ alreadyExists: true }));
     expect(gateway.searchRecords).toHaveBeenCalledWith({
       appToken: 'warehouse-app',
-      tableId: 'tbla1c285ee74476',
+      tableId: 'tbl98EPSzfPIxkDG',
       tableName: '配置库房货架名称',
     });
     expect(gateway.listRecords).not.toHaveBeenCalled();
@@ -129,7 +129,7 @@ describe('InventoryStorageLocationService', () => {
     expect(gateway.searchRecords).toHaveBeenCalledTimes(1);
     expect(gateway.searchRecords).toHaveBeenCalledWith({
       appToken: 'warehouse-app',
-      tableId: 'tbla1c285ee74476',
+      tableId: 'tbl98EPSzfPIxkDG',
       tableName: '配置库房货架名称',
       filter: buildingSearchFilter('H楼'),
     });
@@ -166,13 +166,13 @@ describe('InventoryStorageLocationService', () => {
     expect(gateway.searchRecords).toHaveBeenCalledTimes(2);
     expect(gateway.searchRecords).toHaveBeenNthCalledWith(1, {
       appToken: 'warehouse-app',
-      tableId: 'tbla1c285ee74476',
+      tableId: 'tbl98EPSzfPIxkDG',
       tableName: '配置库房货架名称',
       filter: buildingSearchFilter('H楼'),
     });
     expect(gateway.searchRecords).toHaveBeenNthCalledWith(2, {
       appToken: 'warehouse-app',
-      tableId: 'tbla1c285ee74476',
+      tableId: 'tbl98EPSzfPIxkDG',
       tableName: '配置库房货架名称',
       filter: buildingSearchFilter('A楼'),
     });
@@ -187,7 +187,7 @@ describe('InventoryStorageLocationService', () => {
     ).resolves.toEqual(expect.objectContaining({ alreadyExists: true }));
     expect(gateway.searchRecords).toHaveBeenNthCalledWith(3, {
       appToken: 'warehouse-app',
-      tableId: 'tbla1c285ee74476',
+      tableId: 'tbl98EPSzfPIxkDG',
       tableName: '配置库房货架名称',
     });
     expect(gateway.createRecord).not.toHaveBeenCalled();
@@ -223,13 +223,13 @@ describe('InventoryStorageLocationService', () => {
       expect(gateway.searchRecords).toHaveBeenCalledTimes(2);
       expect(gateway.searchRecords).toHaveBeenNthCalledWith(1, {
         appToken: 'warehouse-app',
-        tableId: 'tbla1c285ee74476',
+        tableId: 'tbl98EPSzfPIxkDG',
         tableName: '配置库房货架名称',
         filter: buildingSearchFilter('H楼'),
       });
       expect(gateway.searchRecords).toHaveBeenNthCalledWith(2, {
         appToken: 'warehouse-app',
-        tableId: 'tbla1c285ee74476',
+        tableId: 'tbl98EPSzfPIxkDG',
         tableName: '配置库房货架名称',
       });
     },
@@ -273,12 +273,12 @@ describe('InventoryStorageLocationService', () => {
     expect(gateway.searchRecords).toHaveBeenCalledTimes(3);
     expect(gateway.searchRecords).toHaveBeenNthCalledWith(2, {
       appToken: 'warehouse-app',
-      tableId: 'tbla1c285ee74476',
+      tableId: 'tbl98EPSzfPIxkDG',
       tableName: '配置库房货架名称',
     });
     expect(gateway.searchRecords).toHaveBeenNthCalledWith(3, {
       appToken: 'warehouse-app',
-      tableId: 'tbla1c285ee74476',
+      tableId: 'tbl98EPSzfPIxkDG',
       tableName: '配置库房货架名称',
       filter: buildingSearchFilter('H楼'),
     });
@@ -339,7 +339,7 @@ describe('InventoryStorageLocationService', () => {
 
     expect(gateway.createRecord).toHaveBeenCalledWith(
       'warehouse-app',
-      'tbla1c285ee74476',
+      'tbl98EPSzfPIxkDG',
       {
         楼栋: 'H楼',
         所属公司: '南通承宏',
@@ -350,7 +350,7 @@ describe('InventoryStorageLocationService', () => {
     );
     expect(gateway.getRecord).toHaveBeenCalledWith(
       'warehouse-app',
-      'tbla1c285ee74476',
+      'tbl98EPSzfPIxkDG',
       'rec-created',
       '配置库房货架名称',
     );

@@ -12,7 +12,7 @@ import { accountPermissionTemplate, pendingHandoverSelection, previewPermissionI
 import { PERSONNEL_PREVIEW_READERS, type PersonnelPreviewReader } from './personnel-preview.ports';
 
 const checks: (PersonnelPreviewCheck & { kinds: string[] })[] = [
-  {module:'leave',label:'请休假',status:'not_selected',scope:'示例人员001和经理待审批阶段',incomplete:['通知与后续执行'],kinds:['leave_supervisor','leave_manager','building_supervisor']},
+  {module:'leave',label:'请休假',status:'not_selected',scope:'主管和经理待审批阶段',incomplete:['通知与后续执行'],kinds:['leave_supervisor','leave_manager','building_supervisor']},
   {module:'overtime',label:'加班',status:'not_selected',scope:'待审批、批准后待确认',incomplete:['通知职责'],kinds:['overtime_supervisor','overtime_manager','building_supervisor']},
   {module:'inventory',label:'出入库',status:'not_selected',scope:'出库待审批阶段',incomplete:['入库','出库后续执行','库房知会'],kinds:['warehouse_approver','warehouse_notify']},
   {module:'purchase',label:'采购',status:'not_selected',scope:'采购经理批量审批',incomplete:['旧单卡审批','采购执行','签收','通知'],kinds:['purchase_manager','purchase_approver','purchase_executor','building_executor']},

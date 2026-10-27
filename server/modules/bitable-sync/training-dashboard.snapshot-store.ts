@@ -24,15 +24,16 @@ let tempFileSequence = 0;
 
 export function writeTrainingDashboardSourceSnapshot(
   sources: TrainingDashboardSources,
+  savedAt = new Date().toISOString(),
 ): Promise<void> {
   let payload: string;
   try {
-    if (!isCompleteSources(sources)) {
+    if (!isCompleteSources(sources) || !Number.isFinite(Date.parse(savedAt))) {
       throw new Error('invalid training dashboard source snapshot');
     }
     payload = JSON.stringify({
       version: SNAPSHOT_VERSION,
-      savedAt: new Date().toISOString(),
+      savedAt,
       configSignature: buildConfigSignature(),
       sources,
     } satisfies TrainingDashboardSourceSnapshot);
@@ -47,13 +48,16 @@ export function writeTrainingDashboardSourceSnapshot(
   return operation;
 }
 
-export async function readTrainingDashboardSourceSnapshot(): Promise<TrainingDashboardSources | null> {
+export async function readTrainingDashboardSourceSnapshot(): Promise<Pick<
+  TrainingDashboardSourceSnapshot,
+  'sources' | 'savedAt'
+> | null> {
   try {
     const payload = JSON.parse(
       await readFile(getSnapshotPath(), 'utf8'),
     ) as unknown;
     if (!isValidSnapshot(payload)) return null;
-    return payload.sources;
+    return { sources: payload.sources, savedAt: payload.savedAt };
   } catch {
     return null;
   }
@@ -86,12 +90,18 @@ function getCacheDirectory(): string {
   );
 }
 
-function buildConfigSignature(): string {
+function buildConfigSignature(legacyEmployeeField = false): string {
   return JSON.stringify(
     TRAINING_TABLE_CONFIGS.map((config) => ({
       key: config.key,
       tableId: getTrainingTableId(config),
-      fieldNames: normalizeFieldNames(config.fieldNames),
+      fieldNames: normalizeFieldNames(
+        legacyEmployeeField && config.key === 'activeScores'
+          ? config.fieldNames.map((name) =>
+              name === '员工 （文本）' ? '员工' : name,
+            )
+          : config.fieldNames,
+      ),
     })).sort((left, right) => left.key.localeCompare(right.key)),
   );
 }
@@ -110,7 +120,9 @@ function isValidSnapshot(
     value.version === SNAPSHOT_VERSION &&
     typeof value.savedAt === 'string' &&
     Number.isFinite(Date.parse(value.savedAt)) &&
-    value.configSignature === buildConfigSignature() &&
+    // Accept only this field rename; table IDs and every other field must match.
+    (value.configSignature === buildConfigSignature() ||
+      value.configSignature === buildConfigSignature(true)) &&
     isCompleteSources(value.sources)
   );
 }

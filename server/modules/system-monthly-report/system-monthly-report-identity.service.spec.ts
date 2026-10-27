@@ -23,8 +23,8 @@ describe('system monthly report identity service', () => {
 
     expect(identities.map((item) => item.name)).toEqual([
       '丁晓杰',
-      '示例人员020',
-      '示例人员009',
+      '马进宇',
+      '施小东',
     ]);
     expect(
       identities.every((item) => /^person_[a-f0-9]{24}$/u.test(item.id)),
@@ -36,14 +36,14 @@ describe('system monthly report identity service', () => {
     const dashboard = buildDashboard();
     const shi = service
       .list(dashboard)
-      .identities.find((item) => item.name === '示例人员009');
+      .identities.find((item) => item.name === '施小东');
     expect(shi).toBeDefined();
 
     const issued = service.select(shi!.id, dashboard, 1_000);
     expect(issued.person).toEqual(shi);
     expect(service.resolve(issued.token, dashboard, 1_001)).toMatchObject({
       kind: 'person',
-      person: { id: shi!.id, openId: 'ou_shi', name: '示例人员009' },
+      person: { id: shi!.id, openId: 'ou_shi', name: '施小东' },
       principalFingerprint: expect.stringMatching(/^smr-person:/u),
     });
     expect(
@@ -93,11 +93,11 @@ function buildDashboard(): SystemMonthlyReportDashboard {
         status: 'initial_pending',
         statusLabel: '待月报提交',
         currentOwnerRole: '可提报人员',
-        currentOwnerName: '示例人员009',
+        currentOwnerName: '施小东',
         latestAt: null,
-        submitters: [{ openId: 'ou_shi', name: '示例人员009' }],
-        leaders: [{ openId: 'ou_ma', name: '示例人员020' }],
-        leader: { openId: 'ou_ma', name: '示例人员020' },
+        submitters: [{ openId: 'ou_shi', name: '施小东' }],
+        leaders: [{ openId: 'ou_ma', name: '马进宇' }],
+        leader: { openId: 'ou_ma', name: '马进宇' },
         initialReviewer: null,
         recheckReviewer: null,
         issueSummary: { initial: '', recheck: '' },

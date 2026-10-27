@@ -39,7 +39,7 @@ import { ALARM_REVIEW_FIELD, ALARM_REVIEW_PERSON_FIELD, ALARM_REVIEW_REPLY_FIELD
 
 const SOURCE_TABLE_NAME = '今日全景告警信息';
 export const DEFAULT_ALARM_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tblD7hi70s6U6rlU';
 const SOURCE_CACHE_TTL_MS = 5 * 60 * 1000;
 const STALE_SNAPSHOT_RETRY_MS = 30 * 1000;
 const SHANGHAI_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;

@@ -32,13 +32,13 @@ describe('首次基线实际旧目录入口与范围',()=>{
   });
   it('七栋审批和知会共用一次新鲜表读取，下一次核对必须重新取源',async()=>{
     const previousEnv={...process.env};jest.useFakeTimers();
-    process.env.FEISHU_WAREHOUSE_MANAGER_APP_TOKEN='syntheticBase';process.env.FEISHU_WAREHOUSE_MANAGER_TABLE_ID='tbl83761b9d761e00b1f2';
+    process.env.FEISHU_WAREHOUSE_MANAGER_APP_TOKEN='syntheticBase';process.env.FEISHU_WAREHOUSE_MANAGER_TABLE_ID='tblSyntheticWarehouse';
     const buildings=['A楼','B楼','C楼','D楼','E楼','H楼','110站'];
     jest.spyOn(bitable,'resolveBitableAppToken').mockResolvedValue('syntheticBase');
     const read=jest.spyOn(bitable,'fetchBitableRecords').mockImplementation(async(_http,options)=>{
       expect(options).toMatchObject({forceRefresh:true,allowStale:false,strict:true});
       await new Promise(resolve=>setTimeout(resolve,1200));
-      return buildings.map((building,index)=>({record_id:`recWarehouse${index}`,fields:{楼栋:building,库房示例人员019员:[{id:`ou_approver${index}`,name:`审批${index}`}],库房管理人:[{id:`ou_notify${index}`,name:`知会${index}`} ]}}));
+      return buildings.map((building,index)=>({record_id:`recWarehouse${index}`,fields:{楼栋:building,库房责任人员:[{id:`ou_approver${index}`,name:`审批${index}`}],库房管理人:[{id:`ou_notify${index}`,name:`知会${index}`} ]}}));
     });
     const directory=snapshot(),first=directory.personnelAuthority!.duties[0];
     directory.personnelAuthority!.duties=buildings.flatMap((building,index)=>(['warehouse_approver','warehouse_notify'] as const).map(kind=>({...first,recordId:`rec${kind}${index}`,kind,buildings:[building]})));

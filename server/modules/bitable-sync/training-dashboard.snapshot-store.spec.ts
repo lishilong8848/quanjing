@@ -52,9 +52,10 @@ describe('training-dashboard.snapshot-store', () => {
 
     await writeTrainingDashboardSourceSnapshot(sources);
 
-    await expect(readTrainingDashboardSourceSnapshot()).resolves.toEqual(
+    await expect(readTrainingDashboardSourceSnapshot()).resolves.toEqual({
       sources,
-    );
+      savedAt: expect.any(String),
+    });
     const persisted = JSON.parse(
       await readFile(join(cacheDir, SNAPSHOT_FILE_NAME), 'utf8'),
     ) as Record<string, unknown>;
@@ -103,12 +104,65 @@ describe('training-dashboard.snapshot-store', () => {
     ]);
 
     const stored = await readTrainingDashboardSourceSnapshot();
-    expect([first, second]).toContainEqual(stored);
-    expect(stored && Object.keys(stored).sort()).toEqual(
+    expect([first, second]).toContainEqual(stored?.sources);
+    expect(stored && Object.keys(stored.sources).sort()).toEqual(
       TRAINING_TABLE_CONFIGS.map(({ key }) => key).sort(),
     );
     expect(
       (await readdir(cacheDir)).filter((name) => name.includes('.tmp')),
     ).toEqual([]);
+  });
+
+  it('keeps the successful sync timestamp and accepts only the exact legacy employee-field signature', async () => {
+    const sources = completeSources('legacy');
+    const savedAt = '2026-10-14T19:10:19.940Z';
+    await writeTrainingDashboardSourceSnapshot(sources, savedAt);
+    const file = join(cacheDir, SNAPSHOT_FILE_NAME);
+    const snapshot = JSON.parse(await readFile(file, 'utf8'));
+    const signature = JSON.parse(snapshot.configSignature) as Array<{
+      key: string;
+      tableId: string;
+      fieldNames: string[];
+    }>;
+    const scores = signature.find((entry) => entry.key === 'activeScores')!;
+    expect(scores.fieldNames).toContain('员工 （文本）');
+    scores.fieldNames = scores.fieldNames
+      .map((field) => (field === '员工 （文本）' ? '员工' : field))
+      .sort((a, b) => a.localeCompare(b));
+    snapshot.configSignature = JSON.stringify(signature);
+    await writeFile(file, JSON.stringify(snapshot));
+    await expect(readTrainingDashboardSourceSnapshot()).resolves.toEqual({
+      sources,
+      savedAt,
+    });
+
+    scores.tableId = 'tbl-another-source';
+    snapshot.configSignature = JSON.stringify(signature);
+    await writeFile(file, JSON.stringify(snapshot));
+    await expect(readTrainingDashboardSourceSnapshot()).resolves.toBeNull();
+  });
+
+  it('rejects a legacy signature with another field change and invalid saved timestamps', async () => {
+    await writeTrainingDashboardSourceSnapshot(completeSources('different'));
+    const file = join(cacheDir, SNAPSHOT_FILE_NAME);
+    const original = JSON.parse(await readFile(file, 'utf8'));
+    const changed = JSON.parse(JSON.stringify(original));
+    const entries = JSON.parse(changed.configSignature);
+    const scores = entries.find(
+      (entry: { key: string }) => entry.key === 'activeScores',
+    );
+    scores.fieldNames = scores.fieldNames.filter(
+      (name: string) => name !== '课程',
+    );
+    changed.configSignature = JSON.stringify(entries);
+    await writeFile(file, JSON.stringify(changed));
+    await expect(readTrainingDashboardSourceSnapshot()).resolves.toBeNull();
+
+    original.savedAt = 'not-a-date';
+    await writeFile(file, JSON.stringify(original));
+    await expect(readTrainingDashboardSourceSnapshot()).resolves.toBeNull();
+    await expect(
+      writeTrainingDashboardSourceSnapshot(completeSources('invalid'), ''),
+    ).rejects.toThrow();
   });
 });

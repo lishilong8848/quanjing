@@ -50,7 +50,7 @@ const dashboard: CampusCertificateDashboardResponse = {
     },
     {
       id: 'person-b',
-      name: '示例人员013',
+      name: '李四',
       building: 'B楼',
       position: '值班员',
       team: 'B班',
@@ -66,7 +66,7 @@ const dashboard: CampusCertificateDashboardResponse = {
     },
     {
       id: 'person-c',
-      name: '示例人员017',
+      name: '王五',
       building: 'C楼',
       position: '值班员',
       team: 'C班',
@@ -94,7 +94,7 @@ const dashboard: CampusCertificateDashboardResponse = {
     {
       id: 'event-b1',
       personId: 'person-b',
-      personName: '示例人员013',
+      personName: '李四',
       building: 'B楼',
       category: 'high-voltage',
       certificateName: '高压电工证',
@@ -103,7 +103,7 @@ const dashboard: CampusCertificateDashboardResponse = {
     {
       id: 'event-b2',
       personId: 'person-b',
-      personName: '示例人员013',
+      personName: '李四',
       building: 'B楼',
       category: 'height-work',
       certificateName: '高处作业证',
@@ -128,17 +128,17 @@ function createHttpMock(options?: {
           {
             member_id: 'ou_zhang',
             member_id_type: 'open_id',
-            name: '示例人员008',
+            name: '张三',
           },
           {
             member_id: 'ou_li',
             member_id_type: 'open_id',
-            name: '示例人员013',
+            name: '李四',
           },
           {
             member_id: 'ou_ma',
             member_id_type: 'open_id',
-            name: '示例人员020',
+            name: '马进宇',
           },
         ],
         has_more: false,
@@ -213,7 +213,7 @@ describe('CertificateDashboardNotificationService', () => {
     process.env.FEISHU_APP_ID = 'cli_test_app';
     process.env.FEISHU_APP_SECRET = 'test-secret';
     process.env.FEISHU_CERTIFICATE_REMINDER_CHAT_ID =
-      'oc_ce346352cc9230b9944a1dbf874b512b';
+      'oc_8402dd5799db4fba085334749bfbb635';
   });
 
   afterEach(() => {
@@ -236,9 +236,9 @@ describe('CertificateDashboardNotificationService', () => {
     const result = matchCertificateReminderRecipients(
       dashboard.people.filter((person) => person.expiryReminder),
       [
-        { openId: 'ou_zhang', name: '示例人员008' },
+        { openId: 'ou_zhang', name: '张三' },
         { openId: 'ou_li_1', name: ' 李 四 ' },
-        { openId: 'ou_li_2', name: '示例人员013' },
+        { openId: 'ou_li_2', name: '李四' },
       ],
       dashboard.expiryEvents,
     );
@@ -254,7 +254,7 @@ describe('CertificateDashboardNotificationService', () => {
       ],
     });
     expect(result.unmatchedNames).toEqual([]);
-    expect(result.ambiguousNames).toEqual(['示例人员013']);
+    expect(result.ambiguousNames).toEqual(['李四']);
     expect(JSON.stringify(result.publicPeople)).not.toContain('ou_');
   });
 
@@ -299,7 +299,7 @@ describe('CertificateDashboardNotificationService', () => {
 
     expect(get).toHaveBeenCalledWith(
       expect.stringContaining(
-        '/chats/oc_ce346352cc9230b9944a1dbf874b512b/members/list',
+        '/chats/oc_8402dd5799db4fba085334749bfbb635/members/list',
       ),
       expect.anything(),
     );
@@ -310,7 +310,7 @@ describe('CertificateDashboardNotificationService', () => {
       code: 0,
       data: {
         items: [
-          { member_id: 'ou_zhang', member_id_type: 'open_id', name: '示例人员008' },
+          { member_id: 'ou_zhang', member_id_type: 'open_id', name: '张三' },
         ],
         has_more: true,
         page_token: 'next-page',
@@ -321,7 +321,7 @@ describe('CertificateDashboardNotificationService', () => {
       code: 0,
       data: {
         items: [
-          { member_id: 'ou_li', member_id_type: 'open_id', name: '示例人员013' },
+          { member_id: 'ou_li', member_id_type: 'open_id', name: '李四' },
         ],
         has_more: false,
         page_token: '',
@@ -364,9 +364,9 @@ describe('CertificateDashboardNotificationService', () => {
           code: 0,
           data: {
             users: [
-              { member_id: 'ou_zhang', name: '示例人员008' },
-              { member_id: 'ou_li', name: '示例人员013' },
-              { member_id: 'ou_ma', name: '示例人员020' },
+              { member_id: 'ou_zhang', name: '张三' },
+              { member_id: 'ou_li', name: '李四' },
+              { member_id: 'ou_ma', name: '马进宇' },
             ],
             user_total: 3,
             bots: [],
@@ -395,7 +395,7 @@ describe('CertificateDashboardNotificationService', () => {
         {
           code: 0,
           data: {
-            users: [{ member_id: 'ou_zhang', name: '示例人员008' }],
+            users: [{ member_id: 'ou_zhang', name: '张三' }],
             user_total: 2,
             truncations: [{ member_id: 'ou_hidden' }],
             has_more: false,
@@ -483,7 +483,7 @@ describe('CertificateDashboardNotificationService', () => {
   });
 
   it('continues after a per-person send failure and reports a partial result', async () => {
-    const { service } = createService({ messageFailureName: '示例人员013' });
+    const { service } = createService({ messageFailureName: '李四' });
     const preview = await service.previewExpiryNotifications();
 
     const result = await service.sendExpiryNotifications({
@@ -497,13 +497,13 @@ describe('CertificateDashboardNotificationService', () => {
       failedCount: 1,
     });
     expect(result.failures).toEqual([
-      expect.objectContaining({ name: '示例人员013' }),
+      expect.objectContaining({ name: '李四' }),
     ]);
     expect(JSON.stringify(result)).not.toContain('tenant-test-token');
   });
 
   it('does not report success when Feishu omits the message id', async () => {
-    const { service } = createService({ missingMessageIdName: '示例人员013' });
+    const { service } = createService({ missingMessageIdName: '李四' });
     const preview = await service.previewExpiryNotifications();
 
     const result = await service.sendExpiryNotifications({
@@ -517,7 +517,7 @@ describe('CertificateDashboardNotificationService', () => {
       failedCount: 1,
     });
     expect(result.failures).toEqual([
-      expect.objectContaining({ name: '示例人员013' }),
+      expect.objectContaining({ name: '李四' }),
     ]);
   });
 
@@ -547,7 +547,7 @@ describe('CertificateDashboardNotificationService', () => {
     const { service, post } = createService();
 
     const result = await service.sendSelfTestSuccess(
-      '示例人员020',
+      '马进宇',
       'certificate-self-test-20260718',
     );
     const messageCalls = post.mock.calls.filter(([url]) =>
@@ -556,7 +556,7 @@ describe('CertificateDashboardNotificationService', () => {
 
     expect(result).toMatchObject({
       success: true,
-      name: '示例人员020',
+      name: '马进宇',
     });
     expect(messageCalls).toHaveLength(1);
     expect(JSON.parse(String(messageCalls[0]?.[1]?.content)).text).toContain(

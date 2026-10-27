@@ -58,7 +58,7 @@ describe('角色默认与个人独立规则', () => {
     expect(validPersonalRules([{ ...rule('wrong', 'allow', null, null), module: 'tools', actions: ['delete'] }])).toBe(false);
     expect(check([{ ...rule('invalid', 'allow', null, null), unexpected: true } as never], 'B楼', '电气')).toBe(false);
   });
-  it('清空个人规则恢复继承，并保持专业示例人员001旧范围', () => {
+  it('清空个人规则恢复继承，并保持专业主管旧范围', () => {
     expect(check([], 'B楼', '电气')).toBe(true);
     expect(check([], 'A楼', '电气')).toBe(false);
     expect(canManageProfessionalRecord({ role: 'professional_admin', specialties: ['电气'] }, '电气')).toBe(true);

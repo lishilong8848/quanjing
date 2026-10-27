@@ -10,8 +10,8 @@ export const ADDITIONAL_MEETING_SOURCES = [
   {
     source: 'training' as const,
     label: '培训分享',
-    appToken: 'PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_APP_TOKEN',
-    tableId: 'tbl00349d6675ac8',
+    appToken: 'MliKbC3fXa8PXrsndKscmxjdn1g',
+    tableId: 'tblsWOglzcniGFwu',
     viewId: 'vew5BJWcH2',
     tableName: '培训分享会',
     automaticFields: true,
@@ -19,8 +19,8 @@ export const ADDITIONAL_MEETING_SOURCES = [
   {
     source: 'ali-meeting' as const,
     label: '阿里会议',
-    appToken: 'PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_APP_TOKEN',
-    tableId: 'tbl1e190ddc55baa',
+    appToken: 'MliKbC3fXa8PXrsndKscmxjdn1g',
+    tableId: 'tblssaUZfDuqW5PQ',
     viewId: 'vewae6upeP',
     tableName: '阿里会议',
     automaticFields: true,
@@ -156,7 +156,7 @@ export function mapAdditionalMeeting(
               : [],
           )
         : [],
-    sourceUrl: `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`,
+    sourceUrl: `https://vnet.feishu.cn/base/${source.appToken}?table=${source.tableId}&view=${source.viewId}`,
     documentUrl:
       documentUrl(f[training ? '演示文档/PPT（链接）' : '会议纪要']) ||
       resources.find((r) => r.kind !== 'meeting')?.url ||

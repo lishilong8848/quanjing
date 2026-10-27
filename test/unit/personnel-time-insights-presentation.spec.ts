@@ -9,14 +9,14 @@ import {
 const people = [
   person({
     key: 'h-1',
-    name: '示例人员008',
+    name: '张三',
     building: 'H楼',
     overtimeHours: 10,
     compensatoryAvailableHours: 2,
   }),
   person({
     key: 'b-1',
-    name: '示例人员013',
+    name: '李四',
     building: 'B楼',
     position: '电气工程师',
     overtimeHours: 4,
@@ -24,7 +24,7 @@ const people = [
   }),
   person({
     key: 'a-1',
-    name: '示例人员017',
+    name: '王五',
     building: 'A楼',
     overtimeHours: 8,
     compensatoryAvailableHours: 6,
@@ -59,7 +59,7 @@ describe('personnel time insights presentation', () => {
     expect(filterPersonnelTimeInsightsPeople(people, '电气')).toEqual([
       people[1],
     ]);
-    expect(filterPersonnelTimeInsightsPeople(people, 'H楼 示例人员008')).toEqual([
+    expect(filterPersonnelTimeInsightsPeople(people, 'H楼 张三')).toEqual([
       people[0],
     ]);
   });

@@ -10,7 +10,7 @@ const sha = (data) => crypto.createHash('sha256').update(data).digest('hex');
   for (const name of files) {
     const local = fs.readFileSync(path.join(root, name));
     try {
-      const response = await fetch('http://example.com:3001/' + name, {
+      const response = await fetch('http://sm.sjhl.online:3001/' + name, {
         signal: AbortSignal.timeout(15000), redirect: 'error',
       });
       const remote = Buffer.from(await response.arrayBuffer());

@@ -75,7 +75,7 @@ for (const [index, building] of ['A楼', 'B楼', 'C楼', 'D楼', 'E楼'].entries
   roles.push({
     openId: `ou_qa_leader_${index}`,
     name: `验收${building}楼长`,
-    position: '设施运维示例人员001',
+    position: '设施运维主管',
     professions: [],
     buildings: [building],
   });
@@ -91,15 +91,15 @@ for (const [index, building] of ['A楼', 'B楼', 'C楼', 'D楼', 'E楼'].entries
 roles.push(
   {
     openId: 'ou_qa_prof_electric',
-    name: '验收电气示例人员001',
-    position: '电气示例人员001',
+    name: '验收电气主管',
+    position: '电气主管',
     professions: ['电气'],
     buildings: ['电气'],
   },
   {
     openId: 'ou_qa_prof_hvac',
-    name: '验收暖通示例人员001',
-    position: '暖通示例人员001',
+    name: '验收暖通主管',
+    position: '暖通主管',
     professions: ['暖通'],
     buildings: ['暖通'],
   },

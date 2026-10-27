@@ -11,16 +11,16 @@ describe('approved leave visibility', () => {
   it('hides pending leave and substitute staff', () => {
     expect(
       resolveApprovedLeaveVisibility({
-        rawLeaveStaff: ['示例人员008'],
-        rawSubstituteStaff: ['示例人员013'],
+        rawLeaveStaff: ['张三'],
+        rawSubstituteStaff: ['李四'],
         approvedLeaveStaff: [],
       }),
     ).toEqual({
       leaveStaff: [],
       substituteStaff: [],
       allRawLeaveApproved: false,
-      rawLeaveStaff: ['示例人员008'],
-      rawSubstituteStaff: ['示例人员013'],
+      rawLeaveStaff: ['张三'],
+      rawSubstituteStaff: ['李四'],
       hasUnapprovedLeave: true,
     });
   });
@@ -28,16 +28,16 @@ describe('approved leave visibility', () => {
   it('shows leave and substitute staff after every leave is approved', () => {
     expect(
       resolveApprovedLeaveVisibility({
-        rawLeaveStaff: ['示例人员008'],
-        rawSubstituteStaff: ['示例人员013'],
-        approvedLeaveStaff: ['示例人员008'],
+        rawLeaveStaff: ['张三'],
+        rawSubstituteStaff: ['李四'],
+        approvedLeaveStaff: ['张三'],
       }),
     ).toEqual({
-      leaveStaff: ['示例人员008'],
-      substituteStaff: ['示例人员013'],
+      leaveStaff: ['张三'],
+      substituteStaff: ['李四'],
       allRawLeaveApproved: true,
-      rawLeaveStaff: ['示例人员008'],
-      rawSubstituteStaff: ['示例人员013'],
+      rawLeaveStaff: ['张三'],
+      rawSubstituteStaff: ['李四'],
       hasUnapprovedLeave: false,
     });
   });
@@ -59,16 +59,16 @@ describe('approved leave visibility', () => {
   it('fails closed for substitutes when a record mixes approved and pending leave', () => {
     expect(
       resolveApprovedLeaveVisibility({
-        rawLeaveStaff: ['示例人员008', '示例人员017'],
-        rawSubstituteStaff: ['示例人员013', '赵六'],
-        approvedLeaveStaff: ['示例人员008'],
+        rawLeaveStaff: ['张三', '王五'],
+        rawSubstituteStaff: ['李四', '赵六'],
+        approvedLeaveStaff: ['张三'],
       }),
     ).toEqual({
-      leaveStaff: ['示例人员008'],
+      leaveStaff: ['张三'],
       substituteStaff: [],
       allRawLeaveApproved: false,
-      rawLeaveStaff: ['示例人员008', '示例人员017'],
-      rawSubstituteStaff: ['示例人员013', '赵六'],
+      rawLeaveStaff: ['张三', '王五'],
+      rawSubstituteStaff: ['李四', '赵六'],
       hasUnapprovedLeave: true,
     });
   });
@@ -95,7 +95,7 @@ describe('approved leave visibility', () => {
       resolveApprovedLeaveVisibility({
         rawLeaveStaff: ['请假甲'],
         rawSubstituteStaff: ['替班甲'],
-        approvedLeaveStaff: ['请假甲', '2026-08-10~2026-08-11', '示例人员004员'],
+        approvedLeaveStaff: ['请假甲', '2026-08-10~2026-08-11', '其他人员'],
       }),
     ).toEqual({
       leaveStaff: ['请假甲'],
@@ -144,18 +144,18 @@ describe('approved leave visibility', () => {
   it('reads the approved helper field and normalizes formula text', () => {
     expect(
       resolveApprovedLeaveVisibilityFromFields({
-        fld4xMPICY: '示例人员008、示例人员017',
-        fldZnstUS3: '示例人员013，赵六',
+        fld4xMPICY: '张三、王五',
+        fldZnstUS3: '李四，赵六',
         __systemLeaveApprovalVerified: true,
-        __systemApprovedLeaveStaff: ' 示例人员017 / 示例人员008 ',
-        __systemApprovedSubstituteStaff: '示例人员013，赵六',
+        __systemApprovedLeaveStaff: ' 王五 / 张三 ',
+        __systemApprovedSubstituteStaff: '李四，赵六',
       }),
     ).toEqual({
-      leaveStaff: ['示例人员008', '示例人员017'],
-      substituteStaff: ['示例人员013', '赵六'],
+      leaveStaff: ['张三', '王五'],
+      substituteStaff: ['李四', '赵六'],
       allRawLeaveApproved: true,
-      rawLeaveStaff: ['示例人员008', '示例人员017'],
-      rawSubstituteStaff: ['示例人员013', '赵六'],
+      rawLeaveStaff: ['张三', '王五'],
+      rawSubstituteStaff: ['李四', '赵六'],
       hasUnapprovedLeave: false,
     });
   });
@@ -163,39 +163,39 @@ describe('approved leave visibility', () => {
   it('restores the planned staff while a leave request is pending', () => {
     expect(
       resolveApprovalAwareDutyStaffFromFields({
-        '人员（文本）': '示例人员008 示例人员017',
-        '值班人员（实际）程序修改': '示例人员013 示例人员017',
-        请假人员: '示例人员008',
-        替班人员: '示例人员013',
+        '人员（文本）': '张三 王五',
+        '值班人员（实际）程序修改': '李四 王五',
+        请假人员: '张三',
+        替班人员: '李四',
         __systemLeaveApprovalVerified: true,
         __systemApprovedLeaveStaff: [],
         __systemApprovedSubstituteStaff: [],
       }).dutyStaff,
-    ).toEqual(['示例人员008', '示例人员017']);
+    ).toEqual(['张三', '王五']);
   });
 
   it('fails closed for actual substitutes on mixed approval records', () => {
     expect(
       resolveApprovalAwareDutyStaffFromFields({
-        '人员（文本）': '示例人员008 示例人员017 周六',
-        '值班人员（实际）程序修改': '示例人员013 赵六 周六',
-        请假人员: '示例人员008 示例人员017',
-        替班人员: '示例人员013 赵六',
+        '人员（文本）': '张三 王五 周六',
+        '值班人员（实际）程序修改': '李四 赵六 周六',
+        请假人员: '张三 王五',
+        替班人员: '李四 赵六',
         __systemLeaveApprovalVerified: true,
-        __systemApprovedLeaveStaff: '示例人员008',
+        __systemApprovedLeaveStaff: '张三',
         __systemApprovedSubstituteStaff: [],
       }).dutyStaff,
-    ).toEqual(['示例人员017', '周六']);
+    ).toEqual(['王五', '周六']);
   });
 
   it('removes business travelers from actual duty staff even when no leave request exists', () => {
     expect(
       resolveApprovalAwareDutyStaffFromFields({
-        '人员（文本）': '示例人员008 示例人员017',
-        '值班人员（实际）程序修改': '示例人员008 示例人员017',
-        差旅人员: '示例人员008',
+        '人员（文本）': '张三 王五',
+        '值班人员（实际）程序修改': '张三 王五',
+        差旅人员: '张三',
       }).dutyStaff,
-    ).toEqual(['示例人员017']);
+    ).toEqual(['王五']);
   });
 
   it('only treats the explicit approval-complete state as approved', () => {

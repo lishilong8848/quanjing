@@ -135,12 +135,12 @@ describe('today operations top KPI model', () => {
             {
               building: 'A',
               buildingName: 'A楼',
-              staff: ['示例人员008', '示例人员013'],
+              staff: ['张三', '李四'],
             },
             {
               building: 'B',
               buildingName: 'B楼',
-              staff: ['示例人员017'],
+              staff: ['王五'],
             },
           ],
         },
@@ -182,17 +182,17 @@ describe('today operations top KPI model', () => {
                 {
                   building: 'A',
                   buildingName: 'A楼',
-                  staff: ['示例人员008', '替班王'],
+                  staff: ['张三', '替班王'],
                   people: [
                     {
-                      name: '示例人员008',
+                      name: '张三',
                       status: 'on_duty',
                       statusLabel: '在岗',
                       onDuty: true,
                       relatedStaff: [],
                     },
                     {
-                      name: '示例人员013',
+                      name: '李四',
                       status: 'leave',
                       statusLabel: '请假',
                       onDuty: false,
@@ -203,7 +203,7 @@ describe('today operations top KPI model', () => {
                       status: 'substitute',
                       statusLabel: '替班',
                       onDuty: true,
-                      relatedStaff: ['示例人员013'],
+                      relatedStaff: ['李四'],
                     },
                   ],
                 },
@@ -217,10 +217,10 @@ describe('today operations top KPI model', () => {
                 {
                   building: 'B',
                   buildingName: 'B楼',
-                  staff: ['示例人员017'],
+                  staff: ['王五'],
                   people: [
                     {
-                      name: '示例人员017',
+                      name: '王五',
                       status: 'time_off',
                       statusLabel: '调休',
                       onDuty: false,
@@ -258,12 +258,12 @@ describe('today operations top KPI model', () => {
             {
               buildingName: 'A楼',
               people: [
-                { name: '示例人员008', statusLabel: '在岗', onDuty: true },
-                { name: '示例人员013', statusLabel: '请假', onDuty: false },
+                { name: '张三', statusLabel: '在岗', onDuty: true },
+                { name: '李四', statusLabel: '请假', onDuty: false },
                 {
                   name: '替班王',
                   statusLabel: '替班',
-                  relatedStaff: ['示例人员013'],
+                  relatedStaff: ['李四'],
                 },
               ],
             },

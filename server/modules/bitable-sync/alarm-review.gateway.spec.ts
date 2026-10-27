@@ -16,10 +16,10 @@ describe('alarm review gateway', () => {
     jest.spyOn(direct, 'invalidateBitableRecordCache').mockImplementation(() => {});
     fields = { 告警内容: '原告警', 处理状态: '已处理', 确认描述: '原确认', 恢复状态: '已恢复' };
     get = jest.fn(async (url: string) => ({ data: { code: 0, data: url.endsWith('/fields') ? {
-      items: [{ field_name: '人工复核结果', type: 3, property: { options: ['人工复核无问题', '已通知现场跟进', '告警已闭环无法处理', '自定义回复'].map(name => ({ name })) } }, { field_name: '复核示例人员019', type: 11, property: { multiple: false } }, { field_name: '复核回复', type: 1 }], has_more: false,
+      items: [{ field_name: '人工复核结果', type: 3, property: { options: ['人工复核无问题', '已通知现场跟进', '告警已闭环无法处理', '自定义回复'].map(name => ({ name })) } }, { field_name: '复核责任人', type: 11, property: { multiple: false } }, { field_name: '复核回复', type: 1 }], has_more: false,
     } : { record: { record_id: 'recABC', fields: { ...fields } } } } }));
     put = jest.fn(async (_url: string, body: { fields: Record<string, unknown> }) => {
-      fields = { ...fields, ...body.fields, 复核示例人员019: [{ id: 'user123', name: '示例人员019' }] };
+      fields = { ...fields, ...body.fields, 复核责任人: [{ id: 'user123', name: '责任人' }] };
       return { data: { code: 0, data: { record: { record_id: 'recABC', fields } } } };
     });
     gateway = new AlarmReviewGateway({ axiosRef: { get, put } } as unknown as HttpService);
@@ -29,21 +29,21 @@ describe('alarm review gateway', () => {
     const result = await gateway.syncRecord('recABC', '人工复核无问题', 'user123', 'unreviewed');
     expect(fields.确认描述).toBe('原确认');
     expect(fields.处理状态).toBe('已处理');
-    expect(Object.keys(put.mock.calls[0][1].fields)).toEqual(['人工复核结果', '复核示例人员019', '复核回复']);
+    expect(Object.keys(put.mock.calls[0][1].fields)).toEqual(['人工复核结果', '复核责任人', '复核回复']);
     expect(result.人工复核结果).toBe('人工复核无问题');
   });
   it('does not repeat the write after an indeterminate response when values already match', async () => {
-    fields.人工复核结果 = '人工复核无问题'; fields.复核示例人员019 = [{ id: 'user123', name: '示例人员019' }];
+    fields.人工复核结果 = '人工复核无问题'; fields.复核责任人 = [{ id: 'user123', name: '责任人' }];
     await gateway.syncRecord('recABC', '人工复核无问题', 'user123', 'unreviewed');
     expect(put).not.toHaveBeenCalled();
   });
   it('rejects a changed review instead of overwriting it', async () => {
-    fields.人工复核结果 = '已通知现场跟进'; fields.复核示例人员019 = [{ id: 'other', name: '其他示例人员019' }];
+    fields.人工复核结果 = '已通知现场跟进'; fields.复核责任人 = [{ id: 'other', name: '其他责任人' }];
     await expect(gateway.syncRecord('recABC', '人工复核无问题', 'user123', 'unreviewed')).rejects.toThrow('复核已变更');
     expect(put).not.toHaveBeenCalled();
   });
   it('allows an explicit update from the review displayed to the user', async () => {
-    fields.人工复核结果 = '已通知现场跟进'; fields.复核示例人员019 = [{ id: 'other', name: '其他示例人员019' }];
+    fields.人工复核结果 = '已通知现场跟进'; fields.复核责任人 = [{ id: 'other', name: '其他责任人' }];
     await gateway.syncRecord('recABC', '人工复核无问题', 'user123', reviewVersion(fields));
     expect(fields.人工复核结果).toBe('人工复核无问题');
   });
@@ -60,7 +60,7 @@ describe('alarm review gateway', () => {
   it('requires a text reply field before any record write', async () => {
     get.mockResolvedValueOnce({ data: { code: 0, data: { items: [
       { field_name: '人工复核结果', type: 3, property: { options: ['人工复核无问题', '已通知现场跟进', '告警已闭环无法处理', '自定义回复'].map(name => ({ name })) } },
-      { field_name: '复核示例人员019', type: 11, property: { multiple: false } },
+      { field_name: '复核责任人', type: 11, property: { multiple: false } },
       { field_name: '复核回复', type: 3 },
     ], has_more: false } } });
     await expect(gateway.preflight()).rejects.toThrow('字段未就绪');

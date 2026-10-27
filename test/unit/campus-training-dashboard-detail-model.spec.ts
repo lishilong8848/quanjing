@@ -67,7 +67,7 @@ function dashboardFixture() {
     participants: [
       {
         id: 'participant-a',
-        name: '示例人员008',
+        name: '张三',
         building: 'A楼',
         totalCourses: 4,
         passedCourses: 1,
@@ -108,7 +108,7 @@ function dashboardFixture() {
       },
       {
         id: 'participant-b',
-        name: '示例人员013',
+        name: '李四',
         building: 'B楼',
         totalCourses: 1,
         passedCourses: 1,
@@ -130,7 +130,7 @@ function dashboardFixture() {
     newHires: [
       {
         id: 'new-hire-a',
-        name: '示例人员017',
+        name: '王五',
         building: 'A楼',
         joinedAt: '2026-07-03',
         assessmentDueAt: '2026-09-30',
@@ -288,8 +288,8 @@ describe('campus training dashboard detail model', () => {
     const expectations = [
       ['annualCompletedCourses', '消防制度'],
       ['monthlyPlannedCourses', 'UPS操作'],
-      ['monthlyParticipants', '示例人员008'],
-      ['monthlyNewHires', '示例人员017'],
+      ['monthlyParticipants', '张三'],
+      ['monthlyNewHires', '王五'],
       ['historicalSharingSessions', '六月技术交流'],
       ['monthlyPlannedSharingSessions', '七月故障复盘'],
     ] as const;
@@ -348,10 +348,10 @@ describe('campus training dashboard detail model', () => {
     ]);
     expect(participationDetail.table?.rows).toEqual(
       expect.arrayContaining([
-        expect.arrayContaining(['示例人员008', '通过']),
-        expect.arrayContaining(['示例人员008', '未通过']),
-        expect.arrayContaining(['示例人员008', '待考核']),
-        expect.arrayContaining(['示例人员008', '未签到']),
+        expect.arrayContaining(['张三', '通过']),
+        expect.arrayContaining(['张三', '未通过']),
+        expect.arrayContaining(['张三', '待考核']),
+        expect.arrayContaining(['张三', '未签到']),
       ]),
     );
     expect(participationDetail.thresholdNote).toContain('考核课程达标率');
@@ -407,7 +407,7 @@ describe('campus training dashboard detail model', () => {
 
     expect(
       detailText(buildNewHireDetail(dashboard.details.newHires[0])),
-    ).toContain('示例人员017');
+    ).toContain('王五');
     const sharingDetail = buildSharingDetail(dashboard);
     expect(sharingDetail.description).toContain(
       '截至 2026-07 已开展分享会明细',
@@ -430,9 +430,9 @@ describe('campus training dashboard detail model', () => {
       dashboard,
     );
 
-    expect(detailText(metricDetail)).toContain('示例人员017');
+    expect(detailText(metricDetail)).toContain('王五');
     expect(detailText(metricDetail)).not.toContain('周八');
-    expect(detailText(parentListDetail)).toContain('示例人员017');
+    expect(detailText(parentListDetail)).toContain('王五');
     expect(detailText(parentListDetail)).toContain('周八');
     expect(metricDetail.sourceNote).toContain('本月新人培训');
     expect(metricDetail.sourceNote).not.toContain('本年度已培训课程');

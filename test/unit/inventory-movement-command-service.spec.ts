@@ -123,7 +123,7 @@ describe('InventoryMovementCommandService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.FEISHU_WAREHOUSE_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/QmxAbhXNJaA9YKsbfZyclzhGnSd';
     delete process.env.FEISHU_WAREHOUSE_APP_TOKEN;
     process.env.FEISHU_WAREHOUSE_INVENTORY_TABLE_ID = TABLES.inventory;
     delete process.env.FEISHU_WAREHOUSE_INVENTORY_LOCATION_FIELD_NAME;

@@ -9,7 +9,7 @@ const target = [
   '--base-token',
   'QmxAbhXNJaA9YKsbfZyclzhGnSd',
   '--table-id',
-  'tbl83d66e680c2bd',
+  'tblAoZ4ngXT22mVU',
 ];
 const apply = process.argv.includes('--apply');
 function call(command, args = []) {

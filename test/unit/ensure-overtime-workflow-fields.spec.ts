@@ -9,7 +9,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 
-const FIXED_TABLE_ID = 'tblf1bbd02a2b049';
+const FIXED_TABLE_ID = 'tblpCzmTT3EapaUY';
 const REQUIRED_FIELDS = [
   {
     name: '加班工作流状态',
@@ -160,7 +160,7 @@ describe('overtime workflow Base field migration', () => {
   it('fails closed when the primary runtime table override targets another table', () => {
     const result = run(
       ['--dry-run'],
-      cliEnvironment({ FEISHU_OVERTIME_TABLE_ID: 'tbl32ce57e0b02a3d98' }),
+      cliEnvironment({ FEISHU_OVERTIME_TABLE_ID: 'tblUnexpectedTarget' }),
     );
 
     expect(result.status).not.toBe(0);
@@ -547,7 +547,7 @@ function cliEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     FEISHU_APP_ID: TEST_FEISHU_APP_ID,
     FEISHU_APP_SECRET: TEST_FEISHU_APP_SECRET,
     FEISHU_LEAVE_SUBSTITUTE_SOURCE_URL:
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/testOvertimeWikiToken?table=tblpCzmTT3EapaUY',
     FEISHU_LEAVE_SUBSTITUTE_TABLE_ID: FIXED_TABLE_ID,
     ...overrides,
   });

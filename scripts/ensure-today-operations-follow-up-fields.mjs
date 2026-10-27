@@ -6,8 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { delimiter, dirname, join, relative } from 'node:path';
 
 const SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
-const FIXED_TABLE_ID = 'tblf929a5033c904';
+  'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblCGU1ry3tanQ20&view=vewX0MdewN';
+const FIXED_TABLE_ID = 'tblCGU1ry3tanQ20';
 const requiredFields = [
   field('日期', 5, {
     type: 'datetime',

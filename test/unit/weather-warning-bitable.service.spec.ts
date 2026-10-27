@@ -50,8 +50,8 @@ function buildRuntimeEnv(
 ): NodeJS.ProcessEnv {
   return {
     FEISHU_WEATHER_WARNING_SOURCE_URL:
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-    FEISHU_WEATHER_WARNING_CHECK_TABLE_ID: 'tblaf0c9347a537',
+      'https://vnet.feishu.cn/base/appWeatherWarning?table=tblRuleFallback',
+    FEISHU_WEATHER_WARNING_CHECK_TABLE_ID: 'tblCheckSummary',
     FEISHU_WEATHER_WARNING_RULE_TYPE_FIELD: '预警类型',
     FEISHU_WEATHER_WARNING_RULE_COLOR_FIELD: '预警颜色',
     FEISHU_WEATHER_WARNING_RULE_GUARD_FIELD: '重保戒备等级',
@@ -107,21 +107,21 @@ describe('weather warning runtime config and Bitable service', () => {
     const config = loadWeatherWarningRuntimeConfig(
       buildRuntimeEnv({
         FEISHU_WEATHER_WARNING_TEST_OPEN_ID: 'ou_weather_test',
-        FEISHU_WEATHER_WARNING_TEST_RECIPIENT_NAME: '示例人员020',
+        FEISHU_WEATHER_WARNING_TEST_RECIPIENT_NAME: '马进宇',
       }),
     );
 
     expect(config).toMatchObject({
       appToken: 'appWeatherWarning',
       wikiToken: '',
-      ruleTableId: 'tbl2d3be06d0847',
-      checkTableId: 'tblaf0c9347a537',
+      ruleTableId: 'tblRuleFallback',
+      checkTableId: 'tblCheckSummary',
       ruleFields: {
         type: '预警类型',
         color: '预警颜色',
         guard: '重保戒备等级',
       },
-      testRecipient: { openId: 'ou_weather_test', displayName: '示例人员020' },
+      testRecipient: { openId: 'ou_weather_test', displayName: '马进宇' },
     });
 
     expect(
@@ -133,8 +133,8 @@ describe('weather warning runtime config and Bitable service', () => {
     expect(loadWeatherWarningRuntimeConfig({})).toMatchObject({
       appToken: 'Tmn8bjGnpasbLTskafbcRijvnKe',
       wikiToken: '',
-      ruleTableId: 'tbl249bff422a711',
-      checkTableId: 'tblc4742cfc8398f',
+      ruleTableId: 'tbldeLoJJe6cPiHy',
+      checkTableId: 'tblVFWuUbjo4GHOY',
       ruleFields: {
         type: '预警类型',
         color: '预警等级',
@@ -234,7 +234,7 @@ describe('weather warning runtime config and Bitable service', () => {
       expect.anything(),
       expect.objectContaining({
         appToken: 'appResolved',
-        tableId: 'tbl2d3be06d0847',
+        tableId: 'tblRuleFallback',
         cacheTtlMs: 10 * 60 * 1000,
         forceRefresh: true,
         allowStale: false,
@@ -281,7 +281,7 @@ describe('weather warning runtime config and Bitable service', () => {
     expect(fetchBitableRecords).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        tableId: 'tbl2d3be06d0847',
+        tableId: 'tblRuleFallback',
         fieldNames: ['预警类型', '预警等级', '重保类型'],
       }),
     );
@@ -350,7 +350,7 @@ describe('weather warning runtime config and Bitable service', () => {
     expect(fetchBitableRecords).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        tableId: 'tblaf0c9347a537',
+        tableId: 'tblCheckSummary',
         cacheTtlMs: 60 * 1000,
         forceRefresh: true,
         allowStale: false,

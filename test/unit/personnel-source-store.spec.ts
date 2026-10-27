@@ -42,7 +42,7 @@ describe('正式来源随原权限配置持久化', () => {
   it('未被正式来源接管的其他职责仍可按原规则保存', async () => {
     await store.mutate(0, 'seed', 'seed', state => { (state as unknown as { personnelSource: unknown }).personnelSource = source(); });
     const service = new AccessConfigurationService();
-    await expect(service.saveCardRule({ clientMutationId: randomUUID(), expectedRevision: 1, code: 'warehouse_notify', building: 'A楼', members: [{ openId: 'ou_other', name: '合成示例人员004员' }] },
+    await expect(service.saveCardRule({ clientMutationId: randomUUID(), expectedRevision: 1, code: 'warehouse_notify', building: 'A楼', members: [{ openId: 'ou_other', name: '合成其他人员' }] },
       { role: 'admin', purchaseBuilding: null })).resolves.toMatchObject({ revision: 2, cardRules: [{ code: 'warehouse_notify', building: 'A楼' }] });
   });
 });

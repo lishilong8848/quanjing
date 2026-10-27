@@ -52,7 +52,7 @@ describe('monthly schedule employee onboarding dialog', () => {
     expect(source).toContain('证件照 <RequiredMark />');
     expect(source).toContain('蓝底半身照');
     expect(source).toContain(
-      '/assets/employee-onboarding-id-photo-example.svg',
+      '/assets/employee-onboarding-blue-id-photo-example.jpg',
     );
     expect(source).not.toContain('用工性质');
     expect(source).not.toContain('证书附件');

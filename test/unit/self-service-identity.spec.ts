@@ -15,7 +15,7 @@ describe('加班与变更使用登录本人', () => {
     const controller = Object.assign(Object.create(DutyScheduleController.prototype), {
       dutyScheduleService: { createOvertimeRequest: create }, overtimeWorkflowService: { isEnabled: () => false },
     });
-    await expect(controller.createOvertimeRequest(JSON.stringify({ staffName: '示例人员004员' }), [], identityRequest(principal)))
+    await expect(controller.createOvertimeRequest(JSON.stringify({ staffName: '其他人员' }), [], identityRequest(principal)))
       .rejects.toThrow('当前登录本人');
     expect(create).not.toHaveBeenCalled();
   });
@@ -39,7 +39,7 @@ describe('加班与变更使用登录本人', () => {
     const controller = Object.assign(Object.create(DutyScheduleController.prototype), {
       dutyScheduleService: { createChangeRequest: create }, changeAttachmentStorage: { stageFromDisk: stage },
     });
-    await expect(controller.createChangeRequest(undefined, { submitterName: '示例人员004员' }, [], identityRequest(principal)))
+    await expect(controller.createChangeRequest(undefined, { submitterName: '其他人员' }, [], identityRequest(principal)))
       .rejects.toThrow('当前登录本人');
     expect(create).not.toHaveBeenCalled();
     expect(stage).not.toHaveBeenCalled();

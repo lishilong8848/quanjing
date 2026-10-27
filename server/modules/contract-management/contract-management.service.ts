@@ -28,7 +28,7 @@ const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const DEFAULT_CONTRACT_COS_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_CONTRACT_COS_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SiW9wuy9DiIsykkTkNUcM0HfnSb?table=tblQehMrGf4zIfnt&view=vewmu8EPpy';
 const DEFAULT_WIKI_TOKEN = 'SiW9wuy9DiIsykkTkNUcM0HfnSb';
 
 const TABLES: Record<
@@ -38,22 +38,22 @@ const TABLES: Record<
   framework: {
     name: '00-框架合同信息',
     env: 'FEISHU_CONTRACT_FRAMEWORK_TABLE_ID',
-    defaultId: 'tbl033c8ec63ff1b',
+    defaultId: 'tblQehMrGf4zIfnt',
   },
   contracts: {
     name: '01-执行合同信息',
     env: 'FEISHU_CONTRACT_EXECUTION_TABLE_ID',
-    defaultId: 'tbl1171c5349e996',
+    defaultId: 'tblWfHs0iwQh8lHj',
   },
   suppliers: {
     name: '02-供应商名录',
     env: 'FEISHU_CONTRACT_SUPPLIER_TABLE_ID',
-    defaultId: 'tblb6b368b0d6407',
+    defaultId: 'tblPf6yV4cxsWZTl',
   },
   payments: {
     name: '03-付款计划',
     env: 'FEISHU_CONTRACT_PAYMENT_TABLE_ID',
-    defaultId: 'tbl277d0db09de0f',
+    defaultId: 'tblYK1vdLAkpoaIC',
   },
 };
 

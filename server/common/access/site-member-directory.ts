@@ -38,6 +38,6 @@ export function buildSiteMemberDirectory(records: readonly BitableRecordItem[], 
   if (invalidEngineers) warnings.push(`${invalidEngineers} 名工程师的岗位、专业或楼栋未明确，保留现有权限，请核对人员标签。`);
   if (duplicatedPeople) warnings.push(`${duplicatedPeople} 名人员的飞书账号关联重复，请核对；姓名账号权限正常同步。`);
   if (inconsistentIdentity) warnings.push(`${inconsistentIdentity} 条人员记录的飞书账号关联不一致，请核对；姓名账号权限正常同步。`);
-  if (missingName) warnings.push(`${missingName} 条记录未填写有效姓名，已跳过；示例人员004员权限正常同步。`);
+  if (missingName) warnings.push(`${missingName} 条记录未填写有效姓名，已跳过；其他人员权限正常同步。`);
   return { members: members.map(({ openId, ...person }) => openId && !blockedOpenIds.has(openId) ? { ...person, openId } : person), blockedOpenIds, warnings, authorityPeople: authority.people, authorityProblems: authority.problems };
 }

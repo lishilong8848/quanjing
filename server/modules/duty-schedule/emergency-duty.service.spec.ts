@@ -63,7 +63,7 @@ const mockedResolveBitableAppToken = jest.mocked(resolveBitableAppToken);
 
 const ACTIVE_PERSON = {
   recordId: 'rec-person-active',
-  name: '示例人员008',
+  name: '张三',
   openId: 'ou_active_private',
   employeeNo: 'N001',
   position: '设施运维经理',
@@ -72,7 +72,7 @@ const ACTIVE_PERSON = {
 };
 const SECOND_ACTIVE_PERSON = {
   recordId: 'rec-person-second',
-  name: '示例人员013',
+  name: '李四',
   openId: 'ou_second_private',
   employeeNo: 'N002',
   position: '设施运维工程师',
@@ -260,7 +260,7 @@ describe('EmergencyDutyService', () => {
     await service.getSchedules(TARGET_DATE, TARGET_DATE);
 
     expect(mockedReadLatestSnapshot).toHaveBeenCalledWith({
-      tableId: 'tbldaccbff3eb177',
+      tableId: 'tblnGg3s3lgn6Plq',
       viewId: 'vewgzik2Nv',
       tableName: '应急值班',
       fieldNames: ['值守机楼', '值班人员', '排班日期'],
@@ -463,7 +463,7 @@ describe('EmergencyDutyService', () => {
     });
     expect(mockedInvalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-emergency-actual',
-      tableId: 'tbldaccbff3eb177',
+      tableId: 'tblnGg3s3lgn6Plq',
     });
   });
 
@@ -1292,7 +1292,7 @@ describe('EmergencyDutyService', () => {
 
     expect(result.syncStatus).toBe('synced');
     expect(mockedReadLatestSnapshot).toHaveBeenCalledWith({
-      tableId: 'tbldaccbff3eb177',
+      tableId: 'tblnGg3s3lgn6Plq',
       viewId: 'vewgzik2Nv',
       tableName: '应急值班',
       fieldNames: ['值守机楼', '值班人员', '排班日期'],

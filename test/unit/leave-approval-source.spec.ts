@@ -136,8 +136,8 @@ describe('leave approval source', () => {
       requests: [
         {
           recordId: 'rec-leave',
-          leaveStaff: ['示例人员012'],
-          substituteStaff: ['示例人员008', '示例人员013'],
+          leaveStaff: ['曹雷'],
+          substituteStaff: ['张三', '李四'],
           startAt: '2026-08-26T09:00',
           endAt: '2026-08-28T09:00',
           building: '',
@@ -149,13 +149,13 @@ describe('leave approval source', () => {
             {
               shiftKey: '2026-08-26T09:00__2026-08-26T18:00',
               scheduleRecordIds: ['rec-day'],
-              substituteStaff: ['示例人员008'],
+              substituteStaff: ['张三'],
               revision: 1,
             },
             {
               shiftKey: '2026-08-27T18:00__2026-08-28T09:00',
               scheduleRecordIds: ['rec-night'],
-              substituteStaff: ['示例人员013'],
+              substituteStaff: ['李四'],
               revision: 1,
             },
           ],
@@ -165,7 +165,7 @@ describe('leave approval source', () => {
     const records = ['rec-day', 'rec-night'].map((recordId) => ({
       record_id: recordId,
       fields: {
-        fld4xMPICY: '示例人员012',
+        fld4xMPICY: '曹雷',
         fldZSaDbGf: Date.parse('2026-08-26T00:00:00+08:00'),
         fldnP4gXMn: 'A楼',
         fldE9Gwnk7: '一班',
@@ -176,10 +176,10 @@ describe('leave approval source', () => {
     const enriched = enrichScheduleRecordsWithLeaveApproval(records, snapshot);
     expect(
       enriched[0].fields?.[SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD],
-    ).toEqual(['示例人员008']);
+    ).toEqual(['张三']);
     expect(
       enriched[1].fields?.[SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD],
-    ).toEqual(['示例人员013']);
+    ).toEqual(['李四']);
   });
 
   it('keeps each leave applicant paired with hours and the exact substitute', () => {
@@ -188,10 +188,10 @@ describe('leave approval source', () => {
         record_id: 'leave-zhang-san',
         fields: {
           系统审批完成标记: '审批结束',
-          '休假人员（文本）': '示例人员008',
+          '休假人员（文本）': '张三',
           休假开始时间: Date.parse('2026-08-10T09:00:00+08:00'),
           休假结束时间: Date.parse('2026-08-10T14:00:00+08:00'),
-          '替班人员（填姓名）': '示例人员017',
+          '替班人员（填姓名）': '王五',
           系统影响排班记录ID: 'schedule-1',
         },
       },
@@ -199,7 +199,7 @@ describe('leave approval source', () => {
         record_id: 'leave-li-si',
         fields: {
           系统审批完成标记: '审批结束',
-          '休假人员（文本）': '示例人员013',
+          '休假人员（文本）': '李四',
           休假开始时间: Date.parse('2026-08-10T09:00:00+08:00'),
           休假结束时间: Date.parse('2026-08-10T18:00:00+08:00'),
           '替班人员（填姓名）': '赵六',
@@ -211,7 +211,7 @@ describe('leave approval source', () => {
       ...scheduleRecord,
       fields: {
         ...scheduleRecord.fields,
-        fld4xMPICY: '示例人员008、示例人员013',
+        fld4xMPICY: '张三、李四',
       },
     };
 
@@ -223,15 +223,15 @@ describe('leave approval source', () => {
     expect(enriched.fields?.[SYSTEM_APPROVED_LEAVE_ASSIGNMENTS_FIELD]).toEqual([
       {
         requestRecordId: 'leave-zhang-san',
-        leaveStaffName: '示例人员008',
-        substituteStaff: ['示例人员017'],
+        leaveStaffName: '张三',
+        substituteStaff: ['王五'],
         startAt: '2026-08-10T09:00',
         endAt: '2026-08-10T14:00',
         leaveHours: 4,
       },
       {
         requestRecordId: 'leave-li-si',
-        leaveStaffName: '示例人员013',
+        leaveStaffName: '李四',
         substituteStaff: ['赵六'],
         startAt: '2026-08-10T09:00',
         endAt: '2026-08-10T18:00',
@@ -287,7 +287,7 @@ describe('leave approval source', () => {
         fields: {
           系统审批完成标记: '审批结束',
           审批来源: '程序卡片',
-          请假工作流状态: '待示例人员001审批',
+          请假工作流状态: '待主管审批',
           '休假人员（文本）': '请假甲',
           休假开始时间: Date.parse('2026-08-10T09:00:00+08:00'),
           休假结束时间: Date.parse('2026-08-10T18:00:00+08:00'),

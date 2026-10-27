@@ -87,7 +87,7 @@ describe('construction management helpers', () => {
       [
         '张鹏',
         '411024199110154959',
-        '13800004492',
+        '17550110588',
         '浙江省邮电工程建设有限公司',
         'HA楼',
         '2026-06-08 至 2026-06-14',
@@ -111,7 +111,7 @@ describe('construction management helpers', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       name: '张鹏',
-      phone: '13800004492',
+      phone: '17550110588',
       certificateNo: '411024199110154959',
       company: '浙江省邮电工程建设有限公司',
       authorizationScope: 'HA楼',
@@ -127,7 +127,7 @@ describe('construction management helpers', () => {
       [
         '周淑娟',
         '320611197206091525',
-        '13800007382',
+        '13773667895',
         '浙江邮电',
         'HA楼',
         '2026-06-08 至 2026-06-14',
@@ -432,7 +432,7 @@ describe('construction management helpers', () => {
       '缴纳保证金（元）': 3000,
     });
     expect(fields).not.toHaveProperty('施工随工人员（专业工程师）');
-    expect(fields).not.toHaveProperty('示例人员001审批');
+    expect(fields).not.toHaveProperty('主管审批');
     expect(fields).not.toHaveProperty('EHS审批');
     expect(fields).not.toHaveProperty('施工编码');
   });
@@ -614,7 +614,7 @@ describe('construction management helpers', () => {
       dailyCrewMembers: JSON.stringify([
         {
           recordId: 'crew-1',
-          name: '示例人员008',
+          name: '张三',
           certificateSummary: '高处作业证，有效期至2026-06-30',
         },
       ]),
@@ -623,7 +623,7 @@ describe('construction management helpers', () => {
     expect(normalized.dailyPersonnelCheckParticipants).toEqual([
       {
         recordId: 'crew-1',
-        name: '示例人员008',
+        name: '张三',
         certificateSummary: '高处作业证，有效期至2026-06-30',
         complianceStatus: null,
         issueSummary: null,
@@ -642,7 +642,7 @@ describe('construction management helpers', () => {
       dailyCrewMembers: JSON.stringify([
         {
           recordId: 'crew-1',
-          name: '示例人员008',
+          name: '张三',
           certificateSummary: '高处作业证',
         },
       ]),
@@ -662,7 +662,7 @@ describe('construction management helpers', () => {
       dailyCrewMembers: JSON.stringify([
         {
           recordId: 'crew-1',
-          name: '示例人员008',
+          name: '张三',
           certificateSummary: '低压电工证',
         },
       ]),
@@ -682,7 +682,7 @@ describe('construction management helpers', () => {
       dailyCrewMembers: JSON.stringify([
         {
           recordId: 'crew-1',
-          name: '示例人员008',
+          name: '张三',
           certificateSummary: '高压电工证',
         },
       ]),
@@ -1488,8 +1488,8 @@ describe('construction management helpers', () => {
               '<tr><td>作业项目</td><td>EA118-A楼挖潜机房施工</td></tr>',
               '<tr><td>作业日期</td><td>2026年06月23日09时00分 至 2026年07月31日18时00分</td></tr>',
               '<tr><td>作业单位</td><td></td></tr>',
-              '<tr><td>作业方负责人</td><td>示例人员009</td><td>联系电话</td><td>333</td><td>施工人数</td><td>5</td></tr>',
-              '<tr><td>现场示例人员019</td><td>示例人员010</td><td>联系电话</td><td>333</td></tr>',
+              '<tr><td>作业方负责人</td><td>施小东</td><td>联系电话</td><td>333</td><td>施工人数</td><td>5</td></tr>',
+              '<tr><td>现场责任人</td><td>明志勇</td><td>联系电话</td><td>333</td></tr>',
               '<tr><td>作业人员身份证号及资质证书（可另贴附件）：</td><td>1. 范柏各    320382198605102838    低压电工证 2. 潘仕学    52020319760302433X 3. 邓小利    500234199710113215</td></tr>',
               '<tr><td>作业地点</td><td>EA118 园区 A楼 楼栋 2F-3F 楼层 其他 房间或区域</td></tr>',
               '<tr><td>作业内容描述</td><td>EA118-A楼挖潜机房施工</td></tr>',
@@ -2736,12 +2736,12 @@ describe('construction management helpers', () => {
       constructionCode: 'SG260505-1031',
       workContent: 'EA118-A楼挖潜机房施工',
       building: 'A楼',
-      checker: '示例人员011',
+      checker: '曹毅',
       checkDate: new Date('2026-05-29T09:00:00+08:00'),
       participants: [
         {
           recordId: 'crew-1',
-          name: '示例人员008',
+          name: '张三',
           certificateSummary: '高处作业证，有效期至2026-06-30',
           complianceStatus: '正常',
           issueSummary: null,
@@ -2753,26 +2753,26 @@ describe('construction management helpers', () => {
       constructionCode: 'SG260505-1031',
       workContent: 'EA118-A楼挖潜机房施工',
       building: 'A楼',
-      checker: '示例人员011',
+      checker: '曹毅',
       checkDate: new Date('2026-05-29T15:00:00+08:00'),
       participants: [
         {
           recordId: 'crew-1',
-          name: '示例人员008',
+          name: '张三',
           certificateSummary: '高处作业证，有效期至2026-06-30',
           complianceStatus: '正常',
           issueSummary: null,
         },
         {
           recordId: 'crew-2',
-          name: '示例人员013',
+          name: '李四',
           certificateSummary: '焊接与热切割证，有效期至2026-07-01',
           complianceStatus: '正常',
           issueSummary: null,
         },
         {
           recordId: 'crew-3',
-          name: '示例人员017',
+          name: '王五',
           certificateSummary: null,
           complianceStatus: null,
           issueSummary: null,
@@ -2795,9 +2795,9 @@ describe('construction management helpers', () => {
       '2026-05-29',
     ]);
     expect(rows.map((row) => row['人员姓名'])).toEqual([
-      '示例人员008',
-      '示例人员013',
-      '示例人员017',
+      '张三',
+      '李四',
+      '王五',
     ]);
     expect(rows[0]['证件摘要']).toContain('高处作业证');
     expect(rows[1]['人员记录ID']).toBe('crew-2');
@@ -2941,9 +2941,9 @@ describe('construction management helpers', () => {
     const result = buildConstructionManagementView({
       generatedAt: '2026-05-23T10:00:00.000Z',
       overviewSourceUrl:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/appToken?table=tblWHIbp172MNjM1&view=vewh3W0Ug0',
       followupSourceUrl:
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/appToken?table=tbl4exCKodfhYCXQ&view=vewiNyHY03',
       referenceDate: new Date('2026-05-23T00:00:00+08:00'),
       overviewRecords: [
         {
@@ -2957,7 +2957,7 @@ describe('construction management helpers', () => {
             楼栋: ['A楼'],
             作业类型: ['一般作业'],
             '施工方（内部/施工单位）': ['外部'],
-            示例人员001审批: ['通过'],
+            主管审批: ['通过'],
             是否已知会EHS工程师: true,
             EHS确认: ['通过'],
             证件审核结果: '通过',
@@ -2982,7 +2982,7 @@ describe('construction management helpers', () => {
           fields: {
             施工编号: 'SG260505-1029',
             姓名: '张鹏',
-            手机号: '13800004492',
+            手机号: '17550110588',
             授权开始日期: '2026-05-01',
             授权结束日期: '2026-06-30',
             授权状态: '已过期',
@@ -2999,7 +2999,7 @@ describe('construction management helpers', () => {
             跟进记录: 'SG260505-1029-A楼挖潜机房施工',
             施工总览: [],
             施工编号: 'SG260505-1029',
-            跟进人员: [{ id: 'ou_follow_1', name: '示例人员008伟' }],
+            跟进人员: [{ id: 'ou_follow_1', name: '张三伟' }],
             作业内容: 'A楼挖潜机房施工',
             作业类型: ['一般作业'],
             当日作业类型: ['动火作业'],
@@ -3035,7 +3035,7 @@ describe('construction management helpers', () => {
       '结论：需人工复核、有效期至：未识别、问题：票面信息需人工核验',
     ]);
     expect(result.items[0].latestFollowup?.followupStaffMembers).toEqual([
-      { id: 'ou_follow_1', name: '示例人员008伟' },
+      { id: 'ou_follow_1', name: '张三伟' },
     ]);
     expect(result.items[0].approval).toMatchObject({
       supervisor: '通过',
@@ -3054,7 +3054,7 @@ describe('construction management helpers', () => {
     expect(result.items[0].crewMembers[0]).toMatchObject({
       recordId: 'recCrew1',
       name: '张鹏',
-      phone: '13800004492',
+      phone: '17550110588',
       authorizationStartDate: '2026-05-01T00:00:00.000Z',
       authorizationEndDate: '2026-06-30T00:00:00.000Z',
       authorizationStatus: '授权有效',
@@ -3073,7 +3073,7 @@ describe('construction management helpers', () => {
       count: 1,
       feedback: '结论：需人工复核、有效期至：未识别、问题：票面信息需人工核验',
     });
-    expect(result.followups[0].followupStaff).toBe('示例人员008伟');
+    expect(result.followups[0].followupStaff).toBe('张三伟');
     expect(result.followups[0].workTypes).toEqual(['动火作业']);
     expect(result.followups[0]).toMatchObject({
       dailyWorkTypesConfirmed: true,
@@ -3226,7 +3226,7 @@ describe('construction management helpers', () => {
           record_id: 'recCrewExpired',
           fields: {
             施工编号: 'SG260605-1035',
-            姓名: '示例人员013',
+            姓名: '李四',
             授权状态: '已过期',
             作业证书: ['高处作业证'],
           },
@@ -3235,7 +3235,7 @@ describe('construction management helpers', () => {
           record_id: 'recCrewFuture',
           fields: {
             施工编号: 'SG260605-1035',
-            姓名: '示例人员017',
+            姓名: '王五',
             授权开始日期: '2026-06-10',
             授权结束日期: '2026-06-30',
             作业证书: ['动火作业证'],
@@ -3255,13 +3255,13 @@ describe('construction management helpers', () => {
         }),
         expect.objectContaining({
           recordId: 'recCrewExpired',
-          name: '示例人员013',
+          name: '李四',
           authorizationStatus: '已过期',
           certificateSummary: '高处作业证',
         }),
         expect.objectContaining({
           recordId: 'recCrewFuture',
-          name: '示例人员017',
+          name: '王五',
           authorizationStatus: '未开始',
           certificateSummary: '动火作业证',
         }),
@@ -3322,7 +3322,7 @@ describe('construction management helpers', () => {
             楼栋: ['A楼'],
             作业类型: ['一般作业'],
             '施工方（内部/施工单位）': ['外部'],
-            示例人员001审批: ['通过'],
+            主管审批: ['通过'],
             是否已知会EHS工程师: true,
             EHS确认: ['通过'],
             证件审核结果: '通过',
@@ -3330,7 +3330,7 @@ describe('construction management helpers', () => {
             '缴纳保证金（元）': 20000,
             保证金审批情况: { text: '✔️', type: 'text' },
             同步机房经理: true,
-            园区负责人: [{ id: 'ou_park_1', name: '示例人员014' }],
+            园区负责人: [{ id: 'ou_park_1', name: '梅冰冰' }],
           },
         },
       ],
@@ -3359,7 +3359,7 @@ describe('construction management helpers', () => {
             楼栋: ['A楼'],
             作业类型: ['一般作业'],
             '施工方（内部/施工单位）': ['外部'],
-            示例人员001审批: ['通过'],
+            主管审批: ['通过'],
             是否已知会EHS工程师: true,
           },
         },
@@ -3400,7 +3400,7 @@ describe('construction management helpers', () => {
             作业类型: ['一般作业'],
             计划开始时间: 1780011600000,
             计划结束时间: 1782836400000,
-            示例人员001审批: ['通过'],
+            主管审批: ['通过'],
             是否已知会EHS工程师: true,
             材料是否上传完成: true,
             材料提交确认: true,

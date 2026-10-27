@@ -104,7 +104,7 @@ describe('Ali monthly report Python command path', () => {
 
   it('保留成功 JSON 中用于构造多维表链接的 app token', async () => {
     const { internals } = createService();
-    const appToken = 'PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_APP_TOKEN';
+    const appToken = 'MliKbC3fXa8PXrsndKscmxjdn1g';
     jest.spyOn(internals, 'getPythonCommand').mockReturnValue(process.execPath);
 
     const completed = await internals.runPython(
@@ -114,7 +114,7 @@ describe('Ali monthly report Python command path', () => {
           'const token = process.env.FEISHU_APP_TOKEN;',
           'process.stdout.write(JSON.stringify({',
           'uploaded: {',
-          'record_url: `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`',
+          'record_url: `https://vnet.feishu.cn/base/${token}?table=tbl-test&recordId=rec-test`',
           '}',
           '}));',
         ].join(''),
@@ -125,7 +125,7 @@ describe('Ali monthly report Python command path', () => {
 
     expect(JSON.parse(completed.stdout)).toMatchObject({
       uploaded: {
-        record_url: `https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE`,
+        record_url: `https://vnet.feishu.cn/base/${appToken}?table=tbl-test&recordId=rec-test`,
       },
     });
   });
@@ -320,7 +320,7 @@ describe('阿里月报 Python 依赖准备', () => {
       files: [],
       logs: [],
       bitableRecordUrls: [
-        'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+        'https://vnet.feishu.cn/base/base-token?table=staff-table&recordId=staff-record',
       ],
     };
     jest.spyOn(internals, 'getRuntimeConfig').mockReturnValue(runtime);
@@ -414,7 +414,7 @@ describe('阿里月报 Python 依赖准备', () => {
         uploaded: {
           record_id: 'rec-alarm',
           record_url:
-            'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+            'https://vnet.feishu.cn/base/base-token?table=alarm-table&recordId=rec-alarm',
         },
       }),
       stderr: '',
@@ -428,7 +428,7 @@ describe('阿里月报 Python 依赖准备', () => {
     );
 
     expect(response.bitableRecordUrls).toEqual([
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/base/base-token?table=alarm-table&recordId=rec-alarm',
     ]);
   });
 
@@ -444,18 +444,18 @@ describe('阿里月报 Python 依赖准备', () => {
           updated: {
             record_id: 'rec-one',
             record_url:
-              'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+              'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-one',
           },
           updated_records: [
             {
               record_id: 'rec-one',
               record_url:
-                'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+                'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-one',
             },
             {
               record_id: 'rec-two',
               record_url:
-                'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+                'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-two',
             },
           ],
         },
@@ -472,8 +472,8 @@ describe('阿里月报 Python 依赖准备', () => {
     );
 
     expect(response.bitableRecordUrls).toEqual([
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-one',
+      'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-two',
     ]);
   });
 });

@@ -9,23 +9,23 @@ describe('change request search and direct entry', () => {
     const records = [
       {
         record_id: 'rec1',
-        fields: { 姓名: '示例人员008', 员工姓名: [{ id: 'ou_test', name: '示例人员008' }] },
+        fields: { 姓名: '张三', 员工姓名: [{ id: 'ou_test', name: '张三' }] },
       },
     ];
     const options = list(records);
     expect(options).toEqual([
-      { id: expect.stringMatching(/^cr-person-[a-f0-9]{64}$/), name: '示例人员008' },
+      { id: expect.stringMatching(/^cr-person-[a-f0-9]{64}$/), name: '张三' },
     ]);
     expect(JSON.stringify(options)).not.toContain('ou_test');
     expect(list([{ ...records[0], record_id: 'rec2' }])).toEqual(options);
     const resolve = directory.resolveChangeRequestSubmitterCandidate as (
       ...args: unknown[]
     ) => unknown;
-    expect(resolve(records, '示例人员008', options[0].id)).toEqual({
+    expect(resolve(records, '张三', options[0].id)).toEqual({
       ok: true,
       userId: 'ou_test',
     });
-    expect(resolve(records, '示例人员008', 'cr-person-wrong')).toEqual({
+    expect(resolve(records, '张三', 'cr-person-wrong')).toEqual({
       ok: false,
       reason: 'identity-mismatch',
     });
@@ -40,7 +40,7 @@ describe('change request search and direct entry', () => {
     const { searchChangeRequestPeople } = jest.requireActual(path);
     const people = Array.from({ length: 10000 }, (_, i) => ({
       id: `p${i}`,
-      name: `示例人员008${i}`,
+      name: `张三${i}`,
     }));
     expect(searchChangeRequestPeople(people, '')).toEqual([]);
     expect(searchChangeRequestPeople(people, '   ')).toEqual([]);

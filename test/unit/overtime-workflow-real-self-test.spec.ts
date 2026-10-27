@@ -63,7 +63,7 @@ describe('overtime workflow real Base self-test', () => {
     const value = source();
 
     expect(value).toContain('--apply-real');
-    expect(value).toContain("const OVERTIME_TABLE_ID = 'tblf1bbd02a2b049'");
+    expect(value).toContain("const OVERTIME_TABLE_ID = 'tblpCzmTT3EapaUY'");
     expect(value).toContain('OvertimeWorkflowService');
     expect(value).toContain('OvertimeWorkflowStore');
     expect(value).toContain('fetchOrganizationRoutingRecords');
@@ -107,7 +107,7 @@ describe('overtime workflow real Base self-test', () => {
         { name: 'B员工', openId: 'ou_staff_b', position: '运维值班员', buildings: ['B楼'] },
         { name: 'H员工', openId: 'ou_staff_h', position: '运维值班员', buildings: ['H楼'] },
         { name: '110员工', openId: 'ou_staff_110', position: '运维值班员', buildings: ['110站'] },
-        { name: '示例人员001', openId: 'ou_manager_candidate', position: '楼栋示例人员001', buildings: ['C楼'] },
+        { name: '主管', openId: 'ou_manager_candidate', position: '楼栋主管', buildings: ['C楼'] },
       ];
       const routes = {
         'ou_staff_a': 'building_supervisor',
@@ -261,7 +261,7 @@ describe('overtime workflow real Base self-test', () => {
       const candidates = [
         { scenario: 'building_a', routeKind: 'building_supervisor', staffName: 'A测试', staffOpenId: 'ou_matrix_a', building: 'A楼', position: '运维值班员', expectedApproverOpenIds: ['ou_approver'], expectedManagerOpenIds: ['ou_manager_1', 'ou_manager_2'] },
         { scenario: 'h_duty', routeKind: 'h_duty_supervisor', staffName: 'H测试', staffOpenId: 'ou_matrix_h', building: 'H楼', position: '运维值班员', expectedApproverOpenIds: ['ou_approver'], expectedManagerOpenIds: ['ou_manager_1', 'ou_manager_2'] },
-        { scenario: 'manager_group', routeKind: 'manager_group', staffName: '示例人员001测试', staffOpenId: 'ou_matrix_manager', building: 'C楼', position: '设施运维示例人员001', expectedApproverOpenIds: ['ou_manager_1', 'ou_manager_2'], expectedManagerOpenIds: ['ou_manager_1', 'ou_manager_2'] },
+        { scenario: 'manager_group', routeKind: 'manager_group', staffName: '主管测试', staffOpenId: 'ou_matrix_manager', building: 'C楼', position: '设施运维主管', expectedApproverOpenIds: ['ou_manager_1', 'ou_manager_2'], expectedManagerOpenIds: ['ou_manager_1', 'ou_manager_2'] },
       ];
       const value = await subject.runOvertimeWorkflowRealMatrixSelfTest({}, {
         candidates,
@@ -907,7 +907,7 @@ describe('overtime workflow real Base self-test', () => {
       const deps = {
         now: () => new Date(Date.parse('2026-08-12T12:00:00.000Z') + tick++ * 1000),
         randomUUID: () => '44444444-4444-4444-8444-444444444444',
-        selectCandidate: async (range) => ({ staffName: '示例人员008', staffOpenId: 'ou_applicant', building: 'A楼', position: '运维值班员', ...range, plannedHours: 1 }),
+        selectCandidate: async (range) => ({ staffName: '张三', staffOpenId: 'ou_applicant', building: 'A楼', position: '运维值班员', ...range, plannedHours: 1 }),
         createBaseRecord: async ({ identity }) => { Object.assign(fields, { '请求唯一ID': identity.requestUniqueId, '加班原因': identity.marker, '请求指纹': identity.fingerprint }); return record.record_id; },
         acceptApplication: async () => { phase = 'pending_approval'; },
         runPendingTasks: async (runAt) => { runTimes.push(runAt.toISOString()); if (phase === 'pending_approval') phase = 'approval_pending'; else if (phase === 'approval_claimed') phase = 'awaiting_confirmation'; else if (phase === 'reminder') phase = 'confirmation_sent'; else if (phase === 'confirmation') phase = 'confirmed'; },
@@ -1225,7 +1225,7 @@ describe('overtime workflow real Base self-test', () => {
         now: () => new Date('2026-08-12T12:00:00.000Z'),
         randomUUID: () => '11111111-1111-4111-8111-111111111111',
         selectCandidate: async ({ plannedStartAt, plannedEndAt }) => ({
-          staffName: '示例人员008', staffOpenId: 'ou_applicant', building: 'A楼',
+          staffName: '张三', staffOpenId: 'ou_applicant', building: 'A楼',
           position: '运维值班员', plannedStartAt, plannedEndAt,
           plannedHours: 1,
         }),
@@ -1358,7 +1358,7 @@ describe('overtime workflow real Base self-test', () => {
       const deps = {
         now: () => new Date('2026-08-12T12:00:00.000Z'),
         randomUUID: () => '22222222-2222-4222-8222-222222222222',
-        selectCandidate: async (range) => ({ staffName: '示例人员008', staffOpenId: 'ou_applicant', building: 'A楼', position: '运维值班员', ...range, plannedHours: 1 }),
+        selectCandidate: async (range) => ({ staffName: '张三', staffOpenId: 'ou_applicant', building: 'A楼', position: '运维值班员', ...range, plannedHours: 1 }),
         createBaseRecord: async ({ identity }) => { Object.assign(identityFields, { '请求唯一ID': identity.requestUniqueId, '加班原因': identity.marker, '请求指纹': identity.fingerprint }); return record.record_id; },
         acceptApplication: async () => undefined,
         runPendingTasks: async () => { throw new Error('Bearer top-secret-token'); },

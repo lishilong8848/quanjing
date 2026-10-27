@@ -18,7 +18,7 @@ const createSchedule = (
   building: '1号楼',
   team: 'A班',
   shift: '白班',
-  dutyStaffActual: ['示例人员008'],
+  dutyStaffActual: ['张三'],
   ...overrides,
 });
 
@@ -40,7 +40,7 @@ const createScheduleWithAssignmentContext = (
 const createRequest = (
   overrides: Partial<OvertimeRequestImpactRequest> = {},
 ): OvertimeRequestImpactRequest => ({
-  staffName: '示例人员008',
+  staffName: '张三',
   startAt: '2026-08-08T18:00:00+08:00',
   endAt: '2026-08-08T22:00:00+08:00',
   ...overrides,
@@ -61,7 +61,7 @@ const createRequestWithStaffShift = (
 describe('calculateOvertimeRequestImpact', () => {
   it('deducts the Shanghai lunch break from daytime overtime', () => {
     const result = calculateOvertimeRequestImpact(
-      [createSchedule({ dutyStaffActual: ['示例人员013'] })],
+      [createSchedule({ dutyStaffActual: ['李四'] })],
       createRequest({
         startAt: '2026-08-08T10:00:00+08:00',
         endAt: '2026-08-08T15:00:00+08:00',
@@ -333,13 +333,13 @@ describe('calculateOvertimeRequestImpact', () => {
 
     expect(
       calculateOvertimeRequestImpact(
-        [createSchedule({ dutyStaffActual: ['示例人员008一 示例人员013'] })],
+        [createSchedule({ dutyStaffActual: ['张三一 李四'] })],
         request,
       ).conflictingSchedules,
     ).toEqual([]);
     expect(
       calculateOvertimeRequestImpact(
-        [createSchedule({ dutyStaffActual: ['示例人员017 示例人员008'] })],
+        [createSchedule({ dutyStaffActual: ['王五 张三'] })],
         request,
       ).conflictingSchedules,
     ).toHaveLength(1);
@@ -597,7 +597,7 @@ describe('long-white overtime policy', () => {
         createSchedule({
           recordId: 'other-staff-normal-shift',
           shift: '夜班',
-          dutyStaffActual: ['示例人员013'],
+          dutyStaffActual: ['李四'],
         }),
       ],
       createRequest({
@@ -866,7 +866,7 @@ describe('overtime request API contract', () => {
     const expectedImpact = calculateOvertimeRequestImpact([], createRequest());
     const request: OvertimeRequestCreateRequest = {
       clientMutationId: 'overtime-request-1',
-      staffName: '示例人员008',
+      staffName: '张三',
       startAt: '2026-08-08T18:00:00+08:00',
       endAt: '2026-08-08T22:00:00+08:00',
       reason: '应急割接',

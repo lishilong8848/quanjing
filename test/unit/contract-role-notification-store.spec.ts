@@ -20,7 +20,7 @@ describe('合同通知复用原生账本与公共岗位解析',()=>{
     const before=readFileSync(file,'utf8');await open().enqueueRoleNotification(input());expect(await open().claimRoleNotification(()=>['ou_newer'])).toBeUndefined();expect(readFileSync(file,'utf8')).toBe(before);
     await expect(store.enqueueRoleNotification({...input(),content:{changed:'payload'}})).rejects.toThrow('重复');
   });
-  it('岗位事务前合法受理的旧投递保留，尚未受理通知直接找现任，同岗示例人员004员不被覆盖',async()=>{
+  it('岗位事务前合法受理的旧投递保留，尚未受理通知直接找现任，同岗其他人员不被覆盖',async()=>{
     let recipients=['ou_old','ou_colleague'];await store.enqueueRoleNotification(input());const old=await store.claimRoleNotification(()=>recipients);expect(old!.receiverOpenId).toBe('ou_old');
     recipients=['ou_new','ou_colleague'];await store.settleRoleNotification(old!,'om_old_history',()=>recipients);
     const next=await store.claimRoleNotification(()=>recipients);expect(next!.receiverOpenId).toBe('ou_new');await store.settleRoleNotification(next!,'om_new',()=>recipients);

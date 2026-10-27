@@ -13,7 +13,7 @@ import { resourceRange } from './monthly-operations-resources.model';
 import { mapMonthlyChanges } from './monthly-operations-changes.model';
 import { mapZhihangProgress } from './monthly-operations-progress.model';
 export const ZHIHANG_PROGRESS_SOURCE = {
-  tableId: 'tbl74dea197c9c1b',
+  tableId: 'tbl2cJuTBqRdIm8Z',
   tableName: '智航变更进展',
   fieldNames: [
     '编码',
@@ -42,7 +42,7 @@ export const ZHIHANG_PROGRESS_SOURCE = {
   ],
 } as const;
 export const MONTHLY_CHANGE_SOURCE = {
-  tableId: 'tbl8f743982e48e1',
+  tableId: 'tblBvg6wCYSX3hcg',
   tableName: '月览变更',
   fieldNames: [
     '自增编号',

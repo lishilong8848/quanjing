@@ -18,14 +18,14 @@ import {
 import { InventoryManagementService } from '../../server/modules/inventory-management/inventory-management.service';
 
 const TABLES = {
-  inventory: 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_INVENTORY_TABLE_ID',
-  inbound: 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_INBOUND_TABLE_ID',
-  outbound: 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID',
-  borrow: 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_BORROW_TABLE_ID',
-  catalog: 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_CATALOG_TABLE_ID',
-  prices: 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_PRICE_TABLE_ID',
-  stocktake: 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_STOCKTAKE_SUMMARY_TABLE_ID',
-  managers: 'PUBLIC_EXAMPLE_FEISHU_WAREHOUSE_MANAGER_TABLE_ID',
+  inventory: 'tblpVtCm9X0YYcdN',
+  inbound: 'tblZh4wODXl6u3oD',
+  outbound: 'tblUBmchdnY9G3Lx',
+  borrow: 'tblsUXYZWDbMm6lZ',
+  catalog: 'tblak6SEtFecgR40',
+  prices: 'tblZKSgTfwfn3IGD',
+  stocktake: 'tbluf9s52zrOr9IF',
+  managers: 'tblWg8gr341c0HzF',
 } as const;
 
 const ENV_KEYS = [
@@ -51,7 +51,7 @@ describe('InventoryManagementService', () => {
     (resolveBitableAppToken as jest.Mock).mockResolvedValue('app-token');
     (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
     process.env.FEISHU_WAREHOUSE_SOURCE_URL =
-      'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE';
+      'https://vnet.feishu.cn/base/QmxAbhXNJaA9YKsbfZyclzhGnSd?table=ldxJpJvX63st7SVm';
     delete process.env.FEISHU_WAREHOUSE_APP_TOKEN;
     process.env.FEISHU_WAREHOUSE_INVENTORY_TABLE_ID = TABLES.inventory;
     process.env.FEISHU_WAREHOUSE_INBOUND_TABLE_ID = TABLES.inbound;

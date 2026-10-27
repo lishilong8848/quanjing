@@ -241,7 +241,7 @@ describe('Ali monthly report and purchase combined hotfix package', () => {
       expect(pythonAudit).toContain(marker);
     }
     for (const readmeContract of [
-      'ZIP 文件发送到配置的会话群和示例人员020',
+      'ZIP 文件发送到配置的会话群和马进宇',
       'ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_OPEN_ID',
       'ALI_MONTHLY_REPORT_FEISHU_MA_JINYU_EMAIL',
     ]) {

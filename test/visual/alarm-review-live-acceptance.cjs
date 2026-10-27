@@ -5,8 +5,8 @@ const output = path.join(root, 'output/release-next-after-20261005-182903');
 const manifestPath = path.join(output, 'alarm-review-live-record-owned-20261006.json');
 const owned = path.join(output, 'alarm-review-live-owned-20261006-f9b9836f');
 const title = 'TEST-异常复核-20261006-f9b9836f';
-const base = 'JeMdbI3JjawMj1s1YGSc3MoBn7c', table = 'tbld976fa6fc1832';
-const personId = 'recuSBqPEuWsww', openId = 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID';
+const base = 'JeMdbI3JjawMj1s1YGSc3MoBn7c', table = 'tblD7hi70s6U6rlU';
+const personId = 'recuSBqPEuWsww', openId = 'ou_a6644e62a43b916c6bc26148cf74f208';
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 let service, stage = 'authorization', phase = '', fields, injected = false, puts = 0, gets = 0;
 const started = performance.now(), startedUtc = new Date().toISOString();
@@ -21,7 +21,7 @@ async function main() {
   assert.equal(fs.existsSync(owned), false, 'Owned ledger directory already exists; no rerun');
   stage = 'source-loading';
   require('dotenv').config({ path: path.join(root, '.env'), quiet: true });
-  assert.equal(process.env.FEISHU_APP_ID, 'cli_0831564613853b26'); assert.ok(process.env.FEISHU_APP_SECRET);
+  assert.equal(process.env.FEISHU_APP_ID, 'cli_a9d1c9fe9d381cee'); assert.ok(process.env.FEISHU_APP_SECRET);
   assert.ok(!process.env.TODAY_OPERATIONS_ALARM_BITABLE_URL);
   for (const key of ['TODAY_OPERATIONS_ALARM_FEISHU_APP_ID', 'FEISHU_RISK_INSPECTION_APP_ID', 'ALI_MONTHLY_REPORT_FEISHU_APP_ID']) assert.ok(!process.env[key]);
   process.env.FEISHU_LOCAL_CACHE_DIR = path.join(owned, 'cache'); process.env.DISABLE_V8_COMPILE_CACHE = '1';
@@ -41,7 +41,7 @@ async function main() {
   const client = axios.create({ timeout: 8000 }); let ownershipRead = false;
   client.interceptors.request.use(config => {
     const method = (config.method || 'get').toLowerCase(), url = config.url;
-    if (method === 'post' && url === 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal') { assert.equal(config.data.app_id, 'cli_0831564613853b26'); return config; }
+    if (method === 'post' && url === 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal') { assert.equal(config.data.app_id, 'cli_a9d1c9fe9d381cee'); return config; }
     if (method === 'get' && url === 'https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node') { assert.equal(config.params.token, 'SOwsw315aiBJjgkl48ccoxIPntc'); return config; }
     if (method === 'get' && url === fieldsUrl) return config;
     assert.equal(url, recordUrl, 'Only newly owned record may be accessed');
@@ -50,8 +50,8 @@ async function main() {
       gets++; return config;
     }
     assert.equal(method, 'put'); assert.equal(ownershipRead, true);
-    assert.deepEqual(Object.keys(config.data.fields).sort(), ['人工复核结果', '复核回复', '复核示例人员019'].sort());
-    assert.deepEqual(config.data.fields.复核示例人员019, [{ id: openId }]); puts++; return config;
+    assert.deepEqual(Object.keys(config.data.fields).sort(), ['人工复核结果', '复核回复', '复核责任人'].sort());
+    assert.deepEqual(config.data.fields.复核责任人, [{ id: openId }]); puts++; return config;
   });
   client.interceptors.response.use(response => {
     if (response.config.url === recordUrl && response.config.method === 'get' && response.data?.code === 0) {
@@ -63,7 +63,7 @@ async function main() {
     return response;
   });
   const ledger = path.join(owned, 'ledger.json'), principal = 'TEST-alarm-review-20261006-f9b9836f';
-  const people = { getCachedActivePersonnelDirectory: async () => ({ personnel: [{ recordId: personId, openId, name: '示例人员020', position: '', buildings: [] }] }) };
+  const people = { getCachedActivePersonnelDirectory: async () => ({ personnel: [{ recordId: personId, openId, name: '马进宇', position: '', buildings: [] }] }) };
   const alarms = { patchHumanReview: (id, value) => { assert.equal(id, recordId); fields = value; } };
   const fresh = () => { const store = new AlarmReviewStore(ledger); service = new AlarmReviewService(store, new AlarmReviewGateway(new HttpService(client)), people, alarms); return store; };
   const request = (suffix, outcome, customReply) => ({ recordIds: [recordId], outcome, responsibleRecordId: personId, clientMutationId: `alarm-review-live20261006-f9b9836f-${suffix}`, expectedVersions: { [recordId]: fields ? reviewVersion(fields) : 'unreviewed' }, ...(customReply ? { customReply } : {}) });

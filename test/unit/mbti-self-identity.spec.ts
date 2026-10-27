@@ -9,7 +9,7 @@ import { feishuIdentityFingerprint } from '../../server/common/access/feishu-acc
 import { DEFAULT_ACTIVE_PERSONNEL_TABLE_ID } from '../../server/modules/bitable-sync/active-personnel-directory';
 
 jest.mock('../../server/modules/bitable-sync/employee-onboarding.config', () => ({
-  readEmployeeOnboardingConfig: () => ({ appToken: 'fixturePersonnelBase', wikiToken: '', tableId: 'PUBLIC_EXAMPLE_FEISHU_ORG_TABLE_ID', tableName: '在职人员' }),
+  readEmployeeOnboardingConfig: () => ({ appToken: 'fixturePersonnelBase', wikiToken: '', tableId: 'tblOu75UtJTDNHIM', tableName: '在职人员' }),
 }));
 jest.mock('../../server/common/config/external-services.config', () => ({
   ...jest.requireActual('../../server/common/config/external-services.config'),

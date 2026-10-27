@@ -60,7 +60,7 @@ export class ThresholdController {
   ) {
     this.actor(request);
     throw new ForbiddenException(
-      '阈值变更必须提交调整申请并通过楼长和专业示例人员001审批',
+      '阈值变更必须提交调整申请并通过楼长和专业主管审批',
     );
   }
   @Get('adjustments/context')

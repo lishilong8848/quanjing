@@ -44,8 +44,8 @@ const movement = (
   destinationBuilding: '',
   location: 'D-01',
   reason: '',
-  operator: '示例人员006',
-  applicant: '示例人员020',
+  operator: '周海祥',
+  applicant: '马进宇',
   status: '已入库',
   occurredAt: '2026-07-01T01:00:00.000Z',
   expectedReturnAt: null,
@@ -133,7 +133,7 @@ describe('inventory management mapper', () => {
   it('uses the warehouse Base fields for inventory risks, movements, and stocktake', () => {
     const snapshot = buildInventoryManagementSnapshot({
       generatedAt: '2026-07-10T06:00:00.000Z',
-      sourceUrl: 'https://example.feishu.cn/base/PUBLIC_EXAMPLE_SOURCE',
+      sourceUrl: 'https://vnet.feishu.cn/base/QmxAbhXNJaA9YKsbfZyclzhGnSd',
       inventory: [
         record('inv-1', {
           物品类别号: 'A1001',
@@ -176,7 +176,7 @@ describe('inventory management mapper', () => {
           入库日期: '2026-07-10 09:00:00',
           楼栋: ['D楼'],
           存放位置: ['opt-location'],
-          示例人员019: '赵震兴',
+          责任人: '赵震兴',
         }),
       ],
       outbound: [
@@ -214,7 +214,7 @@ describe('inventory management mapper', () => {
           盘点总数: '10',
           已盘点数量: '8',
           日期: '2026-07-01 01:00:00',
-          示例人员019: '赵震兴 陶必亮',
+          责任人: '赵震兴 陶必亮',
         }),
         record('stocktake-old', {
           盘点月份: 6,
@@ -227,10 +227,10 @@ describe('inventory management mapper', () => {
       managers: [
         record('manager-a', {
           楼栋: 'A楼',
-          库房示例人员019员: [
-            { id: 'ou_responsible_1', name: '示例人员019甲' },
-            { id: 'ou_responsible_1', name: '示例人员019甲' },
-            { id: 'ou_responsible_2', name: '示例人员019乙' },
+          库房责任人员: [
+            { id: 'ou_responsible_1', name: '责任人甲' },
+            { id: 'ou_responsible_1', name: '责任人甲' },
+            { id: 'ou_responsible_2', name: '责任人乙' },
           ],
           库房管理人: [{ id: 'ou_manager', name: '管理人不得展示' }],
           '类别号管理人员（负责人最好为1人）': [
@@ -279,7 +279,7 @@ describe('inventory management mapper', () => {
       snapshot.dashboard.stocktake.buildings.find(
         (item) => item.building === 'A楼',
       ),
-    ).toMatchObject({ responsible: '示例人员019甲、示例人员019乙' });
+    ).toMatchObject({ responsible: '责任人甲、责任人乙' });
     expect(snapshot.dashboard.movements.inbound[0]).toMatchObject({
       type: 'inbound',
       sku: 'A1001',
@@ -620,7 +620,7 @@ describe('inventory management mapper', () => {
           出库创建标识: 'outbound-h-pending',
           出库当前审批人: [
             { id: 'ou_h_approver_1', name: '刘小杏' },
-            { id: 'ou_h_approver_2', name: '示例人员011' },
+            { id: 'ou_h_approver_2', name: '曹毅' },
           ],
         }),
       ],
@@ -631,7 +631,7 @@ describe('inventory management mapper', () => {
       sectionStatus,
     });
 
-    expect(snapshot.movements.outbound[0].operator).toBe('刘小杏、示例人员011');
+    expect(snapshot.movements.outbound[0].operator).toBe('刘小杏、曹毅');
   });
 
   it('fails closed when program and approval workflow states are partial, invalid, or conflicting', () => {

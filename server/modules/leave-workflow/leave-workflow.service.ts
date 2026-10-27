@@ -164,6 +164,7 @@ export interface LeaveWorkflowRecoveryResult {
 @Injectable()
 export class LeaveWorkflowService {
   private readonly logger = new Logger(LeaveWorkflowService.name);
+  private readonly substituteSyncRuns = new Map<string, Promise<void>>();
   private taskWakeHandler: (() => void) | null = null;
 
   constructor(
@@ -678,9 +679,6 @@ export class LeaveWorkflowService {
       case 'deliver_stage_cards':
         await this.deliverStageCards(task);
         return;
-      case 'sync_leave_shift_details':
-        await this.syncLeaveShiftDetails(task);
-        return;
       case 'apply_stage_action':
         await this.applyStageAction(task, now);
         return;
@@ -699,12 +697,24 @@ export class LeaveWorkflowService {
       case 'deliver_stage_substitute_change_notifications':
         await this.deliverStageSubstituteChangeNotifications(task);
         return;
+      case 'sync_leave_shift_details':
       case 'sync_approved_leave_schedule':
-        await this.syncApprovedLeaveSchedule(task);
+      case 'apply_substitute_update': {
+        // 主表、明细和排班可能来自不同 worker，同一请假记录必须按序写入。
+        const previous = this.substituteSyncRuns.get(task.recordId) || Promise.resolve();
+        const pending = previous.catch(() => undefined).then(() => {
+          if (task.kind === 'sync_leave_shift_details') return this.syncLeaveShiftDetails(task);
+          if (task.kind === 'sync_approved_leave_schedule') return this.syncApprovedLeaveSchedule(task);
+          return this.applySubstituteUpdate(task, now);
+        });
+        this.substituteSyncRuns.set(task.recordId, pending);
+        try {
+          await pending;
+        } finally {
+          if (this.substituteSyncRuns.get(task.recordId) === pending) this.substituteSyncRuns.delete(task.recordId);
+        }
         return;
-      case 'apply_substitute_update':
-        await this.applySubstituteUpdate(task, now);
-        return;
+      }
       default:
         throw new BadRequestException('未知的请休假工作流后台任务');
     }
@@ -742,7 +752,7 @@ export class LeaveWorkflowService {
     const expectedIds = [...new Set(sourceIds.map(id => id === payload.sourceOpenId ? target.openId as string : id))].sort();
     if (JSON.stringify([...stage.approverOpenIds].sort()) !== JSON.stringify(expectedIds)) throw new BadRequestException('岗位交接审批人已变化');
     if (!this.canActorContinue(target.openId)) throw new BadRequestException('接任人员的业务权限已收回，请核对交接');
-    const status = sourceKey === 'supervisor' ? '待示例人员001审批' : '待经理审批';
+    const status = sourceKey === 'supervisor' ? '待主管审批' : '待经理审批';
     await this.gateway.updateLeaveRecord(current.recordId, {
       请假工作流状态: status, 请假当前审批人: stage.approverOpenIds.map(id => ({ id })), 请假工作流错误: '',
     });
@@ -872,7 +882,7 @@ export class LeaveWorkflowService {
       await this.gateway.updateLeaveRecord(application.recordId, {
         审批来源: '程序卡片',
         请假工作流状态:
-          firstStage.key === 'manager' ? '待经理审批' : '待示例人员001审批',
+          firstStage.key === 'manager' ? '待经理审批' : '待主管审批',
         请假当前审批人: firstStage.approvers.map((person) => ({
           id: person.openId,
         })),
@@ -970,7 +980,7 @@ export class LeaveWorkflowService {
       const firstStage = approvalPlan.stages[0];
       if (!firstStage || firstStage.key !== 'supervisor') {
         throw new ServiceUnavailableException(
-          '110站站长请休假改路由未生成示例人员001审批阶段',
+          '110站站长请休假改路由未生成主管审批阶段',
         );
       }
       assertNotificationAccountsCannotApprove(application.snapshot, firstStage);
@@ -1020,7 +1030,7 @@ export class LeaveWorkflowService {
     const nextStageVersion = sourceStageVersion + 1;
     await this.gateway.updateLeaveRecord(application.recordId, {
       审批来源: '程序卡片',
-      请假工作流状态: '待示例人员001审批',
+      请假工作流状态: '待主管审批',
       请假当前审批人: firstStage.approvers.map((person) => ({
         id: person.openId,
       })),
@@ -1029,7 +1039,7 @@ export class LeaveWorkflowService {
       请假工作流错误: '',
     });
     await this.assertBitableState(application.recordId, {
-      请假工作流状态: '待示例人员001审批',
+      请假工作流状态: '待主管审批',
     });
     await this.store.completePendingStageReroute(application.recordId, {
       approvalPlan,
@@ -1355,7 +1365,12 @@ export class LeaveWorkflowService {
     task: LeaveWorkflowTaskEntry,
   ): Promise<void> {
     if (!this.detailGateway) return;
+    const revision = Number(task.payload.revision);
+    if (!Number.isSafeInteger(revision) || revision < 0) {
+      throw new BadRequestException('替班明细同步任务版本无效');
+    }
     const application = await this.requireApplication(task.recordId);
+    if (revision !== (application.snapshot.assignmentRevision ?? application.snapshot.substituteRevision ?? 0)) return;
     const groups = application.snapshot.shiftGroups || [];
     if (!groups.length) return;
     await this.detailGateway.ensurePendingRows(application.recordId, groups);
@@ -1363,7 +1378,7 @@ export class LeaveWorkflowService {
     if (!assignments.length) return;
     await this.detailGateway.upsertCurrentAssignments(
       application.recordId,
-      application.snapshot.assignmentRevision || 0,
+      revision,
       assignments,
     );
   }
@@ -1433,7 +1448,7 @@ export class LeaveWorkflowService {
       const nextVersion = stageVersion + 1;
       await this.gateway.updateLeaveRecord(application.recordId, {
         请假工作流状态:
-          nextStage.key === 'manager' ? '待经理审批' : '待示例人员001审批',
+          nextStage.key === 'manager' ? '待经理审批' : '待主管审批',
         请假当前审批人: nextStage.approvers.map((person) => ({
           id: person.openId,
         })),
@@ -1444,7 +1459,7 @@ export class LeaveWorkflowService {
       });
       await this.assertBitableState(application.recordId, {
         请假工作流状态:
-          nextStage.key === 'manager' ? '待经理审批' : '待示例人员001审批',
+          nextStage.key === 'manager' ? '待经理审批' : '待主管审批',
         ...substituteFields(action),
       });
       await this.store.setPendingStage(
@@ -1652,6 +1667,9 @@ export class LeaveWorkflowService {
       revision,
     );
     if (!update) throw new BadRequestException('替班调整动作不存在');
+    if (application.status !== 'approved' || revision !== (
+      application.snapshot.assignmentRevision ?? application.snapshot.substituteRevision ?? 0
+    )) return;
     await this.gateway.updateLeaveRecord(application.recordId, {
       '是否需要替班（替班打√）': true,
       '替班人员（填姓名）': update.shiftAssignments.length
@@ -1671,6 +1689,20 @@ export class LeaveWorkflowService {
         : update.substituteName,
       替班调整版本: String(update.revision),
     });
+    application = await this.requireApplication(application.recordId);
+    if (application.status !== 'approved' || revision !== (
+      application.snapshot.assignmentRevision ?? application.snapshot.substituteRevision ?? 0
+    )) return;
+    await this.enqueueLeaveShiftDetailSync(
+      application.recordId,
+      application.snapshot,
+    );
+    if (update.shiftAssignments.length || update.substituteName) {
+      await this.enqueueApprovedLeaveScheduleSync(
+        application.recordId,
+        update.revision,
+      );
+    }
     const terminalCard = buildLeaveSubstituteAdjustmentTerminalCard(
       toCardContext(application, 'manager', 1),
       update.actorName || '审批人',
@@ -1694,17 +1726,6 @@ export class LeaveWorkflowService {
     if (failures.length > 0) {
       throw new ServiceUnavailableException(
         `替班调整卡片终态更新未完成：${failures.join('、')}`,
-      );
-    }
-    application = await this.requireApplication(application.recordId);
-    await this.enqueueLeaveShiftDetailSync(
-      application.recordId,
-      application.snapshot,
-    );
-    if (update.shiftAssignments.length || update.substituteName) {
-      await this.enqueueApprovedLeaveScheduleSync(
-        application.recordId,
-        update.revision,
       );
     }
     await this.enqueueSubstituteAdjustmentCards(
@@ -2440,7 +2461,7 @@ function applyRecordSupervisorRouting(
   fields: Record<string, unknown>,
   directory: ActivePersonnelDirectory,
 ): LeaveOrganizationRecord[] {
-  const rawSupervisor = firstFieldText(fields, ['示例人员001', '对应示例人员001']);
+  const rawSupervisor = firstFieldText(fields, ['主管', '对应主管']);
   if (!rawSupervisor) return records;
   const normalizedRaw = normalizeName(rawSupervisor);
   const supervisorNames = [

@@ -37,7 +37,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
 
   it('privately sends a sync failure to the confirmed manager without exposing it to a group', async () => {
     const previousAppId = process.env.FEISHU_APP_ID;
-    process.env.FEISHU_APP_ID = 'cli_0831564613853b26';
+    process.env.FEISHU_APP_ID = 'cli_a9d1c9fe9d381cee';
     jest.mocked(getTenantAccessToken).mockResolvedValue('test-token');
     const post = jest.fn().mockResolvedValue({
       data: { code: 0, data: { message_id: 'om_sync_alert' } },
@@ -55,7 +55,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
       expect(post).toHaveBeenCalledWith(
         expect.stringContaining('receive_id_type=open_id'),
         expect.objectContaining({
-          receive_id: 'PUBLIC_EXAMPLE_FEISHU_TYPHOON_PATH_TEST_OPEN_ID',
+          receive_id: 'ou_a6644e62a43b916c6bc26148cf74f208',
           msg_type: 'text',
           content: expect.stringContaining('飞书回读超时'),
         }),
@@ -164,8 +164,8 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
       {
         record_id: 'rec-cao-c',
         fields: {
-          姓名: '示例人员011',
-          员工姓名: [{ name: '示例人员011', open_id: 'ou_cao_c' }],
+          姓名: '曹毅',
+          员工姓名: [{ name: '曹毅', open_id: 'ou_cao_c' }],
           '机楼/专业': 'C楼',
           岗位: '值班人员',
         },
@@ -173,8 +173,8 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
       {
         record_id: 'rec-cao-a',
         fields: {
-          姓名: '示例人员011',
-          员工姓名: [{ name: '示例人员011', open_id: 'ou_cao_a' }],
+          姓名: '曹毅',
+          员工姓名: [{ name: '曹毅', open_id: 'ou_cao_a' }],
           '机楼/专业': 'A楼',
           岗位: '值班人员',
         },
@@ -183,11 +183,11 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
     const gateway = new AttendanceAutomationFeishuGateway({} as never);
 
     const recipients = await gateway.resolvePersonalRecipients([
-      { name: '示例人员011', building: 'C楼' },
-      { name: '示例人员011', building: 'C楼' },
+      { name: '曹毅', building: 'C楼' },
+      { name: '曹毅', building: 'C楼' },
     ]);
 
-    expect(recipients).toEqual([{ openId: 'ou_cao_c', name: '示例人员011' }]);
+    expect(recipients).toEqual([{ openId: 'ou_cao_c', name: '曹毅' }]);
   });
 
   it('skips an abnormal employee without a Feishu account while keeping valid recipients', async () => {
@@ -195,8 +195,8 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
       {
         record_id: 'rec-cao-c',
         fields: {
-          姓名: '示例人员011',
-          员工姓名: [{ name: '示例人员011', open_id: 'ou_cao_c' }],
+          姓名: '曹毅',
+          员工姓名: [{ name: '曹毅', open_id: 'ou_cao_c' }],
           '机楼/专业': 'C楼',
           岗位: '值班人员',
         },
@@ -206,11 +206,11 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
 
     await expect(
       gateway.resolvePersonalRecipientsBestEffort([
-        { name: '示例人员011', building: 'C楼' },
+        { name: '曹毅', building: 'C楼' },
         { name: '陈奇', building: 'C楼' },
       ]),
     ).resolves.toEqual({
-      recipients: [{ openId: 'ou_cao_c', name: '示例人员011' }],
+      recipients: [{ openId: 'ou_cao_c', name: '曹毅' }],
       failures: [],
     });
   });
@@ -247,7 +247,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
         record_id: 'rec-missing',
         fields: {
           记录类型: '考勤结果',
-          姓名: '示例人员011',
+          姓名: '曹毅',
           工作日期: Date.parse('2026-09-02T16:00:00.000Z'),
           打卡类型: '上班',
           应打卡时间: Date.parse('2026-09-03T01:00:00.000Z'),
@@ -257,7 +257,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
             {
               text: JSON.stringify({
                 derived: true,
-                expectationKey: '2026-09-03:building_c:white:OnDuty:示例人员011',
+                expectationKey: '2026-09-03:building_c:white:OnDuty:曹毅',
               }),
               type: 'text',
             },
@@ -286,7 +286,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
         record_id: 'rec-normal',
         fields: {
           记录类型: '考勤结果',
-          姓名: '示例人员008',
+          姓名: '张三',
           工作日期: Date.parse('2026-09-02T16:00:00.000Z'),
           打卡类型: '下班',
           应打卡时间: Date.parse('2026-09-03T10:00:00.000Z'),
@@ -294,7 +294,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
           时间状态: '正常',
           是否合法: '是',
           原始记录JSON: JSON.stringify({
-            expectationKey: '2026-09-03:building_c:white:OffDuty:示例人员008',
+            expectationKey: '2026-09-03:building_c:white:OffDuty:张三',
           }),
           同步时间: Date.parse('2026-09-03T16:31:00.000Z'),
         },
@@ -334,7 +334,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
     expect(fetchBitableRecords).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        tableId: 'tbl01cda9acd2f8f',
+        tableId: 'tblsunmofUPOYGL9',
         forceRefresh: true,
         strict: true,
       }),
@@ -347,7 +347,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
     expect(summary.normalByBuilding).toEqual({ C楼: 1, H楼: 1 });
     expect(summary.anomalies).toEqual([
       expect.objectContaining({
-        name: '示例人员011',
+        name: '曹毅',
         building: 'C楼',
         shiftLabel: '白班',
         direction: 'OnDuty',
@@ -364,13 +364,13 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
   });
 
   it('uses the newer normal result for one expectation instead of reporting an older anomaly', async () => {
-    const expectationKey = '2026-09-03:building_c:white:OnDuty:示例人员011';
+    const expectationKey = '2026-09-03:building_c:white:OnDuty:曹毅';
     jest.mocked(fetchBitableRecords).mockResolvedValue([
       {
         record_id: 'rec-newer-normal',
         fields: {
           记录类型: '考勤结果',
-          姓名: '示例人员011',
+          姓名: '曹毅',
           工作日期: Date.parse('2026-09-02T16:00:00.000Z'),
           打卡类型: '上班',
           应打卡时间: Date.parse('2026-09-03T01:00:00.000Z'),
@@ -385,7 +385,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
         record_id: 'rec-older-anomaly',
         fields: {
           记录类型: '考勤结果',
-          姓名: '示例人员011',
+          姓名: '曹毅',
           工作日期: Date.parse('2026-09-02T16:00:00.000Z'),
           打卡类型: '上班',
           应打卡时间: Date.parse('2026-09-03T01:00:00.000Z'),
@@ -405,7 +405,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
     expect(summary.normal).toEqual([
       expect.objectContaining({
         key: expectationKey,
-        name: '示例人员011',
+        name: '曹毅',
         building: 'C楼',
         direction: 'OnDuty',
       }),
@@ -420,10 +420,10 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
         fields: {
           记录类型: '考勤结果',
           工作日期: Date.parse('2026-09-02T16:00:00.000Z'),
-          姓名: '示例人员011',
+          姓名: '曹毅',
           应打卡时间: Date.parse('2026-09-03T01:00:00.000Z'),
           原始记录JSON: JSON.stringify({
-            expectationKey: '2026-09-03:building_c:white:OnDuty:示例人员011',
+            expectationKey: '2026-09-03:building_c:white:OnDuty:曹毅',
           }),
         },
       },
@@ -438,13 +438,13 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
       ]),
     ).resolves.toEqual({
       '2026-09-02': [],
-      '2026-09-03': ['2026-09-03:building_c:white:OnDuty:示例人员011'],
+      '2026-09-03': ['2026-09-03:building_c:white:OnDuty:曹毅'],
     });
     expect(fetchBitableRecords).toHaveBeenCalledTimes(1);
   });
 
   it('updates a legacy archive row by expectation key instead of creating a duplicate', async () => {
-    const expectationKey = '2026-09-03:building_c:white:OnDuty:示例人员011';
+    const expectationKey = '2026-09-03:building_c:white:OnDuty:曹毅';
     let verifiedFields: Record<string, unknown> | null = null;
     jest
       .mocked(fetchBitableRecords)
@@ -455,7 +455,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
             记录唯一键: 'ding-r-legacy-record-key',
             记录类型: '考勤结果',
             钉钉员工ID: 'u1',
-            姓名: '示例人员011',
+            姓名: '曹毅',
             工作日期: Date.parse('2026-09-02T16:00:00.000Z'),
             打卡类型: '上班',
             应打卡时间: Date.parse('2026-09-03T01:00:00.000Z'),
@@ -493,7 +493,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
     await expect(
       gateway.archiveAttendance({
         businessDate: '2026-09-03',
-        users: [{ userId: 'u1', name: '示例人员011' }],
+        users: [{ userId: 'u1', name: '曹毅' }],
         results: [
           {
             id: 'new-dingtalk-result-id',
@@ -846,7 +846,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
     await expect(
       gateway.archiveAttendance({
         businessDate: '2026-08-31',
-        users: [{ userId: 'u1', name: '示例人员020' }],
+        users: [{ userId: 'u1', name: '马进宇' }],
         results: [],
         details: [],
         corrections: [
@@ -1273,7 +1273,7 @@ describe('AttendanceAutomationFeishuGateway personal recipients', () => {
         params: {
           extra: JSON.stringify({
             bitablePerm: {
-              tableId: 'tbl01cda9acd2f8f',
+              tableId: 'tblsunmofUPOYGL9',
               attachments: {
                 fldEvidence: { 'rec-approved': ['file-approved'] },
               },

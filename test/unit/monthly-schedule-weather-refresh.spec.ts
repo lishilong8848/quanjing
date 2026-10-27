@@ -938,7 +938,7 @@ describe('MonthlySchedule weather refresh policy', () => {
       'utf8',
     );
     expect(linkConstants).toContain(
-      'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+      'https://vnet.feishu.cn/wiki/Hs4fwlplAijAgskmBnkcEDMvnKc',
     );
     expect(linkConstants).not.toContain('WEATHER_WARNING_REGISTRATION_URL');
     expect(linkConstants).not.toContain('/share/base/form/');

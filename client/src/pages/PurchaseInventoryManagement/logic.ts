@@ -224,7 +224,7 @@ export function buildPendingPurchaseApplicationItems(
       : request.shared.onlineUrl
         ? [request.shared.onlineUrl]
         : [],
-    approvalTarget: '运维经理（示例人员020 / 示例人员014，任一审批）',
+    approvalTarget: '运维经理（马进宇 / 梅冰冰，任一审批）',
     supplier: request.shared.supplier,
     estimatedAmount: roundMoney(
       item.quantity * item.unitPrice + item.shippingFee - item.discount,

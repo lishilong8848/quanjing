@@ -16,7 +16,7 @@ describe('person profile contact routing', () => {
 
   it('builds only the fixed-host official Feishu chat AppLink', () => {
     expect(buildFeishuChatAppLink('ou_contact_User_123')).toBe(
-      'https://example.feishu.cn/client/PUBLIC_EXAMPLE_SOURCE',
+      'https://applink.feishu.cn/client/chat/open?openId=ou_contact_User_123',
     );
     expect(buildFeishuChatAppLink('https://evil.example')).toBeNull();
   });

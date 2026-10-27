@@ -7,8 +7,8 @@
   "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/fzgeh7nuhfboznulog/bitable.svg",
   "paramsSchema": {},
   "formValue": {
-    "appToken": "PUBLIC_EXAMPLE_FEISHU_MAIN_APP_TOKEN",
-    "tableID": "PUBLIC_EXAMPLE_FEISHU_SCHEDULE_TABLE_ID",
+    "appToken": "KdCZbSL5CaTErKsFwFucddA5nYd",
+    "tableID": "tblRV9KeWFh9xCkm",
     "fields": [
       {
         "writeable": false,

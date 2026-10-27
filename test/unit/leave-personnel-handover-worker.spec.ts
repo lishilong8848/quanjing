@@ -5,8 +5,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { LeaveWorkflowStore, type LeavePersonnelHandoverInput } from '../../server/modules/leave-workflow/leave-workflow.store';
 import { LeaveWorkflowService } from '../../server/modules/leave-workflow/leave-workflow.service';
 
-const source={name:'合成前任',openId:'ou_synthetic_old',personRecordId:'rec_old',position:'设施示例人员001',buildings:['C楼']};
-const target={name:'合成接任',openId:'ou_synthetic_new',personRecordId:'rec_new',position:'设施示例人员001',buildings:['C楼']};
+const source={name:'合成前任',openId:'ou_synthetic_old',personRecordId:'rec_old',position:'设施主管',buildings:['C楼']};
+const target={name:'合成接任',openId:'ou_synthetic_new',personRecordId:'rec_new',position:'设施主管',buildings:['C楼']};
 const input=():LeavePersonnelHandoverInput=>({recordId:'rec_synthetic_leave',mutationId:`handover-${'a'.repeat(64)}`,dutyRecordId:'rec_synthetic_duty',sourceOpenId:source.openId,expectedStage:{key:'supervisor',version:1,approverOpenIds:[source.openId]},target});
 
 describe('请休假交接后台任务（实际本地账本、合成外部端口）',()=>{
@@ -24,7 +24,7 @@ describe('请休假交接后台任务（实际本地账本、合成外部端口�
     await store.setPendingStage(input().recordId,input().expectedStage);
     let task;while((task=await store.takeNextTask())) await store.completeTask(task.key,task.claimToken);
     await store.recordStageCardDelivery(input().recordId,{recipientOpenId:source.openId,messageId:'om_synthetic_old',businessKey:`leave:${input().recordId}:stage:supervisor:1:${source.openId}`});
-    gateway={patchInteractiveCard:jest.fn().mockResolvedValue(undefined),updateLeaveRecord:jest.fn().mockResolvedValue(undefined),readLeaveRecord:jest.fn().mockResolvedValue({recordId:input().recordId,fields:{请假当前审批人:[{id:target.openId,name:'合成显示别名'}],请假工作流状态:'待示例人员001审批'}}),sendInteractiveCard:jest.fn().mockResolvedValue('om_synthetic_new')};
+    gateway={patchInteractiveCard:jest.fn().mockResolvedValue(undefined),updateLeaveRecord:jest.fn().mockResolvedValue(undefined),readLeaveRecord:jest.fn().mockResolvedValue({recordId:input().recordId,fields:{请假当前审批人:[{id:target.openId,name:'合成显示别名'}],请假工作流状态:'待主管审批'}}),sendInteractiveCard:jest.fn().mockResolvedValue('om_synthetic_new')};
     service=new LeaveWorkflowService(store,gateway as never,{} as never,undefined,{canUseFeishuBusinessIdentity:()=>true} as never);
   });
   afterEach(()=>{
@@ -55,7 +55,7 @@ describe('请休假交接后台任务（实际本地账本、合成外部端口�
   });
   it('姓名不能代替人员ID回读；失败保任务、不发新卡，重启重试不重复旧卡',async()=>{
     await store.acceptPersonnelHandover(input());
-    gateway.readLeaveRecord.mockResolvedValueOnce({recordId:input().recordId,fields:{请假当前审批人:[{name:target.name}],请假工作流状态:'待示例人员001审批'}});
+    gateway.readLeaveRecord.mockResolvedValueOnce({recordId:input().recordId,fields:{请假当前审批人:[{name:target.name}],请假工作流状态:'待主管审批'}});
     expect(await service.runPendingTasks(new Date(),1)).toEqual({processed:0,failed:1});
     expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
     expect((await store.listTasks()).some(task=>task.businessKey==='leave:rec_synthetic_leave:deliver:supervisor:2')).toBe(false);

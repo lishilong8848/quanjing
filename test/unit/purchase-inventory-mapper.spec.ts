@@ -193,10 +193,10 @@ describe('purchase inventory mapper', () => {
         title: '服务器硬盘',
         requester: '张文豪',
         requesterChatUrl:
-          'https://example.feishu.cn/client/PUBLIC_EXAMPLE_SOURCE',
+          'https://applink.feishu.cn/client/chat/open?openId=ou_requester_contact_123',
         purchaser: '采购负责人',
         purchaserChatUrl:
-          'https://example.feishu.cn/client/PUBLIC_EXAMPLE_SOURCE',
+          'https://applink.feishu.cn/client/chat/open?openId=ou_purchase_contact_123',
         building: 'C楼',
         specialty: '弱电',
         primaryCategory: 'A备品备件类',
@@ -504,7 +504,7 @@ describe('purchase inventory mapper', () => {
       generatedAt: '2026-07-10T06:00:00.000Z',
       submissions: [
         record('submission-1', {
-          采购编码: '示例人员018-UPVC电动球阀-2026/07/09 17:44',
+          采购编码: '王庆华-UPVC电动球阀-2026/07/09 17:44',
           新增物品名称: 'UPVC电动球阀',
           采购数量: 1,
           总价: 508.75,
@@ -515,7 +515,7 @@ describe('purchase inventory mapper', () => {
       ],
       executions: [
         record('execution-1', {
-          采购编码: '示例人员018-UPVC电动球阀-2026/07/09 17:44',
+          采购编码: '王庆华-UPVC电动球阀-2026/07/09 17:44',
           物品名称: 'UPVC电动球阀',
           '3️⃣审批已完成（无需点击）': true,
           下单时间: 1783647987000,
@@ -534,7 +534,7 @@ describe('purchase inventory mapper', () => {
 
     expect(result.requests).toHaveLength(1);
     expect(result.requests[0]).toMatchObject({
-      requestCode: '示例人员018-UPVC电动球阀-2026/07/09 17:44',
+      requestCode: '王庆华-UPVC电动球阀-2026/07/09 17:44',
       title: 'UPVC电动球阀',
       stage: 'receiving',
       statusLabel: '下单完成（待签收）',
@@ -635,7 +635,7 @@ describe('purchase inventory mapper', () => {
       requester: '刘小杏',
       stage: 'approval',
       statusLabel: '未开始（待审批）',
-      approvalTarget: '运维经理（示例人员020 / 示例人员014，任一审批）',
+      approvalTarget: '运维经理（马进宇 / 梅冰冰，任一审批）',
     });
   });
 
@@ -698,7 +698,7 @@ describe('purchase inventory mapper', () => {
       submissions: [
         timedRecord('submission-mask', Date.parse('2026-06-04T08:04:18.000Z'), {
           采购编码: 'CG260604-302',
-          需求人: '示例人员010',
+          需求人: '明志勇',
           申请楼栋: 'C楼',
           新增物品名称: '消防呼吸面罩',
           采购数量: 60,
@@ -724,7 +724,7 @@ describe('purchase inventory mapper', () => {
       executions: [
         timedRecord('execution-mask', Date.parse('2026-06-05T01:38:45.000Z'), {
           采购编码: 'CG260605-301',
-          需求人: '示例人员010',
+          需求人: '明志勇',
           申请楼栋: 'C楼',
           物品名称: '消防呼吸面罩',
           采购申请数量: 60,
@@ -761,7 +761,7 @@ describe('purchase inventory mapper', () => {
         Date.parse(`2026-06-01T02:00:${47 + index}.000Z`),
         {
           采购编码: 'CG260601-601',
-          需求人: '示例人员018',
+          需求人: '王庆华',
           申请楼栋: 'H楼',
           新增物品名称: 'U型垫片',
           采购数量: 20,
@@ -779,7 +779,7 @@ describe('purchase inventory mapper', () => {
         Date.parse(`2026-06-01T02:32:${51 + index}.000Z`),
         {
           采购编码: 'CG260601-602',
-          需求人: '示例人员018',
+          需求人: '王庆华',
           申请楼栋: 'H楼',
           物品名称: 'U型垫片',
           采购申请数量: 20,
@@ -935,15 +935,15 @@ describe('purchase inventory mapper', () => {
       generatedAt: '2026-07-13T01:00:00.000Z',
       submissions: [
         record('submission-1', {
-          采购编码: '示例人员018-UPVC电动球阀-2026/07/09 17:44',
+          采购编码: '王庆华-UPVC电动球阀-2026/07/09 17:44',
           新增物品名称: 'UPVC电动球阀',
           采购数量: 1,
         }),
       ],
       executions: [
         record('execution-1', {
-          采购编码: '示例人员018-UPVC电动球阀-2026/07/09 17:44',
-          需求人: [{ id: 'ou_requester', name: '示例人员018' }],
+          采购编码: '王庆华-UPVC电动球阀-2026/07/09 17:44',
+          需求人: [{ id: 'ou_requester', name: '王庆华' }],
           申请楼栋: ['H楼'],
           物品名称: 'UPVC电动球阀',
         }),
@@ -956,7 +956,7 @@ describe('purchase inventory mapper', () => {
     });
 
     expect(result.requests[0]).toMatchObject({
-      requester: '示例人员018',
+      requester: '王庆华',
       building: 'H楼',
     });
   });
@@ -966,8 +966,8 @@ describe('purchase inventory mapper', () => {
       generatedAt: '2026-07-13T01:00:00.000Z',
       submissions: [
         record('submission-1', {
-          采购编码: '示例人员018-UPVC电动球阀-2026/07/09 17:44',
-          需求人: { id: 'ou_requester', name: '示例人员018' },
+          采购编码: '王庆华-UPVC电动球阀-2026/07/09 17:44',
+          需求人: { id: 'ou_requester', name: '王庆华' },
           '申请楼栋（多楼请选H楼，备注里填写详情）': 'H楼',
           新增物品名称: 'UPVC电动球阀',
           采购数量: 1,
@@ -982,7 +982,7 @@ describe('purchase inventory mapper', () => {
     });
 
     expect(result.requests[0]).toMatchObject({
-      requester: '示例人员018',
+      requester: '王庆华',
       building: 'H楼',
     });
   });
@@ -1064,7 +1064,7 @@ describe('purchase inventory mapper', () => {
 
     expect(result.requests[0]).toMatchObject({
       stage: 'approval',
-      approvalTarget: '运维经理（示例人员020 / 示例人员014，任一审批）',
+      approvalTarget: '运维经理（马进宇 / 梅冰冰，任一审批）',
     });
   });
 

@@ -26,7 +26,7 @@ export function AlarmReviewPersonPicker({ people, value, onChange, disabled, loa
     if (event.key === 'Escape' && expanded) { event.stopPropagation(); setExpanded(false); }
   }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setExpanded(false); }}>
     <Command shouldFilter={false} className="alarm-review-person-command">
-      <CommandInput id="alarm-review-person" aria-label="搜索示例人员019" aria-expanded={expanded && !disabled} placeholder={loading ? '正在读取示例人员019…' : '输入姓名、楼栋或岗位搜索'}
+      <CommandInput id="alarm-review-person" aria-label="搜索责任人" aria-expanded={expanded && !disabled} placeholder={loading ? '正在读取责任人…' : '输入姓名、楼栋或岗位搜索'}
         disabled={disabled} value={query} onFocus={() => { if (!disabled) setExpanded(true); }} onValueChange={text => {
           setQuery(text); setExpanded(true); if (value) onChange('');
         }} />
@@ -40,8 +40,8 @@ export function AlarmReviewPersonPicker({ people, value, onChange, disabled, loa
       </CommandList> : null}
     </Command>
     {value ? <div className="alarm-review-person-selected" role="status">
-      <Check aria-hidden="true" /><span>{selectedName || '已选示例人员019'}{selected ? <small>{[selected.buildings.map(alarmReviewBuildingLabel).join(' / '), selected.position].filter(Boolean).join(' · ')}</small> : null}</span>
-      {!disabled ? <Button size="icon" variant="ghost" aria-label="清除示例人员019" onClick={() => { onChange(''); setQuery(''); setExpanded(true); }}><X aria-hidden="true" /></Button> : null}
-    </div> : <p className="alarm-review-person-hint">{loading ? '正在加载人员' : '从匹配名单中选择示例人员019'}</p>}
+      <Check aria-hidden="true" /><span>{selectedName || '已选责任人'}{selected ? <small>{[selected.buildings.map(alarmReviewBuildingLabel).join(' / '), selected.position].filter(Boolean).join(' · ')}</small> : null}</span>
+      {!disabled ? <Button size="icon" variant="ghost" aria-label="清除责任人" onClick={() => { onChange(''); setQuery(''); setExpanded(true); }}><X aria-hidden="true" /></Button> : null}
+    </div> : <p className="alarm-review-person-hint">{loading ? '正在加载人员' : '从匹配名单中选择责任人'}</p>}
   </div>;
 }

@@ -7,7 +7,7 @@ import type { AccessConfigurationResponse, ManagedAccount } from '../../shared/a
 import { feishuIdentityFingerprint } from '../../server/common/access/feishu-access-approved-grants';
 
 const appId = 'cli_preview_fixture';
-const oldPerson: AuthorityPerson = { id:'local-external-'+ 'a'.repeat(64),recordId:'recOld',name:'前任甲',openId:'ou_old',active:false,type:'employee',position:'C楼示例人员001',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:['recDuty'] };
+const oldPerson: AuthorityPerson = { id:'local-external-'+ 'a'.repeat(64),recordId:'recOld',name:'前任甲',openId:'ou_old',active:false,type:'employee',position:'C楼主管',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:['recDuty'] };
 const newPerson: AuthorityPerson = { ...oldPerson,id:'local-external-'+ 'b'.repeat(64),recordId:'recNew',name:'接任乙',openId:'ou_new',active:true,dutyRecordIds:[] };
 const duty: AuthorityDuty = { recordId:'recDuty',name:'C楼请休假审批',kind:'leave_supervisor',personnelIds:[newPerson.id],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:1 };
 function account(person: AuthorityPerson, overrides: Partial<ManagedAccount> = {}): ManagedAccount {

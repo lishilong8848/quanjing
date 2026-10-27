@@ -13,7 +13,7 @@ export const personnel = [
 export const items: TodayOperationsAlarmItem[] = ['recSyntheticAlarmA', 'recSyntheticAlarmB', 'recSyntheticAlarmC'].map((id, index) => ({
   id, description: ['合成电池内阻过高报警', '合成蜂鸣器告警', '合成漏水检测告警'][index], building: index ? 'B楼' : 'A楼',
   level: '次要', expectation: 'unexpected', occurredAt: at, acceptedAt: at, handlingDescription: '合成现场查看',
-  owner: '合成示例人员019', confirmationStatus: '已确认', handlingStatus: '已关闭', processingStatus: '已处理', recoveryStatus: '已恢复',
+  owner: '合成责任人', confirmationStatus: '已确认', handlingStatus: '已关闭', processingStatus: '已处理', recoveryStatus: '已恢复',
   createdAt: at, location: '合成电池室', alarmCategory: '合成报警', monitorObject: 'SYNTHETIC-LEAK',
   acceptanceDescription: '人员已前往现场查看', confirmationDescription: '合成现场恢复',
   tagIssues: [{ code: index ? 'vague' : 'missing', side: 'acceptance', label: index ? '设备故障未说明原因' : '描述漏填', reason: '合成异常说明', source: 'rule' }],

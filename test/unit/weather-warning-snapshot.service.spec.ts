@@ -169,7 +169,7 @@ function createService(
     getRuntimeConfig: jest.fn().mockReturnValue({
       testRecipient:
         options.testRecipient === undefined
-          ? { openId: 'ou_weather_test', displayName: '示例人员020' }
+          ? { openId: 'ou_weather_test', displayName: '马进宇' }
           : options.testRecipient,
     }),
   };
@@ -766,7 +766,7 @@ describe('WeatherWarningSnapshotService', () => {
   it('keeps the preview contract recipient-safe and sender-fixed to the system bot', () => {
     const preview: WeatherWarningTestPreviewResponse = {
       success: true,
-      recipientName: '示例人员020',
+      recipientName: '马进宇',
       senderName: '系统机器人',
       canSend: false,
       snapshot: {

@@ -57,6 +57,6 @@ export function defaultAccessAccounts(): Record<string, StoredAccount> {
   return accounts;
 }
 export function roleName(role: ManagedAccessRole): string {
-  return ({ guest: '游客', site_member: '基地成员', professional_admin: '专业示例人员001', professional_engineer: '专业工程师', admin: '管理员', editor: '子管理员', building_admin: '楼栋示例人员001', inventory_admin: '库房管理员', purchase_admin: '采购与合同管理员',
+  return ({ guest: '游客', site_member: '基地成员', professional_admin: '专业主管', professional_engineer: '专业工程师', admin: '管理员', editor: '子管理员', building_admin: '楼栋主管', inventory_admin: '库房管理员', purchase_admin: '采购与合同管理员',
     purchase_applicant: '采购申请人', construction_admin: '施工管理员', duty_editor: '值班编辑', supply_chain_admin: '采供存管理员' })[role];
 }

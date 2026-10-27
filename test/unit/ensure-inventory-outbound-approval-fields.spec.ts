@@ -14,7 +14,7 @@ const SCRIPT = resolve(
   ROOT,
   'scripts/ensure-inventory-outbound-approval-fields.mjs',
 );
-const TABLE_ID = 'tblac5490d0b2c6829641c5';
+const TABLE_ID = 'tblOutboundApprovalTest';
 let tempDir = '';
 let fakeState = '';
 let fakeLog = '';
@@ -137,7 +137,7 @@ describe('ensure-inventory-outbound-approval-fields', () => {
       offlineEnvironment({
         FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID: '',
         FEISHU_WAREHOUSE_SOURCE_URL:
-          'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE',
+          'https://vnet.feishu.cn/wiki/testWarehouse?table=tblGenericWrongTable',
       }),
     );
 

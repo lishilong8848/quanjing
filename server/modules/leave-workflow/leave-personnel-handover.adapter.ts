@@ -29,7 +29,7 @@ export class LeavePersonnelHandoverAdapter implements HandoverAdapter {
       const future=application.status==='supervisor_pending'&&application.approvalPlan?.stages.find(candidate=>candidate.key==='manager');
       if(future&&future.approvers.some(person=>person.openId===context.from.openId)){
         const duty=this.duty(context,application,'manager');if(!duty)throw new ConflictException('未来经理职责未包含在交接范围');
-        if(!application.currentStage||await this.store.getStageAction(application.recordId,application.currentStage.key,application.currentStage.version))throw new ConflictException('原示例人员001审批正在同步，请待阶段更新');
+        if(!application.currentStage||await this.store.getStageAction(application.recordId,application.currentStage.key,application.currentStage.version))throw new ConflictException('原主管审批正在同步，请待阶段更新');
         items.push({key:`leave:${application.recordId}:future-manager:${application.revision}`,module:'leave',recordId:application.recordId,title:`${application.snapshot.applicantName} · 后续经理审批`,dutyRecordId:duty.recordId,phase:'approval',status:'pending',stageKey:'future_manager',version:`${application.revision}:${leavePlanHash(application.approvalPlan)}:${application.currentStage.version}`,recipients:future.approvers.map(({name,openId})=>({name,openId}))});
         if(!this.supportsRoleNotifications())continue;
       }
@@ -64,7 +64,7 @@ export class LeavePersonnelHandoverAdapter implements HandoverAdapter {
         assertFutureManagerRoles(context.from.openId!,application,this.supportsRoleNotifications());
         const originalVersion=Number(item.version.split(':')[2]),action=await this.store.getStageAction(item.recordId,'supervisor',originalVersion);
         if(['approved','rejected','rejected_syncing'].includes(application.status)||action?.action==='reject'||await this.store.getStageAction(item.recordId,'manager',originalVersion+1))return {ready:false,alreadyCompleted:true,reason:'原审批已合法受理，保留原结果与历史'};
-        if(action&&application.currentStage?.key!=='manager')return {ready:false,reason:'示例人员001审批正在同步，请待阶段更新后重试原交接'};
+        if(action&&application.currentStage?.key!=='manager')return {ready:false,reason:'主管审批正在同步，请待阶段更新后重试原交接'};
         assertFutureManagerTasks(item.recordId,await this.store.listTasks(),application.currentStage?.key==='manager'?application.currentStage.version:undefined);
         return {ready:true};
       }catch{return {ready:false,reason:'未来经理计划、职责或原审批已变化，请核对后重试'};}

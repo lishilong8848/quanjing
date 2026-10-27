@@ -12,7 +12,7 @@ import { mapMonthlyAlarms } from './monthly-operations-alarms.model';
 import { getAlarmTagSemanticReviewer } from './today-operations-alarm-tag-ai';
 export const MONTHLY_ALARM_SOURCE = {
   appToken: 'JeMdbI3JjawMj1s1YGSc3MoBn7c',
-  tableId: 'tbld976fa6fc1832',
+  tableId: 'tblD7hi70s6U6rlU',
   tableName: '月览告警分析',
   fieldNames: [
     '等级',

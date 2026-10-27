@@ -8,25 +8,25 @@ from typing import Any
 
 
 DEFAULT_ALI_ALARM_SOURCE_URL = (
-    "https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE"
+    "https://vnet.feishu.cn/wiki/SOwsw315aiBJjgkl48ccoxIPntc?table=tblD7hi70s6U6rlU&view=vewG7OKFEg"
 )
 DEFAULT_ALI_STAFF_SOURCE_URL = (
-    "https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE"
+    "https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg?table=tblOu75UtJTDNHIM&view=vewrQcypV4"
 )
 DEFAULT_HIGH_POWER_TABLE = {
     "name": "高功率TOP5报表",
-    "table_id": "tbl82468a84ec746",
-    "view_id": "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID",
+    "table_id": "tblkh6YCMYtS8nHa",
+    "view_id": "vewrHJHl3v",
 }
 DEFAULT_ALARM_REPORT_TABLE = {
     "name": "告警分析报告",
-    "table_id": "tblae41d7fdc6701",
-    "view_id": "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID",
+    "table_id": "tblAGQeQ7tpV8tWt",
+    "view_id": "vewrHJHl3v",
 }
 DEFAULT_STAFF_REPORT_TABLE = {
     "name": "人员变动报告",
-    "table_id": "tblf5fc5e5730d03",
-    "view_id": "PUBLIC_EXAMPLE_FEISHU_DAILY_REPORT_VIEW_ID",
+    "table_id": "tbl3KED5CdvNSCwT",
+    "view_id": "vewrHJHl3v",
 }
 
 CONFIG_ENVIRONMENT_VARIABLES = {

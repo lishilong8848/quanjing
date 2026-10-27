@@ -38,7 +38,7 @@ describe('个人页面增补只授予读取',()=>{
     if(readFileSync(join(directory,'.test-owner'),'utf8') !== owner) throw new Error('测试目录归属标记异常，已保留');
     rmSync(directory,{recursive:true,force:false});
   });
-  it('只按已验证的当前账号版本增补读取，不改变同角色示例人员004员',()=>{
+  it('只按已验证的当前账号版本增补读取，不改变同角色其他人员',()=>{
     const own=Reflect.apply(service.pagePermissions,service,['site_member',chief.id,2]);
     expect(own.paths).toContain('/contract-management'); expect(own.configured).toBe(true);
     expect(Reflect.apply(service.pagePermissions,service,['site_member',other.id,2]).paths).not.toContain('/contract-management');

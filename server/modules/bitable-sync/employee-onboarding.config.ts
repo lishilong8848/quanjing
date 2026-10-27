@@ -10,7 +10,7 @@ export interface EmployeeOnboardingConfig {
 
 const TABLE_NAME = '员工信息池（全量）' as const;
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg?table=tblOu75UtJTDNHIM&view=vewrQcypV4';
 const CONFIGURATION_ERROR_MESSAGE = '新员工入职数据源配置不可用，请联系管理员';
 
 const DEDICATED_SOURCE_URL_ENV = 'FEISHU_EMPLOYEE_ONBOARDING_SOURCE_URL';

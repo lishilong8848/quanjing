@@ -19,7 +19,7 @@ describe('外部员工姓名密码登录', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'nt-external-access-'));
     process.env.ACCESS_CONFIGURATION_FILE = join(root, 'accounts.json');
-    process.env.FEISHU_APP_ID = 'cli_0831564613853b26';
+    process.env.FEISHU_APP_ID = 'cli_a9d1c9fe9d381cee';
     process.env.FEISHU_APP_SECRET = 'synthetic-only';
     process.env.LOCAL_ACCESS_SESSION_SECRET = randomBytes(32).toString('base64');
     process.env.LOCAL_ADMIN_PASSWORD_HASH = hashAccessPassword('synthetic-admin-only');
@@ -28,7 +28,7 @@ describe('外部员工姓名密码登录', () => {
   afterEach(() => { process.env = { ...saved }; rmSync(root, { recursive: true, force: true }); });
   const rows = (password = 'synthetic-external-only') => [{ record_id: 'recExternalTest', fields: { 姓名: '外部验收员工', 密码: password, '离职/异动情况': false } }];
   async function sync(records: BitableRecordItem[] = rows()) {
-    const externalEmployees = await buildExternalEmployeeCredentials(records, 'cli_0831564613853b26', 'synthetic-base', 'tblSynthetic');
+    const externalEmployees = await buildExternalEmployeeCredentials(records, 'cli_a9d1c9fe9d381cee', 'synthetic-base', 'tblSynthetic');
     const snapshot: ConfigurationDirectorySnapshot = { appId: process.env.FEISHU_APP_ID!, people: [], employees: [], snapshotAt: Date.now(), personnelComplete: true, externalEmployees,
       employmentState:{complete:true,entries:externalEmployees.map((person,index)=>({personnelIdentity:person.id,inactive:readPersonnelAuthorizationState(records[index].fields || {})==='inactive'}))} };
     await configuration.synchronizePersonnel(snapshot);

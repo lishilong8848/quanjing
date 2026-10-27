@@ -5,7 +5,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$BaseToken = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_INVENTORY_APP_TOKEN'
+$BaseToken = 'IZKGbwY8TaaRELs6LZIcrNoAnwc'
 $CodeField = '采购编码'
 $DefaultBuilding = 'H楼'
 $BuildingNumbers = @{
@@ -20,7 +20,7 @@ $BuildingNumbers = @{
 
 $TableSpecs = @(
   @{
-    Id = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID'
+    Id = 'tblKmajonrdwW7Z0'
     Name = '采购执行明细'
     PersonFields = @('需求人')
     ItemFields = @('物品名称')
@@ -30,7 +30,7 @@ $TableSpecs = @(
     FieldIds = @('fldRvSQjN7', 'fld5Hmt9R5', 'fldOarHcyQ', 'fldSqzYQ9U', 'fldqE598Mp', 'fldHbEVfzV')
   },
   @{
-    Id = 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID'
+    Id = 'tblIfmOB4VTUMmMh'
     Name = '采购申请清单'
     PersonFields = @('业务申请人', '需求人')
     ItemFields = @('非新增物品名称', '新增物品名称')
@@ -250,8 +250,8 @@ function Test-HistoricalPair {
   return [Math]::Abs(($Submission.CreatedAt - $Execution.CreatedAt).TotalMinutes) -lt 10
 }
 
-$submissions = @($records | Where-Object { $_.TableId -eq 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_SUBMISSION_TABLE_ID' })
-$executions = @($records | Where-Object { $_.TableId -eq 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_EXECUTION_TABLE_ID' })
+$submissions = @($records | Where-Object { $_.TableId -eq 'tblIfmOB4VTUMmMh' })
+$executions = @($records | Where-Object { $_.TableId -eq 'tblKmajonrdwW7Z0' })
 $pairedSubmissionKeys = [System.Collections.Generic.HashSet[string]]::new()
 $confirmedPairs = @()
 $pairedExecutionCount = 0

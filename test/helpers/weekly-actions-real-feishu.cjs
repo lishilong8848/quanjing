@@ -48,7 +48,7 @@ async function main() {
     await gateway.update(id, { [edit.field]: edit.expectedText }, { [edit.field]: edit.desiredText });
     await gateway.update(id, { [edit.field]: edit.expectedText }, { [edit.field]: edit.desiredText });
     assert.equal(gateway.text((await gateway.record(id))['本周代办']), edit.desiredText);
-    proof.checks.push('真实单项修改、示例人员019文本与相邻事项保留，重复回读确认');
+    proof.checks.push('真实单项修改、责任人文本与相邻事项保留，重复回读确认');
     const block = `${marker}\n1. 整段测试\n  保留缩进\n\n2. 保留编号与换行`;
     await gateway.update(id, { 阿里会议待办: '' }, { 阿里会议待办: block });
     assert.equal(gateway.text((await gateway.record(id))['阿里会议待办']), block);

@@ -35,7 +35,7 @@ describe('equipment lifecycle dashboard model', () => {
         building: 'A楼',
         deviceName: 'UPS',
         specialty: '电气',
-        manager: '示例人员008',
+        manager: '张三',
         managerInitial: '张',
         serviceYears: 5,
         lastReplacementDate: '2021-01-01',
@@ -49,7 +49,7 @@ describe('equipment lifecycle dashboard model', () => {
         building: 'B楼',
         deviceName: '冷水机组',
         specialty: '暖通',
-        manager: '示例人员013',
+        manager: '李四',
         managerInitial: '李',
         serviceYears: null,
         lastReplacementDate: null,
@@ -62,7 +62,7 @@ describe('equipment lifecycle dashboard model', () => {
     const filtered = model!.filterLifecycleAssets(assets, {
       building: 'A楼',
       specialty: '电气',
-      manager: '示例人员008',
+      manager: '张三',
       status: '在保',
     });
 
@@ -83,7 +83,7 @@ describe('equipment lifecycle dashboard model', () => {
         building: 'B楼',
         deviceName: 'UPS',
         specialty: '电气',
-        manager: '示例人员008',
+        manager: '张三',
         managerInitial: '张',
         serviceYears: 5,
         lastReplacementDate: null,
@@ -97,7 +97,7 @@ describe('equipment lifecycle dashboard model', () => {
         building: 'A楼',
         deviceName: '冷水机组',
         specialty: '暖通',
-        manager: '示例人员013',
+        manager: '李四',
         managerInitial: '李',
         serviceYears: null,
         lastReplacementDate: null,
@@ -109,7 +109,7 @@ describe('equipment lifecycle dashboard model', () => {
     const serverOptions = {
       buildings: ['E楼', 'A楼'],
       specialties: ['EHS'],
-      managers: ['示例人员017'],
+      managers: ['王五'],
       statuses: ['在采'],
     };
 
@@ -119,7 +119,7 @@ describe('equipment lifecycle dashboard model', () => {
     expect(model!.getLifecycleFilterOptions(assets)).toEqual({
       buildings: ['A楼', 'B楼'],
       specialties: ['暖通', '电气'],
-      managers: ['示例人员008', '示例人员013'],
+      managers: ['张三', '李四'],
       statuses: ['在保', '需评估'],
     });
   });
@@ -191,7 +191,7 @@ describe('equipment lifecycle dashboard model', () => {
           building: 'A楼',
           deviceName: 'UPS',
           specialty: '电气',
-          manager: '示例人员008',
+          manager: '张三',
           status: '未到期',
           currentExpiryDate: '2027-01-15',
         },
@@ -201,7 +201,7 @@ describe('equipment lifecycle dashboard model', () => {
           building: 'A楼',
           deviceName: 'UPS',
           specialty: '电气',
-          manager: '示例人员013',
+          manager: '李四',
           status: '待评估',
           currentExpiryDate: '2027-02-10',
         },
@@ -211,7 +211,7 @@ describe('equipment lifecycle dashboard model', () => {
           building: 'B楼',
           deviceName: '冷水机组',
           specialty: '暖通',
-          manager: '示例人员017',
+          manager: '王五',
           status: '未填写',
           currentExpiryDate: '2027-02-20',
         },
@@ -294,7 +294,7 @@ describe('equipment lifecycle dashboard model', () => {
     expect(topDevice.rows[0]).toMatchObject({
       source: 'equipment',
       name: 'UPS',
-      owner: '示例人员008',
+      owner: '张三',
       dueDate: '2027-01-15',
     });
   });

@@ -568,8 +568,8 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
           excluded: [],
           normal: [
             {
-              key: '2026-09-08:building_a:white:OnDuty:测试示例人员015',
-              name: '测试示例人员015',
+              key: '2026-09-08:building_a:white:OnDuty:测试正常人员',
+              name: '测试正常人员',
               building: 'A楼',
               shiftLabel: '白班',
               direction: 'OnDuty',
@@ -809,7 +809,7 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
       listCorrectionApprovals: jest.fn().mockResolvedValue([]),
       listAllUsers: jest.fn().mockResolvedValue([
         { userId: 'ding-li', name: '李董' },
-        { userId: 'ding-mei', name: '示例人员014' },
+        { userId: 'ding-mei', name: '梅冰冰' },
       ]),
       listAttendanceDetails: jest.fn().mockResolvedValue([]),
     };
@@ -821,8 +821,8 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
           building: 'building_a',
           team: 'team_1',
           shift: 'white',
-          dutyStaffReference: ['李董', '示例人员014'],
-          dutyStaffActual: ['李董', '示例人员014'],
+          dutyStaffReference: ['李董', '梅冰冰'],
+          dutyStaffActual: ['李董', '梅冰冰'],
           leaveStaff: [],
           substituteStaff: [],
         },
@@ -848,7 +848,7 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
         .mockResolvedValue({ total: 2, created: 2, updated: 0 }),
       resolvePersonalRecipients: jest.fn().mockResolvedValue([
         { openId: 'ou_li', name: '李董' },
-        { openId: 'ou_mei', name: '示例人员014' },
+        { openId: 'ou_mei', name: '梅冰冰' },
       ]),
       sendCard,
       readArchivedAttendanceSummary: jest.fn().mockResolvedValue({

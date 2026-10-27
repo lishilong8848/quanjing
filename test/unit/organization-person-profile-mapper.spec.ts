@@ -21,8 +21,8 @@ describe('organization person profile mapper', () => {
         '机楼/专业': ['A楼', '电气'],
         班组: 'A1班',
         班次: '白班',
-        示例人员001: '周明远',
-        联系方式: '13800004144',
+        主管: '周明远',
+        联系方式: '13812346721',
         电子邮箱: 'linhao@example.com',
         身份证号: '32061219930309241X',
         入职日期: 1686499200000,
@@ -121,7 +121,7 @@ describe('organization person profile mapper', () => {
     const profile = mapOrganizationPersonProfileRecord({
       record_id: 'rec-profile-empty',
       fields: {
-        姓名: '示例人员016',
+        姓名: '测试人员',
         岗位: '运维值班员',
       },
     });
@@ -171,7 +171,7 @@ describe('organization person profile mapper', () => {
               月份: '7月',
               楼栋: 'A楼',
               检查项目: '值班纪律',
-              问题: '示例人员008睡岗',
+              问题: '张三睡岗',
               问题补充描述: '已提醒整改',
               问题图片: [
                 {
@@ -189,8 +189,8 @@ describe('organization person profile mapper', () => {
         {
           record_id: 'rec-person-zhang',
           fields: {
-            姓名: '示例人员008',
-            员工姓名: [{ name: '示例人员008', open_id: 'ou_zhang' }],
+            姓名: '张三',
+            员工姓名: [{ name: '张三', open_id: 'ou_zhang' }],
             '机楼/专业': ['A楼'],
           },
         },
@@ -208,7 +208,7 @@ describe('organization person profile mapper', () => {
           month: '7月',
           building: 'A楼',
           item: '值班纪律',
-          issue: '示例人员008睡岗',
+          issue: '张三睡岗',
         },
       ],
     });
@@ -243,7 +243,7 @@ describe('organization person profile mapper', () => {
     const profile = mapOrganizationPersonProfileRecord({
       record_id: 'rec-profile-certificate-merge',
       fields: {
-        姓名: '示例人员006',
+        姓名: '周海祥',
         '机楼/专业': ['H楼', '电气'],
         高压电工证: '有效',
         高压电工证到期日期: '2027-01-01',
@@ -266,7 +266,7 @@ describe('organization person profile mapper', () => {
       },
       [
         certificatePerson({
-          name: '示例人员006',
+          name: '周海祥',
           building: 'H楼',
           highVoltageValid: true,
           highVoltageExpiryDate: '2028-06-30',
@@ -351,7 +351,7 @@ describe('organization person profile mapper', () => {
   it('rejects invalid MBTI values and masks short identifiers safely', () => {
     const profile = mapOrganizationPersonProfileRecord({
       record_id: 'rec-profile-invalid',
-      fields: { 姓名: '示例人员016', MBTI: 'ABCD' },
+      fields: { 姓名: '测试人员', MBTI: 'ABCD' },
     });
     expect(profile?.mbti).toBeNull();
     expect(maskOrganizationPersonIdCard('1234567')).toBe('123****');
@@ -376,7 +376,7 @@ function certificatePerson(
 ): CampusCertificatePerson {
   return {
     id: 'certificate-person',
-    name: '示例人员016',
+    name: '测试人员',
     building: 'A楼',
     position: '运维工程师',
     team: '长白',

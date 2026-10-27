@@ -28,7 +28,7 @@ export function createAliIssueDetail(
       { label: '专业', value: valueOrDash(issue.specialty) },
       { label: '风险等级', value: valueOrDash(issue.levelLabel) },
       { label: '处置状态', value: valueOrDash(issue.statusLabel) },
-      { label: '示例人员019', value: valueOrDash(issue.owner) },
+      { label: '责任人', value: valueOrDash(issue.owner) },
       { label: '发现时间', value: valueOrDash(issue.discoveredAt) },
       { label: '截止日期', value: valueOrDash(issue.dueAt) },
       { label: '闭环日期', value: valueOrDash(issue.closedAt) },

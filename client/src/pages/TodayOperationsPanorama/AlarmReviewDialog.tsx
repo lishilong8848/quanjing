@@ -137,7 +137,7 @@ export function AlarmReviewDialog({ open, onOpenChange, items, allowed, sessionR
     <DialogContent showCloseButton={false} className="alarm-review-dialog" onEscapeKeyDown={event => { if (personSearchOpen) event.preventDefault(); }}>
       <Button variant="ghost" size="icon" aria-label="关闭异常跟进" className="absolute right-3 top-3" onClick={() => onOpenChange(false)}><X aria-hidden="true" /></Button>
       <DialogHeader className="alarm-review-header"><DialogTitle>异常跟进 · {task?.items.length || mutation.current?.recordIds.length || items.length} 条</DialogTitle>
-        <DialogDescription className="sr-only">选择人工复核结果和示例人员019</DialogDescription></DialogHeader>
+        <DialogDescription className="sr-only">选择人工复核结果和责任人</DialogDescription></DialogHeader>
       <div className="alarm-review-body space-y-4">
         {!task ? <div className="alarm-review-context">{items.length === 1 ? items[0].description : `已选择 ${items.length} 条异常`}</div> : null}
         <fieldset className="alarm-review-results" disabled={formDisabled}>
@@ -152,10 +152,10 @@ export function AlarmReviewDialog({ open, onOpenChange, items, allowed, sessionR
             placeholder="填写复核结论或后续处理安排" maxLength={ALARM_REVIEW_REPLY_MAX_LENGTH} rows={3} />
           <span className="alarm-review-reply-count">{customReply.length} / {ALARM_REVIEW_REPLY_MAX_LENGTH}</span>
         </div> : null}
-        <div className="space-y-2"><label htmlFor="alarm-review-person" className="font-medium">示例人员019 <span className="text-destructive">*</span></label>
+        <div className="space-y-2"><label htmlFor="alarm-review-person" className="font-medium">责任人 <span className="text-destructive">*</span></label>
           <AlarmReviewPersonPicker people={people} value={personId} onChange={setPersonId} onExpandedChange={setPersonSearchOpen} disabled={formDisabled || peopleState !== 'ready'} loading={peopleState === 'loading'} fallbackName={task?.responsibleName} />
           {peopleState === 'error' ? <div role="alert" className="text-sm text-destructive">{peopleError} <Button variant="outline" size="sm" onClick={() => setPeopleReload((key) => key + 1)}>重试读取</Button></div> : null}
-          {peopleState === 'ready' && !people.length ? <p role="status" className="text-sm text-muted-foreground">暂无可关联飞书身份的在职示例人员019</p> : null}
+          {peopleState === 'ready' && !people.length ? <p role="status" className="text-sm text-muted-foreground">暂无可关联飞书身份的在职责任人</p> : null}
         </div>
         {task ? <div className="space-y-2" aria-live="polite">
           <div className="font-medium">已完成 {task.items.filter((item) => item.state === 'success').length} / {task.items.length}{phase === 'accepted' ? ' · 同步中' : phase === 'success' ? ' · 复核已保存' : ' · 有未完成条目'}</div>

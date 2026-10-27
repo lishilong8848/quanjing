@@ -18,7 +18,7 @@ import {
 import type { BitableFieldMeta } from './contract-creation.rules';
 
 const DEFAULT_SOURCE_URL =
-  'https://example.feishu.cn/wiki/PUBLIC_EXAMPLE_SOURCE';
+  'https://vnet.feishu.cn/wiki/SiW9wuy9DiIsykkTkNUcM0HfnSb?table=tblQehMrGf4zIfnt&view=vewmu8EPpy';
 const DEFAULT_WIKI_TOKEN = 'SiW9wuy9DiIsykkTkNUcM0HfnSb';
 
 export type ContractCreateTableKind =
@@ -66,27 +66,27 @@ const TABLES: Record<
 > = {
   framework: {
     env: 'FEISHU_CONTRACT_FRAMEWORK_TABLE_ID',
-    defaultId: 'tbl033c8ec63ff1b',
+    defaultId: 'tblQehMrGf4zIfnt',
     tableName: '00-框架合同信息',
   },
   execution: {
     env: 'FEISHU_CONTRACT_EXECUTION_TABLE_ID',
-    defaultId: 'tbl1171c5349e996',
+    defaultId: 'tblWfHs0iwQh8lHj',
     tableName: '01-执行合同信息',
   },
   supplier: {
     env: 'FEISHU_CONTRACT_SUPPLIER_TABLE_ID',
-    defaultId: 'tblb6b368b0d6407',
+    defaultId: 'tblPf6yV4cxsWZTl',
     tableName: '02-供应商名录',
   },
   payment: {
     env: 'FEISHU_CONTRACT_PAYMENT_TABLE_ID',
-    defaultId: 'tbl277d0db09de0f',
+    defaultId: 'tblYK1vdLAkpoaIC',
     tableName: '03-付款计划',
   },
   organization: {
     env: 'FEISHU_CONTRACT_ORGANIZATION_TABLE_ID',
-    defaultId: 'PUBLIC_EXAMPLE_FEISHU_PURCHASE_ORGANIZATION_TABLE_ID',
+    defaultId: 'tblRtv0XGQVTihw7',
     tableName: '组织架构',
   },
 };

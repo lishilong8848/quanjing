@@ -31,6 +31,7 @@ import {
 } from './training-dashboard.snapshot-store';
 
 const STALE_ERROR_MESSAGE = '源数据同步失败，已展示上次成功结果';
+const STORED_SYNC_TIME = '2026-07-15T03:00:00.000Z';
 const ENV_KEYS = [
   'FEISHU_TRAINING_APP_TOKEN',
   'FEISHU_TRAINING_WIKI_TOKEN',
@@ -139,7 +140,10 @@ function installLiveSources(sources = validSources()): void {
 }
 
 function installStoredSources(sources = validSources()): void {
-  jest.mocked(readTrainingDashboardSourceSnapshot).mockResolvedValue(sources);
+  jest.mocked(readTrainingDashboardSourceSnapshot).mockResolvedValue({
+    sources,
+    savedAt: STORED_SYNC_TIME,
+  });
 }
 
 describe('TrainingDashboardService', () => {
@@ -169,6 +173,97 @@ describe('TrainingDashboardService', () => {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+  });
+
+  it('keeps the last successful sync time across projections and advances it only after a successful refresh', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-27T01:00:00.000Z'));
+    const service = new TrainingDashboardService({ axiosRef: {} } as never);
+    const first = await service.getDashboard('2026-07', true);
+    jest.setSystemTime(new Date('2026-10-27T01:02:00.000Z'));
+    const anotherMonth = await service.getDashboard('2026-06', false);
+    expect(anotherMonth.syncedAt).toBe(first.syncedAt);
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(7);
+    const refreshed = await service.getDashboard('2026-07', true);
+    expect(refreshed.syncedAt).toBe('2026-10-27T01:02:00.000Z');
+    expect(writeTrainingDashboardSourceSnapshot).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      refreshed.syncedAt,
+    );
+  });
+
+  it('keeps an old snapshot visibly refreshing beyond one minute without starting another source load', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-27T01:00:00.000Z'));
+    installStoredSources();
+    const sources = validSources();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    jest
+      .mocked(fetchBitableRecords)
+      .mockImplementation(async (_http, options) => {
+        await gate;
+        const records = sources[configForTableId(options.tableId).key];
+        options.validateRecords?.(records);
+        return records;
+      });
+    const service = new TrainingDashboardService({ axiosRef: {} } as never);
+    const initial = await service.getDashboard('2026-07');
+    expect(initial.sourceStatus).toBe('refreshing');
+    expect(initial.syncedAt).toBe(STORED_SYNC_TIME);
+    expect(initial.errorMessage).not.toContain('失败');
+    jest.setSystemTime(new Date('2026-10-27T01:01:30.000Z'));
+    const pending = await service.getDashboard('2026-07');
+    expect(pending.sourceStatus).toBe('refreshing');
+    expect(pending.summary).toEqual(initial.summary);
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(7);
+    finish();
+    const fresh = await service.getDashboard('2026-07', true);
+    expect(fresh.sourceStatus).toBe('fresh');
+    expect(fresh.syncedAt).toBe('2026-10-27T01:01:30.000Z');
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(7);
+  });
+
+  it('uses the current month after restoring an older snapshot while keeping its actual sync timestamp', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-27T01:00:00.000Z'));
+    installStoredSources();
+    jest.mocked(fetchBitableRecords).mockRejectedValue(new Error('offline'));
+    const service = new TrainingDashboardService({ axiosRef: {} } as never);
+    const initial = await service.getDashboard();
+    expect(initial.month).toBe('2026-10');
+    expect(initial.availableMonths).toContain('2026-10');
+    expect(initial.syncedAt).toBe(STORED_SYNC_TIME);
+    // Join the pending load so no asynchronous work outlives this test.
+    const failed = await service.getDashboard(undefined, true);
+    expect(failed.month).toBe('2026-10');
+    expect(failed.syncedAt).toBe(STORED_SYNC_TIME);
+  });
+
+  it('reports background failure without automatic retry storms, then recovers on explicit refresh', async () => {
+    installStoredSources();
+    jest
+      .mocked(fetchBitableRecords)
+      .mockRejectedValue(new Error('private upstream token'));
+    const service = new TrainingDashboardService({ axiosRef: {} } as never);
+    const pending = await service.getDashboard('2026-07');
+    expect(pending.sourceStatus).toBe('refreshing');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const failed = await service.getDashboard('2026-07');
+    expect(failed.sourceStatus).toBe('stale');
+    expect(failed.syncedAt).toBe(STORED_SYNC_TIME);
+    expect(failed.summary).toEqual(pending.summary);
+    await service.getDashboard('2026-06');
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(7);
+    expect(writeTrainingDashboardSourceSnapshot).not.toHaveBeenCalled();
+    installLiveSources();
+    const [first, second] = await Promise.all([
+      service.getDashboard('2026-07', true),
+      service.getDashboard('2026-07', true),
+    ]);
+    expect(first).toBe(second);
+    expect(first.sourceStatus).toBe('fresh');
+    expect(first.errorMessage).toBeUndefined();
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(14);
   });
 
   it('strictly reads only the seven visible-dashboard tables and caches both latest and resolved-month keys', async () => {
@@ -212,7 +307,7 @@ describe('TrainingDashboardService', () => {
       jest
         .mocked(fetchBitableRecords)
         .mock.calls.some(([, options]) =>
-          ['tbl17386849dd95c', 'tbl94bd80a843445'].includes(options.tableId),
+          ['tbluLOjtntNXxNvI', 'tbl4gx4y0Z29qj2H'].includes(options.tableId),
         ),
     ).toBe(false);
     expect(first.month).toBe('2026-07');
@@ -240,6 +335,7 @@ describe('TrainingDashboardService', () => {
         sharingScores: expect.any(Array),
         sharingInterests: expect.any(Array),
       }),
+      first.syncedAt,
     );
     expect(readLatestPersistedBitableRecords).not.toHaveBeenCalled();
   });
@@ -507,7 +603,8 @@ describe('TrainingDashboardService', () => {
       expect(settled).toBe(true);
       const response = await request;
       expect(response.month).toBe('2026-07');
-      expect(response.sourceStatus).toBe('stale');
+      expect(response.sourceStatus).toBe('refreshing');
+      expect(response.syncedAt).toBe('');
       expect(response.dataStatus).toBe('empty');
       expect(readTrainingDashboardSourceSnapshot).toHaveBeenCalledTimes(1);
       expect(fetchBitableRecords).toHaveBeenCalledTimes(7);
@@ -591,7 +688,7 @@ describe('TrainingDashboardService', () => {
     } as never);
 
     const initial = await service.getDashboard('2026-07', false);
-    expect(initial.sourceStatus).toBe('stale');
+    expect(initial.sourceStatus).toBe('refreshing');
     expect(initial.dataStatus).toBe('empty');
 
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -662,6 +759,10 @@ describe('TrainingDashboardService', () => {
       axiosRef: {},
     } as never);
 
+    const pending = await service.getDashboard('2026-07', false);
+    expect(pending.sourceStatus).toBe('refreshing');
+    expect(pending.syncedAt).toBe(STORED_SYNC_TIME);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const stale = await service.getDashboard('2026-07', false);
 
     expect(readTrainingDashboardSourceSnapshot).toHaveBeenCalledTimes(1);
@@ -692,9 +793,10 @@ describe('TrainingDashboardService', () => {
           .mockResolvedValue(null);
       } else if (invalidCase === 'incomplete') {
         const { activeStats: _missing, ...incomplete } = sources;
-        jest
-          .mocked(readTrainingDashboardSourceSnapshot)
-          .mockResolvedValue(incomplete as unknown as TrainingSourcesFixture);
+        jest.mocked(readTrainingDashboardSourceSnapshot).mockResolvedValue({
+          sources: incomplete as unknown as TrainingSourcesFixture,
+          savedAt: STORED_SYNC_TIME,
+        });
       } else {
         sources.activeStats = [
           sourceRecord('activeStats', {
@@ -703,7 +805,7 @@ describe('TrainingDashboardService', () => {
         ];
         jest
           .mocked(readTrainingDashboardSourceSnapshot)
-          .mockResolvedValue(sources);
+          .mockResolvedValue({ sources, savedAt: STORED_SYNC_TIME });
       }
       const service = new TrainingDashboardService({
         axiosRef: {},
@@ -713,7 +815,8 @@ describe('TrainingDashboardService', () => {
 
       expect(fallback.sourceStatus).toBe('stale');
       expect(fallback.dataStatus).toBe('empty');
-      expect(fallback.errorMessage).toContain('后台同步');
+      expect(fallback.errorMessage).toContain('同步失败');
+      expect(fallback.syncedAt).toBe('');
       expect(JSON.stringify(fallback)).not.toContain('secret');
       expect(readTrainingDashboardSourceSnapshot).toHaveBeenCalledTimes(1);
       expect(readLatestPersistedBitableRecords).not.toHaveBeenCalled();
@@ -798,7 +901,7 @@ describe('TrainingDashboardService', () => {
 
     expect(fallback.sourceStatus).toBe('stale');
     expect(fallback.dataStatus).toBe('empty');
-    expect(fallback.errorMessage).toContain('后台同步');
+    expect(fallback.errorMessage).toContain('同步失败');
     expect(JSON.stringify(fallback)).not.toContain('secret');
     expect(readLatestPersistedBitableRecords).not.toHaveBeenCalled();
     expect(writeTrainingDashboardSourceSnapshot).not.toHaveBeenCalled();
@@ -845,7 +948,7 @@ describe('TrainingDashboardService', () => {
 
     expect(fallback.sourceStatus).toBe('stale');
     expect(fallback.dataStatus).toBe('empty');
-    expect(fallback.errorMessage).toContain('后台同步');
+    expect(fallback.errorMessage).toContain('同步失败');
     expect(JSON.stringify(fallback)).not.toContain('secret');
     expect(readLatestPersistedBitableRecords).not.toHaveBeenCalled();
     expect(writeTrainingDashboardSourceSnapshot).not.toHaveBeenCalled();

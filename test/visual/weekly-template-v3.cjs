@@ -15,14 +15,14 @@ const proof = { startedAt: new Date().toISOString(), passed: false, checks: [], 
     assert.equal(await page.locator('.detail-area').first().isVisible(), false);
     await page.getByRole('button', { name: '含场景简述', exact: true }).click();
     assert(await page.locator('.detail-area').first().isVisible());
-    assert((await page.locator('.source').first().innerText()).includes('保留示例人员019员'));
+    assert((await page.locator('.source').first().innerText()).includes('保留责任人员'));
     await page.screenshot({ path: path.join(out, 'v3-template-desktop.png') });
     proof.checks.push({ name: 'v3-reference-and-mode-switch', passed: true });
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       await page.goto('http://127.0.0.1:4200/meeting-templates/nantong-weekly-v3-generated-sample.html');
       const content = await page.locator('main').innerText();
-      for (const value of ['一、本周待办', '二、本周周会内容', '三、专业线', '四、运营线', '二、效率（变更、维护、演练）', '本月已完成1/3项', '其中待审批1项', '场景简述', '演练楼栋待核对：1项', '示例人员020', '2026-10-14', '电气专业线', '暖通专业线', '弱电专业线', 'EHS & 消防专业线', '成本支出']) assert(content.includes(value), value);
+      for (const value of ['一、本周待办', '二、本周周会内容', '三、专业线', '四、运营线', '二、效率（变更、维护、演练）', '本月已完成1/3项', '其中待审批1项', '场景简述', '演练楼栋待核对：1项', '马进宇', '2026-10-14', '电气专业线', '暖通专业线', '弱电专业线', 'EHS & 消防专业线', '成本支出']) assert(content.includes(value), value);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       await page.screenshot({ path: path.join(out, `v3-generated-${width}.png`), fullPage: false });
       if (width === 1440) {

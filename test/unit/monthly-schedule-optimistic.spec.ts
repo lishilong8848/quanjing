@@ -17,7 +17,7 @@ const schedules = [
     building: 'building_a',
     team: 'shift_a',
     shift: 'white',
-    dutyStaffActual: ['示例人员008', '示例人员013'],
+    dutyStaffActual: ['张三', '李四'],
     leaveStaff: [],
     substituteStaff: [],
   },
@@ -27,7 +27,7 @@ const schedules = [
     building: 'building_b',
     team: 'shift_b',
     shift: 'night',
-    dutyStaffActual: ['示例人员017'],
+    dutyStaffActual: ['王五'],
     leaveStaff: [],
     substituteStaff: [],
   },
@@ -39,31 +39,31 @@ describe('monthly schedule optimistic updates', () => {
       { recordId: 'rec1', staffName: '赵六' },
       { recordId: 'rec1', staffName: '赵六' },
     ]);
-    expect(result[0].dutyStaffActual).toEqual(['示例人员008', '示例人员013', '赵六']);
+    expect(result[0].dutyStaffActual).toEqual(['张三', '李四', '赵六']);
   });
 
   it('replaces a duty staff member immediately', () => {
     const result = replaceOptimisticDutyStaff(
       schedules,
       'rec1',
-      '示例人员013',
+      '李四',
       '赵六',
     );
-    expect(result[0].dutyStaffActual).toEqual(['示例人员008', '赵六']);
+    expect(result[0].dutyStaffActual).toEqual(['张三', '赵六']);
   });
 
   it('removes travel or movement staff in the selected range', () => {
-    const result = removeOptimisticDutyStaff(schedules, '示例人员008', {
+    const result = removeOptimisticDutyStaff(schedules, '张三', {
       startDate: '2026-07-21',
       endDate: '2026-07-22',
     });
-    expect(result[0].dutyStaffActual).toEqual(['示例人员013']);
-    expect(result[1].dutyStaffActual).toEqual(['示例人员017']);
+    expect(result[0].dutyStaffActual).toEqual(['李四']);
+    expect(result[1].dutyStaffActual).toEqual(['王五']);
   });
 
   it('applies leave and substitute fields immediately', () => {
     const result = applyOptimisticLeave(schedules, {
-      staffName: '示例人员008',
+      staffName: '张三',
       substituteName: '赵六',
       startDate: '2026-07-21',
       endDate: '2026-07-21',
@@ -72,8 +72,8 @@ describe('monthly schedule optimistic updates', () => {
       shift: 'white',
     });
     expect(result[0]).toMatchObject({
-      dutyStaffActual: ['赵六', '示例人员013'],
-      leaveStaff: ['示例人员008'],
+      dutyStaffActual: ['赵六', '李四'],
+      leaveStaff: ['张三'],
       substituteStaff: ['赵六'],
     });
     expect(result[1]).toBe(schedules[1]);
@@ -97,14 +97,14 @@ describe('monthly schedule optimistic updates', () => {
 
   it('applies leave only to the exact affected schedule records', () => {
     const result = applyOptimisticLeaveToRecords(schedules, {
-      staffName: '示例人员008',
+      staffName: '张三',
       substituteName: '赵六',
       recordIds: ['rec1'],
     });
 
     expect(result[0]).toMatchObject({
-      dutyStaffActual: ['示例人员008', '示例人员013'],
-      leaveStaff: ['示例人员008'],
+      dutyStaffActual: ['张三', '李四'],
+      leaveStaff: ['张三'],
       substituteStaff: ['赵六'],
     });
     expect(result[1]).toBe(schedules[1]);

@@ -23,7 +23,7 @@ describe('tools unified chart and drilldown model', () => {
     const snapshot: any = {
       tools: [tool('recA', 'A楼'), tool('recB', 'B楼')],
       flows: [
-        { id: 'f1', kind: 'borrow', status: '示例人员001审批', toolIds: ['recA'] },
+        { id: 'f1', kind: 'borrow', status: '主管审批', toolIds: ['recA'] },
         { id: 'f2', kind: 'borrow', status: '工具已出库', toolIds: ['recB'] },
       ],
     };
