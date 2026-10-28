@@ -1,3 +1,4 @@
+import { useMonthlyOperationsExport } from './use-export-access';
 import { startTransition, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -48,6 +49,7 @@ export function ResourceDetailSheet({
   onClose: () => void;
   restoreFocus: () => void;
 }) {
+  const { canExport, authorizeExport } = useMonthlyOperationsExport();
   const { data } = useResourceData();
   const selected = selection.building ?? building;
   const racks = selection.resource === 'capacity';
@@ -95,7 +97,7 @@ export function ResourceDetailSheet({
       ]),
   };
   const currentTable = racks ? rackTable : load ? loadTable : table;
-  const exportTable = () => {
+  const exportTable = () => void authorizeExport(() => {
     if (!currentTable) return;
     const csv =
       '\uFEFF' +
@@ -113,7 +115,7 @@ export function ResourceDetailSheet({
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setMessage(`已导出 ${currentTable.rows.length} 条数据`);
-  };
+  }, setMessage);
   const showRows = (
     rows: ResourceTrendRow[],
     metric: ResourceMetric,
@@ -214,7 +216,7 @@ export function ResourceDetailSheet({
                   <Button
                     variant="outline"
                     onClick={exportTable}
-                    disabled={!currentTable.rows.length}
+                    disabled={!canExport || !currentTable.rows.length}
                   >
                     <Download />
                     导出清单

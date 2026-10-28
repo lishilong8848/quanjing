@@ -15,6 +15,7 @@ import type {
   CrossRectificationStatus,
   RiskDistributionItem,
 } from '../../../shared/risk-inspection.interface';
+import { recordProfessionalSpecialty } from '../../common/access/professional-record-scope';
 import {
   type BitableRecordItem,
   extractDateTimeIso,
@@ -255,6 +256,7 @@ function mapAliMonthlyQualityIssue(
     id: recordId,
     month: normalizeMonth(extractDisplayText(fields['月份'])) || '未填写',
     building,
+    specialty: recordProfessionalSpecialty(record),
     item: extractDisplayText(fields['检查项目']) || '其他',
     issue,
     supplemental,

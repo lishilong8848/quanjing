@@ -119,7 +119,7 @@ export class ThresholdAdjustmentService
     }
     return {
       ...context,
-      engineers: filterProfessionalRecords(principal, context.engineers, engineer => engineer.profession),
+      engineers: filterProfessionalRecords({ ...principal, permissionContext: { module: 'thresholds', action: 'read' } }, context.engineers, engineer => engineer.profession),
       applicant: resolveApplicant(context, principal),
       ...(this.recoveryError ? { error: this.recoveryError } : {}),
     };
@@ -176,7 +176,7 @@ export class ThresholdAdjustmentService
     const before = this.records
       .list()
       .records.find((r) => r.id === input.thresholdId);
-    assertProfessionalRecordScope(principal, before?.profession, before?.building);
+    assertProfessionalRecordScope({ ...principal, permissionContext: { module: 'thresholds', action: 'create' } }, before?.profession, before?.building);
     if (
       !before ||
       before.version !== input.expectedVersion ||
@@ -190,7 +190,7 @@ export class ThresholdAdjustmentService
       throw new ConflictException('人员目录已过期，正在刷新，请重试');
     const applicant = resolveApplicant(context, principal);
     const engineerId =
-      (principal.role === 'admin' || isProfessionalBusinessPrincipal(principal)) ? input.engineerOpenId : applicant?.openId;
+      principal.role === 'admin' ? input.engineerOpenId : applicant?.openId;
     const engineer = context.engineers.find(
       (e) =>
         e.openId === engineerId &&
@@ -203,7 +203,7 @@ export class ThresholdAdjustmentService
       );
     if (
       !engineer ||
-      (principal.role !== 'admin' && !isProfessionalBusinessPrincipal(principal) &&
+      (principal.role !== 'admin' &&
         input.engineerOpenId &&
         input.engineerOpenId !== applicant.openId)
     )
@@ -274,7 +274,7 @@ export class ThresholdAdjustmentService
   }
   retry(id: string, principal: AccessPrincipal) {
     const entry = this.ledger.get(id);
-    assertProfessionalRecordScope(principal, entry?.adjustment.before.profession, entry?.adjustment.before.building);
+    assertProfessionalRecordScope({ ...principal, permissionContext: { module: 'thresholds', action: 'update' } }, entry?.adjustment.before.profession, entry?.adjustment.before.building);
     if (
       !entry ||
       (entry.actorId !== principal.accountId && principal.role !== 'admin')

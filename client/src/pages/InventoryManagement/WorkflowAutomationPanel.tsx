@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import {
   getInventoryWorkflowStatus,
   runInventoryWorkflow,
@@ -38,9 +39,10 @@ export function WorkflowAutomationPanel({
 }: {
   embedded?: boolean;
 }) {
-  const {
-    capabilities: { canDelete, canEdit, canForceRefresh },
-  } = useAccess();
+  const access = useAccess();
+  const canDelete = access.role === 'admin';
+  const canEdit = canUsePageAction(access, 'inventory', 'notify', access.capabilities.canEdit);
+  const canForceRefresh = canUsePageAction(access, 'inventory', 'read', access.capabilities.canForceRefresh);
   const [status, setStatus] = useState<InventoryWorkflowStatusResponse | null>(
     null,
   );

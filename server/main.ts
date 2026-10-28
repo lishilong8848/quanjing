@@ -419,6 +419,7 @@ export async function bootstrap() {
       req.method !== 'GET' ||
       req.path === apiMountPath ||
       req.path.startsWith(`${apiMountPath}/`) ||
+      req.path.replace(/\/+$/u, '') === `${clientBasePath}/attendance-anomaly-follow-up` ||
       extname(req.path)
     ) {
       next();

@@ -67,6 +67,7 @@ interface PurchaseCompletionAnalysisDialogProps {
   open: boolean;
   dashboard: PurchaseInventoryResponse | null;
   canDelete: boolean;
+  canDeleteItem: (item: PurchaseInventoryRequestItem) => boolean;
   onOpenChange: (open: boolean) => void;
   onDeleteSelected: (items: PurchaseInventoryRequestItem[]) => void;
 }
@@ -130,6 +131,7 @@ export function PurchaseCompletionAnalysisDialog({
   open,
   dashboard,
   canDelete,
+  canDeleteItem,
   onOpenChange,
   onDeleteSelected,
 }: PurchaseCompletionAnalysisDialogProps) {
@@ -389,6 +391,7 @@ export function PurchaseCompletionAnalysisDialog({
               <CompletedPurchaseDetails
                 items={analysis.completedItems}
                 canDelete={canDelete}
+                canDeleteItem={canDeleteItem}
                 onDeleteSelected={onDeleteSelected}
               />
             </main>
@@ -509,10 +512,12 @@ function RankingChart({
 function CompletedPurchaseDetails({
   items,
   canDelete,
+  canDeleteItem,
   onDeleteSelected,
 }: {
   items: PurchaseInventoryRequestItem[];
   canDelete: boolean;
+  canDeleteItem: (item: PurchaseInventoryRequestItem) => boolean;
   onDeleteSelected: (items: PurchaseInventoryRequestItem[]) => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -558,14 +563,16 @@ function CompletedPurchaseDetails({
     page * COMPLETED_GROUPS_PAGE_SIZE,
   );
   const visibleItems = visibleGroups.flatMap((group) => group.items);
-  const selectedItems = filteredItems.filter((item) =>
+  const deletableItems = filteredItems.filter(item => canDelete && canDeleteItem(item));
+  const visibleDeletableItems = visibleItems.filter(item => canDelete && canDeleteItem(item));
+  const selectedItems = deletableItems.filter((item) =>
     selectedIds.has(item.recordId),
   );
   const allSelected =
-    visibleItems.length > 0 &&
-    visibleItems.every((item) => selectedIds.has(item.recordId));
+    visibleDeletableItems.length > 0 &&
+    visibleDeletableItems.every((item) => selectedIds.has(item.recordId));
   const someSelected =
-    visibleItems.some((item) => selectedIds.has(item.recordId)) && !allSelected;
+    visibleDeletableItems.some((item) => selectedIds.has(item.recordId)) && !allSelected;
   const hasFilters =
     Boolean(query.trim()) ||
     building !== 'all' ||
@@ -577,10 +584,10 @@ function CompletedPurchaseDetails({
     setSelectedIds((current) =>
       prunePurchaseSelection(
         current,
-        filteredItems.map((item) => item.recordId),
+        filteredItems.filter(item => canDelete && canDeleteItem(item)).map((item) => item.recordId),
       ),
     );
-  }, [filteredItems]);
+  }, [filteredItems, canDelete, canDeleteItem]);
 
   useEffect(() => {
     setPage(1);
@@ -595,6 +602,7 @@ function CompletedPurchaseDetails({
   }, [canDelete]);
 
   function toggleItem(recordId: string, checked: boolean) {
+    if (!deletableItems.some(item => item.recordId === recordId)) return;
     setSelectedIds((current) =>
       toggleVisiblePurchaseSelection(current, [recordId], checked),
     );
@@ -604,7 +612,7 @@ function CompletedPurchaseDetails({
     setSelectedIds((current) =>
       toggleVisiblePurchaseSelection(
         current,
-        visibleItems.map((item) => item.recordId),
+        visibleDeletableItems.map((item) => item.recordId),
         checked,
       ),
     );
@@ -766,6 +774,7 @@ function CompletedPurchaseDetails({
                       <td className="w-12 px-4 py-3.5 text-center">
                         <Checkbox
                           aria-label={`选择 ${item.requestCode || item.title}`}
+                          disabled={!canDeleteItem(item)}
                           checked={selectedIds.has(item.recordId)}
                           onCheckedChange={(checked) =>
                             toggleItem(item.recordId, checked === true)
@@ -865,7 +874,7 @@ function CompletedPurchaseDetails({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-3">
-                      {canDelete && (
+                      {canDelete && canDeleteItem(item) && (
                         <Checkbox
                           className="mt-0.5"
                           aria-label={`选择 ${item.requestCode || item.title}`}

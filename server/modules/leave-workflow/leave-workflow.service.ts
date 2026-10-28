@@ -495,7 +495,7 @@ export class LeaveWorkflowService {
   async renderSubstituteAdjustmentCardView(input: LeaveAdjustmentViewInput): Promise<Record<string, unknown>> {
     const application = await this.requireAdjustmentView(input);
     const candidateSets = await this.refreshCandidateSets(application);
-    return buildLeaveSubstituteAdjustmentCard({ ...toCardContext(application, 'manager', 1), candidateSets, ...(input.view === 'review' ? { substitutionReview: this.prepareSubstitutionReview(application, input.shiftSelections || [], candidateSets) } : {}) }, input.expectedRevision);
+    return buildLeaveSubstituteAdjustmentCard({ ...toCardContext(application, 'manager', 1), candidateSets, ...(input.view === 'review' ? { substitutionReview: this.prepareSubstitutionReview(application, input.shiftSelections || [], candidateSets) } : {}) }, input.expectedRevision, true);
   }
 
   async patchSubstituteAdjustmentCardView(input: LeaveAdjustmentViewInput, card: Record<string, unknown>): Promise<void> {

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAccess } from '@/access/AccessProvider';
+import { canUndoStocktakeBatch } from './stocktake-action-access';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -27,6 +29,7 @@ export function StocktakeUndoDialog({
   onSubmitting: (value: boolean) => void;
   onSaved: (value: StocktakeSheet) => void;
 }) {
+  const canUndo = canUndoStocktakeBatch(useAccess(), sheet);
   const [phase, setPhase] = useState<
     'ready' | 'submitting' | 'success' | 'error'
   >('ready');
@@ -42,7 +45,7 @@ export function StocktakeUndoDialog({
   }, [open]);
   const batch = sheet.latestBulk;
   async function submit() {
-    if (lock.current || !batch || batch.status !== 'confirmed') return;
+    if (!canUndo || lock.current || !batch || batch.status !== 'confirmed') return;
     lock.current = true;
     setPhase('submitting');
     setError('');
@@ -123,7 +126,7 @@ export function StocktakeUndoDialog({
           </Button>
           {phase !== 'success' && (
             <Button
-              disabled={phase === 'submitting' || batch?.status !== 'confirmed'}
+              disabled={!canUndo || phase === 'submitting' || batch?.status !== 'confirmed'}
               onClick={() => void submit()}
             >
               {phase === 'submitting' ? '正在撤销…' : '撤销本批确认'}

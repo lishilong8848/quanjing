@@ -192,7 +192,7 @@ describe('unified access frontend integration', () => {
     );
   });
 
-  it('filters navigation by role and exposes the shared login or logout control', () => {
+  it('filters navigation by role and exposes a single shared account menu', () => {
     const layoutSource = readSource('client/src/components/Layout.tsx');
     const navigationSource = readSource(
       'client/src/components/GlobalNavigation.tsx',
@@ -207,25 +207,17 @@ describe('unified access frontend integration', () => {
     expect(layoutSource).toContain(
       "import { switchAccessToGuest } from '@/access/identity-switch';",
     );
-    expect(layoutSource).toContain('void switchAccessToGuest({');
-    expect(layoutSource).toContain("tone?: 'default' | 'inverse'");
+    expect(layoutSource).toContain('await switchAccessToGuest({');
+    expect(layoutSource).not.toContain('UnifiedAccessControl');
     expect(layoutSource).toContain('const location = useLocation();');
     expect(layoutSource).toContain('const navigate = useNavigate();');
-    expect(layoutSource).toContain('const identityLabel = displayName || roleLabel;');
-    expect(layoutSource).toContain('打开身份切换菜单');
-    expect(layoutSource).toContain('border-white/25 bg-white/10 text-white');
-    expect(layoutSource).toContain('输入密码切换身份');
+    expect(layoutSource).toContain('打开账户菜单');
     expect(layoutSource).not.toContain('accountTypes.map((accountType) =>');
-    expect(layoutSource).toContain('切换身份');
-    expect(layoutSource).toContain('切换为游客');
+    expect(layoutSource).toContain('切换账号');
+    expect(layoutSource).toContain('退出当前账号');
     expect(layoutSource).toContain('hasAuthenticatedAccessIdentity');
-    expect(layoutSource).toContain("toast.success('已切换为游客')");
-    expect(layoutSource).toContain("toast.error('切换游客失败，请稍后重试')");
     expect(layoutSource).toContain(
-      '已切换为游客，但页面跳转失败，请手动返回排班页',
-    );
-    expect(layoutSource).toContain(
-      "requestLogin('请输入访问密码。', location.pathname)",
+      "requestLogin('请选择登录方式。', location.pathname)",
     );
     expect(layoutSource).toContain(
       'getAccessRoleLabel(role, purchaseBuilding, buildings)',
@@ -264,7 +256,7 @@ describe('unified access frontend integration', () => {
     expect(headerSource).not.toContain('<PageSwitcher');
     expect(headerSource).not.toContain('<UnifiedAccessControl');
     expect(navigationSource).toContain('getAccessibleNavigationDomains');
-    expect(navigationSource).toContain('<UnifiedAccessControl');
+    expect(navigationSource).toContain('<GlobalUserControl');
     expect(navigationSource).toContain('全部应用');
     expect(navigationSource).toContain(
       "aria-current={active ? 'page' : undefined}",
@@ -282,7 +274,7 @@ describe('unified access frontend integration', () => {
     expect(layoutSource).toContain(
       'min-h-[calc(100dvh-var(--global-navigation-height))]',
     );
-    expect(layoutSource).toContain('打开个人主页');
+    expect(layoutSource).toContain('个人主页');
   });
 
   it('does not offer an unconfigured contract administrator login identity', () => {
@@ -539,8 +531,9 @@ describe('unified access frontend integration', () => {
     const guardSource = readSource('client/src/access/RouteAccessGuard.tsx');
 
     expect(guardSource).toContain(
-      'const allowed =\n    controlledScreenshotRequest || canAccessPage(role, location.pathname, pagePaths);',
+      'const allowed =\n    controlledScreenshotRequest || createOnlyAllowed || canAccessPage(role, location.pathname, pagePaths);',
     );
+    expect(guardSource).toContain('const createOnlyAllowed = !!access.effectiveAuthorization && (');
     expect(guardSource).toContain('if (allowed) {');
     expect(guardSource).toContain('isLoading ||');
     expect(guardSource).toContain(
@@ -590,13 +583,13 @@ describe('unified access frontend integration', () => {
     expect(requestSource).toContain('open: true');
   });
 
-  it('uses the unified identity for avatar display, login and switching to guest', () => {
+  it('keeps the account menu tied to the unified identity rather than the platform profile', () => {
     const layoutSource = readSource('client/src/components/Layout.tsx');
     const userControlStart = layoutSource.indexOf(
       'export function GlobalUserControl()',
     );
     const userControlEnd = layoutSource.indexOf(
-      'export function UnifiedAccessControl(',
+      'function Layout2Desktop()',
       userControlStart,
     );
     const userControlSource = layoutSource.slice(
@@ -612,12 +605,9 @@ describe('unified access frontend integration', () => {
     );
     expect(userControlSource).toContain('{identityLabel}');
     expect(userControlSource).not.toContain("{name || '游客'}");
-    expect(userControlSource).toMatch(
-      /requestLogin\(\s*'请输入访问密码。',\s*location\.pathname,?\s*\)/,
-    );
-    expect(userControlSource).toContain('await switchAccessToGuest({');
-    expect(userControlSource).toContain('if (exitingRef.current) return;');
-    expect(userControlSource).toContain('退出当前身份，切换游客');
+    expect(userControlSource).toContain('hasAuthenticatedAccessIdentity');
+    expect(userControlSource).toContain('isConfirmingIdentity');
+    expect(userControlSource).toContain('isChangingIdentity');
     expect(readSource('client/src/access/AccessProvider.tsx')).toContain(
       'hasAuthenticatedAccessIdentity(normalizeAccessSession(nextSession))',
     );
@@ -630,7 +620,7 @@ describe('unified access frontend integration', () => {
     );
 
     expect(layoutSource).toContain('export function GlobalUserControl()');
-    expect(layoutSource).toContain('aria-label="打开用户菜单"');
+    expect(layoutSource).toContain('aria-label="打开账户菜单"');
     expect(layoutSource).toContain('<AlertDialog');
     expect(layoutSource).toContain('<DropdownMenuTrigger asChild>');
     expect(navigationSource).toContain('<Sheet');
@@ -657,7 +647,7 @@ describe('unified access frontend integration', () => {
     expect(layoutSource).not.toContain('hasEmbeddedAccessControl');
     expect(appSource).not.toContain('fixed top-4 right-4');
     expect(appSource).not.toContain('fixed bottom-4 left-4');
-    expect(navigationSource.match(/<UnifiedAccessControl/g)).toHaveLength(1);
+    expect(navigationSource.match(/<GlobalUserControl/g)).toHaveLength(1);
     expect(navigationSource).toContain(
       'hidden min-w-0 flex-1 items-center justify-center gap-0.5 xl:flex',
     );
@@ -791,20 +781,13 @@ describe('unified access frontend integration', () => {
     expect(getFeishuAuthFeedback(null)).toBeNull();
   });
 
-  it('renders an unobtrusive accessible Feishu button beside local identity switching', () => {
+  it('keeps Feishu authorization inside the shared login dialog without a second header entry', () => {
     const layoutSource = readSource('client/src/components/Layout.tsx');
-
-    expect(layoutSource).toContain('<FeishuIcon');
-    expect(layoutSource).toContain('aria-label="使用飞书授权登录"');
-    expect(layoutSource).toContain('title="使用飞书授权登录"');
-    expect(layoutSource).toContain('const feishuLogin = useFeishuLogin(message => toast.error(message), true, isChangingIdentity);');
-    expect(layoutSource).toContain('variant="ghost"');
-    expect(layoutSource).toContain('size="icon-xs"');
-    expect(layoutSource).toContain('disabled={feishuLogin.isPending || isChangingIdentity}');
-    expect(layoutSource).toContain('aria-busy={feishuLogin.isPending}');
-    expect(layoutSource).toContain('focus-visible:ring-2');
-    expect(layoutSource).toContain("tone === 'inverse'");
-    expect(layoutSource).toContain('text-white/60');
+    const providerSource = readSource('client/src/access/AccessProvider.tsx');
+    expect(layoutSource).not.toContain('useFeishuLogin');
+    expect(layoutSource).not.toContain('<FeishuIcon');
+    expect(providerSource).toContain('useFeishuLogin');
+    expect(providerSource).toContain('<FeishuIcon');
   });
 
   it('confirms callback identity above route guards and consumes it once', () => {
@@ -825,7 +808,7 @@ describe('unified access frontend integration', () => {
     expect(providerSource).toContain('if (requiresFeishuIdentityRef.current) void retrySession();');
     expect(providerSource).toContain('else void refreshSession(true);');
     expect(guardSource.indexOf('if (isConfirmingIdentity || (')).toBeLessThan(guardSource.indexOf('if (allowed) return <Outlet'));
-    expect(guardSource).toContain('if (isConfirmingIdentity || sessionError || dismissedLoginPath === location.pathname) return;');
+    expect(guardSource).toContain('if (isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;');
     const errorStart = guardSource.indexOf('if (sessionError) {');
     expect(errorStart).toBeGreaterThan(-1);
     expect(errorStart).toBeLessThan(guardSource.indexOf('if (allowed) return <Outlet'));

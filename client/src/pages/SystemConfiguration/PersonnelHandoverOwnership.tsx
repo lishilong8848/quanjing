@@ -6,6 +6,21 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ROLE_LABELS } from './model';
 
 const semantic = (source: NonNullable<PersonnelHandoverPreview['permissionOwnership']>[number]['source']) => JSON.stringify({ ...source, sourceVersion: 1 });
+export function describeHandoverGrant(row: NonNullable<PersonnelHandoverPreview['permissionOwnership']>[number], key: string): { title: string; scope: string } {
+  const source = row.source, effective = source.effectiveAuthorization;
+  const rule = key.startsWith('v2:base-rule:') ? effective?.baseline.rules.find(item => item.id === key.slice('v2:base-rule:'.length)) : key.startsWith('v2:personal-rule:') ? effective?.overrides.rules.find(item => item.id === key.slice('v2:personal-rule:'.length)) : key.startsWith('rule:') ? source.personalRules?.find(item => item.id === key.slice(5)) : undefined;
+  if (rule) return { title: `${BUSINESS_PERMISSION_CATALOG.find(item => item.id === rule.module)?.label || '业务功能'} · ${rule.actions.map(action => BUSINESS_ACTION_LABELS[action]).join('、')}`, scope: `${rule.buildings?.join('、') || '全部楼栋'} · ${rule.specialties?.join('、') || '全部专业'}` };
+  if (key.startsWith('v2:grant:')) {
+    const metadata = row.grantMetadata?.[key];
+    return metadata ? { title: metadata.title, scope: `来源任职范围：${metadata.scope.buildings?.join('、') || metadata.scope.building || '全基地'}${metadata.scope.specialties?.length ? ` · ${metadata.scope.specialties.join('、')}` : ''}；各项规则范围保持` } : { title: '既有交接授权', scope: '原授权范围与限制完整保留，具体来源范围尚未取得' };
+  }
+  if (key === 'role' || key === 'v2:role') {
+    const role = key === 'v2:role' ? effective?.baseline.nativeRole : source.role;
+    return { title: role ? `岗位默认权限 · ${ROLE_LABELS[role]}` : '独立基础权限（无默认角色）', scope: `${source.buildings?.join('、') || source.building || '全基地'}${source.specialties?.length ? ` · ${source.specialties.join('、')}` : ''}` };
+  }
+  const page = key.startsWith('v2:base-page:') ? key.slice('v2:base-page:'.length) : key.startsWith('v2:personal-page:') ? key.slice('v2:personal-page:'.length) : key.startsWith('page:') ? key.slice(5) : '';
+  return { title: page ? `页面读取 · ${PAGE_ACCESS_CATALOG.find(item => item.path === page)?.label || page}` : '业务授权', scope: '' };
+}
 export function updateHandoverGrantChoice(preview: PersonnelHandoverPreview, value: readonly HandoverPermissionOwnership[], sourceAccountId: string, key: string, choice: Omit<HandoverGrantChoice, 'key'> | undefined): HandoverPermissionOwnership[] {
   const source = preview.permissionOwnership?.find(row => row.sourceAccountId === sourceAccountId);
   if (!source) return [...value];
@@ -47,9 +62,8 @@ export function PersonnelHandoverOwnership({ preview, value, onChange, onReload,
       return <fieldset key={source.sourceAccountId} disabled={disabled} className="min-w-0 space-y-3">
         <legend className="mb-2 text-sm font-medium">{preview.from.name} · {group.length > 1 ? '两种登录方式同步调整' : source.kind === 'feishu' ? '飞书登录' : '姓名登录'}</legend>
         {source.grantKeys.map((key, index) => {
-          const grant = draft?.grants.find(row => row.key === key), rule = key.startsWith('rule:') ? source.source.personalRules?.find(row => row.id === key.slice(5)) : undefined;
-          const title = key === 'role' ? `岗位默认权限 · ${ROLE_LABELS[source.source.role]}` : rule ? `${BUSINESS_PERMISSION_CATALOG.find(row => row.id === rule.module)!.label} · ${rule.actions.map(action => BUSINESS_ACTION_LABELS[action]).join('、')}` : `页面读取 · ${PAGE_ACCESS_CATALOG.find(row => row.path === key.slice(5))?.label || key.slice(5)}`;
-          const scope = rule ? `${rule.buildings?.join('、') || '全基地'} · ${rule.specialties?.join('、') || '全部专业'}` : key === 'role' ? `${source.source.buildings?.join('、') || source.source.building || '全基地'}${source.source.specialties?.length ? ` · ${source.source.specialties.join('、')}` : ''}` : '';
+          const grant = draft?.grants.find(row => row.key === key);
+          const { title, scope } = describeHandoverGrant(source, key);
           const change = (disposition: HandoverGrantChoice['disposition'] | '') => onChange(updateHandoverGrantChoice(preview, value, source.sourceAccountId, key, disposition ? { disposition, ...(disposition === 'retain' ? {} : { dutyRecordId: grant?.dutyRecordId || (preview.requested.dutyRecordIds.length === 1 ? preview.requested.dutyRecordIds[0] : '') }) } : undefined));
           return <div key={key} className="grid min-w-0 gap-2 border-t pt-3 md:grid-cols-[minmax(0,1fr)_10rem_12rem]">
             <div className="min-w-0"><p className="break-words text-sm">{title}</p>{scope && <p className="break-words text-xs text-muted-foreground">{scope}</p>}</div>

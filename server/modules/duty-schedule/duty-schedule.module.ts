@@ -37,6 +37,7 @@ import { AttendancePeriodicSummaryLocalSchedulerService } from '@server/modules/
 import { AttendanceHistoryController } from '@server/modules/duty-schedule/attendance-history.controller';
 import { AttendanceHistoryService } from '@server/modules/duty-schedule/attendance-history.service';
 import { AttendanceCorrectionEvidenceStorageService } from '@server/modules/duty-schedule/attendance-correction-evidence-storage.service';
+import { SelfServiceScheduleController } from './self-service-schedule.controller';
 
 const databaseFallbackProviders =
   process.env.FORCE_FRAMEWORK_DISABLE_DATAPASS === 'true'
@@ -56,6 +57,7 @@ const databaseFallbackProviders =
   ],
   controllers: [
     DutyScheduleController,
+    SelfServiceScheduleController,
     ChinaWorkCalendarController,
     EmergencyDutyController,
     TodayAttendanceController,

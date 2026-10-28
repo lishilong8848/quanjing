@@ -5,7 +5,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { ThresholdStore } from './threshold.store';
+import { ThresholdStore, type ThresholdMutationScopeCheck } from './threshold.store';
 import { ThresholdBitableGateway } from './threshold-bitable.gateway';
 import { randomUUID } from 'node:crypto';
 import type { ThresholdSourceSync } from '../../../shared/threshold-management.interface';
@@ -26,13 +26,13 @@ export class ThresholdSyncService implements OnModuleInit, OnModuleDestroy {
   sourceStatus() {
     return { ...this.source };
   }
-  async acceptCloud(id: string, actor: string) {
-    const job = this.store.conflictJob(id, actor);
+  async acceptCloud(id: string, actor: string, authorize?: ThresholdMutationScopeCheck) {
+    const job = this.store.conflictJob(id, actor, authorize);
     const record = await this.gateway.readRecord(
       job.before!.profession,
       job.result.id,
     );
-    return this.store.acceptCloud(id, actor, record);
+    return this.store.acceptCloud(id, actor, record, authorize);
   }
   refreshSource(force = false) {
     if (

@@ -1,5 +1,6 @@
 import { assertProfessionalBitableRecord } from '../../common/access/professional-record-scope';
 import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { canManageProfessionalRecord } from '../../../shared/professional-access';
 import { scopeProfessionalBitableRecords, assertProfessionalRecordScope, recordProfessionalSpecialty } from '../../common/access/professional-record-scope';
 import { HttpService } from '@nestjs/axios';
 import {
@@ -225,7 +226,7 @@ export class InventoryMovementCommandService {
       }),
     ]);
     return buildMovementOptions({
-      catalog: scopeProfessionalBitableRecords(principal, catalog),
+      catalog: isProfessionalBusinessPrincipal(principal) ? catalog.filter(record=>(['read','create','update','confirm'] as const).some(action=>canManageProfessionalRecord(principal,recordProfessionalSpecialty(record),building,{module:'inventory',action}))) : catalog,
       inventory,
       type,
       building,

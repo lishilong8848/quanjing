@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
 import {
   checkMonthlyScheduleScreenshotAccess,
@@ -846,6 +848,7 @@ function SyncButton({
   errorMessage: string | null;
   onRefresh: () => void;
 }) {
+  const canRefresh = canUsePageAction(useAccess(), 'campus_operations', 'refresh', true);
   const syncTime = formatSyncTime(lastUpdated);
   const title =
     status === 'error'
@@ -860,7 +863,7 @@ function SyncButton({
       className={`campus-ops-sync-button${status === 'syncing' ? ' is-syncing' : ''}${status === 'error' ? ' is-error' : ''}`}
       aria-label={title}
       title={title}
-      disabled={status === 'syncing'}
+      disabled={status === 'syncing' || !canRefresh}
       onClick={onRefresh}
     >
       <RefreshCw aria-hidden="true" />
@@ -1241,6 +1244,7 @@ function DataSourceIcon() {
 }
 
 function CampusOperationsDashboardContent() {
+  const canRefresh = canUsePageAction(useAccess(), 'campus_operations', 'refresh', true);
   const { scale, width } = useStageLayout();
   const screenshotMode = useMemo(
     () => getHasCampusOperationsScreenshotModeRequest(),
@@ -1287,6 +1291,7 @@ function CampusOperationsDashboardContent() {
   }, []);
 
   const loadDashboardData = useCallback(async (forceRefresh = false, showFeedback = false) => {
+    forceRefresh = forceRefresh && canRefresh;
     setSyncStatus('syncing');
     if (screenshotMode) {
       setHasExactScreenshotData(false);
@@ -1323,7 +1328,7 @@ function CampusOperationsDashboardContent() {
         showSyncNotice({ text: '同步失败：请稍后重试', tone: 'error' }, 8000);
       }
     }
-  }, [screenshotAccess, screenshotMode, showSyncNotice]);
+  }, [canRefresh, screenshotAccess, screenshotMode, showSyncNotice]);
 
   useEffect(() => {
     document.title = '园区运行数据仪表盘';

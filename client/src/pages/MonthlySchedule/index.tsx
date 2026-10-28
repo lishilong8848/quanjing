@@ -9,6 +9,10 @@ import { createPortal, flushSync } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { logger } from '@lark-apaas/client-toolkit/logger';
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
+import { readSelfServiceSchedules } from './self-service-schedule-reader';
+import type { SelfServiceScheduleResponse } from '@shared/self-service-schedule.interface';
+import type { SelfServiceApplicant } from '@shared/self-service-applicant';
 import { createScheduleReadCache } from './schedule-read-cache';
 import { hasAuthenticatedAccessIdentity } from '@/access/access-policy';
 import { resolveLeaveRequestApplicant } from '@shared/leave-request-applicant';
@@ -641,6 +645,7 @@ const PERSONNEL_MOVEMENT_TYPES: PersonnelMovementType[] = [
   '离职',
 ];
 const selectMonthlyScheduleReadScope = createScheduleReadCache(getMonthlySchedules);
+const selectSelfServiceScheduleReadScope = createScheduleReadCache(readSelfServiceSchedules);
 
 const yearlySealingCache = new Map<
   number,
@@ -1744,8 +1749,8 @@ function StaffProfilePopover({
   profile,
   className,
 }: StaffProfilePopoverProps) {
-  const { role } = useAccess();
-  const canViewPrivateProfile = canViewPersonProfileDetails(role);
+  const access = useAccess();
+  const canViewPrivateProfile = canViewPersonProfileDetails(access);
   const [open, setOpen] = useState(false);
   const [photoFailed, setPhotoFailed] = useState(false);
   const photoUrl =
@@ -3421,6 +3426,8 @@ interface TodayEngineersOnDutyProps {
   refreshToken: number;
   localSnapshotRefreshToken: number;
   workCalendarRevision: number;
+  canRefresh?: boolean;
+  canRefreshRelated?: boolean;
 }
 
 function TodayEngineersOnDuty({
@@ -3429,6 +3436,8 @@ function TodayEngineersOnDuty({
   refreshToken,
   localSnapshotRefreshToken,
   workCalendarRevision,
+  canRefresh = false,
+  canRefreshRelated = false,
 }: TodayEngineersOnDutyProps) {
   const [longWhiteDutyBuildings, setLongWhiteDutyBuildings] = useState<
     LongWhiteDutyStaffByBuilding[]
@@ -3468,7 +3477,7 @@ function TodayEngineersOnDuty({
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const requestId = loadSeqRef.current + 1;
     loadSeqRef.current = requestId;
-    const forceRefresh = refreshToken > lastSuccessfulRefreshTokenRef.current;
+    const forceRefresh = canRefresh && refreshToken > lastSuccessfulRefreshTokenRef.current;
     const localSnapshotRefresh =
       localSnapshotRefreshToken >
       lastObservedLocalSnapshotRefreshTokenRef.current;
@@ -3536,7 +3545,7 @@ function TodayEngineersOnDuty({
       const [dutyData, leaveData, festivalSchedulesForDate] = await Promise.all(
         [
           getLongWhiteDutyStaff(dateStr, forceRefresh),
-          getTodayLeaveStaff(dateStr, forceRefresh),
+          getTodayLeaveStaff(dateStr, forceRefresh && canRefreshRelated),
           fetchFestivalSchedulesForDate(),
         ],
       );
@@ -3577,6 +3586,8 @@ function TodayEngineersOnDuty({
       }
     }
   }, [
+    canRefresh,
+    canRefreshRelated,
     holidayInfo.isHoliday,
     isLongWhiteWorkday,
     localSnapshotRefreshToken,
@@ -3822,9 +3833,16 @@ function MonthlySchedulePageContent() {
   const navigate = useNavigate();
   const access = useAccess();
   const { capabilities, principalFingerprint, role, requestLogin } = access;
+  const canReadMonthlySchedule = canUsePageAction(access, 'monthly_schedule', 'read', true);
+  const legacySelfService = capabilities.canEdit || role === 'guest' || role === 'site_member';
+  const canCreateLeaveRequest = canUsePageAction(access, 'leave_requests', 'create', legacySelfService);
+  const canCreateOvertimeRequest = canUsePageAction(access, 'overtime_requests', 'create', legacySelfService);
+  const selfServiceOnly = Boolean(access.effectiveAuthorization && !canReadMonthlySchedule && (canCreateLeaveRequest || canCreateOvertimeRequest));
+  const [selfServiceIdentity, setSelfServiceIdentity] = useState<{ scope: string; status: 'loading' | 'ready' | 'error'; name: string; error: string } | null>(null);
+  const [selfServiceRetry, setSelfServiceRetry] = useState(0);
   const scheduleReadScope = useMemo(
-    () => selectMonthlyScheduleReadScope(principalFingerprint || 'anonymous'),
-    [principalFingerprint],
+    () => selfServiceOnly ? selectSelfServiceScheduleReadScope(`self:${principalFingerprint || 'anonymous'}`) : selectMonthlyScheduleReadScope(principalFingerprint || 'anonymous'),
+    [principalFingerprint, selfServiceOnly],
   );
   const {
     cache: monthlyScheduleCache,
@@ -3833,12 +3851,15 @@ function MonthlySchedulePageContent() {
   } = scheduleReadScope;
   const activeScheduleReadScopeRef = useRef(scheduleReadScope);
   activeScheduleReadScopeRef.current = scheduleReadScope;
+  const selfServiceIdentityReady = selfServiceIdentity?.scope === scheduleReadScope.identity && selfServiceIdentity.status === 'ready';
+  const selfServiceApplicant = useMemo<SelfServiceApplicant | undefined>(() => selfServiceOnly ? { mode: 'automatic', name: selfServiceIdentityReady ? selfServiceIdentity!.name : '' } : undefined, [selfServiceOnly, selfServiceIdentityReady, selfServiceIdentity?.name]);
   const leaveApplicant = useMemo(
-    () => resolveLeaveRequestApplicant(access, hasAuthenticatedAccessIdentity(access)),
-    [access.accountId, access.displayName, access.expiresAt, principalFingerprint, role],
+    () => selfServiceApplicant || resolveLeaveRequestApplicant(access, hasAuthenticatedAccessIdentity(access)),
+    [selfServiceApplicant, access.accountId, access.displayName, access.expiresAt, principalFingerprint, role],
   );
   const weatherSnapshot = useWeatherSnapshot();
-  const todayAttendance = useTodayAttendanceSnapshot(role !== 'guest');
+  const canReadAttendance = canUsePageAction(access, 'attendance', 'read', role !== 'guest');
+  const todayAttendance = useTodayAttendanceSnapshot(canReadAttendance);
   const weatherGuardRegistrationEnabled =
     weatherSnapshot.warningStatus !== 'error' &&
     weatherSnapshot.warningSnapshot?.features?.registrationEnabled === true;
@@ -3925,13 +3946,36 @@ function MonthlySchedulePageContent() {
     weatherSnapshot.screenshotReadiness,
   );
   weatherScreenshotReadinessRef.current = weatherSnapshot.screenshotReadiness;
-  const canManageMonthlySchedule = capabilities.canEdit;
-  const canSubmitChangeDrillReport = canSubmitChangeDrillReportForRole(role);
-  const canSubmitChangeSummaryReport =
-    canSubmitChangeSummaryReportForRole(role) && Boolean(principalFingerprint);
-  const canUseSelfServiceTools = canManageMonthlySchedule || role === 'guest' || role === 'site_member';
-  const canViewPrivateProfile = canViewPersonProfileDetails(role);
-  const canDeleteMonthlySchedule = capabilities.canDelete;
+  const canManageMonthlySchedule = canUsePageAction(access, 'schedule_assignments', 'update', capabilities.canEdit);
+  const canViewScheduleDetails = canUsePageAction(access, 'monthly_schedule', 'read', role !== 'guest');
+  const canReadPersonnelSchedule = canUsePageAction(access, 'personnel_schedule', 'read', role !== 'guest');
+  const canRefreshPersonnelSchedule = canUsePageAction(access, 'personnel_schedule', 'refresh', capabilities.canForceRefresh);
+  const canReadAssignments = canUsePageAction(access, 'schedule_assignments', 'read', true);
+  const canCreateMonthlySchedule = canUsePageAction(access, 'schedule_assignments', 'create', capabilities.canEdit);
+  const canRefreshMonthlySchedule = canUsePageAction(access, 'monthly_schedule', 'refresh', capabilities.canForceRefresh);
+  const canSendMonthlySchedule = canUsePageAction(access, 'monthly_schedule', 'notify', capabilities.canEdit);
+  const canCreateChange = canUsePageAction(access, 'change_requests', 'create', legacySelfService);
+  const canUpdateChange = canUsePageAction(access, 'change_management', 'update', capabilities.canEdit);
+  const canDeleteChange = canUsePageAction(access, 'change_management', 'delete', capabilities.canDelete);
+  const canCreateException = canUsePageAction(access, 'exception_followup', 'create', capabilities.canEdit);
+  const canUpdateException = canUsePageAction(access, 'exception_followup', 'update', capabilities.canEdit);
+  const canDeleteException = canUsePageAction(access, 'exception_followup', 'delete', capabilities.canDelete);
+  const canRefreshException = canUsePageAction(access, 'exception_followup', 'refresh', capabilities.canForceRefresh);
+  const canRefreshChange = canUsePageAction(access, 'change_management', 'refresh', capabilities.canForceRefresh);
+  const canRefreshPrivateProfile = canUsePageAction(access, 'personnel_profile', 'refresh', capabilities.canForceRefresh);
+  const canCreateAdditionalMatter = canCreateMonthlySchedule;
+  const canReadChanges = canUsePageAction(access, 'change_management', 'read', true);
+  const canReadExceptions = canUsePageAction(access, 'exception_followup', 'read', true);
+  const canReadTimeInsights = canUsePageAction(access, 'personnel_time_insights', 'read', role === 'admin');
+  const canReadPublicProfiles = canReadMonthlySchedule || canReadAssignments || canCreateMonthlySchedule || canManageMonthlySchedule || canCreateLeaveRequest || canCreateOvertimeRequest || canCreateChange || canUsePageAction(access, 'organization', 'read', true);
+  const canRefreshPublicProfiles = canUsePageAction(access, 'organization', 'refresh', capabilities.canForceRefresh);
+  const canCreateThresholdAdjustment = canUsePageAction(access, 'thresholds', 'create', legacySelfService);
+  const canCreatePersonality = canUsePageAction(access, 'personality', 'create', legacySelfService);
+  const canSubmitChangeDrillReport = canUsePageAction(access, 'change_management', 'create', canSubmitChangeDrillReportForRole(role));
+  const canSubmitChangeSummaryReport = canUsePageAction(access, 'change_management', 'create', canSubmitChangeSummaryReportForRole(role)) && Boolean(principalFingerprint);
+  const canUseSelfServiceTools = legacySelfService || canCreateLeaveRequest || canCreateOvertimeRequest || canCreateChange || canUpdateChange || canManageMonthlySchedule || canCreateMonthlySchedule || canReadTimeInsights || canCreateThresholdAdjustment || canCreatePersonality || canRefreshMonthlySchedule || canSendMonthlySchedule;
+  const canViewPrivateProfile = canViewPersonProfileDetails(access);
+  const canDeleteMonthlySchedule = canUsePageAction(access, 'schedule_assignments', 'delete', capabilities.canDelete);
   const [selectedDate, setSelectedDate] = useState<Date>(() =>
     getInitialSelectedDate(),
   );
@@ -3956,6 +4000,25 @@ function MonthlySchedulePageContent() {
     };
   }, [refreshBusinessClock]);
   const [schedules, setSchedules] = useState<MonthlySchedule[]>([]);
+  const selfServiceMonth = businessDateKey.slice(0, 7);
+  useEffect(() => {
+    if (!selfServiceOnly || access.isLoading) return;
+    let active = true;
+    const scope = scheduleReadScope;
+    const [year, month] = selfServiceMonth.split('-').map(Number);
+    setSelfServiceIdentity({ scope: scope.identity, status: 'loading', name: '', error: '' });
+    void scope.read(year, month).then((value) => {
+      if (!active || activeScheduleReadScopeRef.current !== scope) return;
+      const own = value as SelfServiceScheduleResponse;
+      scope.cache.set(`${year}-${month}`, { schedules: own.schedules, fetchedAt: Date.now() });
+      setSchedules(current => mergeSchedulesByRecord(current, own.schedules));
+      setSelfServiceIdentity({ scope: scope.identity, status: 'ready', name: own.applicantName, error: '' });
+    }).catch((error) => {
+      if (!active || activeScheduleReadScopeRef.current !== scope) return;
+      setSelfServiceIdentity({ scope: scope.identity, status: 'error', name: '', error: getBackendErrorMessage(error, '本人班次暂时无法读取，请重试') });
+    });
+    return () => { active = false; };
+  }, [selfServiceOnly, access.isLoading, scheduleReadScope, selfServiceMonth, selfServiceRetry]);
   const schedulesRef = useRef(schedules);
   schedulesRef.current = schedules;
   const [loading, setLoading] = useState(false);
@@ -4252,13 +4315,13 @@ function MonthlySchedulePageContent() {
   const [dataRefreshToken, setDataRefreshToken] = useState(0);
   const [localSnapshotRefreshToken, setLocalSnapshotRefreshToken] = useState(0);
   const [workCalendarRevision, setWorkCalendarRevision] = useState(0);
-  const effectiveDataRefreshToken = capabilities.canForceRefresh
+  const effectiveDataRefreshToken = canRefreshMonthlySchedule
     ? dataRefreshToken
     : 0;
   const fetchCalendarFollowUps = useCallback(
     (range: {start:string;end:string}, force: boolean) =>
-      getExceptionFollowUps(range.start, force && capabilities.canForceRefresh, range.end),
-    [capabilities.canForceRefresh],
+      canReadExceptions ? getExceptionFollowUps(range.start, force && canRefreshException, range.end) : Promise.resolve({ date: range.start, range, items: [], total: 0 }),
+    [canRefreshException, canReadExceptions],
   );
   const calendarFollowUps = useCalendarFollowUps(
     calendarFollowUpRange(calendarFollowUpMonth), fetchCalendarFollowUps, effectiveDataRefreshToken,
@@ -4356,6 +4419,7 @@ function MonthlySchedulePageContent() {
     if (
       typeof window === 'undefined' ||
       access.isLoading ||
+      (selfServiceOnly && !selfServiceIdentityReady) ||
       !canUseSelfServiceTools ||
       getHasScreenshotModeRequest() ||
       monthlyScheduleFormDeepLinkConsumedRef.current
@@ -4371,7 +4435,7 @@ function MonthlySchedulePageContent() {
     if (!directForm) return;
     monthlyScheduleFormDeepLinkConsumedRef.current = true;
 
-    if (directForm === 'leave') {
+    if (directForm === 'leave' && canCreateLeaveRequest) {
       if (leaveApplicant.mode === 'login') {
         requestLogin(leaveApplicant.message, '/monthly-schedule');
         return;
@@ -4393,13 +4457,17 @@ function MonthlySchedulePageContent() {
       refreshBusinessClock();
       setLeaveRequestDialogOpen(true);
     }
-    if (directForm === 'overtime') {
+    if (directForm === 'overtime' && canCreateOvertimeRequest) {
       refreshBusinessClock();
       overtimeRequestDialogRef.current?.open();
     }
   }, [
     access.isLoading,
+    selfServiceOnly,
+    selfServiceIdentityReady,
     canUseSelfServiceTools,
+    canCreateLeaveRequest,
+    canCreateOvertimeRequest,
     leaveApplicant,
     requestLogin,
     recoveredLeaveRequestMutationId,
@@ -4503,6 +4571,7 @@ function MonthlySchedulePageContent() {
 
   const loadEmergencyDutySchedules = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!canReadMonthlySchedule) return;
       const startDate = addDaysToDateKey(selectedDateKey, -5);
       const endDate = addDaysToDateKey(selectedDateKey, 5);
       if (!startDate || !endDate) {
@@ -4573,11 +4642,12 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [selectedDateKey, setScreenshotSectionState],
+    [canReadMonthlySchedule, selectedDateKey, setScreenshotSectionState],
   );
 
   const loadEmergencyDutyOptions = useCallback(
     async (force = false) => {
+      if (!canReadAssignments) return;
       if (
         !force &&
         (emergencyDutyOptionsStatus === 'loading' ||
@@ -4623,7 +4693,7 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [emergencyDutyOptionsStatus],
+    [canReadAssignments, emergencyDutyOptionsStatus],
   );
 
   const prepareEmergencyDutyDraft = useCallback((date: string) => {
@@ -4640,7 +4710,7 @@ function MonthlySchedulePageContent() {
 
   const loadSchedules = useCallback(
     async (options: LoadSchedulesOptions = {}): Promise<boolean> => {
-      if (access.isLoading || options.signal?.aborted) return false;
+      if (!canReadMonthlySchedule || access.isLoading || options.signal?.aborted) return false;
       if (!selectedDate) {
         setScreenshotSectionState('schedules', 'error');
         return false;
@@ -4814,7 +4884,7 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [access.isLoading, businessDateKey, getMonthlySchedulesWithInFlightDeduplication, monthlyScheduleCache, scheduleReadScope, selectedDate, setScreenshotSectionState],
+    [canReadMonthlySchedule, access.isLoading, businessDateKey, getMonthlySchedulesWithInFlightDeduplication, monthlyScheduleCache, scheduleReadScope, selectedDate, setScreenshotSectionState],
   );
 
   const loadSchedulesRef = useRef(loadSchedules);
@@ -4853,7 +4923,7 @@ function MonthlySchedulePageContent() {
   );
 
   useEffect(() => {
-    if (isScreenshotMode || access.isLoading) return undefined;
+    if (!canReadMonthlySchedule || isScreenshotMode || access.isLoading) return undefined;
 
     const snapshotRefreshCoordinator = createScheduleSnapshotRefreshCoordinator(
       {
@@ -4895,6 +4965,7 @@ function MonthlySchedulePageContent() {
       );
     };
   }, [
+    canReadMonthlySchedule,
     access.isLoading,
     invalidateScheduleLoads,
     isScreenshotMode,
@@ -4906,6 +4977,7 @@ function MonthlySchedulePageContent() {
       dateKey: string,
       forceRefresh = false,
     ): Promise<MonthlySchedule[] | null> => {
+      if (!canReadMonthlySchedule && !selfServiceOnly) return null;
       const monthKey = getScheduleMonthKey(dateKey);
       if (!monthKey) {
         return null;
@@ -4978,7 +5050,7 @@ function MonthlySchedulePageContent() {
         return null;
       }
     },
-    [getMonthlySchedulesWithInFlightDeduplication, monthlyScheduleCache, scheduleReadScope],
+    [canReadMonthlySchedule, selfServiceOnly, getMonthlySchedulesWithInFlightDeduplication, monthlyScheduleCache, scheduleReadScope],
   );
 
   // 加载人员修正所选日期所在月份排班，避免弹窗日期跨月时无候选数据。
@@ -5073,6 +5145,8 @@ function MonthlySchedulePageContent() {
   // 加载封网信息
   const loadSealingInfo = useCallback(
     async (forceRefresh = false): Promise<boolean> => {
+      if (!canReadMonthlySchedule) return false;
+      forceRefresh = forceRefresh && canRefreshMonthlySchedule;
       const year = selectedDate.getFullYear();
       const requestId = sealingLoadSeqRef.current + 1;
       sealingLoadSeqRef.current = requestId;
@@ -5115,11 +5189,17 @@ function MonthlySchedulePageContent() {
         return false;
       }
     },
-    [selectedDate, setScreenshotSectionState],
+    [canReadMonthlySchedule, canRefreshMonthlySchedule, selectedDate, setScreenshotSectionState],
   );
 
   const loadChangeInfo = useCallback(
     async (forceRefresh = false) => {
+      if (!canReadChanges) {
+        setChanges([]);
+        setScreenshotSectionState('changes', 'ready');
+        return;
+      }
+      forceRefresh = forceRefresh && canRefreshChange;
       const controller = beginLatestDutyOverviewRequest(changeLoadAbortRef);
       setScreenshotSectionState('changes', 'loading');
       const year = selectedDate.getFullYear();
@@ -5213,11 +5293,12 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [deleteChangeRequestOverlay, selectedDate, setScreenshotSectionState],
+    [canReadChanges, canRefreshChange, deleteChangeRequestOverlay, selectedDate, setScreenshotSectionState],
   );
 
   const loadPersonProfiles = useCallback(
     async (forceRefresh = false) => {
+      if (!canReadPublicProfiles && !canViewPrivateProfile) return;
       const controller = beginLatestDutyOverviewRequest(
         personProfileLoadAbortRef,
       );
@@ -5226,7 +5307,7 @@ function MonthlySchedulePageContent() {
       setScreenshotSectionState('personProfiles', 'loading');
       try {
         await Promise.all([
-          getPersonProfiles(forceRefresh, 'leave', controller.signal)
+          canReadPublicProfiles ? getPersonProfiles(forceRefresh && canRefreshPublicProfiles, 'leave', controller.signal)
             .then((data) => {
               if (
                 controller.signal.aborted ||
@@ -5243,10 +5324,10 @@ function MonthlySchedulePageContent() {
                 setPersonProfileDetails([]);
                 setScreenshotSectionState('personProfiles', 'error');
               }
-            }),
+            }) : Promise.resolve(null),
           canViewPrivateProfile
             ? getPersonProfileDetails(
-                forceRefresh,
+                forceRefresh && canRefreshPrivateProfile,
                 'leave',
                 controller.signal,
               )
@@ -5277,10 +5358,12 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [canViewPrivateProfile, setScreenshotSectionState],
+    [canReadPublicProfiles, canRefreshPublicProfiles, canViewPrivateProfile, canRefreshPrivateProfile, setScreenshotSectionState],
   );
 
   const loadTravelPersonProfiles = useCallback(async (forceRefresh = false) => {
+    if (!canReadPublicProfiles) return;
+    forceRefresh = forceRefresh && canRefreshPublicProfiles;
     const requestId = travelProfileLoadSeqRef.current + 1;
     travelProfileLoadSeqRef.current = requestId;
     setTravelProfilesStatus('loading');
@@ -5297,7 +5380,7 @@ function MonthlySchedulePageContent() {
         setTravelProfilesStatus('error');
       }
     }
-  }, []);
+  }, [canReadPublicProfiles, canRefreshPublicProfiles]);
 
   useEffect(() => {
     if (!canViewPrivateProfile) {
@@ -5395,7 +5478,7 @@ function MonthlySchedulePageContent() {
     setLeaveScheduleCoverageReadyKey(null);
     const loaded = await ensureSchedulesForLeaveDateRange(
       leaveScheduleCoverageKey.split('|'),
-      resolveLeaveScheduleForceRefresh(true, capabilities.canForceRefresh),
+      resolveLeaveScheduleForceRefresh(true, canRefreshMonthlySchedule || selfServiceOnly),
     );
     if (requestId !== leaveScheduleCoverageLoadSeqRef.current) {
       return;
@@ -5411,7 +5494,8 @@ function MonthlySchedulePageContent() {
     setLeaveScheduleCoverageReadyKey(leaveScheduleCoverageKey);
     setLeaveAuthoritativeImpact(null);
   }, [
-    capabilities.canForceRefresh,
+    canRefreshMonthlySchedule,
+    selfServiceOnly,
     ensureSchedulesForLeaveDateRange,
     leaveRequestDraftLocked,
     leaveScheduleCoverageKey,
@@ -5644,6 +5728,8 @@ function MonthlySchedulePageContent() {
   );
 
   const loadTravelDetails = useCallback(async (forceRefresh = false) => {
+    if (!canReadMonthlySchedule) return;
+    forceRefresh = forceRefresh && canRefreshMonthlySchedule;
     setTravelDetailsLoading(true);
     try {
       const startDate = getTodayDateKey();
@@ -5699,7 +5785,7 @@ function MonthlySchedulePageContent() {
     } finally {
       setTravelDetailsLoading(false);
     }
-  }, []);
+  }, [canReadMonthlySchedule, canRefreshMonthlySchedule]);
 
   const getSealingsByDate = useCallback(
     (dateStr: string): SealingInfo[] =>
@@ -5963,6 +6049,7 @@ function MonthlySchedulePageContent() {
   );
 
   useEffect(() => {
+    if (!canReadMonthlySchedule && !selfServiceOnly) return;
     let active = true;
     void getChinaWorkCalendar()
       .then((response) => {
@@ -5976,7 +6063,7 @@ function MonthlySchedulePageContent() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [canReadMonthlySchedule, selfServiceOnly]);
 
   useEffect(() => {
     if (access.isLoading) return;
@@ -6309,7 +6396,7 @@ function MonthlySchedulePageContent() {
     const monthDateKeys = leaveScheduleCoverageKey.split('|');
     const forceRefresh = resolveLeaveScheduleForceRefresh(
       leaveScheduleForceRefreshPendingRef.current,
-      capabilities.canForceRefresh,
+      canRefreshMonthlySchedule || selfServiceOnly,
     );
     leaveScheduleForceRefreshPendingRef.current = false;
     let active = true;
@@ -6333,7 +6420,8 @@ function MonthlySchedulePageContent() {
       active = false;
     };
   }, [
-    capabilities.canForceRefresh,
+    canRefreshMonthlySchedule,
+    selfServiceOnly,
     ensureSchedulesForLeaveDateRange,
     leaveScheduleCoverageKey,
     leaveRequestDialogOpen,
@@ -6431,7 +6519,7 @@ function MonthlySchedulePageContent() {
   };
 
   const handleManualSync = useCallback(async () => {
-    if (!canManageMonthlySchedule) {
+    if (!canRefreshMonthlySchedule) {
       toast.info('当前为只读模式，不能同步或写入数据');
       return;
     }
@@ -6475,10 +6563,10 @@ function MonthlySchedulePageContent() {
     } finally {
       setManualSyncing(false);
     }
-  }, [canManageMonthlySchedule, loadSchedules, loadSealingInfo, manualSyncing]);
+  }, [canRefreshMonthlySchedule, loadSchedules, loadSealingInfo, manualSyncing]);
 
   const handleManualScreenshot = useCallback(async () => {
-    if (!canManageMonthlySchedule) {
+    if (!canSendMonthlySchedule) {
       toast.info('当前为只读模式，不能发送截图');
       return;
     }
@@ -6503,7 +6591,7 @@ function MonthlySchedulePageContent() {
     } finally {
       setManualScreenshotSending(false);
     }
-  }, [canManageMonthlySchedule, manualScreenshotSending]);
+  }, [canSendMonthlySchedule, manualScreenshotSending]);
 
   const updateDisplayedSchedules = useCallback(
     (updater: (current: MonthlySchedule[]) => MonthlySchedule[]) => {
@@ -6748,12 +6836,13 @@ function MonthlySchedulePageContent() {
   ]);
 
   const handleSubmitEmergencyDuty = useCallback(async () => {
-    if (!canManageMonthlySchedule) {
+    const currentRecord = emergencyDutyIndexRef.current.get(emergencyDutyDate);
+    const requiresUpdate = Boolean(currentRecord?.recordId && !currentRecord.recordId.startsWith('optimistic-'));
+    if (requiresUpdate ? !canManageMonthlySchedule : !canCreateMonthlySchedule) {
       toast.info('当前为只读模式，不能调整应急值班');
       return;
     }
 
-    const currentRecord = emergencyDutyIndexRef.current.get(emergencyDutyDate);
     const recoveryBinding =
       currentRecord?.syncState === 'unknown-result'
         ? emergencyDutyMutationBindingsRef.current.get(emergencyDutyDate)
@@ -6890,6 +6979,7 @@ function MonthlySchedulePageContent() {
       }
     }
   }, [
+    canCreateMonthlySchedule,
     canManageMonthlySchedule,
     emergencyDutyDate,
     emergencyDutyLoadedRange,
@@ -6900,7 +6990,7 @@ function MonthlySchedulePageContent() {
   ]);
 
   const handleSubmitTravelStaff = useCallback(async () => {
-    if (!canManageMonthlySchedule) {
+    if (!canCreateMonthlySchedule) {
       toast.info('当前为只读模式，不能写入差旅人员');
       return;
     }
@@ -7003,7 +7093,7 @@ function MonthlySchedulePageContent() {
     }
   }, [
     beginOptimisticScheduleMutation,
-    canManageMonthlySchedule,
+    canCreateMonthlySchedule,
     loadTravelDetails,
     schedules,
     travelEndDate,
@@ -7411,7 +7501,7 @@ function MonthlySchedulePageContent() {
       toast.error('请使用原申请人的账号登录后重试');
       return;
     }
-    if (!canUseSelfServiceTools) {
+    if (!canCreateLeaveRequest) {
       toast.info('当前身份不能登记请休假');
       return;
     }
@@ -7673,7 +7763,7 @@ function MonthlySchedulePageContent() {
             coverageKey.split('|'),
             resolveLeaveScheduleForceRefresh(
               true,
-              capabilities.canForceRefresh,
+              canRefreshMonthlySchedule || selfServiceOnly,
             ),
           );
           if (
@@ -7717,8 +7807,9 @@ function MonthlySchedulePageContent() {
       logger.error('请休假后台同步处理失败', error);
     });
   }, [
-    capabilities.canForceRefresh,
-    canUseSelfServiceTools,
+    canRefreshMonthlySchedule,
+    canCreateLeaveRequest,
+    selfServiceOnly,
     ensureSchedulesForLeaveDateRange,
     leaveApplicant.mode,
     leaveApplicant.mode === 'automatic' ? leaveApplicant.name : '',
@@ -7748,7 +7839,7 @@ function MonthlySchedulePageContent() {
       draft: ChangeRequestDraft,
       stagedDocuments: ChangeRequestStagedDocument[],
     ) => {
-      if (!canUseSelfServiceTools) {
+      if (!canCreateChange) {
         toast.info('当前身份不能提交变更申请');
         return;
       }
@@ -8146,7 +8237,7 @@ function MonthlySchedulePageContent() {
       }
     },
     [
-      canUseSelfServiceTools,
+      canCreateChange,
       changeRequestPartialRecord,
       changeRequestRetryAction,
       changeRequestSubmitting,
@@ -8157,7 +8248,7 @@ function MonthlySchedulePageContent() {
 
   const openChangeAdjustmentRequest = useCallback(
     (recordId: string | null = null) => {
-      if (!canManageMonthlySchedule) {
+      if (!canUpdateChange) {
         toast.info('当前为只读模式，不能调整变更');
         return;
       }
@@ -8167,12 +8258,12 @@ function MonthlySchedulePageContent() {
       }
       setChangeAdjustmentRequestOpen(true);
     },
-    [canManageMonthlySchedule, changeAdjustmentRequestRetryBinding],
+    [canUpdateChange, changeAdjustmentRequestRetryBinding],
   );
 
   const handleSubmitChangeAdjustmentRequest = useCallback(
     async (request: ChangeAdjustmentRequest, original: ChangeInfo) => {
-      if (!canManageMonthlySchedule) {
+      if (!canUpdateChange) {
         toast.info('当前为只读模式，不能提交变更调整');
         return;
       }
@@ -8265,7 +8356,7 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [canManageMonthlySchedule, changeAdjustmentRequestSubmitting],
+    [canUpdateChange, changeAdjustmentRequestSubmitting],
   );
 
   const handleSubmitChangeDrillReport = useCallback(
@@ -8846,7 +8937,7 @@ function MonthlySchedulePageContent() {
   );
 
   const handleSubmitAdditionalMatter = useCallback(async () => {
-    if (!canManageMonthlySchedule) {
+    if (!canCreateAdditionalMatter) {
       toast.info('当前为只读模式，不能登记其他事宜');
       return;
     }
@@ -8900,7 +8991,7 @@ function MonthlySchedulePageContent() {
     additionalMatterDate,
     additionalMatterMode,
     additionalMatterSubmitting,
-    canManageMonthlySchedule,
+    canCreateAdditionalMatter,
   ]);
 
   const handleAddSealingRegistrationRow = useCallback(() => {
@@ -8956,7 +9047,7 @@ function MonthlySchedulePageContent() {
   );
 
   const handleSubmitSealingRegistration = useCallback(async () => {
-    if (!canManageMonthlySchedule) {
+    if (!canCreateMonthlySchedule) {
       toast.info('当前为只读模式，不能登记封网信息');
       return;
     }
@@ -9073,7 +9164,7 @@ function MonthlySchedulePageContent() {
       setSealingRegistrationSubmitting(false);
     }
   }, [
-    canManageMonthlySchedule,
+    canCreateMonthlySchedule,
     loadSealingInfo,
     sealingRegistrationRows,
     sealingRegistrationSubmitting,
@@ -9100,7 +9191,7 @@ function MonthlySchedulePageContent() {
 
   const openCreateExceptionFollowUpDialog = useCallback(
     (target: ExceptionFollowUpTarget) => {
-      if (!canManageMonthlySchedule) {
+      if (!canCreateException) {
         toast.info('当前为只读模式，不能登记异常跟进');
         return;
       }
@@ -9110,12 +9201,12 @@ function MonthlySchedulePageContent() {
       });
       setExceptionFollowUpHandling('');
     },
-    [canManageMonthlySchedule],
+    [canCreateException],
   );
 
   const openEditExceptionFollowUpDialog = useCallback(
     (target: ExceptionFollowUpTarget, item: ExceptionFollowUpItem) => {
-      if (!canManageMonthlySchedule) {
+      if (!canUpdateException) {
         toast.info('当前为只读模式，不能修改异常跟进');
         return;
       }
@@ -9125,11 +9216,11 @@ function MonthlySchedulePageContent() {
       });
       setExceptionFollowUpHandling(item.handling || '');
     },
-    [canManageMonthlySchedule],
+    [canUpdateException],
   );
 
   const handleSubmitExceptionFollowUp = useCallback(async () => {
-    if (!canManageMonthlySchedule) {
+    if (!(exceptionFollowUpTarget?.existingFollowUp ? canUpdateException : canCreateException)) {
       toast.info('当前为只读模式，不能写入异常跟进');
       return;
     }
@@ -9211,7 +9302,8 @@ function MonthlySchedulePageContent() {
       setExceptionFollowUpSubmitting(false);
     }
   }, [
-    canManageMonthlySchedule,
+    canUpdateException,
+    canCreateException,
     exceptionFollowUpHandling,
     exceptionFollowUpSubmitting,
     exceptionFollowUpTarget,
@@ -9221,7 +9313,7 @@ function MonthlySchedulePageContent() {
 
   const handleDeleteExceptionFollowUpItem = useCallback(
     async (target: ExceptionFollowUpTarget, item: ExceptionFollowUpItem) => {
-      if (!canDeleteMonthlySchedule) {
+      if (!canDeleteException) {
         toast.info('当前权限不能删除异常跟进');
         return;
       }
@@ -9270,7 +9362,7 @@ function MonthlySchedulePageContent() {
       }
     },
     [
-      canDeleteMonthlySchedule,
+      canDeleteException,
       exceptionFollowUpSubmitting,
       exceptionFollowUpTarget,
       removeExceptionFollowUpItem,
@@ -9298,7 +9390,7 @@ function MonthlySchedulePageContent() {
   );
 
   const handleSubmitChangeAdjustment = useCallback(async () => {
-    if (!canManageMonthlySchedule) {
+    if (!canUpdateChange) {
       toast.info('当前为只读模式，不能提交变更调整');
       return;
     }
@@ -9422,7 +9514,7 @@ function MonthlySchedulePageContent() {
       setChangeAdjustmentSubmitting(false);
     }
   }, [
-    canManageMonthlySchedule,
+    canUpdateChange,
     changeAdjustmentMessages,
     changeAdjustmentDraft,
     changeAdjustmentSubmitting,
@@ -9433,7 +9525,7 @@ function MonthlySchedulePageContent() {
 
   const handleClearChangeAdjustment = useCallback(
     async (change: ChangeInfo) => {
-      if (!canDeleteMonthlySchedule) {
+      if (!canDeleteChange) {
         toast.info('当前权限不能撤销变更调整');
         return;
       }
@@ -9509,7 +9601,7 @@ function MonthlySchedulePageContent() {
       }
     },
     [
-      canDeleteMonthlySchedule,
+      canDeleteChange,
       changeAdjustmentMessages,
       changeAdjustmentSubmitting,
       loadChangeInfo,
@@ -9537,14 +9629,14 @@ function MonthlySchedulePageContent() {
             <button
               type="button"
               onClick={() => {
-                if (canManageMonthlySchedule) {
+                if (canUpdateException) {
                   openEditExceptionFollowUpDialog(target, latest);
                 }
               }}
               className={cn(
                 'shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold transition-colors',
                 'bg-blue-50 text-blue-700 border border-blue-200',
-                canManageMonthlySchedule
+                canUpdateException
                   ? 'hover:bg-blue-100'
                   : 'cursor-default',
                 className,
@@ -9582,7 +9674,7 @@ function MonthlySchedulePageContent() {
                       </span>
                     </div>
                     <div className="whitespace-pre-wrap">{item.handling}</div>
-                    {canManageMonthlySchedule && (
+                    {canUpdateException && (
                       <div className="mt-2 flex justify-end">
                         <Button
                           type="button"
@@ -9608,7 +9700,7 @@ function MonthlySchedulePageContent() {
       );
     },
     [
-      canManageMonthlySchedule,
+      canUpdateException,
       exceptionFollowUpSubmitting,
       openEditExceptionFollowUpDialog,
     ],
@@ -9639,13 +9731,13 @@ function MonthlySchedulePageContent() {
                     </span>
                     {item.handling}
                   </div>
-                  {canManageMonthlySchedule && (
+                  {(canUpdateException || canDeleteException) && (
                     <div className="flex shrink-0 items-center gap-1">
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={exceptionFollowUpSubmitting}
+                        disabled={exceptionFollowUpSubmitting || !canUpdateException}
                         onClick={() =>
                           openEditExceptionFollowUpDialog(target, item)
                         }
@@ -9654,7 +9746,7 @@ function MonthlySchedulePageContent() {
                         <PencilLine className="mr-1 h-3 w-3" />
                         修改
                       </Button>
-                      {canDeleteMonthlySchedule && (
+                      {canDeleteException && (
                         <Button
                           type="button"
                           variant="outline"
@@ -9684,8 +9776,8 @@ function MonthlySchedulePageContent() {
       );
     },
     [
-      canDeleteMonthlySchedule,
-      canManageMonthlySchedule,
+      canDeleteException,
+      canUpdateException,
       exceptionFollowUpSubmitting,
       handleDeleteExceptionFollowUpItem,
       openEditExceptionFollowUpDialog,
@@ -10478,8 +10570,9 @@ function MonthlySchedulePageContent() {
                     人员相关
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className="min-w-48 rounded-lg border-blue-100 bg-white p-1 shadow-lg">
-                    <DropdownMenuItem
+                    {canCreateLeaveRequest && (<DropdownMenuItem
                       onSelect={() => {
+                        if (selfServiceOnly && !selfServiceIdentityReady) { toast.info(selfServiceIdentity?.error || '正在核对本人身份与班次，请稍候'); return; }
                         if (access.isLoading) {
                           toast.info('正在确认登录状态，请稍候');
                           return;
@@ -10511,9 +10604,10 @@ function MonthlySchedulePageContent() {
                     >
                       <CalendarClock className="h-3.5 w-3.5" />
                       请休假&差旅申请
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
+                    </DropdownMenuItem>)}
+                    {canCreateOvertimeRequest && (<DropdownMenuItem
                       onSelect={() => {
+                        if (selfServiceOnly && !selfServiceIdentityReady) { toast.info(selfServiceIdentity?.error || '正在核对本人身份与班次，请稍候'); return; }
                         refreshBusinessClock();
                         overtimeRequestDialogRef.current?.open();
                       }}
@@ -10521,7 +10615,7 @@ function MonthlySchedulePageContent() {
                     >
                       <CalendarClock className="h-3.5 w-3.5" />
                       加班申请
-                    </DropdownMenuItem>
+                    </DropdownMenuItem>)}
                     <DropdownMenuItem
                       onSelect={() =>
                         employeeOnboardingDialogRef.current?.open(
@@ -10533,25 +10627,25 @@ function MonthlySchedulePageContent() {
                       <UserPlus className="h-3.5 w-3.5" />
                       新员工入职
                     </DropdownMenuItem>
-                    <DropdownMenuItem
+                    {canCreatePersonality && (<DropdownMenuItem
                       onSelect={() => navigate('/mbti-assessment')}
                       className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-blue-700 focus:bg-blue-50 focus:text-blue-700"
                     >
                       <ClipboardList className="h-3.5 w-3.5" />
                       MBTI 测试
-                    </DropdownMenuItem>
-                    {canManageMonthlySchedule && (
+                    </DropdownMenuItem>)}
+                    {(canManageMonthlySchedule || canCreateMonthlySchedule || canReadTimeInsights) && (
                       <>
-                        <DropdownMenuItem
+                        {canReadTimeInsights && (<DropdownMenuItem
                           onSelect={() => setPersonnelTimeInsightsDialogOpen(true)}
                           className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-blue-700 focus:bg-blue-50 focus:text-blue-700"
                         >
                           <BarChart3 className="h-3.5 w-3.5" />
                           人员工时与休假分析
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
+                        </DropdownMenuItem>)}
+                        {(canManageMonthlySchedule || canCreateMonthlySchedule) && (<DropdownMenuItem
                           onSelect={() => {
-                            setStaffAdjustmentMode('vacancy');
+                            setStaffAdjustmentMode(canManageMonthlySchedule ? 'vacancy' : 'emergency');
                             setRepairDate(selectedDateKey);
                             setVacancyDialogOpen(true);
                           }}
@@ -10559,8 +10653,8 @@ function MonthlySchedulePageContent() {
                         >
                           <UserCog className="h-3.5 w-3.5" />
                           排班人员调整
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
+                        </DropdownMenuItem>)}
+                        {canManageMonthlySchedule && (<DropdownMenuItem
                           onSelect={() => {
                             setPersonnelMovementDate(selectedDateKey);
                             setPersonnelMovementDialogOpen(true);
@@ -10569,7 +10663,7 @@ function MonthlySchedulePageContent() {
                         >
                           <UserCog className="h-3.5 w-3.5" />
                           人员异动
-                        </DropdownMenuItem>
+                        </DropdownMenuItem>)}
                       </>
                     )}
                   </DropdownMenuSubContent>
@@ -10586,7 +10680,7 @@ function MonthlySchedulePageContent() {
                         变更相关
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="min-w-48 rounded-lg border-blue-100 bg-white p-1 shadow-lg">
-                        <DropdownMenuItem
+                        {canCreateChange && (<DropdownMenuItem
                           disabled={changeRequestSubmitting}
                           onSelect={() => {
                             changeRequestDialogRef.current?.setOpen(true);
@@ -10595,8 +10689,8 @@ function MonthlySchedulePageContent() {
                         >
                           <Wrench className="h-3.5 w-3.5" />
                           变更申请
-                        </DropdownMenuItem>
-                        {canManageMonthlySchedule && (
+                        </DropdownMenuItem>)}
+                        {canUpdateChange && (
                           <DropdownMenuItem
                             disabled={changeAdjustmentRequestSubmitting}
                             onSelect={() => openChangeAdjustmentRequest()}
@@ -10668,7 +10762,7 @@ function MonthlySchedulePageContent() {
                         )}
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
-                    <DropdownMenuItem
+                    {canCreateThresholdAdjustment && (<DropdownMenuItem
                       onSelect={() => {
                         setThresholdAdjustmentDialogOpen(true);
                       }}
@@ -10676,10 +10770,10 @@ function MonthlySchedulePageContent() {
                     >
                       <Bell className="h-3.5 w-3.5" />
                       阈值调整
-                    </DropdownMenuItem>
+                    </DropdownMenuItem>)}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-                {canManageMonthlySchedule && (
+                {(canCreateMonthlySchedule || canCreateAdditionalMatter || canRefreshMonthlySchedule || canSendMonthlySchedule || canUsePageAction(access, 'monthly_reports', 'read', capabilities.canEdit)) && (
                   <>
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger className="gap-2 rounded-md px-3 py-2 text-sm text-blue-700 focus:bg-blue-50 focus:text-blue-700 data-[state=open]:bg-blue-50 data-[state=open]:text-blue-700">
@@ -10687,7 +10781,7 @@ function MonthlySchedulePageContent() {
                         其他事宜
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="min-w-48 rounded-lg border-blue-100 bg-white p-1 shadow-lg">
-                        <DropdownMenuItem
+                        {canCreateMonthlySchedule && (<DropdownMenuItem
                           onSelect={() => {
                             setSealingRegistrationRows([
                               createSealingRegistrationDraftRow(
@@ -10700,8 +10794,8 @@ function MonthlySchedulePageContent() {
                         >
                           <ShieldAlert className="h-3.5 w-3.5" />
                           封网登记
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
+                        </DropdownMenuItem>)}
+                        {canUsePageAction(access, 'monthly_reports', 'read', capabilities.canEdit) && (<DropdownMenuItem
                           onSelect={() => {
                             navigate('/ali-monthly-report');
                           }}
@@ -10709,8 +10803,8 @@ function MonthlySchedulePageContent() {
                         >
                           <FileSpreadsheet className="h-3.5 w-3.5" />
                           阿里月报生成
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
+                        </DropdownMenuItem>)}
+                        {canCreateAdditionalMatter && (<DropdownMenuItem
                           onSelect={() => {
                             setAdditionalMatterDate(getTodayDateKey());
                             setAdditionalMatterDialogOpen(true);
@@ -10719,7 +10813,7 @@ function MonthlySchedulePageContent() {
                         >
                           <ClipboardPlus className="h-3.5 w-3.5" />
                           其他事宜
-                        </DropdownMenuItem>
+                        </DropdownMenuItem>)}
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                     <DropdownMenuSub>
@@ -10728,7 +10822,7 @@ function MonthlySchedulePageContent() {
                         同步相关
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="min-w-48 rounded-lg border-blue-100 bg-white p-1 shadow-lg">
-                        <DropdownMenuItem
+                        {canRefreshMonthlySchedule && (<DropdownMenuItem
                           disabled={manualSyncing}
                           onSelect={() => {
                             void handleManualSync();
@@ -10741,8 +10835,8 @@ function MonthlySchedulePageContent() {
                             <RefreshCw className="h-3.5 w-3.5" />
                           )}
                           {manualSyncing ? '同步中...' : '同步本地库'}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
+                        </DropdownMenuItem>)}
+                        {canSendMonthlySchedule && (<DropdownMenuItem
                           disabled={manualScreenshotSending}
                           onSelect={() => {
                             void handleManualScreenshot();
@@ -10757,7 +10851,7 @@ function MonthlySchedulePageContent() {
                           {manualScreenshotSending
                             ? '发送中...'
                             : '发送今日截图'}
-                        </DropdownMenuItem>
+                        </DropdownMenuItem>)}
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                   </>
@@ -10888,9 +10982,20 @@ function MonthlySchedulePageContent() {
         </CardHeader>
         <CardContent>
           {calendarWeatherSection}
+          {selfServiceOnly && (
+            <div role={selfServiceIdentity?.status === 'error' ? 'alert' : 'status'} className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              <span>{selfServiceIdentityReady ? `仅可为本人 ${selfServiceIdentity!.name} 申请；代申请需原职责和排班总览权限。` : selfServiceIdentity?.status === 'error' ? selfServiceIdentity.error : '正在核对本人身份与班次…'}</span>
+              {selfServiceIdentity?.status === 'error' && <Button size="sm" variant="outline" onClick={() => setSelfServiceRetry(value => value + 1)}>重试读取</Button>}
+            </div>
+          )}
+          {!canReadMonthlySchedule && (
+            <p role="status" className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              当前未开放排班总览，仅展示已授权功能。请休假、加班等申请可从常用工具进入。
+            </p>
+          )}
 
           {/* 今日前后日期值班信息 - 磨玻璃效果展示区 */}
-          <TodayAndNearbySchedules
+          {canReadMonthlySchedule && <TodayAndNearbySchedules
             selectedDate={selectedDate}
             schedules={schedules}
             getScheduleByDateAndBuilding={getScheduleByDateAndBuilding}
@@ -10906,9 +11011,9 @@ function MonthlySchedulePageContent() {
             onPersonnelMovementsLoadStateChange={
               handlePersonnelMovementsLoadStateChange
             }
-          />
+          />}
 
-          {role !== 'guest' && <>
+          {canReadAttendance && <>
           <div className="mb-6" data-screenshot-extra="true">
             <TodayAttendanceAnomalyList
               {...todayAttendance}
@@ -10916,8 +11021,10 @@ function MonthlySchedulePageContent() {
               canViewCorrectionEvidence={role === 'admin'}
             />
           </div>
+          </>}
 
           {/* 今日长白班在岗一览 */}
+          {canReadPersonnelSchedule && (
           <div data-screenshot-extra="true">
             <TodayEngineersOnDuty
               selectedDate={selectedDate}
@@ -10925,9 +11032,13 @@ function MonthlySchedulePageContent() {
               refreshToken={effectiveDataRefreshToken}
               localSnapshotRefreshToken={localSnapshotRefreshToken}
               workCalendarRevision={workCalendarRevision}
+              canRefresh={canRefreshPersonnelSchedule}
+              canRefreshRelated={canRefreshMonthlySchedule}
             />
           </div>
+          )}
 
+          {canViewScheduleDetails && <>
           <div
             data-screenshot-extra="true"
             className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/70 p-3"
@@ -11528,7 +11639,7 @@ function MonthlySchedulePageContent() {
                             {adjustmentMessage && (
                               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-100 bg-emerald-50/80 px-2.5 py-2 text-xs font-medium text-emerald-700">
                                 <span>{adjustmentMessage}</span>
-                                {canDeleteMonthlySchedule &&
+                                {canDeleteChange &&
                                   hasPersistedAdjustment && (
                                     <Button
                                       type="button"
@@ -11550,10 +11661,10 @@ function MonthlySchedulePageContent() {
                               existingFollowUps,
                               followUpTarget,
                             )}
-                            {canManageMonthlySchedule &&
+                            {(canUpdateChange || canCreateException) &&
                               (rawConflict || rawReminder) && (
                                 <div className="mt-2 flex flex-wrap justify-end gap-2">
-                                  {rawConflict && (
+                                  {rawConflict && canUpdateChange && (
                                     <Button
                                       type="button"
                                       variant="outline"
@@ -11576,7 +11687,7 @@ function MonthlySchedulePageContent() {
                                     type="button"
                                     variant="outline"
                                     size="sm"
-                                    disabled={exceptionFollowUpSubmitting}
+                                    disabled={exceptionFollowUpSubmitting || !canCreateException}
                                     onClick={() =>
                                       openCreateExceptionFollowUpDialog(
                                         followUpTarget,
@@ -11693,7 +11804,7 @@ function MonthlySchedulePageContent() {
                     id="exception-follow-up-handling"
                     value={exceptionFollowUpHandling}
                     disabled={
-                      exceptionFollowUpSubmitting || !canManageMonthlySchedule
+                      exceptionFollowUpSubmitting || !(exceptionFollowUpTarget?.existingFollowUp ? canUpdateException : canCreateException)
                     }
                     onChange={(event) =>
                       setExceptionFollowUpHandling(event.target.value)
@@ -11705,7 +11816,7 @@ function MonthlySchedulePageContent() {
               </div>
 
               <DialogFooter className="border-t border-slate-100 bg-white px-5 py-4">
-                {canDeleteMonthlySchedule &&
+                {canDeleteException &&
                   exceptionFollowUpTarget.existingFollowUp && (
                     <Button
                       type="button"
@@ -11736,7 +11847,7 @@ function MonthlySchedulePageContent() {
                 <Button
                   type="button"
                   disabled={
-                    exceptionFollowUpSubmitting || !canManageMonthlySchedule
+                    exceptionFollowUpSubmitting || !(exceptionFollowUpTarget?.existingFollowUp ? canUpdateException : canCreateException)
                   }
                   onClick={handleSubmitExceptionFollowUp}
                   className="bg-blue-600 text-white hover:bg-blue-700"
@@ -11893,7 +12004,7 @@ function MonthlySchedulePageContent() {
                 <Button
                   type="button"
                   disabled={
-                    changeAdjustmentSubmitting || !canManageMonthlySchedule
+                    changeAdjustmentSubmitting || !canUpdateChange
                   }
                   onClick={() => {
                     void handleSubmitChangeAdjustment();
@@ -13124,7 +13235,7 @@ function MonthlySchedulePageContent() {
               <Button
                 type="button"
                 disabled={
-                  !canManageMonthlySchedule ||
+                  !(staffAdjustmentMode === 'emergency' ? (emergencyDutyIndex.get(emergencyDutyDate)?.recordId && !emergencyDutyIndex.get(emergencyDutyDate)?.recordId.startsWith('optimistic-') ? canManageMonthlySchedule : canCreateMonthlySchedule) : staffAdjustmentMode === 'travel' ? canCreateMonthlySchedule : canManageMonthlySchedule) ||
                   (staffAdjustmentMode === 'vacancy'
                     ? vacancySubmitting || filledVacancyCount === 0
                     : staffAdjustmentMode === 'repair'
@@ -13381,7 +13492,7 @@ function MonthlySchedulePageContent() {
                 type="button"
                 disabled={
                   sealingRegistrationSubmitting ||
-                  !canManageMonthlySchedule ||
+                  !canCreateMonthlySchedule ||
                   sealingRegistrationRows.some(
                     (row) =>
                       !row.sealingInfo.trim() || !row.startTime || !row.endTime,
@@ -13536,7 +13647,7 @@ function MonthlySchedulePageContent() {
         onOpenChange={setThresholdAdjustmentDialogOpen}
       />
       <PersonnelTimeInsightsDialog
-        open={personnelTimeInsightsDialogOpen}
+        open={canReadTimeInsights && personnelTimeInsightsDialogOpen}
         onOpenChange={setPersonnelTimeInsightsDialogOpen}
         profiles={personProfileDetails}
       />
@@ -13750,9 +13861,9 @@ function MonthlySchedulePageContent() {
                 type="button"
                 disabled={
                   hasLockedLeaveRequestRetry
-                    ? leaveRequestSubmitting || !canUseSelfServiceTools
+                    ? leaveRequestSubmitting || !canCreateLeaveRequest
                     : leaveRequestSubmitting ||
-                      !canUseSelfServiceTools ||
+                      !canCreateLeaveRequest ||
                       !leaveStaffName.trim() ||
                       !selectedLeaveStaffProfile ||
                       !leaveStartAt ||
@@ -13792,7 +13903,8 @@ function MonthlySchedulePageContent() {
       </Dialog>
       <OvertimeRequestDialogHost
         ref={overtimeRequestDialogRef}
-        canUseSelfServiceTools={canUseSelfServiceTools}
+        applicantOverride={selfServiceApplicant}
+        canUseSelfServiceTools={canCreateOvertimeRequest}
         personProfiles={personProfiles}
         personProfilesStatus={screenshotReadiness.personProfiles}
         onRetryPersonProfiles={loadPersonProfiles}
@@ -13909,7 +14021,7 @@ function MonthlySchedulePageContent() {
                 type="button"
                 disabled={
                   additionalMatterSubmitting ||
-                  !canManageMonthlySchedule ||
+                  !canCreateAdditionalMatter ||
                   !additionalMatterContent.trim()
                 }
                 onClick={() => {

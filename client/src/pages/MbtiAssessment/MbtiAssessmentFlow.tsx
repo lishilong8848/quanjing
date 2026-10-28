@@ -3,6 +3,7 @@ import MbtiAssessmentPage, { type MbtiActivePerson, type MbtiPreviewSelection } 
 import AttachedBankAssessment from './AttachedBankAssessment';
 import { getMbtiCurrentPerson, getMbtiOnboardingContext, searchMbtiActivePeople } from './mbti-api';
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { hasAuthenticatedAccessIdentity } from '@/access/access-policy';
 import { resolveSelfServiceApplicant } from '@shared/self-service-applicant';
 
@@ -13,6 +14,7 @@ export default function MbtiAssessmentFlow() {
   const applicant = useMemo(() => resolveSelfServiceApplicant(access, hasAuthenticatedAccessIdentity(access), '开始 MBTI 测试'),
     [access.accountId, access.displayName, access.expiresAt, access.principalFingerprint, access.role]);
   const onboardingEntry = new URLSearchParams(window.location.search).get('entry') === 'onboarding';
+  const canSubmit = onboardingEntry || canUsePageAction(access, 'personality', 'create', true);
   const [context, setContext] = useState<{ recordId: string; name: string; ticket: string } | null>(null);
   const [contextError, setContextError] = useState('');
   const [selection, setSelection] = useState<MbtiPreviewSelection | null>(null);
@@ -53,12 +55,13 @@ export default function MbtiAssessmentFlow() {
   }, [onboardingEntry]);
 
   if (onboardingEntry && !context) return <main className="mbti-page"><div className="mbti-shell"><div className="mbti-panel mbti-start" role={contextError ? 'alert' : 'status'}>{contextError || '正在打开入职测试…'}</div></div></main>;
-  if (selection && selectionIdentity === identityKey) return <AttachedBankAssessment key={identityKey || 'manual'} selection={selection} onExit={() => setSelection(null)} />;
+  if (selection && selectionIdentity === identityKey) return <AttachedBankAssessment key={identityKey || 'manual'} selection={selection} canSubmit={canSubmit} onExit={() => setSelection(null)} />;
   const currentPersonState = personState?.identity === access.principalFingerprint ? personState : null;
   return <MbtiAssessmentPage onboardingPerson={context || undefined} applicant={onboardingEntry ? undefined : applicant}
     authenticatedPerson={currentPersonState?.person} identityLoading={access.isLoading || (!onboardingEntry && applicant.mode === 'automatic' && !currentPersonState)}
-    identityError={currentPersonState?.error} onIdentityRetry={() => setRetry(value => value + 1)}
+    identityError={currentPersonState?.error || (!canSubmit ? '当前身份无提交测试权限' : undefined)} onIdentityRetry={() => setRetry(value => value + 1)}
     onPrototypeStart={value => {
+      if (!canSubmit) return;
       if (!onboardingEntry && applicant.mode === 'login') { access.requestLogin(applicant.message, '/mbti-assessment'); return; }
       if (!onboardingEntry && applicant.mode === 'error') return;
       setSelectionIdentity(identityKey); setSelection(value);

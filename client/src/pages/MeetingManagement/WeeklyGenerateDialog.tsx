@@ -1,3 +1,5 @@
+import { canUsePageAction } from '../business-action-access';
+import { useAccess } from '@/access/AccessProvider';
 import { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
@@ -46,6 +48,7 @@ export function WeeklyGenerateDialog({
   onDeleteTask?: (job: WeeklyJob) => void;
   onFillTodos?: (kind: 'ali' | 'local') => void;
 }) {
+  const canGenerate = canUsePageAction(useAccess(), 'meetings', record.id === 'new' ? 'create' : 'update', true);
   const date = new Date(`${record.date}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() - 6);
   const [startDate, setStart] = useState(date.toISOString().slice(0, 10));
@@ -96,7 +99,7 @@ export function WeeklyGenerateDialog({
     };
   }, [record.id, record.date, readAttempt]);
   const save = async () => {
-    if (submitting.current || !targetReady || creationBlockReason) return;
+    if (!canGenerate || submitting.current || !targetReady || creationBlockReason) return;
     if (!createOnly && emptyTodos && !confirmedNoTodos) return;
     if (!startDate || !endDate || startDate > endDate) {
       setError('请选择有效的起止日期');
@@ -279,7 +282,7 @@ export function WeeklyGenerateDialog({
           </Button>
           <Button
             disabled={
-              state === 'submitting' ||
+              !canGenerate || state === 'submitting' ||
               !targetReady ||
               (!createOnly && emptyTodos && !confirmedNoTodos) ||
               Boolean(creationBlockReason)

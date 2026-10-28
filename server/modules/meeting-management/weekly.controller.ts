@@ -62,13 +62,13 @@ export class WeeklyController {
     @Req() request: Request,
     @Body() command: SaveWeeklyMeeting,
   ) {
-    return this.weekly.save(command, this.actor(request));
+    return this.weekly.save(command, this.actor(request), (request as Request & {accessPrincipal:AccessPrincipal}).accessPrincipal);
   }
   @Post('generate') generate(
     @Req() request: Request,
     @Body() command: GenerateWeeklyReport,
   ) {
-    return this.weekly.generate(command, this.actor(request));
+    return this.weekly.generate(command, this.actor(request), (request as Request & {accessPrincipal:AccessPrincipal}).accessPrincipal);
   }
   @Post('actions') editAction(
     @Req() request: Request,

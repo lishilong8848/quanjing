@@ -16,6 +16,8 @@ import { EquipmentLedgerService } from '../../server/modules/equipment-lifecycle
 import { buildInventoryManagementSnapshot } from '../../server/modules/inventory-management/inventory-management.mapper';
 import { scopeInventoryDashboard } from '../../server/modules/inventory-management/inventory-access-policy';
 import { PurchaseInventoryController } from '../../server/modules/purchase-inventory/purchase-inventory.controller';
+import { PurchaseOnlineApprovalService } from '../../server/modules/purchase-inventory/purchase-online-approval.service';
+import { PurchaseWorkflowService } from '../../server/modules/purchase-inventory/purchase-workflow.service';
 import type { AccessPrincipal } from '../../shared/access-control.interface';
 
 const scoped = (role: AccessPrincipal['role'] = 'building_admin') => ({ role, purchaseBuilding: 'A楼', buildings: ['A楼', 'B楼'] }) as AccessPrincipal;
@@ -84,16 +86,31 @@ describe('多楼栋真实业务边界', () => {
     expect(canEditPurchaseRecord(principal, { building: 'B楼' } as never)).toBe(true);
     expect(canEditPurchaseRecord(principal, { building: 'C楼' } as never)).toBe(false);
   });
-  it('在线审批绑定实际第二楼栋；未授权记录在进入审批服务前拒绝', async () => {
-    const approve = jest.fn().mockResolvedValue({ success: true });
-    const execution = jest.fn().mockResolvedValue({ building: 'B楼' });
-    const controller = { workflowGateway: { getExecutionRecordAsApp: execution }, onlineApprovalService: { acceptDecision: approve } };
-    const request = { accessPrincipal: scoped() };
-    await PurchaseInventoryController.prototype.approveRecord.call(controller as never, request as never, 'record-B', { decision: 'approved' } as never);
-    expect(approve).toHaveBeenCalledWith('record-B', { decision: 'approved' }, 'B楼');
-    approve.mockClear(); execution.mockResolvedValue({ building: 'C楼' });
-    await expect(PurchaseInventoryController.prototype.approveRecord.call(controller as never, request as never, 'record-C', { decision: 'approved' } as never)).rejects.toThrow();
-    expect(approve).not.toHaveBeenCalled();
+  it('在线审批绑定真实身份、名单及第二楼栋；未授权记录零受理零写入', async () => {
+    const actor = { ...scoped(), accountId: 'synthetic-multi-approver', authorizationVersion: 1 };
+    let building = 'B楼', status = '未开始（待审批）';
+    const record = (recordId: string) => ({ recordId, requestCode: 'SYNTHETIC', status, building, specialty: '电气', purchaseMethod: '综合采购', approvalCompleted: false, requesterOpenId: 'ou_requester', purchaserOpenId: 'ou_purchaser' });
+    const gateway = { getTenantAccessTokenAsApp: jest.fn(async () => 'synthetic-token'), getExecutionRecord: jest.fn(async (id: string) => record(id)), getExecutionRecordAsApp: jest.fn(async (id: string) => record(id)),
+      resolveUser: jest.fn(async () => ({ openId: 'ou_synthetic_multi', name: '合成审批人员', positions: [], buildings: ['B楼'] })),
+      updateExecutionRecordAsApp: jest.fn(async (_id: string, fields: Record<string, unknown>) => { status = String(fields['采购流程']); }) };
+    const configuration = { snapshot: () => ({ accounts: [{ id: actor.accountId, enabled: true, deleted: false, openId: 'ou_synthetic_multi' }] }),
+      currentPrincipal: (id: string, version: number) => id === actor.accountId && version === actor.authorizationVersion ? structuredClone(actor) : undefined,
+      currentDutyRoutePeople: () => [{ openId: 'ou_synthetic_multi', name: '合成审批人员' }] };
+    const workflow = new PurchaseWorkflowService(gateway as never, {} as never, undefined, configuration as never);
+    const online = new PurchaseOnlineApprovalService(gateway as never, workflow), approve = jest.spyOn(online, 'acceptDecision');
+    const controller = Object.assign(Object.create(PurchaseInventoryController.prototype), { workflowGateway: gateway, configuration, onlineApprovalService: online });
+    const request = { accessPrincipal: actor };
+    jest.useFakeTimers();
+    try {
+      const accepted = await controller.approveRecord(request, 'recSecondB', { decision: 'approved' });
+      expect(approve).toHaveBeenCalledWith('recSecondB', { decision: 'approved' }, 'B楼', expect.objectContaining({ scope: { building: 'B楼', specialty: '电气' }, actorOpenId: 'ou_synthetic_multi' }));
+      await jest.runAllTimersAsync();
+      expect(online.getAuthorizedDecisionTaskStatus(accepted.taskId, actor)).toMatchObject({ task: { status: 'completed' } });
+      expect(gateway.updateExecutionRecordAsApp).toHaveBeenCalledTimes(1);
+      approve.mockClear(); gateway.updateExecutionRecordAsApp.mockClear(); building = 'C楼'; status = '未开始（待审批）';
+      await expect(controller.approveRecord(request, 'recDeniedC', { decision: 'approved' })).rejects.toThrow();
+      expect(approve).not.toHaveBeenCalled(); expect(gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();
+    } finally { jest.clearAllTimers(); jest.useRealTimers(); }
   });
   it('库房第二楼栋及授权内调拨允许，未授权来源或目的地拒绝', () => {
     const principal = scoped('inventory_admin');
@@ -127,9 +144,15 @@ describe('多楼栋真实业务边界', () => {
   it('设备汇总、分页源和缓存标识均绑定楼栋集合', () => {
     const service = new EquipmentLedgerService({} as never, {} as never);
     const assets = ['A楼', 'B楼', 'C楼'].map((building, i) => ({ id: String(i), building, quantity: 1 }));
-    const result = (service as any).scope({ assets, dashboard: { snapshotId: 'test' } }, scoped());
+    const actor = { ...scoped(), accountId: 'synthetic-equipment-reader', authorizationVersion: 1 };
+    const source = { assets, dashboard: { snapshotId: 'test' } };
+    const result = (service as any).scope(source, actor);
     expect(result.assets.map((asset: any) => asset.building)).toEqual(['A楼', 'B楼']);
-    expect(result.dashboard.snapshotId).toContain('A楼,B楼');
+    expect(result.dashboard.snapshotId).toMatch(/^test:[a-f0-9]{64}$/);
+    expect((service as any).scope(source, { ...actor }).dashboard.snapshotId).toBe(result.dashboard.snapshotId);
+    for (const other of [{ ...actor, buildings: ['A楼'] }, { ...actor, buildings: ['A楼', 'C楼'] }, { ...actor, authorizationVersion: 2 }, { ...actor, accountId: 'another-reader' }]) {
+      expect((service as any).scope(source, other).dashboard.snapshotId).not.toBe(result.dashboard.snapshotId);
+    }
     expect(result.dashboard.overview).toBeTruthy();
   });
   it('库存并集在原始数据层重算，跨楼同SKU只计一次', () => {

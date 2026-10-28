@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import React, { useEffect, useMemo, useState } from 'react';
 import { logger } from '@lark-apaas/client-toolkit/logger';
 import {
@@ -100,8 +102,9 @@ const FieldText: React.FC<{ value: string; muted?: boolean }> = ({
 const CandidateRow: React.FC<{
   candidate: DutyStaffActualRepairCandidate;
   repairing: boolean;
+  canUpdate: boolean;
   onRepair: (recordId: string) => void;
-}> = ({ candidate, repairing, onRepair }) => (
+}> = ({ candidate, repairing, canUpdate, onRepair }) => (
   <TableRow>
     <TableCell className="whitespace-nowrap font-medium text-foreground">
       {candidate.scheduleDate || '—'}
@@ -127,7 +130,7 @@ const CandidateRow: React.FC<{
       <Button
         type="button"
         size="sm"
-        disabled={!candidate.canRepair || repairing}
+        disabled={!canUpdate || !candidate.canRepair || repairing}
         onClick={() => onRepair(candidate.recordId)}
       >
         {repairing ? (
@@ -142,6 +145,9 @@ const CandidateRow: React.FC<{
 );
 
 const DutyStaffRepairPage: React.FC = () => {
+  const access = useAccess();
+  const canUpdate = canUsePageAction(access, 'schedule_assignments', 'update', true);
+  const canRefresh = canUsePageAction(access, 'schedule_assignments', 'refresh', true);
   const [scanData, setScanData] =
     useState<DutyStaffActualRepairScanResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -166,7 +172,7 @@ const DutyStaffRepairPage: React.FC = () => {
         setLoading(true);
       }
       setError(null);
-      const data = await scanDutyProgramModifiedIssues(500, refreshRemote);
+      const data = await scanDutyProgramModifiedIssues(500, refreshRemote && canRefresh);
       setScanData(data);
     } catch (err) {
       logger.error('加载值班人员修正数据失败', err);
@@ -182,6 +188,7 @@ const DutyStaffRepairPage: React.FC = () => {
   }, []);
 
   const handleRepairOne = async (recordId: string) => {
+    if (!canUpdate) return;
     setRepairingIds((prev) => new Set(prev).add(recordId));
     try {
       const result = await repairDutyProgramModifiedIssues({ recordIds: [recordId] });
@@ -204,6 +211,7 @@ const DutyStaffRepairPage: React.FC = () => {
   };
 
   const handleRepairAll = async () => {
+    if (!canUpdate) return;
     setBulkRepairing(true);
     try {
       const result = await repairDutyProgramModifiedIssues();
@@ -222,6 +230,7 @@ const DutyStaffRepairPage: React.FC = () => {
   };
 
   const handleManualRepair = async () => {
+    if (!canUpdate) return;
     const recordId = manualRecordId.trim();
     if (!recordId) {
       toast.error('请输入记录 ID');
@@ -292,7 +301,7 @@ const DutyStaffRepairPage: React.FC = () => {
           </Button>
           <Button
             type="button"
-            disabled={repairableCount === 0 || bulkRepairing || refreshing}
+            disabled={!canUpdate || repairableCount === 0 || bulkRepairing || refreshing}
             onClick={() => void handleRepairAll()}
           >
             {bulkRepairing ? (
@@ -371,6 +380,7 @@ const DutyStaffRepairPage: React.FC = () => {
                     key={candidate.recordId}
                     candidate={candidate}
                     repairing={repairingIds.has(candidate.recordId)}
+                    canUpdate={canUpdate}
                     onRepair={handleRepairOne}
                   />
                 ))}
@@ -424,7 +434,7 @@ const DutyStaffRepairPage: React.FC = () => {
           <Button
             type="button"
             className="min-h-10"
-            disabled={manualRepairing}
+            disabled={!canUpdate || manualRepairing}
             onClick={() => void handleManualRepair()}
           >
             {manualRepairing ? (

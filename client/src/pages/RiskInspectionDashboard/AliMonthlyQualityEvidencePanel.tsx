@@ -1,4 +1,5 @@
 import { canAccessBuilding } from '@shared/building-access';
+import { decideBusinessPermission, hasBusinessPermissionSomewhere } from '@shared/business-permissions';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   AlertTriangle,
@@ -87,11 +88,14 @@ export function AliMonthlyQualityEvidencePanel({
   const pendingIds = useRef(new Set<string>());
   const [followUpStatus, setFollowUpStatus] = useState('');
   const canFollowUp = (issue: AliMonthlyQualityIssue) =>
-    role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer') || role === 'editor' ||
-    (role === 'building_admin' && canAccessBuilding(principal, issue.building));
+    principal.effectiveAuthorization
+      ? decideBusinessPermission(principal, { module: 'quality', action: 'update', building: issue.building, specialty: issue.specialty }).allowed
+      : role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer') || role === 'editor' ||
+        (role === 'building_admin' && canAccessBuilding(principal, issue.building));
   const submitFollowUp = async () => {
     if (!followUp) return;
     const { issue } = followUp;
+    if (!canFollowUp(issue)) { setFollowUp({ ...followUp, error: '当前权限不能跟进此问题，请核对楼栋及专业归属' }); return; }
     const supplemental = followUp.draft.trim();
     if (!supplemental || supplemental.length > 3000) {
       setFollowUp({ ...followUp, error: '请填写 1–3000 字的问题跟进' });
@@ -508,7 +512,7 @@ export function AliMonthlyQualityEvidencePanel({
                           >
                             问题跟进
                           </Button>
-                        ) : '—'}
+                        ) : principal.effectiveAuthorization && !issue.specialty && hasBusinessPermissionSomewhere(principal, { module: 'quality', action: 'update' }) ? '专业归属未维护' : '—'}
                       </TableCell>
                     </TableRow>
                   ))

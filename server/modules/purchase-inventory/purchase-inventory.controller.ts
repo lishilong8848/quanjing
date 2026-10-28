@@ -1,9 +1,10 @@
-import { businessBuildingsForAction, canPerformBusinessAction, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { businessBuildingsForAction, canPerformBusinessAction, isProfessionalBusinessPrincipal, type BusinessAction } from '../../../shared/business-permissions';
 import { canAccessBuilding } from '../../../shared/building-access';
 import { AccessConfigurationService } from '../../common/access/access-configuration.service';
 import { isPersonalAccessAccount } from '../../../shared/self-service-applicant';
 import { bindSelfServiceApplicant } from '../../common/access/self-service-applicant';
-import { assertProfessionalRecordScope, filterProfessionalRecords } from '../../common/access/professional-record-scope';
+import { assertProfessionalRecordScope } from '../../common/access/professional-record-scope';
+import { assertGlobalBusinessOperation } from '../../common/access/global-business-operation';
 import {
   BadRequestException,
   Body,
@@ -120,8 +121,12 @@ export class PurchaseInventoryController {
   @Get('application-options')
   @ProfessionalScoped()
   getApplicationOptions(@Req() req: AccessRequest) {
-    const principal = requirePrincipal(req);
+    const principal = purchasePrincipal(requirePrincipal(req), 'create');
     const options = this.applicationService.getOptions();
+    if (isProfessionalBusinessPrincipal(principal)) {
+      const buildings = options.buildings.filter(building => businessBuildingsForAction(principal, principal.permissionContext!).some(allowed => allowed === building));
+      return { ...options, buildings, specialties: options.specialties.filter(specialty => buildings.some(building => canPerformBusinessAction(principal, { module: 'purchase', action: 'create', building, specialty }))) };
+    }
     if (principal.role === 'purchase_applicant' || principal.role === 'building_admin') {
       return {
         ...options,
@@ -129,7 +134,7 @@ export class PurchaseInventoryController {
       };
     }
     if (!FULL_PURCHASE_ROLES.has(principal.role) && !isProfessionalBusinessPrincipal(principal)) denyAccess();
-    return isProfessionalBusinessPrincipal(principal) ? { ...options, buildings: options.buildings.filter(value => businessBuildingsForAction(principal, { module: 'purchase', action: 'read' }).includes(value as never)), specialties: options.specialties.filter(specialty => options.buildings.some(building => canPerformBusinessAction(principal, { module: 'purchase', action: 'read', building, specialty }))) } : options;
+    return options;
   }
 
   @Post('records/batch-delete')
@@ -170,38 +175,14 @@ export class PurchaseInventoryController {
     @Param('recordId') recordId: string,
     @Body() request: PurchaseOnlineApprovalRequest,
   ) {
-    const principal = requirePrincipal(req);
-    let approvedBuilding: string | undefined;
-    if (principal.role === 'building_admin') {
-      const record = await this.workflowGateway.getExecutionRecordAsApp(recordId);
-      if (!canAccessBuilding(principal, record.building)) denyAccess();
-      approvedBuilding = record.building;
-    } else if (isProfessionalBusinessPrincipal(principal)) {
-      const record = await this.workflowGateway.getExecutionRecordAsApp(recordId);
-      assertProfessionalRecordScope(principal, record.specialty, record.building);
-    } else if (principal.role !== 'admin') {
-      denyAccess();
-    }
-    return this.onlineApprovalService.acceptDecision(
-      recordId,
-      request,
-      ...(approvedBuilding ? [approvedBuilding] as const : [] as const),
-    );
+    return this.onlineApprovalService.acceptAuthorizedDecision(recordId, request, await this.getWorkflowSession(req));
   }
 
   @AdminOnly()
   @ProfessionalScoped()
   @Get('approval/tasks/:taskId')
   async getApprovalTask(@Req() req: AccessRequest, @Param('taskId') taskId: string) {
-    const principal = requirePrincipal(req);
-    if (principal.role !== 'admin' && principal.role !== 'building_admin' && !isProfessionalBusinessPrincipal(principal)) denyAccess();
-    const result = this.onlineApprovalService.getDecisionTaskStatus(taskId);
-    if ((principal.role === 'building_admin' || isProfessionalBusinessPrincipal(principal)) && result.success && result.task) {
-      const record = await this.workflowGateway.getExecutionRecordAsApp(result.task.recordId);
-      if (principal.role === 'building_admin' && !canAccessBuilding(principal, record.building)) denyAccess();
-      assertProfessionalRecordScope(principal, record.specialty, record.building);
-    }
-    return result;
+    return this.onlineApprovalService.getAuthorizedDecisionTaskStatus(taskId, requirePrincipal(req));
   }
 
   @Get('catalog-search')
@@ -214,10 +195,13 @@ export class PurchaseInventoryController {
     @Query('query') query = '',
     @Query('limit') limit = '50',
   ) {
-    const principal = requirePrincipal(req);
+    const principal = purchasePrincipal(requirePrincipal(req));
     const requestedBuilding = cleanText(building);
     let scopedBuilding = '';
-    if (principal.role === 'purchase_applicant' || principal.role === 'building_admin') {
+    if (isProfessionalBusinessPrincipal(principal)) {
+      if (!businessBuildingsForAction(principal, principal.permissionContext!).length) denyAccess();
+      scopedBuilding = requestedBuilding ? String(this.accessPolicy.assertRequestedBuilding(principal, requestedBuilding)) : '';
+    } else if (principal.role === 'purchase_applicant' || principal.role === 'building_admin') {
       scopedBuilding = requestedBuilding
         ? String(
             this.accessPolicy.assertRequestedBuilding(
@@ -248,7 +232,9 @@ export class PurchaseInventoryController {
       },
       false,
     );
-    return filterProfessionalRecords(principal, catalog, item => item.specialty);
+    return isProfessionalBusinessPrincipal(principal)
+      ? catalog.filter(item => canPerformBusinessAction(principal, { ...principal.permissionContext!, building: item.building, specialty: item.specialty }))
+      : catalog;
   }
 
   @Get('applicant-search')
@@ -260,10 +246,13 @@ export class PurchaseInventoryController {
     @Query('limit') limit = '30',
     @Query('self') self = 'false',
   ) {
-    const principal = requirePrincipal(req);
+    const principal = purchasePrincipal(requirePrincipal(req));
     const requestedBuilding = cleanText(building);
     let scopedBuilding = '';
-    if (principal.role === 'purchase_applicant' || principal.role === 'building_admin') {
+    if (isProfessionalBusinessPrincipal(principal)) {
+      if (!businessBuildingsForAction(principal, principal.permissionContext!).length) denyAccess();
+      scopedBuilding = requestedBuilding ? String(this.accessPolicy.assertRequestedBuilding(principal, requestedBuilding)) : '';
+    } else if (principal.role === 'purchase_applicant' || principal.role === 'building_admin') {
       scopedBuilding = requestedBuilding
         ? String(
             this.accessPolicy.assertRequestedBuilding(
@@ -302,9 +291,11 @@ export class PurchaseInventoryController {
       denyAccess();
     }
     if (self === 'true' && isPersonalAccessAccount(principal)) {
-      return [await this.applicationService.resolveCurrentApplicant(principal, scopedBuilding)];
+      const applicant = await this.applicationService.resolveCurrentApplicant(principal, scopedBuilding);
+      if (isProfessionalBusinessPrincipal(principal) && !canPerformBusinessAction(principal, { ...principal.permissionContext!, building: applicant.building, specialty: applicant.specialty })) denyAccess();
+      return [applicant];
     }
-    return this.applicationService.searchApplicants(
+    const applicants = await this.applicationService.searchApplicants(
       {
         building: scopedBuilding,
         query,
@@ -312,6 +303,9 @@ export class PurchaseInventoryController {
       },
       false,
     );
+    return isProfessionalBusinessPrincipal(principal)
+      ? applicants.filter(person => canPerformBusinessAction(principal, { ...principal.permissionContext!, building: person.building, specialty: person.specialty }))
+      : applicants;
   }
 
   @Post('applications')
@@ -335,7 +329,7 @@ export class PurchaseInventoryController {
       normalizePurchaseApplicationSubmissionFingerprint(submissionFingerprint);
     const fingerprintRequest = parsePurchaseApplicationPayload(payload);
     let request = fingerprintRequest;
-    const principal = requirePrincipal(req);
+    const principal = purchasePrincipal(requirePrincipal(req), 'create');
     assertProfessionalRecordScope(principal, request.shared?.specialty, request.shared?.building);
     const principalFingerprint = requireAccessPrincipalFingerprint(req);
     const building = this.accessPolicy.assertRequestedBuilding(
@@ -524,10 +518,12 @@ export class PurchaseInventoryController {
   }
 
   @Post('workflows/reminders/:code/run')
+  @ProfessionalScoped()
   async runWorkflowReminder(
     @Req() req: Request,
     @Param('code') code: PurchaseWorkflowReminderCode,
   ) {
+    assertGlobalBusinessOperation(requirePrincipal(req), { module: 'purchase', action: 'notify' });
     this.workflowService.assertEnabled(requirePrincipal(req).role);
     await this.getWorkflowSession(req);
     if (!['warehouse', 'order', 'receipt'].includes(code)) {
@@ -608,6 +604,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function requirePrincipal(req: AccessRequest): AccessPrincipal {
   if (!req?.accessPrincipal) denyAccess();
   return req.accessPrincipal;
+}
+
+function purchasePrincipal(principal: AccessPrincipal, action: BusinessAction = principal.permissionContext?.action || 'read'): AccessPrincipal {
+  return { ...principal, permissionContext: { module: 'purchase', action } };
 }
 
 function requireAccessPrincipalFingerprint(req: AccessRequest): string {

@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import {
   CalendarDays,
   ChevronLeft,
@@ -608,6 +610,7 @@ export default function EquipmentLifecycleDashboard({
   embedded?: boolean;
   loader?: typeof getEquipmentLifecycleDashboard;
 } = {}) {
+  const canRefresh = canUsePageAction(useAccess(), 'equipment_lifecycle', 'refresh', true);
   const Container = embedded ? 'section' : 'main';
   const [month, setMonth] = useState<LifecycleMonth | null>(null);
   const [view, setView] = useState<EquipmentLifecycleView | null>(null);
@@ -641,7 +644,7 @@ export default function EquipmentLifecycleDashboard({
       }
 
       try {
-        const response = await loader(options);
+        const response = await loader({ ...options, refresh: Boolean(options.refresh) && canRefresh });
         if (requestSequence !== requestSequenceRef.current) return;
 
         viewRef.current = response;
@@ -662,7 +665,7 @@ export default function EquipmentLifecycleDashboard({
         }
       }
     },
-    [loader],
+    [loader, canRefresh],
   );
 
   useEffect(() => {

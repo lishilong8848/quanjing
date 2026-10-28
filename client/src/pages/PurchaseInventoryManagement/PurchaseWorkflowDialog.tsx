@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAccess } from '@/access/AccessProvider';
 
 import {
   approvePurchaseWorkflow,
@@ -48,6 +49,7 @@ import {
   clearFinishedSubmission,
   resolveActionButtonState,
   runPurchaseOrderSubmission,
+  permittedPurchaseWorkflowActions,
 } from './purchase-workflow-action.logic';
 import { createPurchaseWorkflowPreviewDetail } from './purchase-workflow-center.logic';
 
@@ -86,6 +88,7 @@ export function PurchaseWorkflowDialog({
   onReceiptAccepted,
   onReceiptTaskSettled,
 }: PurchaseWorkflowDialogProps) {
+  const principal=useAccess();
   const [detail, setDetail] = useState<PurchaseWorkflowDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [submittingRecordId, setSubmittingRecordId] = useState<string | null>(
@@ -250,10 +253,11 @@ export function PurchaseWorkflowDialog({
   }
 
   async function runAction(
+    action:'approve'|'start',
     operation: () => Promise<PurchaseWorkflowCommandResult>,
     successMessage: string,
   ) {
-    if (!canOperate || !recordId) return;
+    if (!allowedActions.includes(action) || !recordId) return;
     const submissionRecordId = recordId;
     if (!submissionGateRef.current.begin(submissionRecordId)) return;
     setSubmittingRecordId(submissionRecordId);
@@ -277,7 +281,7 @@ export function PurchaseWorkflowDialog({
   }
 
   async function runOrderAction() {
-    if (!canOperate || !recordId) return;
+    if (!allowedActions.includes('order') || !recordId) return;
     const quantity = Number(actualQuantity);
     const amount = Number(actualAmount);
     if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -349,7 +353,7 @@ export function PurchaseWorkflowDialog({
 
   function runReceiptAction() {
     if (
-      !canOperate ||
+      !allowedActions.includes('receive') ||
       !recordId ||
       !signerOpenId ||
       receiptSubmissionInFlight.current
@@ -402,7 +406,7 @@ export function PurchaseWorkflowDialog({
     }, 0);
   }
 
-  const allowedActions = detail?.allowedActions ?? [];
+  const allowedActions = permittedPurchaseWorkflowActions(principal,detail?.allowedActions ?? [],item || detail?.record || null,canOperate);
   const actionDisabled = !canOperate;
   const actionLoading = Boolean(
     recordId && submittingRecordId === recordId,
@@ -545,6 +549,7 @@ export function PurchaseWorkflowDialog({
                           onComment={setApprovalComment}
                           onSubmit={() =>
                             void runAction(
+                              'approve',
                               () =>
                                 approvePurchaseWorkflow(recordId!, {
                                   decision,
@@ -569,6 +574,7 @@ export function PurchaseWorkflowDialog({
                           label="确认库房并启动采购"
                           onClick={() =>
                             void runAction(
+                              'start',
                               () => startPurchaseWorkflow(recordId!),
                               '采购任务已启动',
                             )

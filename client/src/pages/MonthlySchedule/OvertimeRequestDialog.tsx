@@ -1,6 +1,7 @@
 import { useAccess } from '@/access/AccessProvider';
 import { hasAuthenticatedAccessIdentity } from '@/access/access-policy';
 import { canSelectWorkforcePerson, resolveWorkforceRequestApplicant } from '@shared/workforce-request-applicant';
+import type { SelfServiceApplicant } from '@shared/self-service-applicant';
 import React, {
   useCallback,
   useEffect,
@@ -68,6 +69,7 @@ interface OvertimeRequestDialogFocusCoordinator {
 }
 
 interface OvertimeRequestDialogProps {
+  applicantOverride?: SelfServiceApplicant;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onBackgroundSyncChange: (syncing: boolean) => void;
@@ -205,6 +207,7 @@ function normalizeProfileName(profile: OvertimePersonProfile): string {
 }
 
 export function OvertimeRequestDialog({
+  applicantOverride,
   open,
   onOpenChange,
   onBackgroundSyncChange,
@@ -217,8 +220,8 @@ export function OvertimeRequestDialog({
   focusCoordinator,
 }: OvertimeRequestDialogProps) {
   const access = useAccess();
-  const applicant = useMemo(() => resolveWorkforceRequestApplicant(access, hasAuthenticatedAccessIdentity(access), '提交加班申请'),
-    [access.accountId, access.displayName, access.expiresAt, access.principalFingerprint, access.role]);
+  const applicant = useMemo(() => applicantOverride || resolveWorkforceRequestApplicant(access, hasAuthenticatedAccessIdentity(access), '提交加班申请'),
+    [applicantOverride, access.accountId, access.displayName, access.expiresAt, access.principalFingerprint, access.role]);
   const memberName = applicant.mode === 'automatic' ? applicant.name : undefined;
   const [rangeClockMs, setRangeClockMs] = useState(() => Date.now());
   const todayDate = getShanghaiTodayDate(new Date(rangeClockMs));

@@ -22,6 +22,12 @@ function nodes(value: any): any[] {
   if (!value || typeof value !== 'object') return [];
   return [value, ...Object.values(value).flatMap(nodes)];
 }
+function adjustmentEntryEvent() {
+  const data = fixture();
+  const card = buildLeaveSubstituteAdjustmentCard({ ...data.cardContext, shiftAssignments: data.assignments }, 3);
+  const button = nodes(card).find(row => row.tag === 'button' && row.text?.content === '调整人员');
+  return { ...event(''), action: { tag: 'button', value: button.behaviors[0].value } };
+}
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(ready => { resolve = ready; });
@@ -29,6 +35,22 @@ function deferred() {
 }
 
 describe('optional leave adjustment empty-form contract', () => {
+  it('starts with read-only shift details and opens selection through the existing versioned navigation', () => {
+    const data = fixture();
+    const card = buildLeaveSubstituteAdjustmentCard({ ...data.cardContext, shiftAssignments: data.assignments }, 3);
+    expect(nodes(card).filter(row => ['form', 'select_static'].includes(row.tag))).toHaveLength(0);
+    expect(nodes(card).filter(row => row.tag === 'button').map(row => row.text.content)).toEqual(['调整人员']);
+    const text = JSON.stringify(card);
+    expect(text).toContain(data.assignments[0].substituteName);
+    expect(text).toContain(data.cardContext.shiftGroups[0].scheduleDate);
+    expect(text).toContain('当前：');
+    expect(text).not.toContain('提交替班调整');
+    expect(text).not.toContain('重新选择');
+    expect(parseLeaveLongConnectionCardAction(adjustmentEntryEvent())).toMatchObject({
+      kind: 'adjustment_view', view: 'selection', recordId, expectedRevision: 3,
+      actorOpenId: 'ou_supervisor', messageId,
+    });
+  });
   it.each([undefined, {}])('reviews the current assignments when the review form is untouched (%p)', formValue => {
     expect(parseLeaveLongConnectionCardAction(event(actionName(prefixes[0]), formValue))).toMatchObject({ kind: 'adjustment_view', view: 'review', shiftSelections: [], recordId, expectedRevision: 3, actorOpenId: 'ou_supervisor', messageId });
   });
@@ -53,7 +75,7 @@ describe('optional leave adjustment empty-form contract', () => {
   });
   it('marks final review as required r1 while initial selection stays optional r0', () => {
     const data = fixture(), context = { ...data.cardContext, shiftAssignments: data.assignments };
-    const initial = buildLeaveSubstituteAdjustmentCard(context, 3);
+    const initial = buildLeaveSubstituteAdjustmentCard(context, 3, true);
     const final = buildLeaveSubstituteAdjustmentCard({ ...context, substitutionReview: [data.selection] }, 3);
     expect(nodes(initial).find(row => row.form_action_type === 'submit').name).toBe(actionName());
     const submit = nodes(final).find(row => row.form_action_type === 'submit');
@@ -115,6 +137,33 @@ describe('empty adjustment real Router/Service/Store isolation', () => {
       actorOpenId: other.openId, actorName: other.name, messageId: otherMessageId,
       shiftSelections: [{ shiftKey: fixture().selection.shiftKey, substitutePersonRecordId: replacement.personRecordId }] });
   }
+  it('expands editing in place without changing the ledger or submitting substitute work', async () => {
+    const before = await readFile(file);
+    const response = await router.handle(adjustmentEntryEvent());
+    expect(response.toast?.type).toBe('info');
+    expect(response.card).toBeUndefined();
+    expect(viewPatches).toHaveBeenCalledTimes(1);
+    await Promise.all(viewPatches.mock.results.map(result => result.value));
+    const [patchedMessageId, card] = gateway.patchInteractiveCard.mock.calls[0];
+    expect(patchedMessageId).toBe(messageId);
+    expect(nodes(card).some(row => row.tag === 'select_static')).toBe(true);
+    expect(nodes(card).filter(row => row.tag === 'button').map(row => row.text.content)).toEqual(['提交替班调整', '重新选择']);
+    expect(nodes(card).find(row => row.form_action_type === 'submit').name).toBe(actionName());
+    expect(await readFile(file)).toEqual(before);
+    expect(claim).not.toHaveBeenCalled();
+    expect(background).not.toHaveBeenCalled();
+  });
+  it.each(['actor', 'message', 'revision', 'status'] as const)('rejects opening the editor with invalid %s', async kind => {
+    const payload = adjustmentEntryEvent();
+    if (kind === 'actor') payload.operator.open_id = 'ou_unauthorized';
+    if (kind === 'message') payload.context.open_message_id = 'om_foreign';
+    if (kind === 'revision') payload.action.value.expectedRevision = 2;
+    if (kind === 'status') await store.patchApplication(recordId, { status: 'supervisor_pending' });
+    const before = await readFile(file);
+    const response = await router.handle(payload);
+    expect(response.toast?.type).toBe('error');
+    await expectNoSideEffects(before);
+  });
   it.each([undefined, {}])('keeps a final untouched optional submission (%p) as no change with identical ledger bytes', async formValue => {
     const before = await readFile(file), payload = event(actionName(prefixes[1]), formValue);
     for (let index = 0; index < 2; index++) expect(await router.handle(payload)).toEqual({ toast: { type: 'info', content: '未选择调整人员，未提交变更' } });

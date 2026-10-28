@@ -7,6 +7,9 @@ export class MonthlyOperationsChangesController {
     @Inject(MonthlyOperationsChangesService)
     private readonly changes: MonthlyOperationsChangesService,
   ) {}
+  @Get('monthly-operations/export-access')
+  @Header('Cache-Control', 'no-store')
+  exportAccess() { return {allowed:true}; }
   @Get('monthly-operations-progress')
   @GuestReadable()
   @Header('Cache-Control', 'no-store')

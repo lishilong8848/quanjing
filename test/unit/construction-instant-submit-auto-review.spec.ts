@@ -190,7 +190,7 @@ describe('construction instant submit and automatic manual review', () => {
       'if (permitOnlyUpload && manualReviewAutoApproved)',
     );
     expect(permitCardSource).toContain(
-      'manualReviewAutoApproved && (',
+      'manualReviewAutoApproved && canReview && (',
     );
     expect(permitUploadButtonSource).toContain('requireValidityRange');
     expect(permitUploadButtonSource).toContain('!validFrom || !validUntil');
@@ -233,7 +233,7 @@ describe('construction instant submit and automatic manual review', () => {
     expect(yieldIndex).toBeGreaterThan(instantCloseIndex);
     expect(formDataIndex).toBeGreaterThan(yieldIndex);
     expect(pageSource).toMatch(
-      /const manualReviewAutoApproved\s*=\s*isConstructionManualReviewAutoApprovalRole\(role\);/,
+      /const manualReviewAutoApproved\s*=\s*isConstructionManualReviewAutoApprovalRole\(role,\s*access\);/,
     );
   });
 
@@ -400,7 +400,7 @@ describe('construction instant submit and automatic manual review', () => {
       'buildConstructionIsolationManualReviewAutoApprovalFields',
     );
     expect(serviceSource).toContain(
-      'isConstructionManualReviewAutoApprovalRole(input.accessRole)',
+      'isConstructionManualReviewAutoApprovalRole(input.accessRole, input.professionalPrincipal)',
     );
     expect(serviceSource).toMatch(
       /buildConstructionIsolationManualReviewAutoApprovalFields[\s\S]*?buildConstructionIsolationManualReviewUpdateFields\([\s\S]*?'passed'/,

@@ -10,6 +10,8 @@ import { Search, SlidersHorizontal, Zap, Fan, Network } from 'lucide-react';
 import { toast } from 'sonner';
 import { canAccessPage } from '@/access/access-policy';
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
+import { decideBusinessPermission } from '@shared/business-permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -56,7 +58,7 @@ export default function ThresholdManagement() {
     <ThresholdPage
       key={`${role}:${principalFingerprint}`}
       identity={`${role}:${principalFingerprint}`}
-      canDelegate={(role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer'))}
+      canDelegate={role === 'admin'}
     />
   );
 }
@@ -67,9 +69,13 @@ export function ThresholdPage({
   identity: string;
   canDelegate: boolean;
 }) {
-  const { readOnlyPage } = useAccess();
+  const access = useAccess();
+  const { readOnlyPage } = access;
+  const canCreate = canUsePageAction(access, 'thresholds', 'create', !readOnlyPage);
+  const canUpdate = canUsePageAction(access, 'thresholds', 'update', !readOnlyPage);
+  const canRefresh = canUsePageAction(access, 'thresholds', 'refresh', !readOnlyPage);
   const data = useThresholds(identity);
-  const adjustments = useThresholdAdjustments(identity, data.acceptAdjustment, !readOnlyPage);
+  const adjustments = useThresholdAdjustments(identity, data.acceptAdjustment, canUsePageAction(access, 'thresholds', 'read', !readOnlyPage));
   const [adjusting, setAdjusting] = useState<ThresholdRecord | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [profession, setProfession] = useState('电气');
@@ -144,7 +150,7 @@ export function ThresholdPage({
   );
   const openEdit = useCallback(
     (record: ThresholdRecord) => {
-      if (readOnlyPage) return;
+      if (!canCreate || (access.effectiveAuthorization && !decideBusinessPermission(access, { module: 'thresholds', action: 'create', building: record.building, specialty: record.profession }).allowed)) return;
       setDetail(null);
       if (
         adjustments.records.some(
@@ -158,7 +164,7 @@ export function ThresholdPage({
       }
       setAdjusting(record);
     },
-    [adjustments.records, readOnlyPage],
+    [adjustments.records, canCreate, access],
   );
   const selectBuilding = useCallback((value: string) => {
     setBuilding(value);
@@ -200,7 +206,8 @@ export function ThresholdPage({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => void data.retrySync(job.clientMutationId)}
+                  disabled={!canUpdate}
+                  onClick={() => { if (canUpdate) void data.retrySync(job.clientMutationId); }}
                 >
                   重试同步
                 </Button>
@@ -208,7 +215,8 @@ export function ThresholdPage({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => void data.acceptCloud(job)}
+                    disabled={!canUpdate}
+                    onClick={() => { if (canUpdate) void data.acceptCloud(job); }}
                   >
                     采用云端
                   </Button>
@@ -233,7 +241,7 @@ export function ThresholdPage({
         }
         refreshing={data.refreshing}
         refreshDisabled={pending.size > 0}
-        onRefresh={() => void data.refresh(!readOnlyPage)}
+        onRefresh={() => void data.refresh(canRefresh)}
       >
         <Button className="threshold-add" onClick={() => setHistoryOpen(true)}>
           调整记录
@@ -434,7 +442,7 @@ export function ThresholdPage({
                           pending={pending}
                           canDelete={false}
                           onDetail={openDetail}
-                          onEdit={openEdit}
+                          onEdit={canCreate ? openEdit : undefined}
                           onDelete={() => undefined}
                         />
                       </div>
@@ -489,6 +497,7 @@ export function ThresholdPage({
           onRefreshContext={() => void adjustments.refreshContext()}
           onClose={() => setAdjusting(null)}
           onSubmit={async (input) => {
+            if (!canCreate || (access.effectiveAuthorization && !decideBusinessPermission(access, { module: 'thresholds', action: 'create', building: adjusting.building, specialty: adjusting.profession }).allowed)) throw new Error('当前权限不能提交该阈值调整');
             setAnnouncement('正在提交调整申请');
             const receipt = await adjustments.submit(input);
             setAnnouncement('调整申请已受理，原阈值保持不变');
@@ -502,7 +511,8 @@ export function ThresholdPage({
           records={adjustments.records}
           error={adjustments.error}
           onClose={() => setHistoryOpen(false)}
-          onRetry={(id) => void adjustments.retry(id)}
+          onRetry={(id) => { if (canUpdate) void adjustments.retry(id); }}
+          canRetry={(item) => canUpdate && (!access.effectiveAuthorization || decideBusinessPermission(access, { module: 'thresholds', action: 'update', building: item.before.building, specialty: item.before.profession }).allowed)}
         />
       )}
     </div>

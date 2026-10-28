@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { logger } from '@lark-apaas/client-toolkit/logger';
 import { getOrganizations, getDutyStaff } from '@/api';
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import type {
   DutyStaff,
   DutyStaffByBuilding,
@@ -726,8 +727,9 @@ const DutyMatrix: React.FC<{
 };
 
 const OrganizationPage: React.FC = () => {
-  const { role } = useAccess();
-  const canOpenProfiles = canViewOrganizationPersonProfile(role);
+  const access = useAccess();
+  const canOpenProfiles = canViewOrganizationPersonProfile(access);
+  const canRefreshOrganization = canUsePageAction(access, 'organization', 'refresh', true);
   const [organizations, setOrganizations] = useState<NantongOrganization[]>([]);
   const [dutyStaff, setDutyStaff] = useState<DutyStaffByBuilding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -749,6 +751,7 @@ const OrganizationPage: React.FC = () => {
   }, [canOpenProfiles]);
 
   const loadData = async (forceRefresh = false) => {
+    forceRefresh = forceRefresh && canRefreshOrganization;
     try {
       const hasUsableCache =
         !forceRefresh &&

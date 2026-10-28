@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { useAccess } from '@/access/AccessProvider';
 import { canDeletePurchaseRecord } from '@/access/access-policy';
+import { purchaseUiPrincipal, purchaseUiPrincipalKey } from './purchase-ui-principal';
 import { deletePurchaseInventoryRecords } from '@/api';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,12 +34,12 @@ export function PurchaseDeleteDialog({
   onOpenChange,
   onDeleted,
 }: PurchaseDeleteDialogProps) {
-  const { role, purchaseBuilding, buildings } = useAccess();
+  const access = useAccess();
   const principal = useMemo(
-    () => ({ role, purchaseBuilding, buildings }),
-    [purchaseBuilding, buildings, role],
+    () => purchaseUiPrincipal(access),
+    [access],
   );
-  const principalIdentityKey = `${role}:${purchaseBuilding || ''}:${(buildings || []).join(',')}:${items
+  const principalIdentityKey = `${purchaseUiPrincipalKey(principal)}:${items
     .map((item) => item.recordId)
     .join(',')}`;
   const [principalRequestGate] = useState(

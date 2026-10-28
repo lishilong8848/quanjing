@@ -213,13 +213,16 @@ describe('purchase workflow rules', () => {
     }
   });
 
-  it('allows only managers to approve and returns the exact approval patch', () => {
+  it('allows only the current roster member to approve and returns the exact approval patch', () => {
     const record = workflowRecord();
+    const currentApprover = { ...manager, approvalDuty: true };
     expect(resolveAllowedActions(record, requester)).not.toContain('approve');
-    expect(resolveAllowedActions(record, manager)).toContain('approve');
+    expect(resolveAllowedActions(record, manager)).not.toContain('approve');
+    expect(resolveAllowedActions(record, { ...manager, approvalDuty: false })).not.toContain('approve');
+    expect(resolveAllowedActions(record, currentApprover)).toContain('approve');
 
     expect(
-      buildApprovalPatch(record, manager, {
+      buildApprovalPatch(record, currentApprover, {
         decision: 'approved',
         purchaseMethod: '综合采购',
         comment: '同意采购',

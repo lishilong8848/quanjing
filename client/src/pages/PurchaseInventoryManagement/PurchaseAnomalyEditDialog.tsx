@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 
 import { useAccess } from '@/access/AccessProvider';
 import { canEditPurchaseRecord } from '@/access/access-policy';
+import { purchaseUiPrincipal, purchaseUiPrincipalKey } from './purchase-ui-principal';
 import {
   searchPurchaseApplicationApplicants,
   updatePurchaseInventoryRecord,
@@ -79,12 +80,12 @@ export function PurchaseRecordEditDialog({
   onOpenChange,
   onSaved,
 }: PurchaseRecordEditDialogProps) {
-  const { role, purchaseBuilding, buildings } = useAccess();
+  const access = useAccess();
   const principal = useMemo(
-    () => ({ role, purchaseBuilding, buildings }),
-    [purchaseBuilding, buildings, role],
+    () => purchaseUiPrincipal(access),
+    [access],
   );
-  const principalIdentityKey = `${role}:${purchaseBuilding || ''}:${(buildings || []).join(',')}:${item?.recordId || ''}`;
+  const principalIdentityKey = `${purchaseUiPrincipalKey(principal)}:${item?.recordId || ''}`;
   const [principalRequestGate] = useState(
     () => new PurchasePrincipalRequestGate(principalIdentityKey),
   );

@@ -1,4 +1,5 @@
 import { accessBuildings, canAccessBuilding, buildingScopeKey } from '@shared/building-access';
+import { businessBuildingsForAction, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
 import type {
   PurchaseApplicationBatchRequest,
   PurchaseApplicationItemInput,
@@ -382,7 +383,7 @@ export function getPurchaseApplicationSubmissionJournalKey(
   const session = encodeURIComponent(
     principal.principalFingerprint?.trim() || 'session-unavailable',
   );
-  return `${PURCHASE_APPLICATION_SUBMISSION_JOURNAL_KEY_PREFIX}.${subject}.${session}`;
+  return `${PURCHASE_APPLICATION_SUBMISSION_JOURNAL_KEY_PREFIX}.${principal.accountId ? `account.${encodeURIComponent(principal.accountId)}` : subject}.${session}`;
 }
 
 export function saveDraft(
@@ -419,6 +420,7 @@ export function clearDraft(
 export function getPurchaseApplicationDraftKey(
   principal: AccessPrincipal,
 ): string {
+  if(principal.accountId) return `${PURCHASE_APPLICATION_DRAFT_KEY_PREFIX}.account.${encodeURIComponent(principal.accountId)}`;
   const subject =
     principal.role === 'purchase_applicant'
       ? `${principal.role}.${buildingScopeKey(principal) || 'unassigned'}`
@@ -430,6 +432,7 @@ export function scopePurchaseApplicationDraft(
   principal: AccessPrincipal,
   draft: PurchaseApplicationBatchRequest,
 ): PurchaseApplicationBatchRequest {
+  if(isProfessionalBusinessPrincipal({...principal,permissionContext:{module:'purchase',action:'create'}})) return draft;
   if ((principal.role !== 'purchase_applicant' && principal.role !== 'building_admin') || canAccessBuilding(principal, draft.shared.building)) {
     return draft;
   }
@@ -608,7 +611,10 @@ function normalizePersistedPurchaseDraft(
     },
     items: value.items.map(normalizePersistedPurchaseItem),
   };
+  if(isProfessionalBusinessPrincipal({...principal,permissionContext:{module:'purchase',action:'create'}}) &&
+    !businessBuildingsForAction(principal,{module:'purchase',action:'create'}).includes(restored.shared.building)) return null;
   if (
+    !isProfessionalBusinessPrincipal({...principal,permissionContext:{module:'purchase',action:'create'}}) &&
     (principal.role === 'purchase_applicant' || principal.role === 'building_admin') &&
     !canAccessBuilding(principal, restored.shared.building)
   ) {

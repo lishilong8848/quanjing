@@ -207,18 +207,8 @@ function multiShiftSubstituteForm(
         const choices = context.candidateSets?.find((set) => set.shiftKey === group.shiftKey)?.twoLevelCandidates || [];
         const selectedChoice = choices.find((choice) => choice.person.personRecordId === selected?.substitutePersonRecordId);
         if (reviewing && !selectedChoice) throw new Error('替班人员已不可选，请重新选择');
-        const location = [...group.buildings, ...group.teams]
-          .filter(Boolean)
-          .join(' · ');
         return [
-          {
-            tag: 'markdown',
-            content: `**${escape(group.scheduleDate)} ${escape(group.shift)}**${
-              location ? `  <font color="grey">${escape(location)}</font>` : ''
-            }\n<font color="grey">${escape(formatTime(group.startAt))} 至 ${escape(
-              formatTime(group.endAt),
-            )}${current ? ` · 当前：${escape(current.substituteName)}` : ''}</font>`,
-          },
+          shiftSubstituteDetail(group, current),
           {
             tag: 'select_static',
             name: shiftSubstituteFieldName(group.shiftKey),
@@ -290,13 +280,13 @@ function multiShiftSubstituteForm(
         text: {
           tag: 'plain_text',
           content:
-            hasOnDutyChoices && !reviewing
+            mode === 'adjustment'
+              ? '提交替班调整'
+              : hasOnDutyChoices && !reviewing
               ? '核对替班安排'
-              : mode === 'approval'
-              ? context.substituteDecisionRequired
+              : context.substituteDecisionRequired
                 ? '确认审批'
-                : '同意并确认全部替班'
-              : '提交替班调整',
+                : '同意并确认全部替班',
         },
       },
     ],
@@ -307,15 +297,22 @@ function substituteReviewNavigation(
   context: LeaveCardContext,
   mode: 'approval' | 'adjustment',
 ): Record<string, unknown>[] {
-  if (!context.shiftGroups?.length || context.substitutionReview === undefined) return [];
   if (mode === 'approval') {
+    if (!context.shiftGroups?.length || context.substitutionReview === undefined) return [];
     return [fullWidthViewAction('重新选择', 'default', 'return_to_approval', context)];
   }
-  return [{
+  return [substituteAdjustmentViewAction('重新选择', context)];
+}
+
+function substituteAdjustmentViewAction(
+  label: '调整人员' | '重新选择',
+  context: LeaveCardContext,
+): Record<string, unknown> {
+  return {
     tag: 'button',
-    type: 'default',
+    type: label === '调整人员' ? 'primary_filled' : 'default',
     width: 'fill',
-    text: { tag: 'plain_text', content: '重新选择' },
+    text: { tag: 'plain_text', content: label },
     behaviors: [{
       type: 'callback',
       value: {
@@ -326,7 +323,22 @@ function substituteReviewNavigation(
         expectedRevision: context.assignmentRevision || 0,
       },
     }],
-  }];
+  };
+}
+
+function shiftSubstituteDetail(
+  group: LeaveRequestShiftGroup,
+  current?: LeaveShiftSubstituteAssignment,
+): Record<string, unknown> {
+  const location = [...group.buildings, ...group.teams].filter(Boolean).join(' · ');
+  return {
+    tag: 'markdown',
+    content: `**${escape(group.scheduleDate)} ${escape(group.shift)}**${
+      location ? `  <font color="grey">${escape(location)}</font>` : ''
+    }\n<font color="grey">${escape(formatTime(group.startAt))} 至 ${escape(
+      formatTime(group.endAt),
+    )}${current ? ` · 当前：${escape(current.substituteName)}` : ''}</font>`,
+  };
 }
 
 function substituteRequirementSelector(
@@ -409,9 +421,10 @@ export function buildLeaveProgressCard(
 export function buildLeaveSubstituteAdjustmentCard(
   context: LeaveCardContext,
   expectedRevision: number,
+  showEditor = context.substitutionReview !== undefined,
 ): Record<string, unknown> {
   const cardContext = { ...context, assignmentRevision: expectedRevision };
-  const form = context.shiftGroups?.length
+  const form = !showEditor ? undefined : context.shiftGroups?.length
     ? multiShiftSubstituteForm(cardContext, 'adjustment')
     : {
         tag: 'form',
@@ -443,8 +456,13 @@ export function buildLeaveSubstituteAdjustmentCard(
     ...(context.shiftGroups?.length
       ? []
       : [detail('当前替班', context.substituteName || '未安排')]),
-    form,
-    ...substituteReviewNavigation(cardContext, 'adjustment'),
+    ...(form ? [form, ...substituteReviewNavigation(cardContext, 'adjustment')] : [
+      ...(context.shiftGroups || []).map(group => shiftSubstituteDetail(
+        group, context.shiftAssignments?.find(assignment => assignment.shiftKey === group.shiftKey),
+      )),
+      { tag: 'markdown', content: '<font color="grey">人员无误，无需点击调整。</font>' },
+      substituteAdjustmentViewAction('调整人员', cardContext),
+    ]),
   ]);
   return assertMultiShiftCardSize(card, context.shiftGroups?.length || 0);
 }

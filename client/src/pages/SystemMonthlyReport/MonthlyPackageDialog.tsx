@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import {
   AlertCircle,
   Archive,
@@ -48,6 +50,9 @@ export function MonthlyPackageDialog({
   onRetry: () => void;
   onDownload: () => void;
 }) {
+  const access = useAccess();
+  const canExport = canUsePageAction(access, 'system_reports', 'export', true);
+  const canRetry = canUsePageAction(access, 'system_reports', 'update', true);
   const busy =
     accepting ||
     Boolean(
@@ -185,7 +190,7 @@ export function MonthlyPackageDialog({
             关闭
           </Button>
           {!task ? (
-            <Button onClick={onStart} disabled={accepting || !selected}>
+            <Button onClick={onStart} disabled={!canExport || accepting || !selected}>
               {accepting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -195,13 +200,13 @@ export function MonthlyPackageDialog({
             </Button>
           ) : null}
           {task?.status === 'error' ? (
-            <Button variant="outline" onClick={onRetry}>
+            <Button variant="outline" onClick={onRetry} disabled={!canRetry}>
               <RefreshCw className="h-4 w-4" />
               {task.packageReady ? '重试飞书通知' : '重新打包'}
             </Button>
           ) : null}
           {task?.packageReady ? (
-            <Button onClick={onDownload}>
+            <Button onClick={onDownload} disabled={!canExport}>
               <Download className="h-4 w-4" />
               下载 ZIP
             </Button>

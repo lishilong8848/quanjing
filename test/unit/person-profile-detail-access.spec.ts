@@ -49,7 +49,8 @@ describe('person profile detail access', () => {
     expect(routeStart).toBeGreaterThan(-1);
     expect(routeSource).not.toContain('@GuestReadable()');
     expect(routeSource).toContain('canViewPersonProfileDetails');
-    expect(pageSource).toContain('canViewPersonProfileDetails(role)');
+    expect(pageSource).toContain('canViewPersonProfileDetails(access)');
+    expect(pageSource).not.toContain('canViewPersonProfileDetails(role)');
     expect(pageSource).toContain('getPersonProfileDetails');
     expect(pageSource).toContain('canViewPrivateProfile');
   });

@@ -1,4 +1,5 @@
-import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { businessAuthorizationSnapshot, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { assertBusinessOperation } from '../../common/access/assert-business-operation';
 import {
   BadGatewayException,
   BadRequestException,
@@ -197,7 +198,7 @@ import { isPersonalAccessAccount } from '@shared/self-service-applicant';
 import { isStation110DutyApplicant } from '@shared/workforce-request-applicant';
 import { assertStation110WorkforceIdentity, bindWorkforceRequestApplicant } from '@server/common/access/workforce-request-applicant';
 import { assertProfessionalBitableRecord, assertProfessionalRecordScope, recordProfessionalSpecialty, scopeProfessionalBitableRecords } from '@server/common/access/professional-record-scope';
-import { isConstructionManualReviewAutoApprovalRole } from '@shared/construction-manual-review-policy';
+import { isConstructionAttachmentReplacementAllowed, isConstructionManualReviewAutoApprovalRole } from '@shared/construction-manual-review-policy';
 import { normalizeExceptionFollowUpComparable } from '@shared/exception-follow-up-match';
 import {
   buildLongWhiteDutyStaffByBuilding,
@@ -638,6 +639,7 @@ interface ConstructionFollowupPostSaveSyncInput {
   referenceDate: Date;
   request: ConstructionFollowupCreateRequest;
   accessRole: AccessRole;
+  professionalPrincipal?: AccessPrincipal;
 }
 
 interface ConstructionMutationCompletedEntry {
@@ -14722,7 +14724,7 @@ export class DutyScheduleService {
   bindProfessionalConstructionTasks(principal: AccessPrincipal | undefined, result: unknown): void {
     if (!isProfessionalBusinessPrincipal(principal) || !result || typeof result !== 'object') return;
     const value = result as { taskId?: string; retryTaskId?: string };
-    for (const id of [value.taskId, value.retryTaskId]) if (typeof id === 'string') this.professionalConstructionTasks.set(id, { ...principal, specialties: [...(principal.specialties || [])] });
+    for (const id of [value.taskId, value.retryTaskId]) if (typeof id === 'string') this.professionalConstructionTasks.set(id, businessAuthorizationSnapshot(principal));
   }
   authorizeProfessionalConstructionTask(principal: AccessPrincipal | undefined, taskId: string): void {
     if (!isProfessionalBusinessPrincipal(principal)) return;
@@ -14779,7 +14781,7 @@ export class DutyScheduleService {
             buildConstructionFollowupFields(requestForValidation);
           validateConstructionFollowupSubmission(normalized, normalizedFiles, {
             requirePermitValidityDates:
-              isConstructionManualReviewAutoApprovalRole(accessRole),
+              isConstructionManualReviewAutoApprovalRole(accessRole, professionalPrincipal),
           });
           const acceptedTaskId = await this.enqueueConstructionFollowupSubmit(
             request,
@@ -14841,7 +14843,7 @@ export class DutyScheduleService {
       },
     );
     if (isProfessionalBusinessPrincipal(professionalPrincipal)) {
-      for (const id of [result.taskId, result.retryTaskId]) if (id) this.professionalConstructionTasks.set(id, professionalPrincipal);
+      for (const id of [result.taskId, result.retryTaskId]) if (id) this.professionalConstructionTasks.set(id, businessAuthorizationSnapshot(professionalPrincipal));
     }
     return result;
   }
@@ -14995,7 +14997,7 @@ export class DutyScheduleService {
     const tenantAccessToken =
       existingTenantAccessToken || (await this.getFeishuTenantAccessToken());
     const fastSubmitExistingFollowupUpload =
-      isConstructionManualReviewAutoApprovalRole(accessRole) &&
+      isConstructionManualReviewAutoApprovalRole(accessRole, professionalPrincipal) &&
       Boolean(normalized.followupRecordId && normalizedFiles.length > 0);
     let relatedProjectFollowupRecords: BitableRecordItem[] = [];
     const existingFollowupRecord = normalized.followupRecordId
@@ -15073,10 +15075,10 @@ export class DutyScheduleService {
     }
     const canReplacePermitAttachmentSet =
       normalized.permitOnlyUpload &&
-      isConstructionManualReviewAutoApprovalRole(accessRole);
+      isConstructionAttachmentReplacementAllowed(accessRole, professionalPrincipal, true);
     const retainedFollowupAttachmentFieldMap = canReplacePermitAttachmentSet
       ? CONSTRUCTION_REPLACEABLE_PERMIT_ATTACHMENT_FIELDS
-      : this.canReplaceConstructionAttachmentSet(accessRole)
+      : this.canReplaceConstructionAttachmentSet(accessRole, professionalPrincipal)
         ? CONSTRUCTION_FOLLOWUP_ATTACHMENT_FIELDS
         : {};
     const retainedFollowupAttachmentFields =
@@ -15153,7 +15155,7 @@ export class DutyScheduleService {
       {
         existingAttachmentFields,
         requirePermitValidityDates:
-          isConstructionManualReviewAutoApprovalRole(accessRole),
+          isConstructionManualReviewAutoApprovalRole(accessRole, professionalPrincipal),
       },
     );
     const changedPermitFileKeys = changedNormalizedFiles
@@ -15168,7 +15170,7 @@ export class DutyScheduleService {
       ? new Date(`${normalized.followupDate}T00:00:00+08:00`)
       : new Date();
     const manualReviewAutoApprovalPending =
-      isConstructionManualReviewAutoApprovalRole(accessRole) &&
+      isConstructionManualReviewAutoApprovalRole(accessRole, professionalPrincipal) &&
       changedPermitFileKeys.some((fileKey) =>
         Boolean(normalized.permitValidUntilByFileKey[fileKey]),
       );
@@ -15186,6 +15188,7 @@ export class DutyScheduleService {
         fields,
         this.buildConstructionFollowupAttachmentBackfillFields({
           accessRole,
+          professionalPrincipal,
           uploadedFollowupAttachmentFields: {},
           existingFollowupRecord,
           existingFollowupFieldsForAttachments,
@@ -15247,6 +15250,7 @@ export class DutyScheduleService {
               fields,
               this.buildConstructionFollowupAttachmentBackfillFields({
                 accessRole,
+                professionalPrincipal,
                 uploadedFollowupAttachmentFields: {},
                 existingFollowupRecord: currentFollowupRecord,
                 existingFollowupFieldsForAttachments:
@@ -15309,6 +15313,7 @@ export class DutyScheduleService {
       referenceDate,
       request,
       accessRole,
+      ...(professionalPrincipal ? { professionalPrincipal: businessAuthorizationSnapshot(professionalPrincipal) } : {}),
     };
     let taskId: string | undefined;
     if (normalized.partialDailySubmit || attachmentSyncPending) {
@@ -15423,7 +15428,7 @@ export class DutyScheduleService {
       files: files.map((file) => this.serializeConstructionUploadFile(file)),
       accessRole,
       lastError,
-      ...(isProfessionalBusinessPrincipal(professionalPrincipal) ? { professionalPrincipal: { ...professionalPrincipal, specialties: [...(professionalPrincipal.specialties || [])] } } : {}),
+      ...(professionalPrincipal ? { professionalPrincipal: businessAuthorizationSnapshot(professionalPrincipal) } : {}),
     };
     this.ensureQueuedConstructionFollowupSyncTask(task);
     await this.persistQueuedConstructionFollowupSubmitTask(task);
@@ -15746,6 +15751,7 @@ export class DutyScheduleService {
 
   private buildConstructionFollowupAttachmentBackfillFields(input: {
     accessRole: AccessRole;
+    professionalPrincipal?: AccessPrincipal;
     uploadedFollowupAttachmentFields: Record<
       string,
       Array<{ file_token: string }>
@@ -15771,23 +15777,28 @@ export class DutyScheduleService {
     const uploadedFieldsForMerge = {
       ...input.uploadedFollowupAttachmentFields,
     };
-    if (this.canReplaceConstructionAttachmentSet(input.accessRole)) {
+    if (this.canReplaceConstructionAttachmentSet(input.accessRole, input.professionalPrincipal)) {
       delete uploadedFieldsForMerge[dailyPersonnelChecklistFieldName];
     }
 
-    if (input.hasRetainedFollowupAttachmentFields) {
-      Object.assign(fields, input.retainedFollowupAttachmentFields);
-    }
+    const retainedFields = this.canReplaceConstructionAttachmentSet(input.accessRole, input.professionalPrincipal)
+      ? input.retainedFollowupAttachmentFields
+      : isConstructionAttachmentReplacementAllowed(input.accessRole, input.professionalPrincipal, true)
+        ? Object.fromEntries(Object.entries(input.retainedFollowupAttachmentFields).filter(([field]) =>
+            Object.values(CONSTRUCTION_REPLACEABLE_PERMIT_ATTACHMENT_FIELDS).includes(field)))
+        : {};
+    const hasRetainedFields = input.hasRetainedFollowupAttachmentFields && Object.keys(retainedFields).length > 0;
+    if (hasRetainedFields) Object.assign(fields, retainedFields);
     const existingFollowupFieldsForMerge =
-      input.hasRetainedFollowupAttachmentFields
+      hasRetainedFields
         ? {
             ...input.existingFollowupFieldsForAttachments,
-            ...input.retainedFollowupAttachmentFields,
+            ...retainedFields,
           }
         : input.existingFollowupFieldsForAttachments;
     Object.assign(
       fields,
-      input.existingFollowupRecord || input.hasRetainedFollowupAttachmentFields
+      input.existingFollowupRecord || hasRetainedFields
         ? mergeConstructionAttachmentFieldValues(
             existingFollowupFieldsForMerge,
             uploadedFieldsForMerge,
@@ -15795,7 +15806,7 @@ export class DutyScheduleService {
         : uploadedFieldsForMerge,
     );
     if (
-      this.canReplaceConstructionAttachmentSet(input.accessRole) &&
+      this.canReplaceConstructionAttachmentSet(input.accessRole, input.professionalPrincipal) &&
       uploadedDailyPersonnelChecklist
     ) {
       fields[dailyPersonnelChecklistFieldName] =
@@ -15830,16 +15841,15 @@ export class DutyScheduleService {
         referenceDate: input.referenceDate,
       }),
     );
-    Object.assign(
-      fields,
-      buildConstructionPermitManualReviewAutoApprovalFields(
+    if (isConstructionManualReviewAutoApprovalRole(input.accessRole, input.professionalPrincipal)) {
+      Object.assign(fields, buildConstructionPermitManualReviewAutoApprovalFields(
         { ...fieldsForInheritance, ...inheritedFields, ...fields },
         input.accessRole,
         input.permitValidUntilByFileKey,
         input.changedPermitFileKeys,
         input.permitValidFromByFileKey,
-      ),
-    );
+      ));
+    }
     if (!this.isConstructionAiAuditEnabled()) {
       Object.values(CONSTRUCTION_PERMIT_ATTACHMENT_AUDIT_FIELDS).forEach(
         (config) => {
@@ -15925,8 +15935,11 @@ export class DutyScheduleService {
     }
   }
 
-  private canReplaceConstructionAttachmentSet(accessRole: AccessRole): boolean {
-    return accessRole === 'admin' || accessRole === 'professional_admin';
+  private canReplaceConstructionAttachmentSet(
+    accessRole: AccessRole,
+    professionalPrincipal?: AccessPrincipal,
+  ): boolean {
+    return isConstructionAttachmentReplacementAllowed(accessRole, professionalPrincipal);
   }
 
   private async runConstructionFollowupPostSaveSync(
@@ -16018,6 +16031,7 @@ export class DutyScheduleService {
             attachmentUpdateFields =
               this.buildConstructionFollowupAttachmentBackfillFields({
                 accessRole: input.accessRole,
+                professionalPrincipal: input.professionalPrincipal,
                 uploadedFollowupAttachmentFields,
                 existingFollowupRecord,
                 existingFollowupFieldsForAttachments,
@@ -16043,6 +16057,7 @@ export class DutyScheduleService {
               await this.buildConstructionIsolationManualReviewAutoApprovalFields(
                 {
                   accessRole: input.accessRole,
+            professionalPrincipal: input.professionalPrincipal,
                   fields: {
                     ...existingFollowupFieldsForAttachments,
                     ...savedFields,
@@ -16085,7 +16100,7 @@ export class DutyScheduleService {
         throw error;
       }
       savedFields = { ...savedFields, ...attachmentUpdateFields };
-    } else if (isConstructionManualReviewAutoApprovalRole(input.accessRole)) {
+    } else if (isConstructionManualReviewAutoApprovalRole(input.accessRole, input.professionalPrincipal)) {
       const currentFields = {
         ...input.existingFieldsForAttachments,
         ...savedFields,
@@ -16101,6 +16116,7 @@ export class DutyScheduleService {
         ...(await this.buildConstructionIsolationManualReviewAutoApprovalFields(
           {
             accessRole: input.accessRole,
+                  professionalPrincipal: input.professionalPrincipal,
             fields: currentFields,
             followupAppToken: input.followupAppToken,
             tenantAccessToken: input.tenantAccessToken,
@@ -16227,7 +16243,7 @@ export class DutyScheduleService {
       return existingOverviewRecord;
     };
     const retainedOverviewAttachmentFields =
-      this.canReplaceConstructionAttachmentSet(input.accessRole)
+      this.canReplaceConstructionAttachmentSet(input.accessRole, input.professionalPrincipal)
         ? this.mapRetainedConstructionAttachmentFieldValues(
             input.request.retainedAttachmentTokens,
             CONSTRUCTION_OVERVIEW_ATTACHMENT_FIELDS,
@@ -16841,11 +16857,12 @@ export class DutyScheduleService {
 
   private async buildConstructionIsolationManualReviewAutoApprovalFields(input: {
     accessRole: AccessRole;
+    professionalPrincipal?: AccessPrincipal;
     fields: Record<string, unknown>;
     followupAppToken: string;
     tenantAccessToken: string;
   }): Promise<Record<string, unknown>> {
-    if (!isConstructionManualReviewAutoApprovalRole(input.accessRole)) {
+    if (!isConstructionManualReviewAutoApprovalRole(input.accessRole, input.professionalPrincipal)) {
       return {};
     }
 
@@ -21947,6 +21964,7 @@ export class DutyScheduleService {
    */
   async batchUpsertDutySchedules(
     schedules: Array<{ buildingId: string; dutyDate: string; staffId: string }>,
+    principal?:AccessPrincipal,
   ) {
     try {
       const buildingIdMap: Record<
@@ -21968,12 +21986,14 @@ export class DutyScheduleService {
         '110': 'station_110',
       };
 
+      if (!Array.isArray(schedules) || schedules.some(schedule=>!schedule || !buildingIdMap[schedule.buildingId] || !/^\d{4}-\d{2}-\d{2}$/.test(schedule.dutyDate) || typeof schedule.staffId!=='string' || !schedule.staffId.trim())) throw new BadRequestException('排班楼栋、日期或人员无效');
+      return await this.db.transaction(async transaction => {
       const results = [];
       for (const schedule of schedules) {
         const { buildingId, dutyDate, staffId } = schedule;
-        const buildingEnum = buildingIdMap[buildingId] || 'app_a_building';
+        const buildingEnum = buildingIdMap[buildingId];
 
-        const existing = await this.db
+        const existing = await transaction
           .select()
           .from(appRoomScheduleEnhanced)
           .where(
@@ -21984,15 +22004,16 @@ export class DutyScheduleService {
           )
           .limit(1);
 
+        if (principal) assertBusinessOperation(principal,{module:'schedule_assignments',action:existing.length?'update':'create'});
         if (existing.length > 0) {
-          const updated = await this.db
+          const updated = await transaction
             .update(appRoomScheduleEnhanced)
             .set({ dutyStaffActual: [staffId] })
             .where(eq(appRoomScheduleEnhanced.id, existing[0].id))
             .returning();
           results.push(updated[0]);
         } else {
-          const inserted = await this.db
+          const inserted = await transaction
             .insert(appRoomScheduleEnhanced)
             .values({
               recordId: `${buildingId}-${dutyDate}`,
@@ -22007,6 +22028,7 @@ export class DutyScheduleService {
 
       this.logger.debug(`批量创建/更新排班数据成功，共 ${results.length} 条`);
       return { success: true };
+      });
     } catch (error) {
       this.logger.error('批量创建/更新排班数据失败', error);
       throw error;

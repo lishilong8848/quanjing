@@ -9,9 +9,9 @@ import { validBuildingScope } from '../../../shared/building-access';
 import { validPersonalRules } from '../../../shared/business-permissions';
 import { ID_PATTERN, HASH_PATTERN } from './access-configuration.validation';
 import { normalizeAccessDisplayName } from './access-display-name';
-import { pendingHandoverSelection } from './personnel-handover.preview';
+import { copyAccountPermissionTemplate, pendingHandoverSelection } from './personnel-handover.preview';
 import { normalizePersonnelDutyRoutingChanges } from './personnel-duty-routing';
-import { normalizeHandoverPermissionOwnership } from './personnel-handover.ownership';
+import { handoverPermissionGrantMetadata, normalizeHandoverPermissionOwnership } from './personnel-handover.ownership';
 
 export type PreviewContent = Omit<PersonnelHandoverPreview, 'fingerprint' | 'createdAt'>;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -35,6 +35,7 @@ function person(value: AuthorityPerson): AuthorityPerson {
     permissionTags:strings(value.permissionTags,100,text),dutyRecordIds:strings(value.dutyRecordIds,1000,id) };
 }
 function template(value: AccountPermissionTemplate): AccountPermissionTemplate {
+  if(value?.effectiveAuthorization) return copyAccountPermissionTemplate(value);
   if (!record(value) || !(PAGE_ACCESS_ROLES as readonly unknown[]).includes(value.role) || !validBuildingScope(value.role,value.building,value.buildings) ||
     !version(value.sourceVersion) || !validPagePaths(value.pagePaths) ||
     (['professional_admin','professional_engineer'].includes(value.role) ? !professionalScopeIsValid(value.specialties) : value.specialties !== undefined) ||
@@ -98,7 +99,9 @@ function content(value: PreviewContent): PreviewContent {
     if(!record(row)||!id(row.sourceAccountId)||!['local','feishu'].includes(row.kind)||typeof row.required!=='boolean')return fail();
     const source=template(row.source),ref=accounts.find(account=>account.id===row.sourceAccountId),saved=archives.find(item=>item.accountId===row.sourceAccountId);
     if(!ref||source.sourceVersion!==(requested.mode==='offboarding'?saved?.sourceVersion:ref.version))return fail();
-    return {sourceAccountId:row.sourceAccountId,kind:row.kind,source,required:row.required,grantKeys:strings(row.grantKeys,300,text)};
+    const metadata=row.grantMetadata === undefined ? undefined : handoverPermissionGrantMetadata(source);
+    if(metadata && JSON.stringify(metadata)!==JSON.stringify(row.grantMetadata)) return fail();
+    return {sourceAccountId:row.sourceAccountId,kind:row.kind,source,required:row.required,grantKeys:strings(row.grantKeys,300,text),...(metadata?{grantMetadata:metadata}:{})};
   });
   if(permissionOwnership&&(!Array.isArray(value.permissionOwnership)||permissionOwnership.length>100||new Set(permissionOwnership.map(row=>row.sourceAccountId)).size!==permissionOwnership.length))return fail();
   const dutyRouting = value.dutyRouting === undefined ? undefined : normalizePersonnelDutyRoutingChanges(value.dutyRouting);

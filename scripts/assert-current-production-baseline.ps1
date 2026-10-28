@@ -38,8 +38,13 @@ Assert-Sha256 -Path $outerPath -Expected ([string]$production.outerSha256) -Labe
 
 $outer = [System.IO.Compression.ZipFile]::OpenRead($outerPath)
 try {
-  $payloadEntry = $outer.GetEntry('_hotfix-payload\hotfix-package.zip')
-  if ($null -eq $payloadEntry -or $payloadEntry.Length -gt 1073741824) { throw 'Embedded production payload is missing or oversized.' }
+  $payloadEntries = @($outer.Entries | Where-Object {
+    $_.FullName -ceq '_hotfix-payload\hotfix-package.zip' -or
+    $_.FullName -ceq '_hotfix-payload/hotfix-package.zip'
+  })
+  if ($payloadEntries.Count -ne 1) { throw 'Embedded production payload is missing or duplicated.' }
+  $payloadEntry = $payloadEntries[0]
+  if ($payloadEntry.Length -gt 1073741824) { throw 'Embedded production payload is missing or oversized.' }
   $memory = [System.IO.MemoryStream]::new()
   try {
     $stream = $payloadEntry.Open()

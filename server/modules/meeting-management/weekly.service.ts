@@ -8,6 +8,8 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { join } from 'node:path';
+import type { AccessPrincipal } from '../../../shared/access-control.interface';
+import { assertBusinessOperation } from '../../common/access/assert-business-operation';
 import type {
   GenerateWeeklyReport,
   SaveWeeklyMeeting,
@@ -145,7 +147,7 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
       },
     };
   }
-  async save(command: SaveWeeklyMeeting, actor: string) {
+  async save(command: SaveWeeklyMeeting, actor: string, principal?:AccessPrincipal) {
     const error = validateWeeklyMeeting(command?.meeting);
     if (error) throw new BadRequestException(error);
     if (
@@ -222,11 +224,12 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
       )
         throw new BadRequestException('责任人不在当前人员列表，请重新选择');
     await this.meetings.detail(meeting.targetRecordId, false);
+    if (principal) assertBusinessOperation(principal,{module:'meetings',action:'update'});
     const job = this.store.accept('meeting', normalized, actor);
     setImmediate(() => void this.tick());
     return job;
   }
-  async generate(command: GenerateWeeklyReport, actor: string) {
+  async generate(command: GenerateWeeklyReport, actor: string, principal?:AccessPrincipal) {
     if (
       !command ||
       !(
@@ -286,6 +289,7 @@ export class WeeklyService implements OnModuleInit, OnModuleDestroy {
       this.documentEditors();
     if (normalized.createOnly && command.targetRecordId !== 'new')
       throw new BadRequestException('新建条目不能覆盖现有记录');
+    if (principal) assertBusinessOperation(principal,{module:'meetings',action:command.targetRecordId==='new'?'create':'update'});
     const job = this.store.accept('generate', normalized, actor);
     setImmediate(() => void this.tick());
     return job;

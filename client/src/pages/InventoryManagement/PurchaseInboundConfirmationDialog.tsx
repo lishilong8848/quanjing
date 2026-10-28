@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAccess } from '@/access/AccessProvider';
+import { canUseInventoryAction } from './inventory-action-access';
 import { CheckCircle2, Loader2, PackagePlus, Search } from 'lucide-react';
 
 import {
@@ -482,6 +484,9 @@ export function PurchaseInboundConfirmationDialog({
   onSubmit,
   batchPosition,
 }: PurchaseInboundConfirmationDialogProps) {
+  const principal = useAccess();
+  const canConfirm = canUseInventoryAction(principal, 'confirm', item || undefined);
+  const canPrepareCategory = canUseInventoryAction(principal, 'update', item || undefined);
   const [draft, setDraft] = useState<PurchaseInboundDraft | null>(null);
   const [options, setOptions] = useState<InventoryMovementOptionItem[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
@@ -707,6 +712,7 @@ export function PurchaseInboundConfirmationDialog({
       draft.preparedCatalogRecordId?.trim() && draft.generatedSku?.trim(),
     );
   const confirmDisabled =
+    !canConfirm ||
     categoryTaskActive ||
     creatingStorageLocation ||
     submitting ||
@@ -890,6 +896,7 @@ export function PurchaseInboundConfirmationDialog({
   }
 
   async function prepareCategory() {
+    if (!canPrepareCategory) { setErrors(current => ({ ...current, submit: '当前权限不能生成物品类别号' })); return; }
     if (
       categoryPrepareGuard.current ||
       creatingStorageLocation ||
@@ -949,6 +956,7 @@ export function PurchaseInboundConfirmationDialog({
   }
 
   function submit() {
+    if (!canConfirm) { setErrors(current => ({ ...current, submit: '当前权限不能确认该采购入库' })); return; }
     if (inboundSubmitGuard.current) return;
 
     const nextErrors = validatePurchaseInboundDraft(draft!);
@@ -1280,7 +1288,7 @@ export function PurchaseInboundConfirmationDialog({
                   type="button"
                   variant={preparedNew ? 'outline' : 'default'}
                   disabled={
-                    categoryTaskActive || creatingStorageLocation || preparedNew
+                    !canPrepareCategory || categoryTaskActive || creatingStorageLocation || preparedNew
                   }
                   onClick={prepareCategory}
                 >
@@ -1316,7 +1324,7 @@ export function PurchaseInboundConfirmationDialog({
 
         <DialogFooter>
           {categoryTaskPhase === 'uncertain' && (
-            <Button type="button" variant="outline" onClick={prepareCategory}>
+            <Button type="button" variant="outline" disabled={!canPrepareCategory} onClick={prepareCategory}>
               使用原编号重试
             </Button>
           )}

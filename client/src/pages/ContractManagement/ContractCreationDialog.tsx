@@ -42,6 +42,9 @@ import {
   type ContractCreateDraft,
 } from './contract-creation.logic';
 import { createLatestRequestCoordinator } from './latest-request';
+import { useAccess } from '@/access/AccessProvider';
+import { businessBuildingLabels } from '@shared/business-permissions';
+import { canUseContractAction, type ContractPermissionScope } from './contract-permissions';
 
 interface ContractCreationDialogProps {
   open: boolean;
@@ -61,6 +64,8 @@ export function ContractCreationDialog({
   onOpenChange,
   onCreated,
 }: ContractCreationDialogProps) {
+  const access = useAccess();
+  const canStartCreate = canUseContractAction(access, 'create');
   const [kind, setKind] = useState<ContractCreateKind | null>(null);
   const [options, setOptions] = useState<ContractCreateOptionsResponse | null>(
     null,
@@ -76,6 +81,7 @@ export function ContractCreationDialog({
   const [supplierQuery, setSupplierQuery] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState('');
   const [optionsRequestCoordinator] = useState(createLatestRequestCoordinator);
+  const canSubmitCreate = canStartCreate && canUseContractAction(access, 'create', contractCreationPermissionScope(draft, options));
 
   useEffect(() => {
     optionsRequestCoordinator.invalidate();
@@ -102,6 +108,8 @@ export function ContractCreationDialog({
   );
 
   async function chooseKind(selectedKind: ContractCreateKind) {
+    if (!canStartCreate) { setFeedback('当前账号没有新增合同权限'); return; }
+    if (selectedKind === 'framework' && (access.role === 'professional_admin' || !canUseContractAction(access, 'create', null))) { setFeedback('框架合同归属尚未明确，当前账号不能创建'); return; }
     const fixedOptions = createFixedContractOptions(selectedKind);
     setKind(selectedKind);
     setOptions(fixedOptions);
@@ -153,6 +161,7 @@ export function ContractCreationDialog({
 
   async function handleSubmit() {
     if (!draft || !options || submitting || !dynamicOptionsReady) return;
+    if (!canSubmitCreate) { setFeedback('所选合同专业或楼栋超出新增权限范围'); return; }
     const validationErrors = validateContractDraft(draft, options);
     if (validationErrors.length) {
       setErrors(
@@ -302,7 +311,7 @@ export function ContractCreationDialog({
           {result ? (
             <SuccessState result={result} />
           ) : !kind ? (
-            <ContractKindStep onChoose={(value) => void chooseKind(value)} />
+            <ContractKindStep onChoose={(value) => void chooseKind(value)} canCreate={canStartCreate} canCreateFramework={canStartCreate && access.role !== 'professional_admin' && canUseContractAction(access, 'create', null)} />
           ) : options && draft ? (
             <div className="space-y-6">
               <div className="flex items-center justify-between gap-3">
@@ -749,7 +758,7 @@ export function ContractCreationDialog({
             <button
               type="button"
               onClick={() => void handleSubmit()}
-              disabled={submitting || !dynamicOptionsReady}
+              disabled={submitting || !dynamicOptionsReady || !canSubmitCreate}
               className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? (
@@ -766,10 +775,22 @@ export function ContractCreationDialog({
   );
 }
 
+export function contractCreationPermissionScope(draft: ContractCreateDraft | null, options: ContractCreateOptionsResponse | null): ContractPermissionScope | null {
+  if (!draft || !options) return null;
+  const field = (name: string) => draft.fields[options.fields.find(item => item.name === name)?.fieldId || ''];
+  const specialty = field('专业类别'), buildings = field('对应楼栋设备');
+  return { specialty: typeof specialty === 'string' ? specialty : '',
+    buildings: businessBuildingLabels(typeof buildings === 'string' ? buildings : Array.isArray(buildings) ? buildings.filter(value => typeof value === 'string').join('、') : '') };
+}
+
 function ContractKindStep({
   onChoose,
+  canCreate,
+  canCreateFramework,
 }: {
   onChoose: (kind: ContractCreateKind) => void;
+  canCreate: boolean;
+  canCreateFramework: boolean;
 }) {
   return (
     <div className="py-3">
@@ -785,12 +806,14 @@ function ContractKindStep({
           title="框架合同"
           description="建立采购或服务框架，供后续执行合同关联。"
           onClick={() => onChoose('framework')}
+          disabled={!canCreateFramework}
         />
         <KindCard
           icon={FileText}
           title="执行合同"
           description="登记具体履约合同，可关联生效框架与供应商。"
           onClick={() => onChoose('execution')}
+          disabled={!canCreate}
         />
       </div>
     </div>
@@ -802,16 +825,19 @@ function KindCard({
   title,
   description,
   onClick,
+  disabled,
 }: {
   icon: typeof FileText;
   title: string;
   description: string;
   onClick: () => void;
+  disabled: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className="group rounded-lg border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-400 hover:bg-blue-50/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
     >
       <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white">

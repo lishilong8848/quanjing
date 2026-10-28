@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import {
   useCallback,
   useEffect,
@@ -965,6 +967,9 @@ function formatSourceTime(data: {
 export default function RiskInspectionDashboard({
   standaloneQuality = false,
 }: RiskInspectionDashboardProps) {
+  const access = useAccess();
+  const canRefreshRisk = canUsePageAction(access, 'risk', 'refresh', true);
+  const canRefreshQuality = canUsePageAction(access, 'quality', 'refresh', true);
   const { scale, viewportWidth, viewportHeight } = useFixedStage();
   const [activeView, setActiveView] = useState<DashboardView>(
     standaloneQuality ? 'monthly-quality' : 'inspection',
@@ -1027,7 +1032,7 @@ export default function RiskInspectionDashboard({
       try {
         const nextData = await getRiskInspectionAliDashboard({
           month: aliMonth,
-          refresh: options.refresh,
+          refresh: options.refresh && canRefreshRisk,
         });
         setAliData(nextData);
         setAliStatus('ready');
@@ -1038,7 +1043,7 @@ export default function RiskInspectionDashboard({
         setAliStatus(aliData ? 'ready' : 'error');
       }
     },
-    [aliData, aliMonth],
+    [aliData, aliMonth, canRefreshRisk],
   );
 
   const loadCross = useCallback(
@@ -1047,7 +1052,7 @@ export default function RiskInspectionDashboard({
       setCrossError('');
       try {
         const nextData = await getRiskInspectionCrossDashboard({
-          refresh: options.refresh,
+          refresh: options.refresh && canRefreshRisk,
         });
         setCrossData(nextData);
         setCrossStatus('ready');
@@ -1056,7 +1061,7 @@ export default function RiskInspectionDashboard({
         setCrossStatus(crossData ? 'ready' : 'error');
       }
     },
-    [crossData],
+    [crossData, canRefreshRisk],
   );
 
   const loadQuality = useCallback(
@@ -1070,7 +1075,7 @@ export default function RiskInspectionDashboard({
       setQualityError('');
       try {
         const nextData = await getAliMonthlyQualityDataset({
-          refresh: options.refresh,
+          refresh: options.refresh && canRefreshQuality,
         });
         if (requestRevision !== qualityMutationRevisionRef.current) return;
         setQualityData(nextData);
@@ -1100,7 +1105,7 @@ export default function RiskInspectionDashboard({
         setQualityRefreshing(false);
       }
     },
-    [qualityData],
+    [qualityData, canRefreshQuality],
   );
 
   useEffect(() => {

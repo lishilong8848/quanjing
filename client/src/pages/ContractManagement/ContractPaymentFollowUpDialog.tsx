@@ -10,6 +10,8 @@ import {
   UserRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAccess } from '@/access/AccessProvider';
+import { contractPaymentPermissions, type ContractPermissionScope } from './contract-permissions';
 
 import {
   adjustContractPaymentPlan,
@@ -39,6 +41,7 @@ import {
 
 interface ContractPaymentFollowUpDialogProps {
   item: ContractPaymentFollowUpItem | null;
+  contractScope?: ContractPermissionScope;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCompleted: () => void | Promise<void>;
@@ -49,11 +52,13 @@ interface ContractPaymentFollowUpDialogProps {
 
 export function ContractPaymentFollowUpDialog({
   item,
+  contractScope,
   open,
   onOpenChange,
   onCompleted,
   onNoPaymentRequired,
 }: ContractPaymentFollowUpDialogProps) {
+  const access = useAccess();
   const [options, setOptions] =
     useState<ContractPaymentFollowUpOptionsResponse | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(false);
@@ -85,8 +90,8 @@ export function ContractPaymentFollowUpDialog({
       : fixedOptions;
 
   const permissions = useMemo(
-    () => availablePaymentActions(effectiveOptions?.plans || []),
-    [effectiveOptions?.plans],
+    () => contractPaymentPermissions(access, availablePaymentActions(effectiveOptions?.plans || []), contractScope || null),
+    [access, effectiveOptions?.plans, contractScope],
   );
   const selectablePlans = useMemo(
     () =>
@@ -200,6 +205,12 @@ export function ContractPaymentFollowUpDialog({
     setSelectedPaymentId(plan?.recordId || '');
   }
 
+  useEffect(() => {
+    if (permissions[action]) return;
+    const next = (['create', 'adjust', 'confirm'] as const).find(value => permissions[value]);
+    if (next) selectAction(next);
+  }, [action, permissions.create, permissions.adjust, permissions.confirm, effectiveOptions]);
+
   async function handleNoPaymentRequired() {
     if (!item || busy || !permissions.noPaymentRequired) return;
     if (item.planCount !== 0) return;
@@ -215,6 +226,7 @@ export function ContractPaymentFollowUpDialog({
 
   async function handleSubmit() {
     if (!item || !effectiveOptions || busy || !dynamicOptionsReady) return;
+    if (!permissions[action]) { setError('当前账号无此合同对应的付款操作权限'); return; }
     const validation = validateForm({
       action,
       selectedPaymentId,
@@ -473,6 +485,7 @@ export function ContractPaymentFollowUpDialog({
               onClick={() => void handleSubmit()}
               disabled={
                 busy ||
+                !permissions[action] ||
                 !dynamicOptionsReady ||
                 (action !== 'create' && !selectedPaymentId)
               }

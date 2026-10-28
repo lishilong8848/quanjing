@@ -28,6 +28,8 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useAccess } from '@/access/AccessProvider';
+import { hasBusinessPermissionSomewhere } from '@shared/business-permissions';
+import { purchaseUiPrincipal, purchaseUiPrincipalKey } from './purchase-ui-principal';
 import {
   canCreatePurchaseApplication,
   canDeleteCompletedPurchaseRecords,
@@ -244,16 +246,13 @@ function formatQuantity(item: PurchaseInventoryRequestItem): string {
 export default function PurchaseOverviewPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const {
-    role,
-    purchaseBuilding, buildings,
-    capabilities: { canForceRefresh },
-  } = useAccess();
+  const access = useAccess();
+  const canForceRefresh = hasBusinessPermissionSomewhere(access, { module: 'purchase', action: 'refresh' });
   const principal = useMemo(
-    () => ({ role, purchaseBuilding, buildings }),
-    [purchaseBuilding, buildings, role],
+    () => purchaseUiPrincipal(access),
+    [access],
   );
-  const principalKey = `${role}:${purchaseBuilding || ''}:${(buildings || []).join(',')}`;
+  const principalKey = purchaseUiPrincipalKey(principal);
   const canCreateApplication = canCreatePurchaseApplication(principal);
   const canDeleteCompletedRecords =
     canDeleteCompletedPurchaseRecords(principal);
@@ -320,6 +319,8 @@ export default function PurchaseOverviewPage() {
   );
   const previousPrincipalKeyRef = useRef(principalKey);
   const activePrincipalKeyRef = useRef(principalKey);
+  const canForceRefreshRef = useRef(canForceRefresh);
+  canForceRefreshRef.current = canForceRefresh;
   activePrincipalKeyRef.current = principalKey;
   const principalMatchesRenderedData =
     previousPrincipalKeyRef.current === principalKey;
@@ -335,6 +336,7 @@ export default function PurchaseOverviewPage() {
   const loadDashboard = useCallback(function runDashboardRequest(
     refresh: DashboardRefreshMode = false,
   ): Promise<boolean> {
+    if (refresh === true && !canForceRefreshRef.current) refresh = false;
     const requestPrincipalKey = activePrincipalKeyRef.current;
     const currentRequest = dashboardRequestInFlightRef.current;
     if (currentRequest && currentRequest.principalKey === requestPrincipalKey) {
@@ -877,7 +879,7 @@ export default function PurchaseOverviewPage() {
         filterLabel="定位采购筛选"
         onFilter={() => handleOverviewCard('application-stage')}
         onSearchChange={setSearchQuery}
-        onRefresh={requestForceRefresh}
+        onRefresh={canForceRefresh ? requestForceRefresh : undefined}
         actions={
           canCreateApplication ? (
             <Button
@@ -1107,6 +1109,7 @@ export default function PurchaseOverviewPage() {
         open={principalMatchesRenderedData && completionDialogOpen}
         dashboard={dashboard}
         canDelete={canDeleteCompletedRecords}
+        canDeleteItem={canDeleteRecord}
         onOpenChange={setCompletionDialogOpen}
         onDeleteSelected={requestDeletion}
       />

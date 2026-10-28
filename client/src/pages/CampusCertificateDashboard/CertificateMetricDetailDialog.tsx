@@ -178,7 +178,7 @@ export function CertificateMetricDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {isExpiringDetail ? (
+        {isExpiringDetail && (onNotifyExpiring || onRetryNotificationPreview) ? (
           <CertificateExpiryNotificationPanel
             state={notificationState}
             onNotify={onNotifyExpiring}

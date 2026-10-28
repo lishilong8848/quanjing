@@ -148,7 +148,7 @@ describe('actual attendance routes after professional access changes', () => {
   it.each(['/api/attendance/today', '/api/attendance/history?from=2026-10-01&through=2026-10-10'])(
     'guest cannot read private attendance through actual route %s',
     async path => {
-      expect(canAccessPage('guest', '/monthly-schedule')).toBe(false);
+      expect(canAccessPage('guest', '/monthly-schedule')).toBe(true);
       expect((await call(path, 'guest')).status).toBe(403);
       expect(history.getHistory).not.toHaveBeenCalled();
       expect(snapshots.getSnapshot).not.toHaveBeenCalled();

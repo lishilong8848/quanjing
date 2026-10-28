@@ -700,7 +700,10 @@ export class InventoryStocktakeService {
     if (!sheet || !isProfessionalBusinessPrincipal(principal)) return sheet;
     const lines = this.ownedLines(sheet.lines, principal);
     const result = { ...sheet, lines, shortfall: 0, status: lines.length > 0 && lines.every(line => line.status === 'confirmed') ? 'completed' as const : 'open' as const };
-    delete (result as { latestBulk?: unknown }).latestBulk;
+    const latestBulk=(result as {latestBulk?:{id:string}}).latestBulk;
+    const batch=latestBulk && this.store.read().bulkBatches?.find(entry=>entry.id===latestBulk.id);
+    if (!batch || batch.before.some(before=>!lines.some(line=>line.inventory.recordId===before.recordId))) delete (result as { latestBulk?: unknown }).latestBulk;
+    else (result as T & {latestBulk?:import('../../../shared/inventory-stocktake.interface').StocktakeBulkSummary}).latestBulk={...(sheet as T & {latestBulk:import('../../../shared/inventory-stocktake.interface').StocktakeBulkSummary}).latestBulk,recordIds:batch.before.map(before=>before.recordId)};
     return result;
   }
   private findSheet(state: StocktakeLedger, request: StocktakeWriteRequest) {

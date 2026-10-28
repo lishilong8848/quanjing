@@ -28,7 +28,7 @@ import {
   type SwitcherPage,
 } from '@/navigation/page-switcher';
 
-import { GlobalUserControl, UnifiedAccessControl } from './Layout';
+import { GlobalUserControl } from './Layout';
 
 const VNET_LOGO_URL = '/assets/vnet-logo-transparent.png';
 
@@ -429,7 +429,6 @@ export function GlobalNavigation() {
           </Sheet>
         </div>
 
-        <UnifiedAccessControl compact />
         <GlobalUserControl />
       </div>
     </header>

@@ -12,6 +12,8 @@ export interface AccountPermissionTemplate {
   personalRules?: PersonalPermissionRule[];
   pagePaths: string[];
   sourceVersion: number;
+  /** Frozen authorization; never a live link to a role that may later change. */
+  effectiveAuthorization?: import('./authorization-profile').EffectiveAuthorization;
 }
 export interface PersonnelPermissionArchive {
   accountId: string;
@@ -59,7 +61,8 @@ export interface HandoverPreviewRequest {
 }
 export interface HandoverGrantChoice { key: string; disposition: 'transfer' | 'retain' | 'shared'; dutyRecordId?: string; }
 export interface HandoverPermissionOwnership { sourceAccountId: string; grants: HandoverGrantChoice[]; }
-export interface HandoverOwnershipPreview { sourceAccountId: string; kind: 'local' | 'feishu'; source: AccountPermissionTemplate; required: boolean; grantKeys: string[]; }
+export interface HandoverGrantMetadata { title:string; nativeRole:AccessRole|null; scope:{building:BuildingAdminBuilding|null;buildings?:BuildingAdminBuilding[];specialties?:ProfessionalSpecialty[]}; }
+export interface HandoverOwnershipPreview { sourceAccountId: string; kind: 'local' | 'feishu'; source: AccountPermissionTemplate; required: boolean; grantKeys: string[]; grantMetadata?:Record<string,HandoverGrantMetadata>; }
 export interface HandoverBaseline {
   configurationRevision: number;
   directoryVersion: string;

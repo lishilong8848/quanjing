@@ -15,7 +15,7 @@ import type { Request, Response } from 'express';
 import { GuestReadable, PublicAccess } from '../../common/access/unified-access.decorators';
 import { UnifiedAccessService } from '../../common/access/unified-access.service';
 import { readAccessCookie } from '../../common/access/unified-access.guard';
-import { personalPermissionPagePaths } from '../../../shared/business-permissions';
+import { hasBusinessPermissionSomewhere, personalPermissionPagePaths } from '../../../shared/business-permissions';
 import { TodayOperationsAnomalyService } from './today-operations-anomaly.service';
 import { renderTodayOperationsFollowUpPage } from './today-operations-follow-up.page';
 import { TodayOperationsFollowUpTicketService } from './today-operations-follow-up.ticket';
@@ -45,10 +45,10 @@ export class TodayOperationsFollowUpController {
   @Get('api/duty-schedules/daily-operations-follow-ups')
   async list(@Headers('x-follow-up-ticket') ticket: string, @Req() request: Request) {
     const scope = this.tickets.verify(ticket);
-    const session = this.requireCurrentSession(request);
+    const session = this.requireCurrentSession(request,'read');
     return {
       success: true as const,
-      canUpdate: session.principal.role === 'admin' || session.principal.role === 'editor',
+      canUpdate: session.principal.effectiveAuthorization ? hasBusinessPermissionSomewhere(session.principal,{module:'today_operations',action:'update'}) : session.principal.role === 'admin' || session.principal.role === 'editor',
       actorKey: session.principal.accountId || session.principalFingerprint!,
       records: await this.service.listFollowUps(scope.from, scope.through),
     };
@@ -61,9 +61,9 @@ export class TodayOperationsFollowUpController {
     @Req() request: Request,
   ) {
     const scope = this.tickets.verify(ticket);
-    const session = this.requireCurrentSession(request);
+    const session = this.requireCurrentSession(request,'update');
     // This route's existing unified guard permits writes only to these roles.
-    if (!['admin', 'editor'].includes(session.principal.role)) throw new ForbiddenException('当前账号仅可查看，暂无处理权限');
+    if (!(session.principal.effectiveAuthorization ? hasBusinessPermissionSomewhere(session.principal,{module:'today_operations',action:'update'}) : ['admin', 'editor'].includes(session.principal.role))) throw new ForbiddenException('当前账号仅可查看，暂无处理权限');
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new BadRequestException('异常跟进请求无效');
     }
@@ -74,11 +74,15 @@ export class TodayOperationsFollowUpController {
     return { success: true as const, record };
   }
 
-  private requireCurrentSession(request: Request) {
+  private requireCurrentSession(request: Request, action:'read'|'update') {
     const cookie = readAccessCookie(request?.headers?.cookie, this.access);
     const session = this.access.readSessionIdentity(cookie.value);
     if (!session.principalFingerprint || !session.expiresAt) throw new UnauthorizedException('请先登录后查看异常跟进');
     const principal = session.principal;
+    if (principal.effectiveAuthorization) {
+      if(!hasBusinessPermissionSomewhere(principal,{module:'today_operations',action})) throw new ForbiddenException('当前账号暂无异常跟进权限');
+      return session;
+    }
     if (principal.role === 'guest') throw new ForbiddenException('当前账号暂无异常跟进权限');
     const inherited = this.access.pagePermissions(principal.role, principal.accountId, principal.authorizationVersion);
     const paths = personalPermissionPagePaths(principal, inherited.paths);

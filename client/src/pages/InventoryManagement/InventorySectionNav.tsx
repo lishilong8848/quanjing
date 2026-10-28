@@ -35,12 +35,15 @@ export const INVENTORY_SECTIONS: Array<{
 
 export function InventorySectionNav({
   activeSection,
+  allowedSections = INVENTORY_SECTIONS.map(section => section.key),
 }: {
   activeSection: InventorySection;
+  allowedSections?: readonly InventorySection[];
 }) {
   const [, setSearchParams] = useSearchParams();
 
   const selectSection = (section: InventorySection) => {
+    if (!allowedSections.includes(section)) return;
     setSearchParams((current) => {
       const searchParams = new URLSearchParams(current);
       if (section === 'overview') searchParams.delete('view');
@@ -55,7 +58,7 @@ export function InventorySectionNav({
       className="sticky top-0 z-20 overflow-x-auto rounded-xl border border-blue-100 bg-white/95 p-1.5 shadow-[0_6px_20px_rgba(27,75,143,0.08)] backdrop-blur"
     >
       <div className="flex min-w-max items-center gap-1">
-        {INVENTORY_SECTIONS.map((section) => {
+        {INVENTORY_SECTIONS.filter(section => allowedSections.includes(section.key)).map((section) => {
           const Icon = section.icon;
           const active = activeSection === section.key;
           return (

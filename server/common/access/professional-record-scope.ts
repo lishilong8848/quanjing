@@ -33,5 +33,5 @@ export function businessRecordBuilding(record: unknown): unknown {
   return businessBuildingLabels(extractDisplayText(fields['对应楼栋设备'])) || undefined;
 }
 export function filterProfessionalRecords<T>(principal: AccessPrincipal | undefined, records: T[], specialty: (record: T) => unknown, building: (record: T) => unknown = businessRecordBuilding): T[] {
-  return isProfessionalBusinessPrincipal(principal) ? records.filter(record => canManageProfessionalRecord(principal!, specialty(record), building(record), { module: principal!.permissionContext?.module || 'equipment_ledger', action: 'read' })) : records;
+  return isProfessionalBusinessPrincipal(principal) ? records.filter(record => canManageProfessionalRecord(principal!, specialty(record), building(record), { module: principal!.permissionContext?.module || 'equipment_ledger', action: principal!.permissionContext?.action || 'read' })) : records;
 }

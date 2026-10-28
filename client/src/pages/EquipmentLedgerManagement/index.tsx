@@ -1,4 +1,6 @@
 import { accessBuildings } from '@shared/building-access';
+import { businessBuildingsForAction } from '@shared/business-permissions';
+import { canUsePageAction } from '../business-action-access';
 import {
   lazy,
   Suspense,
@@ -48,13 +50,15 @@ const LifecycleDashboard = lazy(() => import('../EquipmentLifecycleDashboard'));
 
 const BUILDINGS = ['A楼', 'B楼', 'C楼', 'D楼', 'E楼'];
 export default function EquipmentLedgerManagement() {
+  const access = useAccess();
   const {
     role, pagePaths,
     purchaseBuilding, buildings,
     principalFingerprint,
-    capabilities: { canForceRefresh },
-  } = useAccess();
-  const scope = accessBuildings({ role, purchaseBuilding, buildings });
+    capabilities,
+  } = access;
+  const canForceRefresh = canUsePageAction(access, 'equipment_ledger', 'refresh', capabilities.canForceRefresh);
+  const scope = access.effectiveAuthorization ? businessBuildingsForAction(access, { module: 'equipment_ledger', action: 'read' }) : accessBuildings(access);
   const allowedBuildings = BUILDINGS.filter(value => !scope || scope.includes(value as never));
   const scopedBuilding = role === 'building_admin' && allowedBuildings.length === 1 ? allowedBuildings[0] : null;
   if (

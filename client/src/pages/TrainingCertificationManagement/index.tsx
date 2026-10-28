@@ -19,6 +19,8 @@ import { useSearchParams } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 
 import {
   parseTrainingCertificationModule,
@@ -79,9 +81,15 @@ function ModuleLoading({ label }: { label: string }) {
 }
 
 export default function TrainingCertificationManagementPage() {
+  const access = useAccess();
+  const canReadCertificate = canUsePageAction(access, 'certification', 'read', true);
+  const canReadTraining = canUsePageAction(access, 'training', 'read', true);
+  const allowedModules = MODULES.filter(module => module.key === 'certificate' ? canReadCertificate : canReadTraining);
   const [searchParams, setSearchParams] = useSearchParams();
   const rawModule = searchParams.get('module');
-  const activeModule = parseTrainingCertificationModule(rawModule);
+  const requestedModule = parseTrainingCertificationModule(rawModule);
+  const activeModule = allowedModules.some(module => module.key === requestedModule) ? requestedModule : allowedModules[0]?.key || requestedModule;
+  const canRefresh = canUsePageAction(access, activeModule === 'certificate' ? 'certification' : 'training', 'refresh', true);
   const [visitedModules, setVisitedModules] = useState(() => ({
     certificate: activeModule === 'certificate',
     training: activeModule === 'training',
@@ -125,12 +133,13 @@ export default function TrainingCertificationManagementPage() {
 
   const selectModule = useCallback(
     (nextModule: TrainingCertificationModule) => {
-      if (nextModule === activeModule) return;
+      if (nextModule === activeModule || nextModule === 'certificate' && !canReadCertificate || nextModule === 'training' && !canReadTraining) return;
       setSearchParams({ module: nextModule });
     },
-    [activeModule, setSearchParams],
+    [activeModule, canReadCertificate, canReadTraining, setSearchParams],
   );
 
+  if (!allowedModules.length) return <p role="alert" className="p-6 text-sm">当前账号没有培训或持证读取权限。</p>;
   return (
     <div className="training-certification-page" aria-label="培训持证管理">
       <header className="training-certification-hero">
@@ -156,9 +165,9 @@ export default function TrainingCertificationManagementPage() {
           </p>
           <Button
             type="button"
-            disabled={!activeHeaderState || activeHeaderState.refreshing}
+            disabled={!canRefresh || !activeHeaderState || activeHeaderState.refreshing}
             aria-busy={activeHeaderState?.refreshing ?? false}
-            onClick={() => activeHeaderState?.refresh()}
+            onClick={() => { if (canRefresh) activeHeaderState?.refresh(); }}
           >
             <RefreshCw
               className={cn(
@@ -177,7 +186,7 @@ export default function TrainingCertificationManagementPage() {
           className="training-certification-module-grid"
           aria-label="培训持证业务模块"
         >
-          {MODULES.map((module) => {
+          {allowedModules.map((module) => {
             const selected = activeModule === module.key;
             const Icon = module.Icon;
             return (
@@ -211,7 +220,7 @@ export default function TrainingCertificationManagementPage() {
         </nav>
 
         <div className="training-certification-workspace">
-          {visitedModules.certificate ? (
+          {canReadCertificate && visitedModules.certificate ? (
             <section
               className="training-certification-module-panel"
               hidden={activeModule !== 'certificate'}
@@ -236,7 +245,7 @@ export default function TrainingCertificationManagementPage() {
             </section>
           ) : null}
 
-          {visitedModules.training ? (
+          {canReadTraining && visitedModules.training ? (
             <section
               className="training-certification-module-panel"
               hidden={activeModule !== 'training'}

@@ -1,3 +1,13 @@
+import type { AccessPrincipal } from '@shared/access-control.interface';
+import type { PurchaseWorkflowAction } from '@shared/purchase-workflow.interface';
+import { canManageProfessionalRecord } from '@shared/professional-access';
+
+export function permittedPurchaseWorkflowActions(principal:AccessPrincipal, offered:readonly PurchaseWorkflowAction[],
+  scope:{building:string;specialty?:string}|null, canOperate:boolean):PurchaseWorkflowAction[] {
+  if(!canOperate || !scope) return [];
+  return offered.filter(action=>canManageProfessionalRecord(principal,scope.specialty,scope.building,{module:'purchase',action:action === 'start'?'create':action}));
+}
+
 export interface ActionButtonStateInput {
   disabled: boolean;
   loading: boolean;

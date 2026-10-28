@@ -227,13 +227,13 @@ describe('monthly stocktake generation', () => {
   it('runs after the Shanghai monthly deadline and cleans up all timers', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-01T02:29:59+08:00'));
     const { generation, store } = setup();
-    generation.onModuleInit();
+    await generation.onModuleInit();
     expect(store.read().generationJobs).toHaveLength(0);
     await jest.advanceTimersByTimeAsync(1000);
     expect(store.read().generationJobs[0].status).toBe('queued');
     await jest.advanceTimersByTimeAsync(1);
     expect(store.read().sheets).toHaveLength(7);
-    generation.onModuleDestroy();
+    await generation.onModuleDestroy();
     expect(jest.getTimerCount()).toBe(0);
   });
   it('keeps an earlier building failure visible in the admin summary after another building succeeds', async () => {
@@ -266,7 +266,7 @@ describe('monthly stocktake generation', () => {
     source.snapshot.mockRejectedValue(
       Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' }),
     );
-    generation.onModuleInit();
+    await generation.onModuleInit();
     await jest.advanceTimersByTimeAsync(1);
     expect(store.read().generationJobs[0]).toMatchObject({
       month: '2026-10',
@@ -280,7 +280,7 @@ describe('monthly stocktake generation', () => {
       retryAt: null,
     });
     expect(source.snapshot).toHaveBeenCalledTimes(3);
-    generation.onModuleDestroy();
+    await generation.onModuleDestroy();
   });
   it('computes 02:30 monthly deadlines including year changes independently of host time zone', () => {
     expect(

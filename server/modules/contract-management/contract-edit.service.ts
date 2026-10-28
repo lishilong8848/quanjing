@@ -18,6 +18,7 @@ import { ContractCreationService } from './contract-creation.service';
 import { assertKnownPersonFieldValues } from './contract-person-validation';
 import { AccessConfigurationService } from '../../common/access/access-configuration.service';
 import { assertCurrentContractMutation } from './contract-current-authority';
+import { assertContractSelectorAccess, CONTRACT_EDIT_SELECTOR_ACTIONS } from './contract-selector-access';
 
 @Injectable()
 export class ContractEditService {
@@ -32,12 +33,13 @@ export class ContractEditService {
     assertProfessionalBitableRecord(principal, await this.gateway.getRecord('execution', normalizeRecordId(recordId)));
   }
 
-  async getOptions(recordId: string): Promise<ContractEditOptionsResponse> {
+  async getOptions(recordId: string, principal?:AccessPrincipal): Promise<ContractEditOptionsResponse> {
     const normalizedRecordId = normalizeRecordId(recordId);
     const [record, options] = await Promise.all([
       this.gateway.getRecord('execution', normalizedRecordId),
       this.contractCreation.getOptions('execution'),
     ]);
+    assertContractSelectorAccess(principal,record,CONTRACT_EDIT_SELECTOR_ACTIONS);
     const fields = options.fields.filter(
       (field) => field.control !== 'attachment',
     );

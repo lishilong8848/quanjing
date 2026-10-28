@@ -40,7 +40,7 @@ describe('unified access duty backend migration', () => {
       "@Post('duty-schedules/construction-management/applications')",
     );
     expect(source).toMatch(
-      /@AdminOnly\(\)\s+@Post\('duty-schedules\/construction-management\/projects\/delete'\)/,
+      /@AdminOnly\(\)\s+@ProfessionalScoped\(\)\s+@Post\('duty-schedules\/construction-management\/projects\/delete'\)/,
     );
   });
 

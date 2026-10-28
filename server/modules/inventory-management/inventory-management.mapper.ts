@@ -1,7 +1,8 @@
 import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import { accessBuildings, canAccessBuilding } from '../../../shared/building-access';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
-import { filterProfessionalRecords, scopeProfessionalBitableRecords } from '../../common/access/professional-record-scope';
+import { filterProfessionalRecords, recordProfessionalSpecialty, scopeProfessionalBitableRecords } from '../../common/access/professional-record-scope';
+import { canManageProfessionalRecord, PROFESSIONAL_SPECIALTIES } from '../../../shared/professional-access';
 import type {
   InventoryBuildingSummary,
   InventoryCategorySummary,
@@ -103,11 +104,13 @@ export function buildInventoryManagementSnapshot(
   let items = filterProfessionalRecords(input.principal, input.inventory.map((record, index) =>
     mapInventoryItem(record, index, catalog),
   ), item => item.specialty);
-  const scope = input.principal ? accessBuildings(input.principal) : null;
+  const scopedPrincipal = isProfessionalBusinessPrincipal(input.principal);
+  const scope = input.principal && !scopedPrincipal ? accessBuildings(input.principal) : null;
   const scopedItems = scope ? items.filter(item => canAccessBuilding(input.principal!, item.building)) : items;
   items = scopedItems;
   const managers = buildManagerIndex(input.managers);
-  const buildings = buildBuildingSummaries(items, managers).filter(item => !scope || scope.includes(item.building));
+  const visibleBuildings = scopedPrincipal ? WAREHOUSE_BUILDINGS.filter(building => PROFESSIONAL_SPECIALTIES.some(specialty => canManageProfessionalRecord(input.principal!, specialty, building))) : scope;
+  const buildings = buildBuildingSummaries(items, managers).filter(item => !visibleBuildings || visibleBuildings.includes(item.building));
   const categories = buildCategorySummaries(items);
   const stocktake = buildStocktakeSummaries(
     scopeProfessionalBitableRecords(input.principal, input.stocktakeSummaries),
@@ -320,6 +323,7 @@ function mapInventoryItem(
   const sku = text(fields, ['物品类别号']);
   const inventoryBuilding = building(fields, ['楼栋']);
   const catalogFields = findCatalogFields(catalog, sku, inventoryBuilding);
+  const specialty = recordProfessionalSpecialty({ record_id: '', fields: catalogFields }) || recordProfessionalSpecialty(record);
   const quantity = number(fields, ['剩余库存']) ?? 0;
   const minimumQuantity =
     number(fields, ['最小库存量']) ??
@@ -334,6 +338,7 @@ function mapInventoryItem(
 
   return {
     recordId,
+    ...(specialty ? { specialty } : {}),
     sku,
     name: resolvedText(fields, ['名称'], catalogFields) || '未命名物品',
     specification: resolvedText(
@@ -569,9 +574,11 @@ function buildMovements(
           : (number(fields, ['出库数量']) ?? 0)
         : (number(fields, [inbound ? '入库数量' : '借调数量']) ?? 0);
       const clientMutationId = outbound ? text(fields, ['出库创建标识']) : '';
+      const specialty = recordProfessionalSpecialty({ record_id: '', fields: catalogFields }) || recordProfessionalSpecialty(record);
 
       return {
         recordId: getRecordId(record) || `${type}:${index}`,
+        ...(specialty ? { specialty } : {}),
         ...(clientMutationId ? { clientMutationId } : {}),
         type,
         sku,

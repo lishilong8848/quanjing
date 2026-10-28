@@ -25,6 +25,11 @@ import {
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useAccess } from '@/access/AccessProvider';
+import { BUILDING_ADMIN_BUILDINGS, type AccessPrincipal } from '@shared/access-control.interface';
+import { PROFESSIONAL_SPECIALTIES } from '@shared/professional-access';
+import { canPerformBusinessAction } from '@shared/business-permissions';
+import { canUseContractAction } from './contract-permissions';
 import type {
   ContractWorkflowCode,
   ContractWorkflowStatusResponse,
@@ -37,6 +42,10 @@ export function ContractWorkflowPanel({
   open: boolean;
   onClose: () => void;
 }) {
+  const access = useAccess();
+  const canReadStatus = canUseContractAction(access, 'read');
+  const canNotify = canRunAllContractNotifications(access);
+  const canSelfTest = access.role === 'admin';
   const [status, setStatus] = useState<ContractWorkflowStatusResponse | null>(
     null,
   );
@@ -52,12 +61,13 @@ export function ContractWorkflowPanel({
   } | null>(null);
 
   const loadStatus = useCallback(async () => {
+    if (!canReadStatus) { setStatus(null); setLoading(false); return; }
     try {
       setStatus(await getContractWorkflowStatus());
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canReadStatus]);
 
   useEffect(() => {
     if (!open) return;
@@ -76,6 +86,7 @@ export function ContractWorkflowPanel({
   }, [onClose, open]);
 
   const handleRun = async (code: ContractWorkflowCode) => {
+    if (!canNotify) { setFeedback('此操作覆盖全基地，当前账号没有完整范围的通知权限'); return; }
     setRunningCode(code);
     setFeedback('');
     try {
@@ -92,6 +103,7 @@ export function ContractWorkflowPanel({
   };
 
   const handleSelfTest = async () => {
+    if (!canSelfTest) { setFeedback('只读自检仅管理员可执行'); return; }
     setSelfTesting(true);
     setFeedback('');
     try {
@@ -148,7 +160,7 @@ export function ContractWorkflowPanel({
             <button
               type="button"
               onClick={() => void handleSelfTest()}
-              disabled={selfTesting}
+              disabled={selfTesting || !canSelfTest}
               className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {selfTesting ? (
@@ -220,7 +232,7 @@ export function ContractWorkflowPanel({
                         name: workflow.name,
                       })
                     }
-                    disabled={running || !workflow.enabled}
+                    disabled={running || !workflow.enabled || !canNotify}
                     className="mt-4 inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     {running ? (
@@ -262,6 +274,7 @@ export function ContractWorkflowPanel({
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
+              disabled={!canNotify}
               onClick={() => {
                 const workflow = pendingWorkflow;
                 setPendingWorkflow(null);
@@ -275,6 +288,11 @@ export function ContractWorkflowPanel({
       </AlertDialog>
     </div>
   );
+}
+
+export function canRunAllContractNotifications(principal: AccessPrincipal): boolean {
+  return BUILDING_ADMIN_BUILDINGS.every(building => PROFESSIONAL_SPECIALTIES.every(specialty =>
+    canPerformBusinessAction(principal, { module: 'contracts', action: 'notify', building, specialty })));
 }
 
 function formatDateTime(value: string): string {

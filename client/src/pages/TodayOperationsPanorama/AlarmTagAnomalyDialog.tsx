@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dialog';
 import { formatAlarmDateTime } from './alarm-model';
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import type { AlarmHumanReview, AlarmReviewTask } from '@shared/today-operations-alarm-review.interface';
 import { AlarmReviewDialog } from './AlarmReviewDialog';
 
@@ -69,7 +70,7 @@ function reviewNotice(
 
 export function AlarmTagAnomalyDialog({ open, onOpenChange, snapshot, businessDate, initialPageLoaded = false }: Props) {
   const access = useAccess();
-  const canReview = access.role === 'admin' || access.role === 'editor';
+  const canReview = canUsePageAction(access, 'alarm_review', 'confirm', access.role === 'admin' || access.role === 'editor') || canUsePageAction(access, 'alarm_review', 'update', access.role === 'admin' || access.role === 'editor');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewItems, setReviewItems] = useState<TodayOperationsAlarmItem[]>([]);
@@ -99,6 +100,7 @@ export function AlarmTagAnomalyDialog({ open, onOpenChange, snapshot, businessDa
     });
   };
   const openReviews = (rows: TodayOperationsAlarmItem[]) => {
+    if (!canReview) return;
     setReviewItems(rows.map((item) => ({ ...item, humanReview: reviews[item.id]?.version ? reviews[item.id] : item.humanReview })));
     setReviewOpen(true);
   };

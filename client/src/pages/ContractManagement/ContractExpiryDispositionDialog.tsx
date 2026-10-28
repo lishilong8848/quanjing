@@ -9,6 +9,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAccess } from '@/access/AccessProvider';
+import { canUseContractAction } from './contract-permissions';
 
 import {
   getContractExpiryDispositionTaskStatus,
@@ -54,6 +56,8 @@ export function ContractExpiryDispositionDialog({
   onSubmitted,
   onUpdated,
 }: ContractExpiryDispositionDialogProps) {
+  const access = useAccess();
+  const canUpdate = canUseContractAction(access, 'update', contract);
   const [action, setAction] =
     useState<ContractExpiryDispositionAction>('renew');
   const [renewalEndDate, setRenewalEndDate] = useState('');
@@ -149,6 +153,7 @@ export function ContractExpiryDispositionDialog({
 
   async function handleSubmit() {
     if (!contract || busy) return;
+    if (!canUpdate) { setError('当前账号无此合同的续期或作废权限'); return; }
     if (action === 'renew') {
       if (!renewalEndDate) {
         setError('请选择续期截止时间');
@@ -408,6 +413,7 @@ export function ContractExpiryDispositionDialog({
             onClick={() => void handleSubmit()}
             disabled={
               busy ||
+              !canUpdate ||
               (action === 'renew' && (!renewalEndDate || optionsLoading))
             }
             className={cn(

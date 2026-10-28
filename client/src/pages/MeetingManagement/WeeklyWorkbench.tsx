@@ -1,3 +1,4 @@
+import { canUsePageAction } from '../business-action-access';
 import {
   lazy,
   Suspense,
@@ -77,8 +78,14 @@ export function WeeklyWorkbench({
   onSynced: (job: WeeklyJob) => void;
   externalJob?: WeeklyJob | null;
 }) {
-  const { role } = useAccess();
-  const editable = role === 'admin' || role === 'editor' || (role === 'professional_admin' || role === 'professional_engineer');
+  const access = useAccess();
+  const { role } = access;
+  const legacyEditable = role === 'admin' || role === 'editor' || (role === 'professional_admin' || role === 'professional_engineer');
+  const editable = canUsePageAction(access, 'meetings', 'update', legacyEditable);
+  const canCreate = canUsePageAction(access, 'meetings', 'create', legacyEditable);
+  const canRefresh = canUsePageAction(access, 'meetings', 'refresh', legacyEditable);
+  const canNotify = canUsePageAction(access, 'meetings', 'notify', legacyEditable);
+  const canDelete = canUsePageAction(access, 'meetings', 'delete', role === 'admin' || role === 'professional_admin' || role === 'professional_engineer');
   const [data, setData] = useState<WeeklyWorkspace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState('');
@@ -171,7 +178,7 @@ export function WeeklyWorkbench({
   const load = useCallback(async (signal: AbortSignal, recheck = false) => {
     const request = ++workspaceRequest.current;
     try {
-      const workspace = await weeklyWorkspace(signal, editable && recheck);
+      const workspace = await weeklyWorkspace(signal, canRefresh && recheck);
       if (
         signal.aborted ||
         !mounted.current ||
@@ -221,7 +228,7 @@ export function WeeklyWorkbench({
         );
       }
     }
-  }, [editable]);
+  }, [canRefresh]);
   useEffect(() => {
     const controller = new AbortController();
     mounted.current = true;
@@ -385,7 +392,7 @@ export function WeeklyWorkbench({
     }
   };
   const retry = async (job: WeeklyJob) => {
-    if (retrying) return;
+    if (!editable || retrying) return;
     setRetrying(job.id);
     setError(null);
     try {
@@ -403,7 +410,7 @@ export function WeeklyWorkbench({
     }
   };
   const retryNotification = async (job: WeeklyJob) => {
-    if (retrying) return;
+    if (!canNotify || retrying) return;
     setRetrying(job.id);
     try {
       const result = await retryWeeklyNotification(job.id);
@@ -418,7 +425,7 @@ export function WeeklyWorkbench({
     }
   };
   const changeTask = async (job: WeeklyJob, action: 'delete' | 'restore') => {
-    if ((role !== 'admin' && (role !== 'professional_admin' && role !== 'professional_engineer')) || taskChangeActive.current) return;
+    if ((action === 'delete' ? !canDelete : !editable) || taskChangeActive.current) return;
     if (
       action === 'delete' ? !canDeleteWeeklyTask(job) : job.status !== 'deleted'
     )
@@ -523,7 +530,7 @@ export function WeeklyWorkbench({
           }}
           onOpen={onOpenRecord}
           onAction={(action) => {
-            if (!editable) return;
+            if (!(action === 'create-row' || (action === 'generate' && record?.id === 'new') ? canCreate : editable)) return;
             if (action === 'create-row') setSelected('new');
             setDialog(action);
           }}
@@ -533,7 +540,7 @@ export function WeeklyWorkbench({
           <Button
             variant="outline"
             size="sm"
-            disabled={!editable || data.runtime.message === '正在检查周报引擎'}
+            disabled={!canRefresh || data.runtime.message === '正在检查周报引擎'}
             onClick={() => {
               engineProbes.current = 0;
               setData(
@@ -721,7 +728,7 @@ export function WeeklyWorkbench({
                       删除失败：{job.deletion.error}
                     </span>
                   )}
-                  {(role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer')) && canDeleteWeeklyTask(job) && (
+                  {canDelete && canDeleteWeeklyTask(job) && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -731,7 +738,7 @@ export function WeeklyWorkbench({
                       删除任务
                     </Button>
                   )}
-                  {(role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer')) && job.status === 'deleted' && (
+                  {editable && job.status === 'deleted' && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -761,7 +768,7 @@ export function WeeklyWorkbench({
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={!editable || retrying === job.id}
+                          disabled={!canNotify || retrying === job.id}
                           onClick={() => void retryNotification(job)}
                         >
                           重试群提醒
@@ -806,7 +813,7 @@ export function WeeklyWorkbench({
                       恢复草稿
                     </Button>
                   )}
-                  {job.status === 'uncertain' && (role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer')) && (
+                  {job.status === 'uncertain' && editable && (
                     <>
                       {job.targetRecordId === 'new' &&
                         job.kind === 'generate' && (
@@ -887,7 +894,7 @@ export function WeeklyWorkbench({
                 schedule={data?.schedule}
                 jobs={jobs}
                 onDeleteTask={
-                  (role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer'))
+                  canDelete
                     ? (job) => void changeTask(job, 'delete')
                     : undefined
                 }

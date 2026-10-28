@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import { canUseInventoryAction } from './inventory-action-access';
+import type { BusinessAction } from '@shared/business-permissions';
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -277,7 +279,14 @@ export function InventoryMovementPage({
   createRequested = false,
   onCreateRequestHandled,
 }: InventoryMovementPageProps) {
-  const { principalFingerprint } = useAccess();
+  const principal = useAccess();
+  const { principalFingerprint } = principal;
+  const canCreate = canUseInventoryAction(principal, 'create');
+  const canConfirm = canUseInventoryAction(principal, 'confirm');
+  const canRefresh = canUseInventoryAction(principal, 'refresh');
+  const canActOnRecord = useCallback((action: BusinessAction, record: { building?: unknown; specialty?: unknown }) => canUseInventoryAction(principal, action, record), [principal]);
+  const currentPrincipalRef = useRef(principal);
+  currentPrincipalRef.current = principal;
   const [inboundState, setInboundState] = useState(() =>
     createInitialInventoryInboundState<MovementMutationDraft>({
       movementResponse: EMPTY_RESPONSE,
@@ -563,6 +572,7 @@ export function InventoryMovementPage({
 
   const loadMovements = useCallback(
     async (forceRefresh = false) => {
+      forceRefresh = forceRefresh && canRefresh;
       const requestId = ++movementRequestRef.current;
       const requestGeneration = principalRequestGenerationRef.current;
       const requestPrincipal = principalFingerprint;
@@ -650,6 +660,7 @@ export function InventoryMovementPage({
     [
       building,
       meta.title,
+      canRefresh,
       page,
       principalFingerprint,
       searchQuery,
@@ -660,6 +671,7 @@ export function InventoryMovementPage({
 
   const loadPendingPurchases = useCallback(
     async (forceRefresh = false) => {
+      forceRefresh = forceRefresh && canRefresh;
       if (type !== 'inbound') return [];
       const requestId = ++pendingRequestRef.current;
       const requestGeneration = principalRequestGenerationRef.current;
@@ -703,7 +715,7 @@ export function InventoryMovementPage({
         }
       }
     },
-    [principalFingerprint, type],
+    [principalFingerprint, type, canRefresh],
   );
 
   useEffect(() => {
@@ -953,6 +965,11 @@ export function InventoryMovementPage({
           setSelectedOutbound(null);
           return false;
         }
+        if (currentPrincipalRef.current.effectiveAuthorization && !canUseInventoryAction(currentPrincipalRef.current, 'confirm', recovery.itemSnapshot)) {
+          setOutboundConfirmRetryMutationId('');
+          setSelectedOutbound(null);
+          return false;
+        }
         if (
           !canRestoreInventoryOutboundConfirmation(
             canConfirmOutbound,
@@ -1110,7 +1127,7 @@ export function InventoryMovementPage({
   }, [loadPendingPurchases, normalizedPurchaseExecutionRecordId, type]);
 
   useEffect(() => {
-    if (!createRequested) {
+    if (!createRequested || !canCreate) {
       return;
     }
     if (type === 'inbound' && restoreSavedInboundRecovery()) {
@@ -1137,6 +1154,7 @@ export function InventoryMovementPage({
     onCreateRequestHandled?.();
   }, [
     createRequested,
+    canCreate,
     onCreateRequestHandled,
     restoreSavedInboundRecovery,
     legacyOutboundCreateBlocked,
@@ -1298,7 +1316,10 @@ export function InventoryMovementPage({
 
     const runtime = createInventoryOutboundCreationRuntime({
       principalFingerprint: principalFingerprint,
-      submitOutbound: submitInventoryOutbound,
+      submitOutbound: (request) => {
+        if (!canUseInventoryAction(currentPrincipalRef.current, 'create')) return Promise.reject(new Error('当前权限不能提交出库，原任务记录已保留'));
+        return submitInventoryOutbound(request);
+      },
       getTaskStatus: getInventoryOutboundTaskStatus,
       saveJournal: saveInventoryOutboundCreationTask,
       finalizeJournal: finalizeInventoryOutboundCreationTask,
@@ -1845,6 +1866,7 @@ export function InventoryMovementPage({
   };
 
   const openMovementCreateDialog = useCallback(() => {
+    if (!canCreate) return;
     if (type === 'outbound' && visibleOutboundCreationTask) {
       toast.info('当前出库尚未取得任务编号，请等待服务端受理后再办理下一笔');
       return;
@@ -1864,6 +1886,7 @@ export function InventoryMovementPage({
     }
     setCreateOpen(true);
   }, [
+    canCreate,
     legacyOutboundCreateBlocked,
     restoreSavedOutboundRecovery,
     type,
@@ -2045,6 +2068,11 @@ export function InventoryMovementPage({
     ]);
 
   const sendInventoryBatch = useCallback(async (journal: InventoryBatchJournal) => {
+    if (journal.principalFingerprint !== principalRequestPrincipalRef.current) return;
+    if (!canUseInventoryAction(currentPrincipalRef.current, journal.kind === 'purchase' ? 'confirm' : 'create')) {
+      setBatchErrors(current => ({ ...current, [journal.kind]: '当前权限不能重新提交此批任务，可继续查询已受理结果' }));
+      return;
+    }
     if (batchSendingRef.current.has(journal.kind)) return;
     batchSendingRef.current.add(journal.kind);
     try {
@@ -2070,13 +2098,14 @@ export function InventoryMovementPage({
     } finally {
       batchSendingRef.current.delete(journal.kind);
     }
-  }, [loadPendingPurchases]);
+  }, [loadPendingPurchases, canConfirm, canCreate]);
 
   const startInventoryBatch = useCallback((
     kind: InventoryBatchKind,
     requests: InventoryBatchJournal['requests'],
     labels: string[],
   ): boolean => {
+    if (kind === 'purchase' ? !canConfirm : !canCreate) return false;
     if (!principalFingerprint) {
       toast.error('登录身份未就绪，本次未发送');
       return false;
@@ -2099,7 +2128,7 @@ export function InventoryMovementPage({
       toast.error(errorMessage(error, '批量任务无法安全保存，本次未发送'));
       return false;
     }
-  }, [principalFingerprint, sendInventoryBatch]);
+  }, [principalFingerprint, sendInventoryBatch, canConfirm, canCreate]);
 
   const reconcileInventoryBatch = useCallback(async (journal: InventoryBatchJournal) => {
     if (batchPollingRef.current.has(journal.kind)) return;
@@ -2161,11 +2190,11 @@ export function InventoryMovementPage({
   }, [batchJournals, reconcileInventoryBatch, type]);
 
   const submitOutboundBatch = useCallback((submissions: InventoryOutboundSubmission[]): boolean =>
-    startInventoryBatch(
+    submissions.every(submission => canActOnRecord('create', { building: submission.draft.building, specialty: submission.draft.selectedItem?.specialty })) && startInventoryBatch(
       'outbound',
       submissions.map((submission) => submission.request),
       submissions.map((submission) => `${submission.optimisticMovement.name} · ${submission.request.quantity} ${submission.optimisticMovement.unit}`),
-    ), [startInventoryBatch]);
+    ), [startInventoryBatch, canActOnRecord]);
 
   useEffect(() => {
     if (!principalFingerprint) return;
@@ -2189,6 +2218,7 @@ export function InventoryMovementPage({
 
   const submitOutbound = useCallback(
     async (submission: InventoryOutboundSubmission): Promise<boolean> => {
+      if (!canCreate || !canActOnRecord('create', { building: submission.draft.building, specialty: submission.draft.selectedItem?.specialty })) return false;
       const namespace =
         getInventoryOutboundCreationTaskStorageKey(principalFingerprint);
       const runtime = outboundCreationRuntimeRef.current;
@@ -2278,6 +2308,8 @@ export function InventoryMovementPage({
       return true;
     },
     [
+      canCreate,
+      canActOnRecord,
       legacyOutboundCreateBlocked,
       outboundCreationStorageBlocked,
       principalFingerprint,
@@ -2290,6 +2322,7 @@ export function InventoryMovementPage({
   const openOutboundConfirmation = useCallback(
     (item: InventoryOutboundMovementItem) => {
       if (
+        !canActOnRecord('confirm', item) ||
         !canConfirmInventoryOutboundForBuilding(
           canConfirmOutbound,
           item.building,
@@ -2309,6 +2342,7 @@ export function InventoryMovementPage({
     },
     [
       canConfirmOutbound,
+      canActOnRecord,
       outboundConfirmationBuilding,
       restoreSavedOutboundRecovery,
     ],
@@ -2317,6 +2351,7 @@ export function InventoryMovementPage({
   const submitOutboundConfirmation = useCallback(
     (item: InventoryOutboundMovementItem) => {
       if (
+        !canActOnRecord('confirm', item) ||
         !canConfirmInventoryOutboundForBuilding(
           canConfirmOutbound,
           item.building,
@@ -2446,6 +2481,7 @@ export function InventoryMovementPage({
     [
       canConfirmOutbound,
       loadMovements,
+      canActOnRecord,
       outboundConfirmationBuilding,
       outboundConfirmRetryMutationId,
       restoreSavedOutboundRecovery,
@@ -2464,6 +2500,7 @@ export function InventoryMovementPage({
 
   const submitManualInbound = useCallback(
     (submission: InventoryInboundSubmission): boolean => {
+      if (!canCreate || !canActOnRecord('create', { building: submission.draft.building, specialty: submission.draft.mode === 'new' ? submission.draft.newItem.specialty : submission.draft.selectedItem?.specialty })) return false;
       if (
         activeInboundMutationIdsRef.current.has(submission.clientMutationId)
       ) {
@@ -2632,11 +2669,12 @@ export function InventoryMovementPage({
       });
       return true;
     },
-    [requestAcceptedInboundRecoveryCheck, restoreSavedInboundRecovery],
+    [requestAcceptedInboundRecoveryCheck, restoreSavedInboundRecovery, canCreate, canActOnRecord],
   );
 
   const submitPurchaseInbound = useCallback(
     (submission: PurchaseInboundSubmission): boolean => {
+      if (!canConfirm) return false;
       if (
         activeInboundMutationIdsRef.current.has(submission.clientMutationId)
       ) {
@@ -2658,6 +2696,7 @@ export function InventoryMovementPage({
         toast.error('采购待办上下文已失效，请刷新后重试');
         return false;
       }
+      if (!canActOnRecord('confirm', retryItem)) return false;
       const purchaseRecoveryDraft = createPurchaseInboundRecoveryDraft(
         submission.draft,
         retryItem,
@@ -2851,7 +2890,7 @@ export function InventoryMovementPage({
       });
       return true;
     },
-    [
+    [canConfirm, canActOnRecord,
       pendingPurchases,
       requestAcceptedInboundRecoveryCheck,
       restoreSavedInboundRecovery,
@@ -2890,6 +2929,7 @@ export function InventoryMovementPage({
   );
 
   const handlePendingPurchaseAction = (item: PurchasePendingInboundItem) => {
+    if (!canActOnRecord('confirm', item)) return;
     const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>();
     if (recovery && recovery.status === 'accepted') {
       void queryAcceptedPurchaseInboundRecovery(recovery);
@@ -2910,7 +2950,9 @@ export function InventoryMovementPage({
   };
 
   const beginPurchaseBatch = () => {
+    if (!canConfirm) return;
     const items = pendingPurchases.filter((item) => selectedPendingIds.has(item.executionRecordId));
+    if (items.some(item => !canActOnRecord('confirm', item))) { toast.error('当前权限不能确认所选条目'); return; }
     if (items.length < 2) {
       toast.info('请至少选择两项待入库物品');
       return;
@@ -2948,6 +2990,8 @@ export function InventoryMovementPage({
   };
 
   const stagePurchaseBatch = (submission: PurchaseInboundSubmission): boolean => {
+    const candidate = batchInboundQueue.find(item => item.executionRecordId === submission.purchaseExecutionRecordId);
+    if (!candidate || !canActOnRecord('confirm', candidate)) return false;
     const next = [...batchInboundSubmissions, submission];
     const following = batchInboundQueue[batchInboundIndex + 1];
     if (following) {
@@ -2972,13 +3016,13 @@ export function InventoryMovementPage({
 
   const canDeleteMovement = useCallback(
     (item: InventoryMovementItem): boolean =>
-      canDeleteMovements &&
+      canDeleteMovements && canActOnRecord('delete', item) &&
       (item.type === 'inbound' || item.type === 'outbound') &&
       item.pendingSync !== true &&
       !item.recordId.startsWith('pending:') &&
       (movementDeletionBuilding === null ||
         item.building === movementDeletionBuilding),
-    [canDeleteMovements, movementDeletionBuilding],
+    [canDeleteMovements, movementDeletionBuilding, canActOnRecord],
   );
 
   const openMovementDeletion = useCallback(
@@ -3207,6 +3251,7 @@ export function InventoryMovementPage({
               ) : (
                 <Button
                   size="sm"
+                  disabled={!canCreate}
                   onClick={openMovementCreateDialog}
                   className="bg-blue-600 text-white shadow-sm hover:bg-blue-700"
                 >
@@ -3340,7 +3385,7 @@ export function InventoryMovementPage({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" disabled={selectedPendingIds.size < 2} onClick={beginPurchaseBatch}>
+                  <Button size="sm" disabled={!canConfirm || selectedPendingIds.size < 2} onClick={beginPurchaseBatch}>
                     批量办理入库（{selectedPendingIds.size}）
                   </Button>
                   <Badge className="border-emerald-200 bg-white text-emerald-700">
@@ -3486,7 +3531,7 @@ export function InventoryMovementPage({
             type={type}
             response={response}
             onPageChange={setPage}
-            canConfirmOutbound={canConfirmOutbound}
+            canConfirmOutbound={canConfirmOutbound && canConfirm}
             outboundConfirmationBuilding={outboundConfirmationBuilding}
             confirmingOutboundRecordId={confirmingOutboundRecordId}
             onOutboundAction={openOutboundConfirmation}
@@ -3561,7 +3606,7 @@ export function InventoryMovementPage({
         open={
           Boolean(selectedOutbound) &&
           Boolean(
-            selectedOutbound &&
+            selectedOutbound && canActOnRecord('confirm', selectedOutbound) &&
             canConfirmInventoryOutboundForBuilding(
               canConfirmOutbound,
               selectedOutbound.building,
@@ -3571,7 +3616,7 @@ export function InventoryMovementPage({
         }
         item={selectedOutbound}
         canConfirm={Boolean(
-          selectedOutbound &&
+          selectedOutbound && canActOnRecord('confirm', selectedOutbound) &&
           canConfirmInventoryOutboundForBuilding(
             canConfirmOutbound,
             selectedOutbound.building,
@@ -3858,13 +3903,14 @@ function PendingPurchaseActionButton({
   confirmingExecutionId: string;
   onAction: (item: PurchasePendingInboundItem) => void;
 }) {
+  const canConfirm = canUseInventoryAction(useAccess(), 'confirm', item);
   const isConfirming = confirmingExecutionId === item.executionRecordId;
 
   return (
     <Button
       size="sm"
       aria-label={`处理${item.itemName}入库`}
-      disabled={isConfirming}
+      disabled={isConfirming || !canConfirm}
       className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700"
       onClick={() => onAction(item)}
     >
@@ -3933,6 +3979,7 @@ function MovementRecords({
   onDeleteAction: (item: InventoryMovementItem) => void;
   uncertainOutboundMutationIds: ReadonlySet<string>;
 }) {
+  const principal = useAccess();
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -3961,7 +4008,7 @@ function MovementRecords({
                 uncertainOutboundMutationIds.has(item.clientMutationId);
               const confirmable = Boolean(
                 outboundItem &&
-                canConfirmInventoryOutboundForBuilding(
+                canUseInventoryAction(principal, 'confirm', item) && canConfirmInventoryOutboundForBuilding(
                   canConfirmOutbound,
                   outboundItem.building,
                   outboundConfirmationBuilding,
@@ -4073,7 +4120,7 @@ function MovementRecords({
                           <span className="text-xs text-slate-400">
                             {getOutboundOperationHint(
                               outboundItem,
-                              canConfirmInventoryOutboundForBuilding(
+                              canUseInventoryAction(principal, 'confirm', item) && canConfirmInventoryOutboundForBuilding(
                                 canConfirmOutbound,
                                 outboundItem.building,
                                 outboundConfirmationBuilding,
@@ -4116,7 +4163,7 @@ function MovementRecords({
             uncertainOutboundMutationIds.has(item.clientMutationId);
           const confirmable = Boolean(
             outboundItem &&
-            canConfirmInventoryOutboundForBuilding(
+            canUseInventoryAction(principal, 'confirm', item) && canConfirmInventoryOutboundForBuilding(
               canConfirmOutbound,
               outboundItem.building,
               outboundConfirmationBuilding,
@@ -4202,7 +4249,7 @@ function MovementRecords({
                       {type === 'outbound' && outboundItem
                         ? getOutboundOperationHint(
                             outboundItem,
-                            canConfirmInventoryOutboundForBuilding(
+                            canUseInventoryAction(principal, 'confirm', item) && canConfirmInventoryOutboundForBuilding(
                               canConfirmOutbound,
                               outboundItem.building,
                               outboundConfirmationBuilding,

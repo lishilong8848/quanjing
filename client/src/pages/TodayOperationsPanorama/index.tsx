@@ -47,6 +47,7 @@ import {
   getTodayOperationsOverview,
 } from '@/api';
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { AlarmAiConnectionBadge } from '@/components/AlarmAiConnectionBadge';
 import { useNantongAssistantPageSummary } from '@/components/NantongAssistantHost';
 import { Button } from '@/components/ui/button';
@@ -1372,11 +1373,11 @@ function AlarmOverview({
 }
 
 export default function TodayOperationsPanoramaPage() {
-  const {
-    role,
-    capabilities: { canForceRefresh },
-  } = useAccess();
-  const todayAttendance = useTodayAttendanceSnapshot(role !== 'guest');
+  const access = useAccess();
+  const { role } = access;
+  const canForceRefresh = canUsePageAction(access, 'today_operations', 'refresh', access.capabilities.canForceRefresh);
+  const canReadAttendance = canUsePageAction(access, 'attendance', 'read', role !== 'guest');
+  const todayAttendance = useTodayAttendanceSnapshot(canReadAttendance);
   const [now, setNow] = useState(() => new Date());
   const businessDateKey = formatShanghaiBusinessDateKey(now);
   const [operationsReady, setOperationsReady] = useState(false);
@@ -1697,7 +1698,7 @@ export default function TodayOperationsPanoramaPage() {
               onOpenChange={setOnDutyDialogOpen}
               model={onDutyDialogModel}
               attendance={todayAttendance}
-              canViewAttendance={role !== 'guest'}
+              canViewAttendance={canReadAttendance}
               canManualSync={role === 'admin'}
               canViewCorrectionEvidence={role === 'admin'}
             />

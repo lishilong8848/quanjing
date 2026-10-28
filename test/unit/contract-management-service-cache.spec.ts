@@ -59,14 +59,14 @@ describe('ContractManagementService dashboard cache', () => {
       .results[0].value;
 
     expect(refreshOptions.intervalMs).toBe(7 * 24 * 60 * 60 * 1000);
-    service.onModuleInit();
+    await service.onModuleInit();
     expect(refreshController.start).toHaveBeenCalledTimes(1);
 
     await refreshOptions.refresh();
 
     expect(fetchBitableRecords).toHaveBeenCalledTimes(4);
     expect(attachmentStorage.enrichAndSchedule).toHaveBeenCalledTimes(1);
-    service.onModuleDestroy();
+    await service.onModuleDestroy();
     expect(refreshController.stop).toHaveBeenCalledTimes(1);
   });
 

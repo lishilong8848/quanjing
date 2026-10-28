@@ -1,4 +1,4 @@
-import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { businessBuildingsForAction, canPerformBusinessAction, isProfessionalBusinessPrincipal, type BusinessPermissionContext } from '../../../shared/business-permissions';
 import { accessBuildings, canAccessBuilding } from '../../../shared/building-access';
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import {
@@ -18,7 +18,6 @@ import type {
 } from '../../../shared/purchase-inventory.interface';
 import { PurchaseInventoryService } from './purchase-inventory.service';
 import { canManageProfessionalRecord } from '../../../shared/professional-access';
-import { assertProfessionalRecordScope } from '../../common/access/professional-record-scope';
 
 const FULL_DASHBOARD_ROLES = new Set([
   'admin',
@@ -71,7 +70,7 @@ export class PurchaseAccessPolicyService {
     pageRead = false,
   ): PurchaseInventoryResponse {
     if (isProfessionalBusinessPrincipal(principal)) {
-      const requests = dashboard.requests.filter(item => canManageProfessionalRecord(principal, item.specialty, item.building, { module: 'purchase', action: 'read' }));
+      const requests = dashboard.requests.filter(item => canManageProfessionalRecord(principal, item.specialty, item.building, { module: 'purchase', action: principal.permissionContext?.action || 'read' }));
       return buildScopedDashboard(dashboard, requests, [], [], []);
     }
     if (FULL_DASHBOARD_ROLES.has(principal.role)) return dashboard;
@@ -113,10 +112,17 @@ export class PurchaseAccessPolicyService {
   assertRequestedBuilding(
     principal: AccessPrincipal,
     requestedBuilding: unknown,
+    context: BusinessPermissionContext = principal.permissionContext || { module: 'purchase', action: 'read' },
   ): PurchaseBuilding | string {
-    if (principal.role === 'guest' && !isProfessionalBusinessPrincipal(principal)) denyAccess();
+    const scopedPrincipal = { ...principal, permissionContext: context };
+    if (principal.role === 'guest' && !isProfessionalBusinessPrincipal(scopedPrincipal)) denyAccess();
     const requested = normalizeBuilding(requestedBuilding);
     if (!requested) denyAccess();
+    // A selector has no record specialty yet; writes/results still check the actual pair.
+    if (isProfessionalBusinessPrincipal(scopedPrincipal)) {
+      if (!businessBuildingsForAction(scopedPrincipal, context).some(building => building === requested)) denyAccess();
+      return requested;
+    }
     if (
       (principal.role === 'purchase_applicant' || principal.role === 'building_admin' || principal.role === 'inventory_admin') &&
       !canAccessBuilding(principal, requested)
@@ -135,14 +141,24 @@ export class PurchaseAccessPolicyService {
     const includesStatus =
       isObjectLike(fields) &&
       Object.prototype.hasOwnProperty.call(fields, 'status');
+    // Record-state and applicant invariants apply before any personal scope override.
+    if (includesStatus && principal.role !== 'admin') denyAccess();
+    if (principal.role === 'purchase_applicant' && isObjectLike(fields)) {
+      for (const field of APPLICANT_FORBIDDEN_UPDATE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(fields, field)) denyAccess();
+      }
+    }
     if (isProfessionalBusinessPrincipal(principal)) {
       const dashboard = await this.inventoryService.getDashboard(true);
       this.assertFreshProfessionalDashboard(principal, dashboard);
       const item = resolveUniqueRouteItem(dashboard.requests, clean(routeRecordId));
       if (!item) denyAccess();
-      assertProfessionalRecordScope(principal, item.specialty, item.building);
+      if (!canPerformBusinessAction(principal, { module: 'purchase', action: 'update', specialty: item.specialty, building: item.building }) ||
+        (principal.role === 'purchase_applicant' && !applicantStageAllowsMutation(item))) denyAccess();
       assertTypedUpdateIdsMatch(dashboard.requests, item, request);
-      if (isObjectLike(fields)) assertProfessionalRecordScope(principal, Object.hasOwn(fields, 'specialty') ? (fields as Record<string, unknown>).specialty : item.specialty, Object.hasOwn(fields, 'building') ? (fields as Record<string, unknown>).building : item.building);
+      if (isObjectLike(fields) && !canPerformBusinessAction(principal, { module: 'purchase', action: 'update',
+        specialty: Object.hasOwn(fields, 'specialty') ? (fields as Record<string, unknown>).specialty : item.specialty,
+        building: Object.hasOwn(fields, 'building') ? (fields as Record<string, unknown>).building : item.building })) denyAccess();
       return request;
     }
     if (principal.role === 'building_admin') {
@@ -208,7 +224,9 @@ export class PurchaseAccessPolicyService {
         if (!target || typeof target !== 'object' || Array.isArray(target)) denyAccess();
         const item = resolveDeleteTarget(indexes, target.submissionRecordId, target.executionRecordId);
         if (!item) denyAccess();
-        assertProfessionalRecordScope(principal, item.specialty, item.building);
+        if (!canPerformBusinessAction(principal, { module: 'purchase', action: 'delete', specialty: item.specialty, building: item.building }) ||
+          (principal.role === 'editor' && item.stage !== 'stocked') ||
+          (principal.role === 'purchase_applicant' && !applicantStageAllowsMutation(item))) denyAccess();
       }
       return request;
     }
@@ -463,9 +481,12 @@ function canApplicantMutate(
 ): boolean {
   return (
     canAccessBuilding(principal, item.building) &&
-    APPLICANT_EDITABLE_STAGES.has(item.stage) &&
-    item.purchaseCompleted === false
+    applicantStageAllowsMutation(item)
   );
+}
+
+function applicantStageAllowsMutation(item: PurchaseInventoryRequestItem): boolean {
+  return APPLICANT_EDITABLE_STAGES.has(item.stage) && item.purchaseCompleted === false;
 }
 
 function normalizeBuilding(value: unknown): PurchaseBuilding | null {

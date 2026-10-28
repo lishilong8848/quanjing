@@ -1,5 +1,6 @@
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
 import * as React from 'react';
+import { hasBusinessPermissionSomewhere } from '@shared/business-permissions';
 import { Outlet, useLocation } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
@@ -7,20 +8,28 @@ import { isPurchaseApplicationDirectPath } from '@/navigation/purchase-applicati
 import { useAccess } from './AccessProvider';
 import {
   canAccessPage,
+  hasAuthenticatedAccessIdentity,
   isControlledScreenshotPageRequest,
 } from './access-policy';
 
 export default function RouteAccessGuard() {
   const location = useLocation();
-  const { role, pagePaths, isLoading, isConfirmingIdentity, dismissedLoginPath, sessionError, retrySession, requestLogin } = useAccess();
+  const access = useAccess();
+  const { role, pagePaths, isLoading, isConfirmingIdentity, dismissedLoginPath, sessionError, retrySession, requestLogin } = access;
+  const authenticated = hasAuthenticatedAccessIdentity(access);
   const lastAutomaticLoginRequestRef = React.useRef('');
   const controlledScreenshotRequest = isControlledScreenshotPageRequest(
     location.pathname,
     location.search,
   );
   const guestAllowed = canAccessPage('guest', location.pathname);
+  const directApplication = location.pathname.replace(/\/+$/,'');
+  const createOnlyAllowed = !!access.effectiveAuthorization && (
+    directApplication==='/monthly-schedule/apply/leave' && hasBusinessPermissionSomewhere(access,{module:'leave_requests',action:'create'}) ||
+    directApplication==='/monthly-schedule/apply/overtime' && hasBusinessPermissionSomewhere(access,{module:'overtime_requests',action:'create'}) ||
+    isPurchaseApplicationDirectPath(directApplication) && hasBusinessPermissionSomewhere(access,{module:'purchase',action:'create'}));
   const allowed =
-    controlledScreenshotRequest || canAccessPage(role, location.pathname, pagePaths);
+    controlledScreenshotRequest || createOnlyAllowed || canAccessPage(role, location.pathname, pagePaths);
   const reason = getRouteAccessReason(role, location.pathname);
   const preferredAccountType = isPurchaseApplicationDirectPath(
     location.pathname,
@@ -30,7 +39,7 @@ export default function RouteAccessGuard() {
   const automaticLoginRequestKey = `${location.pathname}\n${reason}\n${preferredAccountType || ''}`;
 
   React.useEffect(() => {
-    if (isConfirmingIdentity || sessionError || dismissedLoginPath === location.pathname) return;
+    if (isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;
     if (allowed) {
       lastAutomaticLoginRequestRef.current = '';
       return;
@@ -48,6 +57,7 @@ export default function RouteAccessGuard() {
     return () => window.clearTimeout(timeoutId);
   }, [
     allowed,
+    authenticated,
     automaticLoginRequestKey,
     isLoading,
     isConfirmingIdentity,
@@ -100,9 +110,9 @@ export default function RouteAccessGuard() {
           <LockKeyhole className="size-6" aria-hidden="true" />
         </div>
         <h1 className="mt-4 text-xl font-semibold text-slate-900">
-          当前页面需要登录权限
+          {authenticated ? '当前账号未获此页面权限' : '当前页面需要登录权限'}
         </h1>
-        <p className="mt-2 text-sm leading-6 text-slate-600">{reason}</p>
+        <p className="mt-2 text-sm leading-6 text-slate-600">{authenticated ? '请联系管理员调整页面权限，或切换有权限的账号。' : reason}</p>
         <Button
           type="button"
           className="mt-5"
@@ -111,7 +121,7 @@ export default function RouteAccessGuard() {
           }
         >
           <ShieldCheck className="size-4" aria-hidden="true" />
-          登录权限
+          {authenticated ? '切换账号' : '登录权限'}
         </Button>
       </section>
     </main>

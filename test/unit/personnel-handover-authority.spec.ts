@@ -15,7 +15,7 @@ function fixture(){
   const from:AuthorityPerson={id:'local-external-'+ 'a'.repeat(64),recordId:'recOld',name:'合成前任',openId:'ou_old',active:false,type:'employee',position:'C楼主管',systemPosition:'',buildings:['C楼'],specialties:[],permissionTags:[],dutyRecordIds:[]};
   const to:AuthorityPerson={...from,id:'local-external-'+ 'b'.repeat(64),recordId:'recNew',name:'合成接任',openId:'ou_new',active:true};
   const account=(person:AuthorityPerson):ManagedAccount=>({id:'feishu-'+feishuIdentityFingerprint(appId,person.openId!),kind:'feishu',appId,name:person.name,role:'site_member',building:null,version:2,enabled:true,deleted:false,source:'configuration',personnelIdentity:person.id,identityHash:feishuIdentityFingerprint(appId,person.openId!)});
-  const source={...account(from),role:'building_admin' as const,building:'C楼' as const,enabled:false,permissionsRevoked:true,guestLoginAllowed:true};
+  const source={...account(from),role:'building_admin' as const,building:'C楼' as const,enabled:false,permissionsRevoked:true,guestLoginAllowed:false};
   const state:AccessConfigurationResponse={appId,revision:8,accounts:[source,account(to)],cardRules:[],audit:[]};
   const archive:PersonnelPermissionArchive={accountId:source.id,name:source.name,appId,personnelIdentity:from.id,capturedAt:'2026-10-14T00:00:00Z',configurationRevision:7,template:accountPermissionTemplate({...source,version:1,enabled:true,permissionsRevoked:false})};
   const directory:ConfigurationDirectorySnapshot={appId,people:[],employees:[],snapshotAt:Date.now(),personnelComplete:true,employmentState:{complete:true,entries:[{personnelIdentity:from.id,openId:from.openId,inactive:true},{personnelIdentity:to.id,openId:to.openId,inactive:false}]},personnelAuthority:{mode:'shadow',version:'c'.repeat(64),snapshotAt:Date.now(),source:{appId,appToken:'fixture',tableId:'tblPeople'},people:[from,to],duties:[{recordId:'recDuty',name:'C楼请休假主管',kind:'leave_supervisor',personnelIds:[to.id],buildings:['C楼'],specialties:null,enabled:true,startsAt:0,endsAt:null,parentDutyIds:[],version:3}],problems:[],issues:[]}};
@@ -64,7 +64,7 @@ describe('实际交接authority基线（合成主表）',()=>{
     ]){const f=fixture();alter(f);expect(()=>buildHandoverAuthoritySnapshot(f.directory,f.state,[f.archive],f.request)).toThrow();}
   });
   it('接任者全撤权、手工停用、删除都不能通过继承恢复',()=>{
-    for(const flags of [{permissionsRevoked:true,guestLoginAllowed:true},{enabled:false},{deleted:true}]){const f=fixture();Object.assign(f.state.accounts[1],flags);expect(()=>buildHandoverAuthoritySnapshot(f.directory,f.state,[f.archive],f.request)).toThrow();}
+    for(const flags of [{permissionsRevoked:true,guestLoginAllowed:false},{enabled:false},{deleted:true}]){const f=fixture();Object.assign(f.state.accounts[1],flags);expect(()=>buildHandoverAuthoritySnapshot(f.directory,f.state,[f.archive],f.request)).toThrow();}
   });
   it('全撤权前任不能伪装轮岗；缺收权前存档不复制游客模板',()=>{
     const f=fixture();f.from.active=true;f.directory.employmentState!.entries[0].inactive=false;

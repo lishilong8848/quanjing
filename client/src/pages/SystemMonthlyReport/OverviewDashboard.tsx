@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -1000,6 +1002,9 @@ export function ArchiveAttachmentActions({
   onRefresh: () => void;
   onRequireLogin: () => void;
 }) {
+  const access = useAccess();
+  canDownload = canDownload && canUsePageAction(access, 'system_reports', 'export', true);
+  canRetry = canRetry && canUsePageAction(access, 'system_reports', 'update', true);
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
   const attachment = item.attachments[0];
@@ -1017,6 +1022,7 @@ export function ArchiveAttachmentActions({
   if (!attachment)
     return <span className="text-xs text-slate-400">附件信息已裁剪</span>;
   const run = async (action: 'download' | 'retry') => {
+    if (action === 'download' ? !canDownload : !canRetry) return;
     setBusyId(attachment.id);
     setError('');
     try {

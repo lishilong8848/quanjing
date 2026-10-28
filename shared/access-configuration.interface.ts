@@ -31,6 +31,10 @@ export interface ManagedAccount {
   pagePaths?: string[];
   permissionsRevoked?: boolean;
   guestLoginAllowed?: boolean;
+  authorizationBinding?: import('./authorization-profile').AuthorizationBinding;
+  authorizationOverrides?: import('./authorization-profile').AuthorizationOverrides;
+  effectiveAuthorization?: import('./authorization-profile').EffectiveAuthorization;
+  reactivationRequired?: boolean;
 }
 export const CARD_ROLE_CODES = [
   'purchase_manager', 'purchase_approvers', 'purchase_executor',
@@ -45,6 +49,15 @@ export interface CardRoleRule {
   members: ConfigurationPerson[];
   version: number;
 }
+export interface EffectiveCardDuty {
+  code: CardRoleCode;
+  building: BuildingAdminBuilding | null;
+  members: ConfigurationPerson[];
+  status: 'resolved' | 'unknown' | 'blocked';
+  source: 'personnel' | 'handover' | 'configuration' | 'default';
+  sourceStatus?: 'active' | 'pending' | 'error' | 'paused';
+  revision: number;
+}
 export interface ConfigurationAudit {
   id: string;
   at: string;
@@ -56,6 +69,9 @@ export interface ConfigurationAudit {
   after: string;
 }
 export interface AccessConfigurationResponse {
+  schemaVersion?: 1 | 2;
+  authorizationTemplates?: import('./authorization-profile').AuthorizationTemplate[];
+  effectiveCardDuties?: EffectiveCardDuty[];
   personnelBaseline?: { id:string; confirmedAt:number; actorName:string; count:number };
   personnelSource?: import('./personnel-source.interface').PersonnelSourceState;
   personnelDutyAssignments?: Record<string, import('./personnel-duty-routing').PersonnelDutyAssignment>;
@@ -95,6 +111,9 @@ export interface AccountMutation {
   specialties?: ProfessionalSpecialty[];
   personalRules?: import('./business-permissions').PersonalPermissionRule[];
   pagePaths?: string[];
+  authorizationBinding?: import('./authorization-profile').AuthorizationBinding;
+  authorizationOverrides?: import('./authorization-profile').AuthorizationOverrides;
+  confirmReactivation?: boolean;
 }
 export interface CardRoleMutation {
   clientMutationId: string;

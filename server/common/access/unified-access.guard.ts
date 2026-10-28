@@ -7,8 +7,8 @@ import {
 } from '@nestjs/common';
 import { effectivePagePaths, pageApiBinding } from '../../../shared/page-access';
 import { isSiteMemberSessionAccountId, SITE_MEMBER_BACKUP_ACCOUNT_ID } from '../../../shared/site-member-backup';
-import { hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal, personalPermissionPagePaths } from '../../../shared/business-permissions';
-import { businessRequestPermission } from './business-request-permission';
+import { businessModuleDefinition, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal, personalPermissionPagePaths, validEffectiveAuthorization } from '../../../shared/business-permissions';
+import { classifyBusinessRequest } from '../../../shared/business-request-permission';
 import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 import type {
@@ -218,7 +218,7 @@ export class UnifiedAccessGuard implements CanActivate {
       now,
     );
     const renewed = this.access.renew(cookie.value, now);
-    const principal: AccessPrincipal = renewed?.principal ?? {
+    const principal: AccessPrincipal = renewed?.principal ? {...renewed.principal} : {
       role: 'guest',
       purchaseBuilding: null,
     };
@@ -228,14 +228,41 @@ export class UnifiedAccessGuard implements CanActivate {
 
     if (path.startsWith('/api/access/configuration')) return principal.role === 'admin';
 
-    const business = businessRequestPermission(path, request.method, hasForcedRefresh(request) || hasPageReadSideEffect(request));
+    const classification = classifyBusinessRequest(path, request.method, hasForcedRefresh(request) || hasPageReadSideEffect(request));
+    const business = classification.permission;
     if (business) principal.permissionContext = business;
     const scopedBusiness = isProfessionalBusinessPrincipal(principal);
     if (business) {
-      if (scopedBusiness && !hasBusinessPermissionSomewhere(principal, business)) return false;
+      if (!principal.effectiveAuthorization && scopedBusiness) {
+        if (!classification.permissions?.every(permission=>hasBusinessPermissionSomewhere(principal,permission)) ||
+          classification.candidatePermissions && !classification.candidatePermissions.some(permission=>hasBusinessPermissionSomewhere(principal,permission))) return false;
+        principal.permissionContext=classification.candidatePermissions?.find(permission=>hasBusinessPermissionSomewhere(principal,permission)) || business;
+        principal.permissionRequirements=classification.permissions;
+      }
     }
 
     if (isAuthorizedCampusOperationsScreenshotRequest(request, path, now)) return true;
+
+    if (principal.effectiveAuthorization && principal.role !== 'admin') {
+      if (!validEffectiveAuthorization(principal.effectiveAuthorization) || classification.kind === 'admin' || classification.kind === 'denied') return false;
+      if (classification.kind === 'business') {
+        if (!classification.permissions?.every(permission=>hasBusinessPermissionSomewhere(principal,permission)) ||
+          classification.candidatePermissions && !classification.candidatePermissions.some(permission=>hasBusinessPermissionSomewhere(principal,permission))) return false;
+        const permission=classification.candidatePermissions?.find(permission=>hasBusinessPermissionSomewhere(principal,permission)) || business;
+        if (!permission) return false;
+        principal.permissionContext=permission;
+        principal.permissionRequirements=classification.permissions;
+        if (businessModuleDefinition(permission.module).scoped && isProfessionalBusinessPrincipal(principal) && !this.hasHandlerMetadata(ProfessionalScopedMetadataKey,context)) return false;
+        if (this.hasHandlerMetadata(GuestSubmittableMetadataKey,context) && String(request.method).toUpperCase()==='POST') this.reserveGuestSubmission(context,request,now);
+        if (permission.action==='read') request.accessPageRead=true;
+        return true;
+      }
+      if (classification.kind === 'auxiliary' && classification.route?.dependencies) {
+        if (!classification.route.dependencies.some(permission=>hasBusinessPermissionSomewhere(principal,permission))) return false;
+        request.accessPageRead=true;
+        return true;
+      }
+    }
 
     const inherited = this.access.pagePermissions?.(principal.role,principal.accountId,principal.authorizationVersion) ?? { paths: effectivePagePaths(principal.role), configured: false };
     const permissions = { ...inherited, paths: personalPermissionPagePaths(principal, inherited.paths) };
@@ -969,7 +996,8 @@ function hasPageReadSideEffect(request: Request): boolean {
   const params = parseRequestTarget(request.originalUrl || request.url || '')?.searchParams;
   return ['refresh', 'forceRefresh', 'recheck', 'force'].some(key => {
     const values = [...(params?.getAll(key) || []), ...(Array.isArray(request.query?.[key]) ? request.query[key] as unknown[] : [request.query?.[key]])];
-    return values.some(value => value !== undefined && !['', '0', 'false'].includes(String(value).trim().toLowerCase()));
+    return values.some(value => value !== undefined && !['', '0', 'false'].includes(String(value).trim().toLowerCase()) &&
+      !(key==='refresh' && value==='active' && normalizeApiPath(request)==='/api/purchase-inventory/dashboard'));
   });
 }
 function hasForcedRefresh(request: Request): boolean {

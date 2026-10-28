@@ -51,7 +51,7 @@ jest.mock('@nestjs/platform-express', () => ({
   FilesInterceptor: jest.fn(() => class TestFilesInterceptor {}),
 }));
 
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
@@ -60,6 +60,8 @@ import type {
 } from '../../shared/access-control.interface';
 import { AdminOnlyMetadataKey } from '../../server/common/access/unified-access.decorators';
 import { PurchaseInventoryController } from '../../server/modules/purchase-inventory/purchase-inventory.controller';
+import { PurchaseOnlineApprovalService } from '../../server/modules/purchase-inventory/purchase-online-approval.service';
+import { PurchaseWorkflowService } from '../../server/modules/purchase-inventory/purchase-workflow.service';
 
 const applicantA: AccessPrincipal = {
   role: 'purchase_applicant',
@@ -208,7 +210,7 @@ describe('PurchaseInventoryController purchase access gateways', () => {
     const result = controller.getApplicationOptions(requestFor(applicantA));
 
     expect(result).toEqual({ ...options(), buildings: ['A楼'] });
-    expect(policy.requireApplicantBuilding).toHaveBeenCalledWith(applicantA);
+    expect(policy.requireApplicantBuilding).toHaveBeenCalledWith({ ...applicantA, permissionContext: { module: 'purchase', action: 'create' } });
   });
 
   it.each(['admin', 'editor', 'purchase_admin', 'supply_chain_admin'] as const)(
@@ -311,22 +313,17 @@ describe('PurchaseInventoryController purchase access gateways', () => {
 
   it('lets an administrator decide an online purchase approval', async () => {
     const input = { decision: 'approved' };
-
-    await expect(
-      controller.approveRecord(
-        requestFor(principal('admin')),
-        'rec-approval-1',
-        input,
-      ),
-    ).resolves.toEqual({
-      pending: true,
-      taskId: 'purchase-approval-task-1',
-      message: '审批操作已受理，正在后台同步飞书多维表',
-    });
-    expect(onlineApprovalService.acceptDecision).toHaveBeenCalledWith(
-      'rec-approval-1',
-      input,
-    );
+    const actor = { ...principal('admin'), accountId: 'synthetic-admin', authorizationVersion: 1 };
+    const fixture = installApprovalAuthority(controller, actor);
+    jest.useFakeTimers();
+    try {
+      const accepted = await controller.approveRecord(requestFor(actor), 'rec-approval-1', input);
+      expect(accepted).toMatchObject({ pending: true, taskId: expect.stringMatching(/^purchase-approval-/), message: '审批操作已受理，正在后台同步飞书多维表' });
+      expect(fixture.accept).toHaveBeenCalledWith('rec-approval-1', input, 'A楼', expect.objectContaining({ actorOpenId: 'ou_synthetic_actor', principal: expect.objectContaining({ accountId: actor.accountId, authorizationVersion: 1 }) }));
+      await jest.runAllTimersAsync();
+      expect(fixture.online.getAuthorizedDecisionTaskStatus(accepted.taskId, actor)).toMatchObject({ task: { status: 'completed' } });
+      expect(fixture.gateway.updateExecutionRecordAsApp).toHaveBeenCalledTimes(1);
+    } finally { jest.clearAllTimers(); jest.useRealTimers(); }
   });
 
   it.each([
@@ -336,19 +333,20 @@ describe('PurchaseInventoryController purchase access gateways', () => {
     'purchase_applicant',
     'guest',
   ] as AccessRole[])(
-    'rejects online purchase approval for %s before invoking the service',
+    'rejects %s without current approval authority before task acceptance or external writes',
     async (role) => {
-      const accessPrincipal =
-        role === 'purchase_applicant' ? applicantA : principal(role);
+      const accessPrincipal = { ...(role === 'purchase_applicant' ? applicantA : principal(role)), accountId: `synthetic-${role}`, authorizationVersion: 1 };
+      const fixture = installApprovalAuthority(controller, accessPrincipal);
       const error = await controller
         .approveRecord(requestFor(accessPrincipal), 'rec-approval-1', {
           decision: 'rejected',
         })
         .catch((reason: unknown) => reason);
 
-      expect(error).toBeInstanceOf(ForbiddenException);
-      expect((error as ForbiddenException).getStatus()).toBe(403);
-      expect(onlineApprovalService.acceptDecision).not.toHaveBeenCalled();
+      expect(error).toBeInstanceOf(role === 'guest' ? UnauthorizedException : ForbiddenException);
+      expect((error as ForbiddenException).getStatus()).toBe(role === 'guest' ? 401 : 403);
+      expect(fixture.accept).not.toHaveBeenCalled();
+      expect(fixture.gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();
     },
   );
 
@@ -519,7 +517,7 @@ describe('PurchaseInventoryController purchase access gateways', () => {
       );
 
       expect(policy.assertRequestedBuilding).toHaveBeenCalledWith(
-        principal(role),
+        { ...principal(role), permissionContext: { module: 'purchase', action: 'read' } },
         'a楼',
       );
       expect(applicationService.searchCatalog).toHaveBeenCalledWith(
@@ -866,6 +864,22 @@ function requestFor(
 
 function principal(role: AccessRole): AccessPrincipal {
   return { role, purchaseBuilding: null };
+}
+
+function installApprovalAuthority(controller: any, actor: AccessPrincipal) {
+  let record = { recordId: 'rec-approval-1', requestCode: 'SYNTHETIC', status: '未开始（待审批）', itemName: '合成物品', building: 'A楼', specialty: '电气', requesterOpenId: 'ou_requester', requesterName: '合成申请人', purchaserOpenId: 'ou_purchaser', purchaserName: '合成采购人', purchaseMethod: '综合采购', requestedQuantity: 1, actualQuantity: null, actualAmount: null, approvalCompleted: false, warehouseConfirmed: false, purchaseCompleted: false, receiptConfirmed: false, signer: '', receiptTime: null, receiptPhotoTokens: [], invoiceTokens: [] };
+  const gateway = { getTenantAccessTokenAsApp: jest.fn(async () => 'synthetic-token'),
+    getExecutionRecord: jest.fn(async () => structuredClone(record)), getExecutionRecordAsApp: jest.fn(async () => structuredClone(record)),
+    resolveUser: jest.fn(async () => ({ openId: 'ou_synthetic_actor', name: '合成人员', positions: [], buildings: ['A楼'] })),
+    updateExecutionRecordAsApp: jest.fn(async (_id: string, fields: Record<string, unknown>) => { record = { ...record, status: String(fields['采购流程']), purchaseMethod: String(fields['1️⃣物品采购方式']) }; }) };
+  const configuration = { snapshot: () => ({ accounts: [{ id: actor.accountId, enabled: true, deleted: false, openId: 'ou_synthetic_actor' }] }),
+    currentPrincipal: (id: string, version: number) => id === actor.accountId && version === actor.authorizationVersion ? structuredClone(actor) : undefined,
+    currentDutyRoutePeople: () => [] };
+  const workflow = new PurchaseWorkflowService(gateway as never, {} as never, undefined, configuration as never);
+  const online = new PurchaseOnlineApprovalService(gateway as never, workflow);
+  const accept = jest.spyOn(online, 'acceptDecision');
+  Object.assign(controller, { workflowGateway: gateway, configuration, onlineApprovalService: online });
+  return { gateway, online, accept };
 }
 
 function options() {

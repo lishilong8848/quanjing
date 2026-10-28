@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -707,6 +709,7 @@ function ExecutionAnomalyCard({
 }
 
 export default function EquipmentPatrolDashboardPage() {
+  const canRefresh = canUsePageAction(useAccess(), 'patrol', 'refresh', true);
   const [selectedMonth, setSelectedMonth] = useState<string>(DEFAULT_MONTH);
   const [view, setView] = useState<DashboardView>('calendar');
   const [matrixScope, setMatrixScope] = useState<MatrixScope>('standard');
@@ -752,7 +755,7 @@ export default function EquipmentPatrolDashboardPage() {
       try {
         const response = await getEquipmentPatrolExecutions(
           selectedMonth,
-          refresh,
+          refresh && canRefresh,
         );
         setExecutionResponse(response);
       } catch {
@@ -761,7 +764,7 @@ export default function EquipmentPatrolDashboardPage() {
         setExecutionLoading(false);
       }
     },
-    [selectedMonth],
+    [selectedMonth, canRefresh],
   );
 
   useEffect(() => {

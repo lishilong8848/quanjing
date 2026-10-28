@@ -1,4 +1,4 @@
-import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { canPerformBusinessAction, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import {
   Body,
   Controller,
@@ -12,7 +12,7 @@ import {
 import type { Request } from 'express';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
 import type { ThresholdCommand } from '../../../shared/threshold-management.interface';
-import { ThresholdStore } from './threshold.store';
+import { ThresholdStore, type ThresholdMutationScopeCheck } from './threshold.store';
 import { ThresholdSyncService } from './threshold-sync.service';
 import { Optional } from '@nestjs/common';
 import { ThresholdAdjustmentService } from './threshold-adjustment.service';
@@ -49,7 +49,7 @@ export class ThresholdController {
     const snapshot = this.store.list();
     return {
       ...snapshot,
-      records: filterProfessionalRecords(request.accessPrincipal, snapshot.records, record => record.profession).filter(record => !request.accessPrincipal || accessBuildings(request.accessPrincipal) === null || canAccessBuilding(request.accessPrincipal, record.building)),
+      records: filterProfessionalRecords(request.accessPrincipal && { ...request.accessPrincipal, permissionContext: { module: 'thresholds', action: 'read' } }, snapshot.records, record => record.profession).filter(record => !request.accessPrincipal || isProfessionalBusinessPrincipal({ ...request.accessPrincipal, permissionContext: { module: 'thresholds', action: 'read' } }) || accessBuildings(request.accessPrincipal) === null || canAccessBuilding(request.accessPrincipal, record.building)),
       ...(this.sync ? { sourceSync: this.sync.sourceStatus() } : {}),
     };
   }
@@ -102,6 +102,7 @@ export class ThresholdController {
     return this.adjustments.retry(body.id, request.accessPrincipal!);
   }
   @Get('sync')
+  @ProfessionalScoped()
   status(
     @Query('ids') ids: string,
     @Req() request: Request & { accessPrincipal?: AccessPrincipal },
@@ -114,7 +115,7 @@ export class ThresholdController {
       values.some((id) => !/^[a-zA-Z0-9_-]{8,160}$/.test(id))
     )
       throw new BadRequestException('同步任务标识无效');
-    return this.store.syncResults(values);
+    return this.store.syncResults(values, this.syncScope(request, 'read'));
   }
   @ProfessionalScoped()
   @Get('sync/source')
@@ -129,6 +130,7 @@ export class ThresholdController {
     };
   }
   @Post('sync/retry')
+  @ProfessionalScoped()
   retry(
     @Body() body: { clientMutationId: string },
     @Req() request: Request & { accessPrincipal?: AccessPrincipal },
@@ -139,11 +141,12 @@ export class ThresholdController {
       !/^[a-zA-Z0-9_-]{8,160}$/.test(body.clientMutationId)
     )
       throw new BadRequestException('同步任务标识无效');
-    const result = this.store.retrySync(body.clientMutationId, actor);
+    const result = this.store.retrySync(body.clientMutationId, actor, this.syncScope(request, 'update'));
     this.sync?.kick();
     return result;
   }
   @Post('sync/accept-cloud')
+  @ProfessionalScoped()
   acceptCloud(
     @Body() body: { clientMutationId: string },
     @Req() request: Request & { accessPrincipal?: AccessPrincipal },
@@ -155,6 +158,15 @@ export class ThresholdController {
     )
       throw new BadRequestException('同步任务标识无效');
     if (!this.sync) throw new BadRequestException('未接入云端同步');
-    return this.sync.acceptCloud(body.clientMutationId, actor);
+    return this.sync.acceptCloud(body.clientMutationId, actor, this.syncScope(request, 'update'));
+  }
+
+  private syncScope(request: Request & { accessPrincipal?: AccessPrincipal }, action: 'read' | 'update'): ThresholdMutationScopeCheck {
+    const principal = request.accessPrincipal;
+    return records => {
+      if (!principal || !records.length || records.some(record => !canPerformBusinessAction(principal, {
+        module: 'thresholds', action, building: record.building, specialty: record.profession,
+      }))) throw new ForbiddenException('同步任务超出当前授权的楼栋或专业范围');
+    };
   }
 }

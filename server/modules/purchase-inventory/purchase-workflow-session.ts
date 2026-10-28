@@ -31,9 +31,8 @@ export async function resolvePurchaseWorkflowSession(
 ): Promise<PurchaseWorkflowSession> {
   if (isProfessionalBusinessPrincipal(input.principal)) {
     if (!validScopedBusinessPrincipal(input.principal)) throw new UnauthorizedException('业务授权身份无效');
-    const openId = OPERATOR_OPEN_ID_PATTERN.test(input.professionalOpenId || '') ? input.professionalOpenId! :
-      input.principal.accountId?.startsWith('local-external-') ? resolveConfiguredOperatorOpenId('purchase_admin') : '';
-    if (!OPERATOR_OPEN_ID_PATTERN.test(openId)) throw new UnauthorizedException('当前登录身份尚未配置采购操作人');
+    const openId = resolveWorkflowActorOpenId(input);
+    if (!OPERATOR_OPEN_ID_PATTERN.test(openId)) throw new UnauthorizedException('当前人员未关联采购操作身份');
     return { accessToken: await input.getTenantAccessToken(), openId, userName: input.principal.displayName || '',
       accessRole: input.principal.role, specialties: input.principal.specialties ? [...input.principal.specialties] : undefined,
       purchaseBuilding: input.principal.purchaseBuilding, purchaseBuildings: input.principal.buildings ? [...input.principal.buildings] : undefined,
@@ -44,7 +43,7 @@ export async function resolvePurchaseWorkflowSession(
   if (!operatorEnvironmentName) {
     throw new UnauthorizedException('采购工作流权限不足');
   }
-  const openId = resolveConfiguredOperatorOpenId(role);
+  const openId = resolveWorkflowActorOpenId(input);
   if (!OPERATOR_OPEN_ID_PATTERN.test(openId)) {
     throw new ServiceUnavailableException(
       `采购工作流未配置有效操作人：${operatorEnvironmentName}`,
@@ -69,9 +68,7 @@ export async function resolvePurchaseWorkflowReadSession(
 ): Promise<PurchaseWorkflowSession> {
   if (isProfessionalBusinessPrincipal(input.principal)) {
     if (!validScopedBusinessPrincipal(input.principal)) throw new UnauthorizedException('业务授权身份无效');
-    const openId = OPERATOR_OPEN_ID_PATTERN.test(input.professionalOpenId || '') ? input.professionalOpenId! :
-      input.principal.accountId?.startsWith('local-external-') ? resolveConfiguredOperatorOpenId('purchase_admin') : '';
-    if (!OPERATOR_OPEN_ID_PATTERN.test(openId)) throw new UnauthorizedException('当前登录身份尚未配置采购操作人');
+    const openId = resolveWorkflowActorOpenId(input);
     return { accessToken: await input.getTenantAccessToken(), openId, userName: input.principal.displayName || '',
       accessRole: input.principal.role, specialties: input.principal.specialties ? [...input.principal.specialties] : undefined,
       purchaseBuilding: input.principal.purchaseBuilding, purchaseBuildings: input.principal.buildings ? [...input.principal.buildings] : undefined,
@@ -82,7 +79,7 @@ export async function resolvePurchaseWorkflowReadSession(
   if (!operatorEnvironmentName) {
     throw new UnauthorizedException('采购工作流权限不足');
   }
-  const configuredOpenId = resolveConfiguredOperatorOpenId(role);
+  const configuredOpenId = resolveWorkflowActorOpenId(input);
 
   return {
     accessToken: await input.getTenantAccessToken(),
@@ -91,11 +88,22 @@ export async function resolvePurchaseWorkflowReadSession(
       : '',
     userName: '',
     accessRole: role,
+    ...(input.principal.accountId ? { permissionPrincipal: businessAuthorizationSnapshot(input.principal) } : {}),
     ...(role === 'purchase_applicant' || role === 'building_admin'
       ? { purchaseBuilding: input.principal.purchaseBuilding, ...(input.principal.buildings ? { purchaseBuildings: [...input.principal.buildings] } : {}) }
       : {}),
     authenticationMode: 'delegated-app',
   };
+}
+
+function resolveWorkflowActorOpenId(input: ResolvePurchaseWorkflowSessionInput): string {
+  if (OPERATOR_OPEN_ID_PATTERN.test(input.professionalOpenId || '')) return input.professionalOpenId!;
+  const id = input.principal.accountId;
+  if (!id) return resolveConfiguredOperatorOpenId(input.principal.role); // Original trusted shared contexts only.
+  // A personal account must never borrow the configured purchaser's duties. Fixed
+  // shared password entrances retain only their original, explicit delegation.
+  const shared = /^local-(admin|editor|purchase_admin)-all$/.exec(id) || /^local-(purchase_applicant|building_admin)-(?:[ABCDEH]|110)$/.exec(id);
+  return shared ? resolveConfiguredOperatorOpenId(shared[1] as AccessRole) : '';
 }
 
 function resolveConfiguredOperatorOpenId(role: AccessRole): string {

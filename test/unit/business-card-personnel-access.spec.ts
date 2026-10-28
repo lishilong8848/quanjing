@@ -6,8 +6,16 @@ import { PurchaseWorkflowCallbackController } from '../../server/modules/purchas
 import * as accessConfiguration from '../../server/common/access/access-configuration.service';
 import { ThresholdAdjustmentService } from '../../server/modules/threshold-management/threshold-adjustment.service';
 import { TodayOperationsAnomalyService } from '../../server/modules/bitable-sync/today-operations-anomaly.service';
+import { currentHotfixActivation, closeHotfixActivation } from '../../server/common/hotfix-runtime-activation';
 
 describe('采购和出库人员权限收回边界', () => {
+  beforeAll(async () => {
+    const gate = currentHotfixActivation();
+    gate.completeBootstrap();
+    await gate.refresh();
+    expect(gate.isAcceptingNewWork()).toBe(true);
+  });
+  afterAll(async () => { await closeHotfixActivation(); });
   let originalApp: string | undefined;
   beforeEach(() => { originalApp = process.env.FEISHU_APP_ID; process.env.FEISHU_APP_ID = 'cli_synthetic_cards'; });
   afterEach(() => { if (originalApp === undefined) delete process.env.FEISHU_APP_ID; else process.env.FEISHU_APP_ID = originalApp; jest.restoreAllMocks(); });

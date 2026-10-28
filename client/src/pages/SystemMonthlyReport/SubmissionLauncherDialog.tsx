@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { useState } from 'react';
 import {
   CheckCircle2,
@@ -63,6 +65,7 @@ export function SubmissionLauncherDialog({
     stage: SystemMonthlyReportStage,
   ) => Promise<void>;
 }) {
+  const canDelete = canUsePageAction(useAccess(), 'system_reports', 'delete', true);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -71,7 +74,7 @@ export function SubmissionLauncherDialog({
   );
 
   const confirmDelete = async () => {
-    if (!deleteTarget || deleting) return;
+    if (!canDelete || !deleteTarget || deleting) return;
     const key = `${deleteTarget.room.recordId}:${deleteTarget.stage}`;
     setDeleting(true);
     setDeleteError('');
@@ -182,7 +185,7 @@ export function SubmissionLauncherDialog({
                                   ? `替换${option.label}`
                                   : option.label}
                             </Button>
-                            {option.canDelete && !pending ? (
+                            {canDelete && option.canDelete && !pending ? (
                               <Button
                                 type="button"
                                 variant="ghost"

@@ -1,3 +1,4 @@
+import { useMonthlyOperationsExport } from './use-export-access';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
@@ -247,6 +248,7 @@ export function EventList({
   priorityReasons?: Record<string, EventPriorityReason[]>;
   timelineRecords?: MonthlyEvent[];
 }) {
+  const { canExport, authorizeExport } = useMonthlyOperationsExport();
   const [page, setPage] = useState(1),
     [size, setSize] = useState(10),
     [notice, setNotice] = useState(''),
@@ -329,7 +331,7 @@ export function EventList({
       ));
   const pages = Math.max(1, Math.ceil(filtered.length / size)),
     safePage = Math.min(page, pages);
-  const exportCsv = () => {
+  const exportCsv = () => void authorizeExport(() => {
     const rows = [
       [
         '机楼',
@@ -377,7 +379,7 @@ export function EventList({
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setNotice(`已导出 ${filtered.length} 条事件`);
-  };
+  }, setNotice);
 
   if (!ready)
     return (
@@ -453,7 +455,7 @@ export function EventList({
         <Button
           variant="outline"
           onClick={exportCsv}
-          disabled={!filtered.length}
+          disabled={!canExport || !filtered.length}
         >
           <Download />
           导出

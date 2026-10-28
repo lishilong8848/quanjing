@@ -1,6 +1,7 @@
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import type { AccessPrincipal } from '@shared/access-control.interface';
 import { isStation110DutyApplicant } from '@shared/workforce-request-applicant';
+import { SITE_MEMBER_BACKUP_ACCOUNT_ID } from '@shared/site-member-backup';
 import { extractDisplayText, getRecordId, normalizeBuildingForFrontend, pickField, type BitableRecordItem } from '../feishu/bitable-direct-read';
 import { feishuIdentityFingerprint } from './feishu-access-approved-grants';
 import { readPersonnelAuthorizationState } from './personnel-employment-state';
@@ -12,6 +13,9 @@ export function bindWorkforceRequestApplicant(
   authenticated: boolean,
   action: string,
 ): string {
+  if (principal?.accountId === SITE_MEMBER_BACKUP_ACCOUNT_ID) {
+    throw new ForbiddenException('基地备用账号不能代替个人提交请休假或加班申请');
+  }
   if (!authenticated && isStation110DutyApplicant(principal)) throw new UnauthorizedException(`请先登录后${action}`);
   return authenticated && isStation110DutyApplicant(principal)
     ? requestedName.trim()

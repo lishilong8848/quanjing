@@ -19,5 +19,6 @@ export function canManageProfessionalRecord(
   principal: Pick<AccessPrincipal, 'role' | 'specialties'> & Partial<AccessPrincipal>, specialty: unknown,
   building?: unknown, context: BusinessPermissionContext = principal.permissionContext || { module: 'equipment_ledger', action: 'read' },
 ): boolean {
-  return canPerformBusinessAction(principal, { ...context, specialty, building });
+  return [context,...(principal.permissionRequirements || []).filter(required=>required.module===context.module)]
+    .every(required=>canPerformBusinessAction(principal,{...required,specialty,building}));
 }

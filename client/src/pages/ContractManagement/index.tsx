@@ -47,6 +47,9 @@ import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { useAccess } from '@/access/AccessProvider';
+import type { AccessPrincipal } from '@shared/access-control.interface';
+import { businessPermissionScopeKey } from '@shared/business-permissions';
+import { canUseContractAction, canOpenContractPayment, findContractPermissionScope } from './contract-permissions';
 import {
   getContractCreateOptions,
   getContractManagementDashboard,
@@ -115,7 +118,9 @@ const dialogOptionPrefetches = new Map<string, Promise<unknown>>();
 
 function prefetchContractDialogOptions(
   dashboard: ContractManagementDashboard,
+  principal: AccessPrincipal,
 ): void {
+  const principalKey=businessPermissionScopeKey(principal);
   const dialogContractIds = [
     ...new Set(
       [
@@ -125,18 +130,18 @@ function prefetchContractDialogOptions(
         ),
       ]
         .map((recordId) => recordId.trim())
-        .filter(Boolean),
+        .filter(recordId=>Boolean(recordId) && (['create','update','confirm'] as const).some(action=>canUseContractAction(principal,action,findContractPermissionScope(dashboard,recordId)))),
     ),
   ].slice(0, 12);
   const requests = [
-    prefetchDialogOption('create:framework', () =>
+    ...(canUseContractAction(principal,'create') ? [prefetchDialogOption(`${principalKey}:create:framework`, () =>
       getContractCreateOptions('framework'),
     ),
-    prefetchDialogOption('create:execution', () =>
+    prefetchDialogOption(`${principalKey}:create:execution`, () =>
       getContractCreateOptions('execution'),
-    ),
+    )] : []),
     ...dialogContractIds.map((recordId) =>
-      prefetchDialogOption(`payment:${recordId}`, () =>
+      prefetchDialogOption(`${principalKey}:payment:${recordId}`, () =>
         getContractPaymentFollowUpOptions(recordId),
       ),
     ),
@@ -206,8 +211,10 @@ export function buildContractListDisplay(
 }
 
 export default function ContractManagementPage() {
-  const { capabilities } = useAccess();
-  const canManageContracts = capabilities.canAccessContracts;
+  const principal = useAccess();
+  const principalKey=businessPermissionScopeKey(principal);
+  const canCreateContracts=canUseContractAction(principal,'create');
+  const canRefreshContracts=canUseContractAction(principal,'refresh');
   const [dashboard, setDashboard] =
     useState<ContractManagementDashboard | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -228,6 +235,10 @@ export default function ContractManagementPage() {
   const hiddenNoPaymentRequiredRef = useRef(new Set<string>());
   const pendingNoPaymentRequiredRef = useRef(new Map<string, string>());
   const [requestCoordinator] = useState(createLatestRequestCoordinator);
+  useEffect(()=>{
+    requestCoordinator.invalidate();dashboardRef.current=null;setDashboard(null);setCreationOpen(false);setQuickViewerRequest(null);
+    hiddenNoPaymentRequiredRef.current.clear();pendingNoPaymentRequiredRef.current.clear();
+  },[principalKey,requestCoordinator]);
 
   const loadDashboard = useCallback(
     async (forceRefresh = false) => {
@@ -236,7 +247,7 @@ export default function ContractManagementPage() {
       else if (!dashboardRef.current) setLoading(true);
 
       await requestCoordinator.run(
-        getContractManagementDashboard(forceRefresh && capabilities.canForceRefresh),
+        getContractManagementDashboard(forceRefresh && canRefreshContracts),
         {
           onSuccess: (response) => {
             refreshed = true;
@@ -250,7 +261,7 @@ export default function ContractManagementPage() {
             dashboardRef.current = visibleResponse;
             setDashboard(visibleResponse);
             setLoadError(null);
-            if (canManageContracts) prefetchContractDialogOptions(response);
+            prefetchContractDialogOptions(response,principal);
           },
           onError: () => {
             setLoadError('合同数据读取失败，请检查网络或飞书数据源后重试。');
@@ -263,7 +274,7 @@ export default function ContractManagementPage() {
       );
       return refreshed;
     },
-    [capabilities.canForceRefresh, canManageContracts, requestCoordinator],
+    [canRefreshContracts, principal, requestCoordinator],
   );
 
   const refreshDashboardAfterMutation = useCallback(() => {
@@ -297,6 +308,7 @@ export default function ContractManagementPage() {
       if (pendingNoPaymentRequiredRef.current.has(recordId)) return;
       const current = dashboardRef.current;
       if (!current) return;
+      if(!canUseContractAction(principal,'update',findContractPermissionScope(current,recordId))) return;
 
       const mutationId = createPaymentDispositionRequestId();
       const optimistic = applyNoPaymentRequired(current, recordId);
@@ -332,7 +344,7 @@ export default function ContractManagementPage() {
         }
       }
     },
-    [],
+    [principal],
   );
 
   useEffect(() => {
@@ -431,9 +443,9 @@ export default function ContractManagementPage() {
         onSearchKeyDown={(event) => {
           if (event.key === 'Escape') setSearchOpen(false);
         }}
-        onRefresh={() => void loadDashboard(true)}
+        onRefresh={canRefreshContracts ? () => void loadDashboard(true) : undefined}
         actions={
-          canManageContracts ? (
+          canCreateContracts ? (
             <Button
               type="button"
               onClick={() => setCreationOpen(true)}
@@ -447,7 +459,7 @@ export default function ContractManagementPage() {
       />
 
       <ContractCreationDialog
-        open={creationOpen}
+        open={creationOpen && canCreateContracts}
         onOpenChange={setCreationOpen}
         onCreated={refreshDashboardAfterMutation}
       />
@@ -522,7 +534,6 @@ export default function ContractManagementPage() {
                 dashboard={dashboard}
                 onUpdated={refreshDashboardAfterMutation}
                 onNoPaymentRequired={handleNoPaymentRequired}
-                canManageContracts={canManageContracts}
               />
             </section>
 
@@ -536,7 +547,7 @@ export default function ContractManagementPage() {
               onStatusFilter={setStatusFilter}
               focusRequest={focusRequest}
               paymentSourceIssue={paymentSourceIssue}
-              canManageContracts={canManageContracts}
+              canEditContract={item=>canUseContractAction(principal,'update',item)}
               onUpdated={refreshDashboardAfterMutation}
             />
           </>
@@ -1142,6 +1153,7 @@ function ContractRiskPanel({
   onSubmitted: (recordId: string) => void;
   onUpdated: () => void | Promise<void>;
 }) {
+  const principal=useAccess();
   const [selectedContract, setSelectedContract] =
     useState<ContractManagementItem | null>(null);
   return (
@@ -1194,7 +1206,7 @@ function ContractRiskPanel({
                           : `剩余 ${item.daysRemaining} 天`}
                     </p>
                   </div>
-                  <button
+                  {canUseContractAction(principal,'update',item) && <button
                     type="button"
                     aria-label="人工确认合同到期处置"
                     title="人工确认合同到期处置"
@@ -1202,7 +1214,7 @@ function ContractRiskPanel({
                     className="flex h-9 w-9 items-center justify-center rounded-lg border border-blue-200 bg-white text-blue-600 shadow-sm transition hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   >
                     <ClipboardCheck className="h-4 w-4" />
-                  </button>
+                  </button>}
                 </div>
               </div>
             ))}
@@ -1235,6 +1247,7 @@ function PaymentAttentionPanel({
     item: ContractPaymentFollowUpItem,
   ) => void | Promise<void>;
 }) {
+  const principal=useAccess();
   const dataSourceIssue = getContractSourceIssue(dashboard.sectionStatus, [
     'contracts',
     'payments',
@@ -1266,7 +1279,7 @@ function PaymentAttentionPanel({
     { key: 'upcoming', label: '30 天内需付款' },
   ];
   const viewerContract = viewerTarget
-    ? {
+    ? findContractPermissionScope(dashboard,viewerTarget.contractRecordId) || {
         code: viewerTarget.contractCode,
         name: viewerTarget.contractName,
         attachments: viewerTarget.attachments,
@@ -1365,8 +1378,8 @@ function PaymentAttentionPanel({
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
-                              disabled={!target}
-                              onClick={() => target && setPaymentTarget(target)}
+                              disabled={!target || !canOpenContractPayment(principal,target,findContractPermissionScope(dashboard,target.contractRecordId))}
+                              onClick={() => target && canOpenContractPayment(principal,target,findContractPermissionScope(dashboard,target.contractRecordId)) && setPaymentTarget(target)}
                               className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                             >
                               <CreditCard className="h-3.5 w-3.5" />
@@ -1430,6 +1443,7 @@ function PaymentAttentionPanel({
       />
       <ContractPaymentFollowUpDialog
         item={paymentTarget}
+        contractScope={paymentTarget ? findContractPermissionScope(dashboard,paymentTarget.contractRecordId) || undefined : undefined}
         open={Boolean(paymentTarget)}
         onOpenChange={(open) => {
           if (!open) setPaymentTarget(null);
@@ -1465,15 +1479,14 @@ function MissingPaymentPlanPanel({
   dashboard,
   onUpdated,
   onNoPaymentRequired,
-  canManageContracts,
 }: {
   dashboard: ContractManagementDashboard;
   onUpdated: () => void | Promise<void>;
   onNoPaymentRequired: (
     item: ContractPaymentFollowUpItem,
   ) => void | Promise<void>;
-  canManageContracts: boolean;
 }) {
+  const principal=useAccess();
   const dataSourceIssue = getContractSourceIssue(dashboard.sectionStatus, [
     'contracts',
     'payments',
@@ -1502,7 +1515,7 @@ function MissingPaymentPlanPanel({
   const [paymentTarget, setPaymentTarget] =
     useState<ContractPaymentFollowUpItem | null>(null);
   const viewerContract = viewerTarget
-    ? {
+    ? findContractPermissionScope(dashboard,viewerTarget.contractRecordId) || {
         code: viewerTarget.contractCode,
         name: viewerTarget.contractName,
         attachments: viewerTarget.attachments,
@@ -1597,7 +1610,7 @@ function MissingPaymentPlanPanel({
                 </div>
 
                 <div className="min-w-0">
-                  {canManageContracts ? (
+                  {canOpenContractPayment(principal,item,findContractPermissionScope(dashboard,item.contractRecordId)) ? (
                     <button
                       type="button"
                       onClick={() => setPaymentTarget(item)}
@@ -1670,6 +1683,7 @@ function MissingPaymentPlanPanel({
       />
       <ContractPaymentFollowUpDialog
         item={paymentTarget}
+        contractScope={paymentTarget ? findContractPermissionScope(dashboard,paymentTarget.contractRecordId) || undefined : undefined}
         open={Boolean(paymentTarget)}
         onOpenChange={(open) => {
           if (!open) setPaymentTarget(null);
@@ -1689,7 +1703,7 @@ function ContractList({
   onStatusFilter,
   focusRequest,
   paymentSourceIssue,
-  canManageContracts,
+  canEditContract,
   onUpdated,
 }: {
   contracts: ContractManagementItem[];
@@ -1699,7 +1713,7 @@ function ContractList({
   onStatusFilter: (status: ContractStatusFilter) => void;
   focusRequest: { recordId: string; requestId: number } | null;
   paymentSourceIssue: string | null;
-  canManageContracts: boolean;
+  canEditContract: (item:ContractManagementItem) => boolean;
   onUpdated: () => void | Promise<void>;
 }) {
   const [viewerRequest, setViewerRequest] = useState<{
@@ -1930,7 +1944,7 @@ function ContractList({
                           />
                         </td>
                         <td className="px-2 py-3 text-center">
-                          {canManageContracts ? (
+                          {canEditContract(item) ? (
                             <button
                               type="button"
                               onClick={() => setEditTarget(item)}
@@ -2030,7 +2044,7 @@ function ContractList({
                         </div>
                       </div>
                     </div>
-                    {canManageContracts && (
+                    {canEditContract(item) && (
                       <button
                         type="button"
                         onClick={() => setEditTarget(item)}

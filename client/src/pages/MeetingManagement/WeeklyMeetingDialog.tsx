@@ -1,3 +1,5 @@
+import { canUsePageAction } from '../business-action-access';
+import { useAccess } from '@/access/AccessProvider';
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import {
@@ -55,6 +57,7 @@ export function WeeklyMeetingDialog({
   onClose: () => void;
   onAccepted: (job: WeeklyJob, additional?: WeeklyJob[]) => void;
 }) {
+  const canUpdate = canUsePageAction(useAccess(), 'meetings', 'update', true);
   const today = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
   }).format(new Date());
@@ -126,6 +129,7 @@ export function WeeklyMeetingDialog({
     setError(null);
   };
   const save = async () => {
+    if (!canUpdate) return;
     if (inFlight.current || !detail) return;
     const validation = validateWeeklyMeeting(input);
     if (validation) {
@@ -470,7 +474,7 @@ export function WeeklyMeetingDialog({
             取消
           </Button>
           <Button
-            disabled={!detail || state === 'submitting'}
+            disabled={!canUpdate || !detail || state === 'submitting'}
             onClick={() => void save()}
           >
             {state === 'submitting' ? '正在提交…' : '保存'}

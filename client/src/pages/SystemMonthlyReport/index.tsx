@@ -78,6 +78,7 @@ import {
 } from './api';
 import { PersonIdentityGate } from './PersonIdentityGate';
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { hasAuthenticatedAccessIdentity } from '@/access/access-policy';
 import { resolveSelfServiceApplicant } from '@shared/self-service-applicant';
 import { ReviewWorkbench } from './ReviewWorkbench';
@@ -108,6 +109,12 @@ const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
 export default function SystemMonthlyReportPage() {
   const access = useAccess();
+  const allowCreate = canUsePageAction(access, 'system_reports', 'create', true);
+  const allowApprove = canUsePageAction(access, 'system_reports', 'approve', true);
+  const allowDelete = canUsePageAction(access, 'system_reports', 'delete', true);
+  const allowUpdate = canUsePageAction(access, 'system_reports', 'update', true);
+  const allowExport = canUsePageAction(access, 'system_reports', 'export', true);
+  const allowRefresh = canUsePageAction(access, 'system_reports', 'refresh', true);
   const applicant = useMemo(() => resolveSelfServiceApplicant(access, hasAuthenticatedAccessIdentity(access), '进入体系月报'),
     [access.role, access.accountId, access.displayName, access.expiresAt, access.principalFingerprint]);
   const personalIdentity = applicant.mode === 'automatic';
@@ -165,13 +172,13 @@ export default function SystemMonthlyReportPage() {
       dashboard ? buildSystemMonthlyReportPackagePeriodOptions(dashboard) : [],
     [dashboard],
   );
-  const canForceRefresh = dashboard?.viewer?.canForceRefresh === true;
-  const canPackage = dashboard?.viewer?.canPackage === true;
+  const canForceRefresh = allowRefresh && dashboard?.viewer?.canForceRefresh === true;
+  const canPackage = allowExport && dashboard?.viewer?.canPackage === true;
   const canSubmit =
-    dashboard?.period.editable === true &&
+    allowCreate && dashboard?.period.editable === true &&
     dashboard.rooms.some((room) => room.access?.canSubmit);
   const canDownload =
-    dashboard?.rooms.some((room) => room.access?.canDownload) === true;
+    allowExport && dashboard?.rooms.some((room) => room.access?.canDownload) === true;
   const activePeriodKey = dashboard
     ? selectedPeriodKey ||
       systemMonthlyReportPeriodKey(
@@ -243,12 +250,14 @@ export default function SystemMonthlyReportPage() {
   }, [loadIdentity, access.isLoading]);
 
   const loadDashboard = useCallback(async (forceRefresh = false) => {
+    forceRefresh = forceRefresh && allowRefresh;
     const requestId = ++requestIdRef.current;
     const scope = identityScopeRef.current;
     if (forceRefresh) setRefreshing(true);
     else if (!dashboardRef.current) setLoading(true);
     try {
-      const next = await getSystemMonthlyReportDashboard(forceRefresh);
+      const loaded = await getSystemMonthlyReportDashboard(forceRefresh);
+      const next = { ...loaded, rooms: loaded.rooms.map(room => ({ ...room, access: room.access ? { ...room.access, canSubmit: room.access.canSubmit && allowCreate, canDownload: room.access.canDownload && allowExport, reviewRounds: allowApprove ? room.access.reviewRounds : [] } : room.access })) };
       if (scope !== identityScopeRef.current) return;
       if (
         !shouldCommitSystemMonthlyReportResponse(
@@ -280,7 +289,7 @@ export default function SystemMonthlyReportPage() {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [allowRefresh, allowCreate, allowExport, allowApprove]);
 
   useEffect(() => {
     if (!identitySession?.selected) return;
@@ -375,6 +384,7 @@ export default function SystemMonthlyReportPage() {
     stage: SystemMonthlyReportStage,
     operation: SystemMonthlyReportSubmissionOperation,
   ) => {
+    if (!allowCreate || !room.access?.canSubmit) return;
     setTasks((current) => {
       const next = { ...current };
       delete next[room.recordId];
@@ -387,7 +397,7 @@ export default function SystemMonthlyReportPage() {
     room: SystemMonthlyReportRoom,
     stage: SystemMonthlyReportStage,
   ) => {
-    if (!dashboard) return;
+    if (!allowDelete || !dashboard) return;
     const response = await deleteSystemMonthlyReportStage({
       clientMutationId: crypto.randomUUID(),
       currentRecordId: room.recordId,
@@ -427,6 +437,7 @@ export default function SystemMonthlyReportPage() {
   }, [packageTask?.id, packageTask?.status]);
 
   const downloadPackage = useCallback(async (taskId: string) => {
+    if (!allowExport) return;
     setPackageError('');
     try {
       const result = await getSystemMonthlyReportPackageDownloadUrl(taskId);
@@ -439,7 +450,7 @@ export default function SystemMonthlyReportPage() {
         ),
       );
     }
-  }, []);
+  }, [allowExport]);
 
   useEffect(() => {
     if (
@@ -459,6 +470,7 @@ export default function SystemMonthlyReportPage() {
   };
 
   const acceptPackage = async (periodKey: string) => {
+    if (!canPackage) return;
     if (packageStartRef.current) return;
     const [year, month] = periodKey.split('-').map(Number);
     if (!year || !month) {
@@ -808,6 +820,7 @@ export default function SystemMonthlyReportPage() {
         }}
         onStart={() => void acceptPackage(packagePeriodKey)}
         onRetry={() =>
+          allowUpdate &&
           packageTask &&
           void retrySystemMonthlyReportPackage(packageTask.id)
             .then(setPackageTask)

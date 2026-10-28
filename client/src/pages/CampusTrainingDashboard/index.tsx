@@ -63,6 +63,8 @@ import {
 } from './model';
 import { getCampusTrainingDashboard } from '@/api';
 import { startTrainingRefreshPolling } from './refresh-polling';
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import {
   buildSmoothAreaPath,
   buildSmoothLinePath,
@@ -1103,6 +1105,9 @@ export default function CampusTrainingDashboard({
   embedded = false,
   onHeaderStateChange,
 }: CampusTrainingDashboardProps) {
+  const access = useAccess();
+  const canReadTraining = canUsePageAction(access, 'training', 'read', true);
+  const canRefreshTraining = canUsePageAction(access, 'training', 'refresh', true);
   const { scale, compact } = useResponsiveStage(!embedded);
   const defaultMonthRef = useRef(currentTrainingMonth());
   const [month, setMonth] = useState<string | undefined>(
@@ -1128,6 +1133,8 @@ export default function CampusTrainingDashboard({
       forceRefresh = false,
       silent = false,
     ) => {
+      if (!canReadTraining) return 'error' as const;
+      forceRefresh = forceRefresh && canRefreshTraining;
       if (silent && silentReadPendingRef.current) return 'refreshing' as const;
       if (silent) silentReadPendingRef.current = true;
       const requestId = silent
@@ -1178,7 +1185,7 @@ export default function CampusTrainingDashboard({
         }
       }
     },
-    [],
+    [canReadTraining, canRefreshTraining],
   );
 
   useEffect(() => {
@@ -1311,6 +1318,7 @@ export default function CampusTrainingDashboard({
     });
   }, [handleRefresh, headerUpdatedAt, loading, onHeaderStateChange]);
 
+  if (!canReadTraining) return <p role="alert" className="p-6 text-sm">当前账号没有培训管理读取权限。</p>;
   return (
     <main
       className={`campus-training-dashboard${
@@ -1379,7 +1387,7 @@ export default function CampusTrainingDashboard({
                     variant="outline"
                     size="sm"
                     className="training-refresh-button"
-                    disabled={loading}
+                    disabled={loading || !canRefreshTraining}
                     onClick={handleRefresh}
                   >
                     <RefreshCw

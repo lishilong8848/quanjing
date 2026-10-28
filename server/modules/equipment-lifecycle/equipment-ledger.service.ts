@@ -1,5 +1,5 @@
-import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
-import { accessBuildings, canAccessBuilding, buildingScopeKey } from '../../../shared/building-access';
+import { businessPermissionScopeKey, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { accessBuildings, canAccessBuilding } from '../../../shared/building-access';
 import { HttpService } from '@nestjs/axios';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
 import { filterProfessionalRecords } from '../../common/access/professional-record-scope';
@@ -222,14 +222,14 @@ export class EquipmentLedgerService implements OnModuleInit, OnModuleDestroy {
   private scope(snapshot: LedgerSnapshot, principal?: AccessPrincipal): LedgerSnapshot {
     const scope = principal ? accessBuildings(principal) : null;
     if (!isProfessionalBusinessPrincipal(principal) && scope === null) return snapshot;
-    const assets = filterProfessionalRecords(principal, snapshot.assets, asset => asset.specialty).filter(asset => !scope || (['A楼', 'B楼', 'C楼', 'D楼', 'E楼'].includes(asset.building) && canAccessBuilding(principal!, asset.building)));
+    const assets = filterProfessionalRecords(principal, snapshot.assets, asset => asset.specialty).filter(asset => isProfessionalBusinessPrincipal(principal) || !scope || (['A楼', 'B楼', 'C楼', 'D楼', 'E楼'].includes(asset.building) && canAccessBuilding(principal!, asset.building)));
     const buildings = [...new Set(assets.map(asset => asset.building))];
     return {
       ...snapshot,
       assets,
       dashboard: {
         ...snapshot.dashboard,
-        snapshotId: `${snapshot.dashboard.snapshotId}:${principal!.role}:${scope ? buildingScopeKey(principal!) : (principal!.specialties || []).join(',')}`,
+        snapshotId: `${snapshot.dashboard.snapshotId}:${createHash('sha256').update(businessPermissionScopeKey(principal!)).digest('hex')}`,
         overview: summarizeLedger(assets),
         buildings: buildings.map(building => summarizeLedger(assets, building)),
       },

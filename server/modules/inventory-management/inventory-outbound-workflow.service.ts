@@ -1568,6 +1568,7 @@ export class InventoryOutboundWorkflowService
     const config = await this.resolveConfig();
     const record = await this.gateway.getRecord(config.appToken, config.catalogTableId, clean(request.catalogRecordId), TABLES.catalog.name);
     assertProfessionalBitableRecord(principal, record);
+    assertProfessionalRecordScope(principal, recordProfessionalSpecialty(record), request.building);
   }
 
   private async resolveRecordIdentity(
@@ -2385,6 +2386,7 @@ function authorizeBuildingScope(
   principal: AccessPrincipal | undefined,
   building: WarehouseBuilding,
 ): void {
+  if (isProfessionalBusinessPrincipal(principal)) return;
   if (principal?.role !== 'inventory_admin') return;
   if (!canAccessBuilding(principal, building)) {
     throw new ForbiddenException('无权访问或操作该楼栋库存数据');

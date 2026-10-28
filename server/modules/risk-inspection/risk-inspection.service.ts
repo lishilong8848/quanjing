@@ -1,4 +1,4 @@
-import { businessAuthorizationSnapshot, businessPermissionScopeKey, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { businessAuthorizationIdentityKey, businessAuthorizationSnapshot, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import { canAccessBuilding, buildingScopeKey } from '../../../shared/building-access';
 import { assertProfessionalBitableRecord, assertProfessionalRecordScope, recordProfessionalSpecialty, scopeProfessionalBitableRecords } from '../../common/access/professional-record-scope';
 import { HttpService } from '@nestjs/axios';
@@ -198,9 +198,11 @@ export class RiskInspectionService implements OnModuleInit, OnModuleDestroy {
 
   getAliMonthlyQualitySupplementalTask(taskId: string, principal?: AccessPrincipal) {
     const task = this.qualityTaskStore?.get(taskId);
+    if (task && principal && (principal.accountId || task.principal.accountId || isProfessionalBusinessPrincipal(principal) || isProfessionalBusinessPrincipal(task.principal)) &&
+      businessAuthorizationIdentityKey(principal) !== businessAuthorizationIdentityKey(task.principal)) throw new NotFoundException('问题跟进任务不存在');
     if (!task || !principal || (!['admin', 'editor', 'building_admin', 'professional_admin', 'professional_engineer'].includes(principal.role) && !isProfessionalBusinessPrincipal(principal)) ||
       (principal.role !== 'admin' &&
-        (principal.role !== task.principal.role || principal.purchaseBuilding !== task.principal.purchaseBuilding || buildingScopeKey(principal) !== buildingScopeKey(task.principal) || (isProfessionalBusinessPrincipal(principal) && (businessPermissionScopeKey(principal) !== businessPermissionScopeKey(task.principal)))))) {
+        (principal.role !== task.principal.role || principal.purchaseBuilding !== task.principal.purchaseBuilding || buildingScopeKey(principal) !== buildingScopeKey(task.principal)))) {
       throw new NotFoundException('问题跟进任务不存在');
     }
     return this.qualityTaskResponse(task);

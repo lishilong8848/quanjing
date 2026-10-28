@@ -1,4 +1,5 @@
 import { accessBuildings, canAccessBuilding } from '../../../shared/building-access';
+import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import { normalizeLedgerBuilding } from './equipment-ledger.model';
 import { HttpService } from '@nestjs/axios';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
@@ -150,6 +151,7 @@ export class EquipmentLifecycleService {
     building?: string,
     principal?: AccessPrincipal,
   ): Promise<EquipmentLifecycleDashboardResponse> {
+    const scopedPrincipal = principal && { ...principal, permissionContext: { module: principal.permissionContext?.module || 'equipment_lifecycle' as const, action: 'read' as const } };
     const syncedAt = new Date().toISOString();
     const entries = await Promise.all(
       TABLE_CONFIGS.map(
@@ -159,7 +161,7 @@ export class EquipmentLifecycleService {
     );
     const sources = Object.fromEntries(entries.map(([key, source]) => [key, {
       ...source,
-      records: source.records === null ? null : filterProfessionalRecords(principal, source.records, record => extractDisplayText(record.fields?.['专业'])).filter(record => !principal || accessBuildings(principal) === null || canAccessBuilding(principal, normalizeLedgerBuilding(extractDisplayText(record.fields?.['楼栋'] || record.fields?.['园区楼栋'])))),
+      records: source.records === null ? null : filterProfessionalRecords(scopedPrincipal, source.records, record => extractDisplayText(record.fields?.['专业'])).filter(record => !scopedPrincipal || isProfessionalBusinessPrincipal(scopedPrincipal) || accessBuildings(scopedPrincipal) === null || canAccessBuilding(scopedPrincipal, normalizeLedgerBuilding(extractDisplayText(record.fields?.['楼栋'] || record.fields?.['园区楼栋'])))),
     }])) as EquipmentLifecycleSources;
 
     if (Object.values(sources).every(({ records }) => records === null)) {

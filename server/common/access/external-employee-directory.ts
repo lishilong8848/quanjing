@@ -12,6 +12,7 @@ export async function buildExternalEmployeeCredentials(records: BitableRecordIte
   const secretBytes = Buffer.from(secret.trim(), 'base64');
   if (secretBytes.length !== 32 || secretBytes.toString('base64') !== secret.trim()) throw unavailable();
   const result: ExternalEmployeeCredential[] = [], ids = new Set<string>();
+  const derivations: { index: number; password: string; salt: Buffer }[] = [];
   let missingName = false;
   for (const record of records) {
     const recordId = record.record_id || record.id;
@@ -33,11 +34,19 @@ export async function buildExternalEmployeeCredentials(records: BitableRecordIte
     else if (active) {
       // Stable per-record salts let unchanged credentials retain their session version.
       const salt = createHmac('sha256', secretBytes).update(`external-employee-salt\0${id}`).digest().subarray(0, 16);
-      const key = await new Promise<Buffer>((resolve, reject) => scrypt(password, salt, 32, (error, derived) => error ? reject(error) : resolve(derived)));
-      passwordHash = `scrypt$${salt.toString('base64')}$${key.toString('base64')}`;
+      derivations.push({ index: result.length, password, salt });
     }
     result.push({ id, name, active, ...(passwordHash ? { passwordHash } : {}) });
   }
+  // Bound the shared thread-pool work while retaining record order and stable salts.
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(2, derivations.length) }, async () => {
+    while (cursor < derivations.length) {
+      const { index, password, salt } = derivations[cursor++];
+      const key = await new Promise<Buffer>((resolve, reject) => scrypt(password, salt, 32, (error, derived) => error ? reject(error) : resolve(derived)));
+      result[index].passwordHash = `scrypt$${salt.toString('base64')}$${key.toString('base64')}`;
+    }
+  }));
   const names = new Map<string, number>();
   for (const employee of result) names.set(employee.name, (names.get(employee.name) || 0) + 1);
   if (missingName) onWarning?.('部分姓名账号姓名未维护，该记录暂不启用，其他合法账号继续同步。');

@@ -52,7 +52,7 @@ function loadDraft(key: string, count: number, version: MbtiPreviewSelection['ve
   return emptyDraft(count);
 }
 
-export default function AttachedBankAssessment({ selection, onExit, onUseResult }: { selection: MbtiPreviewSelection; onExit: () => void; onUseResult?: (assessment: EmployeeOnboardingMbtiAssessment) => void }) {
+export default function AttachedBankAssessment({ selection, onExit, onUseResult, canSubmit = true }: { selection: MbtiPreviewSelection; onExit: () => void; onUseResult?: (assessment: EmployeeOnboardingMbtiAssessment) => void; canSubmit?: boolean }) {
   const { version } = selection;
   const questions = version === 'short' ? ATTACHED_BANK.short : ATTACHED_BANK.full;
   const count = questions.length;
@@ -78,7 +78,7 @@ export default function AttachedBankAssessment({ selection, onExit, onUseResult 
   }, [draftKey, draft]);
 
   useEffect(() => {
-    if (!draft.complete || !selection.recordId ||
+    if (!canSubmit || !draft.complete || !selection.recordId ||
       !['ready', 'submitting'].includes(draft.syncState) || syncInFlightRef.current === draft.clientMutationId) return;
     const mutationId = draft.clientMutationId;
     syncInFlightRef.current = mutationId;
@@ -99,7 +99,7 @@ export default function AttachedBankAssessment({ selection, onExit, onUseResult 
     }).catch((error: unknown) => {
       setDraft((previous) => previous.clientMutationId === mutationId ? { ...previous, syncState: 'error', syncError: error instanceof Error ? error.message : '飞书同步暂时失败，请重试' } : previous);
     }).finally(() => { if (syncInFlightRef.current === mutationId) syncInFlightRef.current = null; });
-  }, [draft, selection.audience, selection.recordId, selection.name, selection.ticket, version]);
+  }, [canSubmit, draft, selection.audience, selection.recordId, selection.name, selection.ticket, version]);
 
   const answered = draft.answers.filter((value) => value !== null).length;
   const question = questions[draft.current];
@@ -117,6 +117,7 @@ export default function AttachedBankAssessment({ selection, onExit, onUseResult 
   }
 
   function submit() {
+    if (!canSubmit) { setNotice('当前身份无提交测试权限，答案已保留'); return; }
     const missing = draft.answers.findIndex((value) => value === null);
     if (missing >= 0) {
       setDraft((previous) => ({ ...previous, current: missing }));
@@ -132,6 +133,7 @@ export default function AttachedBankAssessment({ selection, onExit, onUseResult 
   }
 
   function confirmSubmission() {
+    if (!canSubmit) { setNotice('当前身份无提交测试权限，答案已保留'); return; }
     confirmDialogRef.current?.close();
     setDraft((previous) => ({ ...previous, complete: true, syncState: 'ready', syncError: '' }));
     setNotice('');

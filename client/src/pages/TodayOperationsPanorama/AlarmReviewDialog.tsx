@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { X } from 'lucide-react';
 import './alarm-review.css';
 import { ALARM_REVIEW_CUSTOM_OUTCOME, ALARM_REVIEW_REPLY_MAX_LENGTH, ALARM_REVIEW_OUTCOMES, type AlarmReviewOutcome, type AlarmReviewPerson, type AlarmReviewRequest, type AlarmReviewTask } from '@shared/today-operations-alarm-review.interface';
@@ -26,6 +28,9 @@ function saveTaskId(id: string | null): void {
   try { if (id) sessionStorage.setItem(STORAGE_KEY, id); else sessionStorage.removeItem(STORAGE_KEY); } catch { /* 不影响服务端已持久化任务 */ }
 }
 export function AlarmReviewDialog({ open, onOpenChange, items, allowed, sessionReady, onTask }: Props) {
+  const access = useAccess();
+  const canConfirm = allowed && canUsePageAction(access, 'alarm_review', 'confirm', allowed);
+  const canRetry = allowed && canUsePageAction(access, 'alarm_review', 'update', allowed);
   const [people, setPeople] = useState<AlarmReviewPerson[]>([]);
   const [peopleState, setPeopleState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [peopleError, setPeopleError] = useState('');
@@ -101,7 +106,7 @@ export function AlarmReviewDialog({ open, onOpenChange, items, allowed, sessionR
   }, [task?.id, phase, allowed, pollKey]);
 
   async function submit() {
-    if (inFlight.current || !allowed || (!items.length && !mutation.current) || !personId) return;
+    if (inFlight.current || !canConfirm || (!items.length && !mutation.current) || !personId) return;
     if (!mutation.current && outcome === ALARM_REVIEW_CUSTOM_OUTCOME && (!customReply.trim() || customReply.trim().length > ALARM_REVIEW_REPLY_MAX_LENGTH)) {
       setError(`请输入 1–${ALARM_REVIEW_REPLY_MAX_LENGTH} 字的自定义回复`); return;
     }
@@ -124,7 +129,7 @@ export function AlarmReviewDialog({ open, onOpenChange, items, allowed, sessionR
     finally { inFlight.current = false; }
   }
   async function retry() {
-    if (!task || inFlight.current || !allowed) return;
+    if (!task || inFlight.current || !canRetry) return;
     inFlight.current = true; setError(''); setPhase('submitting');
     try { const value = await retryAlarmReviewTask(task.id); setTask(value); callback.current(value); setPhase('accepted'); setPollKey((key) => key + 1); }
     catch (reason) { setPhase('error'); setError(alarmReviewError(reason)); } finally { inFlight.current = false; }
@@ -132,7 +137,7 @@ export function AlarmReviewDialog({ open, onOpenChange, items, allowed, sessionR
   const busy = phase === 'submitting' || phase === 'accepted';
   const lockedDraft = Boolean(mutation.current) && !task;
   const mismatchedDraft = lockedDraft && [...mutation.current!.recordIds].sort().join(':') !== selectionKey;
-  const formDisabled = busy || Boolean(task) || lockedDraft || !allowed;
+  const formDisabled = busy || Boolean(task) || lockedDraft || !canConfirm;
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent showCloseButton={false} className="alarm-review-dialog" onEscapeKeyDown={event => { if (personSearchOpen) event.preventDefault(); }}>
       <Button variant="ghost" size="icon" aria-label="关闭异常跟进" className="absolute right-3 top-3" onClick={() => onOpenChange(false)}><X aria-hidden="true" /></Button>
@@ -173,8 +178,8 @@ export function AlarmReviewDialog({ open, onOpenChange, items, allowed, sessionR
       </div>
       <DialogFooter className="alarm-review-footer gap-2">
         <Button variant="outline" onClick={() => { if (phase === 'success') saveTaskId(null); onOpenChange(false); }}>{phase === 'success' ? '完成' : '关闭'}</Button>
-        {task ? task.items.some((item) => item.state === 'error') ? <Button onClick={retry} disabled={busy || !allowed}>重试失败项</Button> : phase === 'accepted' ? <Button variant="outline" onClick={() => { setError(''); setPollKey((key) => key + 1); }}>重新核对</Button> : null
-          : <Button onClick={submit} disabled={busy || !personId || peopleState !== 'ready' || (!items.length && !mutation.current) || !allowed || (outcome === ALARM_REVIEW_CUSTOM_OUTCOME && !customReply.trim())}>{phase === 'submitting' ? '正在受理…' : mismatchedDraft ? '重试上次提交' : lockedDraft ? '重试本次提交' : '提交复核'}</Button>}
+        {task ? task.items.some((item) => item.state === 'error') ? <Button onClick={retry} disabled={busy || !canRetry}>重试失败项</Button> : phase === 'accepted' ? <Button variant="outline" onClick={() => { setError(''); setPollKey((key) => key + 1); }}>重新核对</Button> : null
+          : <Button onClick={submit} disabled={busy || !personId || peopleState !== 'ready' || (!items.length && !mutation.current) || !canConfirm || (outcome === ALARM_REVIEW_CUSTOM_OUTCOME && !customReply.trim())}>{phase === 'submitting' ? '正在受理…' : mismatchedDraft ? '重试上次提交' : lockedDraft ? '重试本次提交' : '提交复核'}</Button>}
       </DialogFooter>
     </DialogContent>
   </Dialog>;

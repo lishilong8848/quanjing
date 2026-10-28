@@ -7,7 +7,7 @@ import type { SiteMemberIdentity } from './site-member-accounts';
 import { DEFAULT_ACTIVE_PERSONNEL_VIEW_ID } from '../../modules/bitable-sync/active-personnel-directory';
 import { readExternalEmployeeCredentials, type ExternalEmployeeCredential } from './external-employee-directory';
 import { HttpService } from '@nestjs/axios';
-import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigurationPerson } from '../../../shared/access-configuration.interface';
 import { extractDisplayText, fetchBitableRecords, getTenantAccessToken, pickField, resolveBitableAppToken, type BitableRecordItem } from '../feishu/bitable-direct-read';
 import { readEmployeeOnboardingConfig } from '../../modules/bitable-sync/employee-onboarding.config';
@@ -22,6 +22,7 @@ export interface ConfigurationDirectorySnapshot { appId: string; people: Configu
 
 @Injectable()
 export class AccessConfigurationDirectory {
+  private readonly logger = new Logger(AccessConfigurationDirectory.name);
   private cached?: ConfigurationDirectorySnapshot;
   private pending?: Promise<ConfigurationDirectorySnapshot>;
   private pendingForced = false;
@@ -36,16 +37,20 @@ export class AccessConfigurationDirectory {
       return this.read(true);
     }
     this.pendingForced = force;
+    const startedAt = Date.now();
     this.pending = (async () => {
       const source = readEmployeeOnboardingConfig();
       const appToken = await resolveBitableAppToken(this.http, { appToken: source.appToken, wikiToken: source.wikiToken, tableName: source.tableName, requestTimeoutMs: () => 8000 });
       const token = await getTenantAccessToken(this.http);
-      const fields = await this.metadata<{ field_name: string; type: number }>(appToken, `${source.tableId}/fields`, token);
+      const [fields, views, tables] = await Promise.all([
+        this.metadata<{ field_name: string; type: number }>(appToken, `${source.tableId}/fields`, token),
+        this.metadata<{ view_id: string; view_name: string }>(appToken, `${source.tableId}/views`, token),
+        this.metadata<{ table_id: string; name: string }>(appToken, '', token),
+      ]);
       const employmentCheckbox=fields.filter(field=>field.field_name==='离职/异动情况');
       // A requested checkbox omitted by Bitable represents unchecked; unknown schema or explicit invalid values remain unknown.
       const normalizeCheckbox=(record:BitableRecordItem):BitableRecordItem=>employmentCheckbox.length===1&&employmentCheckbox[0].type===7&&!Object.prototype.hasOwnProperty.call(record.fields||{},'离职/异动情况')
         ? {...record,fields:{...record.fields,'离职/异动情况':false}} : record;
-      const views = await this.metadata<{ view_id: string; view_name: string }>(appToken, `${source.tableId}/views`, token);
       let externalEmployees: ExternalEmployeeCredential[] | undefined;
       const credentialWarnings: string[] = [];
       try { externalEmployees = await readExternalEmployeeCredentials(this.http, appId, appToken, source.tableId, token, fields, views, warning => credentialWarnings.push(warning)); }
@@ -80,7 +85,6 @@ export class AccessConfigurationDirectory {
         viewId: process.env.FEISHU_ORG_VIEW_ID?.trim() || process.env.FEISHU_ORGANIZATION_VIEW_ID?.trim() || DEFAULT_ACTIVE_PERSONNEL_VIEW_ID,
         automaticFields: true, fieldNames, strict: true, allowStale: false, forceRefresh: force, cacheTtlMs: 5 * 60_000 })).map(normalizeCheckbox);
       const { members: activeMembers, blockedOpenIds, warnings: personnelWarnings } = buildSiteMemberDirectory(activeRecords, appId, appToken, source.tableId);
-      const tables = await this.metadata<{ table_id: string; name: string }>(appToken, '', token);
       const organizationPeople = await this.organizationPeople(appToken, token, tables);
       const authority = buildAuthorityPeople(identityRecords, appId, appToken, source.tableId);
       const { warnings: employmentWarnings, ...employmentState } = buildPersonnelEmploymentEvidence(identityRecords, appId, appToken, source.tableId);
@@ -122,8 +126,12 @@ export class AccessConfigurationDirectory {
       for (const person of organizationPeople) if (!merged.has(person.openId)) merged.set(person.openId, person);
       this.cached = { appId, people: [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.openId.localeCompare(b.openId)), employees: employees.filter(person => !blockedOpenIds.has(person.openId)), externalEmployees, activeMembers, activeMembersComplete:true, employmentState, personnelWarnings, personnelAuthority, snapshotAt: Date.now(),
         personnelComplete: !problems.some(problem => problem !== '人员身份重复'), personnelProblems: problems };
+      this.logger.log(`人员目录读取完成：耗时 ${Date.now() - startedAt}ms，人员 ${records.length}，职责 ${dutyRecords.length}`);
       return this.cached;
-    })().finally(() => { this.pending = undefined; this.pendingForced = false; });
+    })().catch(error => {
+      this.logger.warn(`人员目录读取失败：耗时 ${Date.now() - startedAt}ms`);
+      throw error;
+    }).finally(() => { this.pending = undefined; this.pendingForced = false; });
     return this.pending;
   }
   private async metadata<T>(appToken: string, resource: string, token: string): Promise<T[]> {

@@ -7,6 +7,7 @@
   color: var(--foreground);
   font-size: 0.875rem;
 }
+.configuration-page, .configuration-editor, .matrix-popover { font-family: Inter, system-ui, -apple-system, "Microsoft YaHei", sans-serif; }
 .config-select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .config-select:disabled { opacity: 0.6; }
 :where(.configuration-page, .configuration-editor) :where(*) { border-color: var(--border); }

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAccess } from '@/access/AccessProvider';
+import { canUseStocktakeLines } from './stocktake-action-access';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -60,6 +62,7 @@ export function StocktakeBulkDialog({
     request: StocktakeBulkRequest;
   } | null>(null);
   const pending = sheet.lines.filter((line) => line.status === 'draft');
+  const canConfirm = canUseStocktakeLines(useAccess(), 'confirm', pending);
   useEffect(() => {
     if (open) {
       setPhase('ready');
@@ -99,6 +102,7 @@ export function StocktakeBulkDialog({
         setPhase('success');
         return;
       }
+      if (!canConfirm) throw new Error('当前权限不能确认所选盘点条目');
       if (!person) throw new Error('请从在职员工中选择确认人');
       const lines = buildStocktakeBulkLines(sheet, drafts);
       const payload = {
@@ -205,6 +209,7 @@ export function StocktakeBulkDialog({
               disabled={
                 phase === 'submitting' ||
                 phase === 'accepted' ||
+                (!accepted.current && !canConfirm) ||
                 !pending.length
               }
               onClick={() => void submit()}

@@ -1,3 +1,4 @@
+import { canUsePageAction } from '../business-action-access';
 import {
   ArrowUpRight,
   CalendarClock,
@@ -36,8 +37,12 @@ export function WeeklyWorkbenchControls({
   onOpen: (id: string) => void;
   onAction: (action: 'ali' | 'local' | 'generate' | 'create-row') => void;
 }) {
-  const { role } = useAccess();
-  const editable = role === 'admin' || role === 'editor' || (role === 'professional_admin' || role === 'professional_engineer');
+  const access = useAccess();
+  const { role } = access;
+  const legacyEditable = role === 'admin' || role === 'editor' || (role === 'professional_admin' || role === 'professional_engineer');
+  const canCreate = canUsePageAction(access, 'meetings', 'create', legacyEditable);
+  const canUpdate = canUsePageAction(access, 'meetings', 'update', legacyEditable);
+  const editable = canCreate || canUpdate;
   const blocked = Boolean(blockReason);
   const writeReason = !editable ? '当前角色仅可读取' : !data
     ? '正在读取周会状态'
@@ -117,7 +122,7 @@ export function WeeklyWorkbenchControls({
           <Button
             size="sm"
             variant="outline"
-            disabled={Boolean(writeReason)}
+            disabled={!canCreate || Boolean(writeReason)}
             onClick={() => onAction('create-row')}
           >
             <Plus />
@@ -166,7 +171,7 @@ export function WeeklyWorkbenchControls({
                     : `weekly-console-${action.key}-reason`
                   : undefined
               }
-              disabled={Boolean(action.reason)}
+              disabled={!(action.key === 'generate' && record?.id === 'new' ? canCreate : canUpdate) || Boolean(action.reason)}
               onClick={() => onAction(action.key)}
             >
               <span className="weekly-console-icon">

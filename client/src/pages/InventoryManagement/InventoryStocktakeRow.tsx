@@ -1,4 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { useAccess } from '@/access/AccessProvider';
+import { canUseStocktakeAction } from './stocktake-action-access';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -45,6 +47,9 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
   onBusy: (recordId: string, busy: boolean) => void;
   drafts: Map<string, StocktakeLocalDraft>;
 }) {
+  const principal = useAccess();
+  const canUpdate = canUseStocktakeAction(principal, 'update', line.inventory);
+  const canConfirm = canUseStocktakeAction(principal, 'confirm', line.inventory);
   const draftKey = `${scope}:${month}:${line.inventory.building}:${line.inventory.recordId}`;
   const cached = line.status === 'confirmed' ? undefined : drafts.get(draftKey);
   const [quantity, setQuantity] = useState(
@@ -92,7 +97,7 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
     draftKey,
   ]);
   const locked =
-    readOnly || line.status === 'confirmed' || phase === 'submitting';
+    readOnly || (!canUpdate && !canConfirm) || line.status === 'confirmed' || phase === 'submitting';
   const difference =
     quantity.trim() && Number.isFinite(Number(quantity))
       ? Math.round((Number(quantity) - line.inventory.quantity) * 1000) / 1000
@@ -103,6 +108,7 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
   };
   async function submit(mode: 'draft' | 'confirm' | 'refresh-line') {
     if (inFlight.current || readOnly || line.status === 'confirmed') return;
+    if (mode === 'confirm' ? !canConfirm : !canUpdate) return;
     let actualQuantity: number | null;
     try {
       actualQuantity = parseStocktakeQuantity(quantity);
@@ -265,14 +271,14 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
             <Button
               size="sm"
               variant="ghost"
-              disabled={locked}
+              disabled={locked || !canUpdate}
               onClick={() => void submit('draft')}
             >
               暂存
             </Button>
             <Button
               size="sm"
-              disabled={locked}
+              disabled={locked || !canConfirm}
               onClick={() => void submit('confirm')}
             >
               {phase === 'submitting' ? '保存中' : '确认'}
@@ -304,7 +310,7 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
             {phase === 'error' ? (
               <>
                 <span>{error}</span>
-                {error.includes('库存已变化') && (
+                {canUpdate && error.includes('库存已变化') && (
                   <Button
                     size="sm"
                     variant="outline"

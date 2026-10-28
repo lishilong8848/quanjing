@@ -5,16 +5,25 @@ export function renderTodayOperationsFollowUpPage(input: { ticket: string }): st
 <style>:root{font-family:Inter,system-ui,sans-serif;color:#172033;background:#f5f7fb}*{box-sizing:border-box}body{margin:0;padding:20px}.shell{max-width:760px;margin:0 auto}.panel{background:#fff;border:1px solid #e5eaf2;border-radius:14px;box-shadow:0 8px 28px #1f293714;overflow:hidden}.head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #edf0f5}.head h1{font-size:21px;margin:0}.close{border:1px solid #dbe2ec;background:#fff;color:#475569;border-radius:8px;padding:8px 13px}.content{padding:16px}.state{padding:28px;text-align:center;color:#64748b}.item{border:1px solid #e5eaf2;border-radius:10px;padding:15px;margin-bottom:12px}.row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.title{font-weight:700}.meta{font-size:13px;color:#64748b;margin-top:4px}.description{white-space:pre-wrap;line-height:1.55;margin:12px 0;color:#334155}.checks{display:flex;gap:18px;margin:10px 0}.checks label{display:flex;gap:7px;align-items:center}input.login-input{width:100%;border:1px solid #cfd8e6;border-radius:8px;padding:10px;font:inherit;margin:6px 0 12px}.login-label{display:block;margin-top:12px}.login-note{font-size:12px;color:#64748b}.save-link{display:block;text-align:center;text-decoration:none}.readonly{white-space:pre-wrap;line-height:1.55}textarea{width:100%;min-height:84px;border:1px solid #cfd8e6;border-radius:8px;padding:10px;font:inherit;resize:vertical}textarea:focus{outline:2px solid #93b4ff;border-color:#4f7cff}.save{width:100%;border:0;border-radius:8px;background:#3563e9;color:#fff;padding:11px;font-weight:700;margin-top:10px}.save:disabled{opacity:.55}.result{min-height:22px;margin-top:8px;font-size:13px}.success{color:#16803c}.error{color:#c73232}.submitting{color:#475569}@media(max-width:560px){body{padding:0}.panel{border:0;border-radius:0;min-height:100vh}.row{display:block}.content{padding:12px}}</style></head>
 <body><main class="shell"><section class="panel"><header class="head"><h1>异常跟进</h1><button id="close" class="close" type="button">退出</button></header><div id="content" class="content"><div class="state loading">正在加载…</div></div></section></main>
 <script>(()=>{
-  const ticket=${ticket},content=document.getElementById('content'),api='/api/duty-schedules/daily-operations-follow-ups';
+  const ticket=${ticket},content=document.getElementById('content'),basePath=location.pathname.replace(/\\/attendance-anomaly-follow-up\\/?$/u,''),api=basePath+'/api/duty-schedules/daily-operations-follow-ups';
   history.replaceState({},document.title,location.pathname);
   let loadGeneration=0,actorKey='',canUpdate=false;
   document.getElementById('close').onclick=()=>{window.close();setTimeout(()=>{if(history.length>1)history.back();else content.innerHTML='<div class="state">已退出，请关闭此页面</div>'},120)};
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const draftKey=id=>'follow-up-draft:'+actorKey+':'+id;
   function readDraft(id){try{const value=JSON.parse(localStorage.getItem(draftKey(id))||'{}');return value&&typeof value==='object'&&!Array.isArray(value)?value:{}}catch{return {}}}
+  function csrfToken(){
+    for(const name of ['__Host-suda-csrf-token','suda-csrf-token']){
+      const matches=document.cookie.split(';').map(part=>part.trim()).filter(part=>part===name||part.startsWith(name+'='));
+      if(!matches.length)continue;
+      if(matches.length!==1)return '';
+      try{const value=decodeURIComponent(matches[0].slice(name.length+1));return /^[A-Za-z0-9_-]{43}$/.test(value)||/^[a-f0-9]{40}-\\d{10}$/.test(value)?value:''}catch{return ''}
+    }
+    return '';
+  }
   async function request(url,options={}){
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
-    try{const response=await fetch(url,{...options,signal:controller.signal,credentials:'same-origin'});const data=await response.json().catch(()=>({}));return {response,data}}
+    try{const headers=new Headers(options.headers),token=csrfToken();if(token)headers.set('x-suda-csrf-token',token);const response=await fetch(url,{...options,headers,signal:controller.signal,credentials:'same-origin'});const data=await response.json().catch(()=>({}));return {response,data}}
     catch(error){if(error&&error.name==='AbortError')throw new Error('请求超时，草稿已保留，请重试');throw new Error('连接失败，请稍后重试')}
     finally{clearTimeout(timeout)}
   }
@@ -22,11 +31,11 @@ export function renderTodayOperationsFollowUpPage(input: { ticket: string }): st
   function signIn(){
     content.innerHTML='<div class="item"><div class="title">登录后查看异常跟进</div><a id="feishu-login" class="save save-link">飞书授权登录</a><details style="margin-top:18px"><summary>使用姓名与密码登录</summary><form id="name-login"><label class="login-label" for="login-name">姓名</label><input id="login-name" class="login-input" type="text" autocomplete="username" maxlength="100" required><label class="login-label" for="login-password">密码</label><input id="login-password" class="login-input" type="password" autocomplete="current-password" maxlength="128" required><p class="login-note">如未修改，初始密码为身份证后6位。</p><button class="save" type="submit">登录</button><div class="result" role="status" aria-live="polite"></div></form></details></div>';
     const returnTo=location.pathname+'?'+new URLSearchParams({ticket}).toString();
-    document.getElementById('feishu-login').href='/api/access/feishu/authorize?'+new URLSearchParams({returnTo}).toString();
+    document.getElementById('feishu-login').href=basePath+'/api/access/feishu/authorize?'+new URLSearchParams({returnTo}).toString();
     document.getElementById('name-login').onsubmit=async event=>{
       event.preventDefault();const form=event.currentTarget,button=form.querySelector('button'),result=form.querySelector('.result'),password=form.querySelector('#login-password');
       if(button.disabled)return;button.disabled=true;result.className='result submitting';result.textContent='正在登录…';
-      try{const {response,data}=await request('/api/access/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({employeeName:form.querySelector('#login-name').value.trim(),password:password.value})});if(!response.ok)throw new Error(message(data,'登录失败，请核对姓名和密码'));password.value='';await load()}
+      try{const {response,data}=await request(basePath+'/api/access/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({employeeName:form.querySelector('#login-name').value.trim(),password:password.value})});if(!response.ok)throw new Error(message(data,'登录失败，请核对姓名和密码'));password.value='';await load()}
       catch(error){result.className='result error';result.textContent=error.message}
       finally{password.value='';button.disabled=false}
     };

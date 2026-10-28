@@ -71,13 +71,15 @@ describe('外部员工姓名密码登录', () => {
     await sync();
     await expect(access.login({ employeeName: account.name, password: 'synthetic-external-only' }, 'test')).rejects.toThrow('登录凭据无效');
   });
-  it('勾选撤销旧会话但保留实名游客；移出凭据视图或空密码仍拒绝登录', async () => {
+  it('明确离职撤销旧会话并禁止实名游客登录；普通同步不能恢复', async () => {
     const account = await sync(), session = await access.login({ employeeName: '外部验收员工', password: 'synthetic-external-only' }, 'test');
     const inactive = [{ ...rows()[0], fields: { ...rows()[0].fields, '离职/异动情况': '已离职' } }];
     await sync(inactive);
     expect(access.readSession(session.token).expiresAt).toBeNull();
-    await expect(access.login({ employeeName: account.name, password: 'synthetic-external-only' }, 'test')).resolves.toMatchObject({principal:{role:'guest',displayName:account.name}});
-    await sync(); await sync([]);
+    await expect(access.login({ employeeName: account.name, password: 'synthetic-external-only' }, 'test')).rejects.toThrow('登录凭据无效');
+    await sync();
+    await expect(access.login({ employeeName: account.name, password: 'synthetic-external-only' }, 'test')).rejects.toThrow('登录凭据无效');
+    await sync([]);
     await expect(access.login({ employeeName: account.name, password: 'synthetic-external-only' }, 'test')).rejects.toThrow();
     await sync(rows(''));
     await expect(access.login({ employeeName: account.name, password: '' }, 'test')).rejects.toThrow();

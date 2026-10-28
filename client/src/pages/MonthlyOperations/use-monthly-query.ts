@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useAccess } from '@/access/AccessProvider';
 import { createMonthlyQuery, type QueryRange } from './query-cache';
+import { canUsePageAction } from '../business-action-access';
 
 export function useMonthlyQuery<T>(
   query: ReturnType<typeof createMonthlyQuery<T>>,
   { start, end }: QueryRange,
 ) {
-  const { role } = useAccess();
-  const canForceRefresh = role !== 'guest';
+  const access = useAccess();
+  const canForceRefresh = canUsePageAction(access, 'monthly_operations', 'refresh', access.role !== 'guest');
   const read = useCallback(
     () => query.read({ start, end }),
     [query, start, end],

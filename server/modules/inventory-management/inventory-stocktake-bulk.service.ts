@@ -1,5 +1,5 @@
 import { cancelHotfixInitialization, runHotfixInitialization } from '../../common/hotfix-runtime-activation';
-import { businessAuthorizationSnapshot, businessPermissionScopeKey, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { businessAuthorizationIdentityKey, businessAuthorizationSnapshot, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -93,7 +93,7 @@ export class InventoryStocktakeBulkService
       const jobs = (state.bulkJobs ||= []);
       const existing = jobs.find((j) => j.id === request.clientMutationId);
       if (existing) {
-        if (isProfessionalBusinessPrincipal(principal) && businessPermissionScopeKey(existing.principal) !== businessPermissionScopeKey(principal)) throw new ConflictException('任务授权已变化，请重新提交');
+        if ((principal.accountId || existing.principal.accountId || isProfessionalBusinessPrincipal(principal) || isProfessionalBusinessPrincipal(existing.principal)) && businessAuthorizationIdentityKey(existing.principal) !== businessAuthorizationIdentityKey(principal)) throw new ConflictException('任务授权已变化，请重新提交');
         if (existing.fingerprint !== fingerprint)
           throw new ConflictException('重复变更号对应的内容不同，请重新提交');
         if (existing.status !== 'error') return existing;
@@ -159,14 +159,15 @@ export class InventoryStocktakeBulkService
     id: string,
     principal: AccessPrincipal,
   ) {
-    this.sheets.get(month, building, principal, 'review');
     const job = this.store
       .read()
       .bulkJobs?.find(
         (j) => j.id === id && j.month === month && j.building === building,
       );
-    if (isProfessionalBusinessPrincipal(principal) && (!job || businessPermissionScopeKey(job.principal) !== businessPermissionScopeKey(principal))) throw new NotFoundException('未找到本专业的批量确认任务');
     if (!job) throw new NotFoundException('未找到批量确认任务，请用原请求重试');
+    if ((principal.accountId || job.principal.accountId || isProfessionalBusinessPrincipal(principal) || isProfessionalBusinessPrincipal(job.principal)) && businessAuthorizationIdentityKey(job.principal) !== businessAuthorizationIdentityKey(principal)) throw new NotFoundException('未找到本专业的批量确认任务');
+    // Check the same accepted confirmation scope, not an unrelated list-read action.
+    this.sheets.get(month, building, { ...principal, permissionContext: job.principal.permissionContext, permissionRequirements: job.principal.permissionRequirements }, 'review');
     return summary(job);
   }
   private wake() {

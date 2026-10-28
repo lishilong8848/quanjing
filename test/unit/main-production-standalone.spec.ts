@@ -594,6 +594,28 @@ describe('production standalone bootstrap', () => {
     expect(response.send).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['', '/attendance-anomaly-follow-up'],
+    ['', '/attendance-anomaly-follow-up/'],
+    ['/tenant', '/tenant/attendance-anomaly-follow-up'],
+    ['/tenant', '/tenant/attendance-anomaly-follow-up/'],
+  ])('lets the signed follow-up controller handle %s %s before the SPA', async (basePath, path) => {
+    process.env.FORCE_FRAMEWORK_DISABLE_DATAPASS = 'true';
+    process.env.CLIENT_BASE_PATH = basePath;
+    const app = createMockApp();
+    mockNestCreate.mockResolvedValue(app);
+    await bootstrap();
+    const fallback = app.use.mock.calls.at(-1)![0];
+    const response = { locals: {}, type: jest.fn(), send: jest.fn() };
+    const next = jest.fn();
+
+    fallback({ method: 'GET', path }, response, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(response.send).not.toHaveBeenCalled();
+    expect(response.type).not.toHaveBeenCalled();
+  });
+
   it('passes the CSRF token from response locals into every standalone runtime location', async () => {
     process.env.FORCE_FRAMEWORK_DISABLE_DATAPASS = 'true';
     const app = createMockApp();

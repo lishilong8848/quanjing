@@ -275,11 +275,13 @@ export function ThresholdAdjustmentHistory({
   error,
   onClose,
   onRetry,
+  canRetry = () => true,
 }: {
   records: ThresholdAdjustment[];
   error: string;
   onClose: () => void;
   onRetry: (id: string) => void;
+  canRetry?: (item: ThresholdAdjustment) => boolean;
 }) {
   return (
     <Dialog
@@ -342,7 +344,7 @@ export function ThresholdAdjustmentHistory({
                 {a.error && (
                   <div className="threshold-error" role="alert">
                     {a.error}
-                    {a.state !== 'conflict' && (
+                    {a.state !== 'conflict' && canRetry(a) && (
                       <Button
                         size="sm"
                         variant="outline"

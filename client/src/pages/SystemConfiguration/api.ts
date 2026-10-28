@@ -1,6 +1,7 @@
 import { axiosForBackend } from '@lark-apaas/client-toolkit/utils/getAxiosForBackend';
 import type { AccessConfigurationResponse, AccountMutation, CardRoleMutation, ConfigurationPerson, ManagedAccount } from '@shared/access-configuration.interface';
 import type { PersonnelOverview, PersonnelPreviewRequest, PersonnelReadOnlyPreview } from '@shared/personnel-preview.interface';
+import type { AuthorizationAccountChange, AuthorizationAccountPreview, AuthorizationRoleList, AuthorizationRoleMutation, AuthorizationRolePreview } from '@shared/authorization-profile';
 
 const PERSONNEL_SOURCE_TIMEOUT_MS = 60_000;
 async function request<T>(url: string, data?: unknown, timeout = 15_000): Promise<T> {
@@ -18,7 +19,7 @@ async function request<T>(url: string, data?: unknown, timeout = 15_000): Promis
   }
 }
 export const loadConfiguration = () => request<AccessConfigurationResponse>('');
-export const loadConfigurationPeople = () => request<{ appId: string; people: ConfigurationPerson[]; accounts: ManagedAccount[]; snapshotAt: number; personnelOverview?: PersonnelOverview }>('/people');
+export const loadConfigurationPeople = () => request<{ appId: string; people: ConfigurationPerson[]; accounts: ManagedAccount[]; snapshotAt: number; personnelOverview?: PersonnelOverview }>('/people', undefined, PERSONNEL_SOURCE_TIMEOUT_MS);
 export const loadPersonnelPreview = (data: PersonnelPreviewRequest) => request<PersonnelReadOnlyPreview>('/personnel-preview', data);
 export const loadHandoverPreview=(data:import('@shared/personnel-handover.interface').HandoverPreviewRequest)=>request<import('@shared/personnel-handover.interface').PersonnelHandoverPreview>('/personnel-handover/preview',data);
 export const confirmHandover=(data:import('@shared/personnel-handover.interface').HandoverConfirmation)=>request<import('@shared/personnel-handover.interface').HandoverBatch>('/personnel-handover/confirm',data);
@@ -38,4 +39,8 @@ export const changePersonnelSource = (data: import('@shared/personnel-source.int
 export const saveCardRole = (data: CardRoleMutation) => request<AccessConfigurationResponse>('/card-roles', data);
 export const loadCardMembers = (code: string, building: string | null) => request<{ members: ConfigurationPerson[] | null; description?: string }>(`/card-members?code=${encodeURIComponent(code)}${building ? `&building=${encodeURIComponent(building)}` : ''}`);
 
-export const savePageRole = (data: import('@shared/access-configuration.interface').PageRoleMutation) => request<AccessConfigurationResponse>('/pages', data);
+export const loadAuthorizationRoles = () => request<AuthorizationRoleList>('/roles');
+export const previewAuthorizationRole = (data: AuthorizationRoleMutation) => request<AuthorizationRolePreview>('/roles/preview', data);
+export const saveAuthorizationRole = (data: AuthorizationRoleMutation) => request<AccessConfigurationResponse>('/roles', data);
+export const loadAccountAuthorization = (accountId: string) => request<AuthorizationAccountPreview>(`/permissions/effective?accountId=${encodeURIComponent(accountId)}`);
+export const previewAccountAuthorization = (data: AuthorizationAccountChange) => request<AuthorizationAccountPreview>('/permissions/preview', data);

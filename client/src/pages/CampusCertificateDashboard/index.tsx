@@ -18,6 +18,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { getGlobalNavigationViewportHeight } from '@/navigation/global-navigation-layout';
 import {
   getCampusCertificateDashboard,
@@ -133,6 +135,10 @@ export default function CampusCertificateDashboard({
   embedded = false,
   onHeaderStateChange,
 }: CampusCertificateDashboardProps) {
+  const access = useAccess();
+  const canReadCertificate = canUsePageAction(access, 'certification', 'read', true);
+  const canRefreshCertificate = canUsePageAction(access, 'certification', 'refresh', true);
+  const canNotifyCertificate = canUsePageAction(access, 'certification', 'notify', true);
   const scale = useFixedStage(!embedded);
   const [certificateFilter, setCertificateFilter] =
     useState<CertificateFilter>('all');
@@ -246,6 +252,7 @@ export default function CampusCertificateDashboard({
   );
 
   const loadExpiryNotificationPreview = useCallback(async () => {
+    if (!canReadCertificate || !canNotifyCertificate) return;
     const requestSequence = notificationPreviewRequestRef.current + 1;
     notificationPreviewRequestRef.current = requestSequence;
     setNotificationState({ status: 'loading' });
@@ -264,10 +271,12 @@ export default function CampusCertificateDashboard({
         message: '群成员预检失败，请检查飞书连接后重试',
       });
     }
-  }, []);
+  }, [canReadCertificate, canNotifyCertificate]);
 
   const loadDashboard = useCallback(
     async (forceRefresh: boolean) => {
+      if (!canReadCertificate) return;
+      forceRefresh = forceRefresh && canRefreshCertificate;
       if (successTimerRef.current !== null) {
         window.clearTimeout(successTimerRef.current);
         successTimerRef.current = null;
@@ -315,7 +324,7 @@ export default function CampusCertificateDashboard({
         setIsRefreshing(false);
       }
     },
-    [showDashboardStatus],
+    [showDashboardStatus, canReadCertificate, canRefreshCertificate],
   );
 
   useEffect(() => {
@@ -335,6 +344,7 @@ export default function CampusCertificateDashboard({
   }, [activeDetailKey, loadExpiryNotificationPreview]);
 
   const handleNotifyExpiring = useCallback(async () => {
+    if (!canNotifyCertificate) return;
     const preview =
       notificationState.status === 'ready' ||
       notificationState.status === 'sending'
@@ -368,7 +378,7 @@ export default function CampusCertificateDashboard({
         message: '发送结果未确认，可使用同一请求号安全重试',
       });
     }
-  }, [notificationState]);
+  }, [notificationState, canNotifyCertificate]);
 
   const handleRefresh = useCallback(() => {
     if (!isRefreshing) {
@@ -387,6 +397,7 @@ export default function CampusCertificateDashboard({
     ? getDashboardStatusPresentation(dashboardStatus.kind)
     : null;
 
+  if (!canReadCertificate) return <p role="alert" className="p-6 text-sm">当前账号没有持证管理读取权限。</p>;
   return (
     <main
       className={`certificate-dashboard certificate-dashboard-root${
@@ -439,7 +450,7 @@ export default function CampusCertificateDashboard({
                   type="button"
                   className="certificate-refresh-button"
                   onClick={handleRefresh}
-                  disabled={isRefreshing}
+                  disabled={isRefreshing || !canRefreshCertificate}
                   aria-busy={isRefreshing}
                 >
                   <RefreshCw
@@ -815,8 +826,8 @@ export default function CampusCertificateDashboard({
           dashboardData?.sourceUpdatedAt || dashboardData?.syncedAt || ''
         }
         notificationState={notificationState}
-        onNotifyExpiring={() => void handleNotifyExpiring()}
-        onRetryNotificationPreview={() => void loadExpiryNotificationPreview()}
+        onNotifyExpiring={canNotifyCertificate ? () => void handleNotifyExpiring() : undefined}
+        onRetryNotificationPreview={canNotifyCertificate ? () => void loadExpiryNotificationPreview() : undefined}
       />
 
       <CertificateExpiryDayDetailDialog

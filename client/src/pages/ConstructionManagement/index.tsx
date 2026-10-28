@@ -59,6 +59,7 @@ import {
   updateConstructionPermitManualReview,
 } from '@/api';
 import { getAccessRoleLabel, useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { isConstructionManualReviewAutoApprovalRole } from '@shared/construction-manual-review-policy';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -905,12 +906,15 @@ function DialogOpeningFeedback({
 }
 
 export default function ConstructionManagementPage() {
-  const { role, capabilities } = useAccess();
-  const canEditConstruction = capabilities.canEdit;
-  const canDeleteConstruction = capabilities.canDelete;
-  const canForceRefreshConstruction = capabilities.canForceRefresh;
+  const access = useAccess();
+  const { role, capabilities } = access;
+  const canCreateConstruction = canUsePageAction(access, 'construction', 'create', capabilities.canEdit);
+  const canEditConstruction = canUsePageAction(access, 'construction', 'update', capabilities.canEdit);
+  const canConfirmConstruction = canUsePageAction(access, 'construction', 'confirm', capabilities.canEdit);
+  const canDeleteConstruction = canUsePageAction(access, 'construction', 'delete', capabilities.canDelete);
+  const canForceRefreshConstruction = canUsePageAction(access, 'construction', 'refresh', capabilities.canForceRefresh);
   const manualReviewAutoApproved =
-    isConstructionManualReviewAutoApprovalRole(role);
+    isConstructionManualReviewAutoApprovalRole(role, access);
 
   const [data, setData] = useState<ConstructionManagementResponse | null>(null);
   const constructionAiAuditEnabled = data?.imageAuditStatus?.enabled === true;
@@ -1239,8 +1243,8 @@ export default function ConstructionManagementPage() {
     async (
       options: boolean | ConstructionLoadDataOptions = false,
     ): Promise<ConstructionManagementResponse | null> => {
-      const forceRefresh =
-        typeof options === 'boolean' ? options : options.forceRefresh === true;
+      const forceRefresh = canForceRefreshConstruction &&
+        (typeof options === 'boolean' ? options : options.forceRefresh === true);
       const background =
         typeof options === 'boolean' ? false : options.background === true;
       if (forceRefresh && forceRefreshInFlightRef.current) {
@@ -1319,7 +1323,7 @@ export default function ConstructionManagementPage() {
       );
       return loadedData;
     },
-    [clearOptimisticConfirmationTimer, updateConstructionData],
+    [canForceRefreshConstruction, clearOptimisticConfirmationTimer, updateConstructionData],
   );
 
   const monitorAcceptedFollowupMutation = useCallback(
@@ -1420,6 +1424,7 @@ export default function ConstructionManagementPage() {
 
   const syncPendingManualReviewItem = useCallback(
     (review: PendingManualReviewItem) => {
+      if (!canConfirmConstruction) return Promise.reject(new Error('当前权限不能提交人工审核结果'));
       if (review.kind === 'permit') {
         return updateConstructionPermitManualReview({
           followupRecordId: review.followupRecordId,
@@ -1438,7 +1443,7 @@ export default function ConstructionManagementPage() {
         decision: review.decision,
       });
     },
-    [],
+    [canConfirmConstruction],
   );
 
   const confirmPendingManualReviewSync = useCallback(
@@ -1762,14 +1767,14 @@ export default function ConstructionManagementPage() {
   const allProjectsHidden =
     projectsFullyHidden && filteredProjectInProgressItems.length > 0;
   const requireConstructionEdit = useCallback(
-    (actionLabel = '执行该操作') => {
-      if (canEditConstruction) {
+    (actionLabel = '执行该操作', action: 'create' | 'update' | 'confirm' = 'update') => {
+      if (action === 'create' ? canCreateConstruction : action === 'confirm' ? canConfirmConstruction : canEditConstruction) {
         return true;
       }
-      toast.error(`游客模式不能${actionLabel}`);
+      toast.error(`当前权限不能${actionLabel}`);
       return false;
     },
-    [canEditConstruction],
+    [canCreateConstruction, canEditConstruction, canConfirmConstruction],
   );
   const requireConstructionDelete = useCallback(
     (actionLabel = '执行删除操作') => {
@@ -1782,19 +1787,17 @@ export default function ConstructionManagementPage() {
     [canDeleteConstruction],
   );
   useEffect(() => {
-    if (canEditConstruction) {
-      return;
-    }
+    if (!canCreateConstruction) setApplicationOpen(false);
+    if (canEditConstruction || canConfirmConstruction) return;
     if (followupOpeningFrameRef.current !== null) {
       window.cancelAnimationFrame(followupOpeningFrameRef.current);
       followupOpeningFrameRef.current = null;
     }
     followupOpeningFeedbackRef.current?.hide();
-    setApplicationOpen(false);
     setFollowupOpen(false);
     setCrewRosterUploadTarget(null);
     setProjectTerminateCandidate(null);
-  }, [canEditConstruction]);
+  }, [canCreateConstruction, canEditConstruction, canConfirmConstruction]);
   useEffect(() => {
     if (!canDeleteConstruction) {
       setProjectDeleteCandidate(null);
@@ -2098,7 +2101,7 @@ export default function ConstructionManagementPage() {
     [openConstructionDetail],
   );
   const handleFollowupDialogOpen = useCallback(() => {
-    if (!requireConstructionEdit('施工跟进')) {
+    if (!requireConstructionEdit('施工跟进', canEditConstruction ? 'update' : 'confirm')) {
       return;
     }
     scheduleFollowupDialogOpen(
@@ -2201,12 +2204,13 @@ export default function ConstructionManagementPage() {
     followupForm.followupMode,
     dailyPermitReferenceDate,
     requireConstructionEdit,
+    canEditConstruction,
     scheduleFollowupDialogOpen,
     visibleConstructionItems,
   ]);
 
   const handleOpenNewApplication = useCallback(() => {
-    if (!requireConstructionEdit('新建施工')) {
+    if (!requireConstructionEdit('新建施工', 'create')) {
       return;
     }
     applicationSessionSequenceRef.current += 1;
@@ -2241,7 +2245,7 @@ export default function ConstructionManagementPage() {
     form: ApplicationFormState,
     files: FileBucket,
   ) => {
-    if (!requireConstructionEdit('新建施工')) {
+    if (!requireConstructionEdit('新建施工', 'create')) {
       return false;
     }
     if (
@@ -4287,7 +4291,7 @@ export default function ConstructionManagementPage() {
       validFrom: string | null,
       validUntil: string | null,
     ) => {
-      if (!requireConstructionEdit('暂存作业票人工审核')) {
+      if (!requireConstructionEdit('暂存作业票人工审核', 'confirm')) {
         return;
       }
       const targetFollowupRecordId =
@@ -4353,7 +4357,7 @@ export default function ConstructionManagementPage() {
       followupRecordId: string | null,
       decision: ConstructionPermitManualReviewDecision,
     ) => {
-      if (!requireConstructionEdit('暂存挂牌隔离人工审核')) {
+      if (!requireConstructionEdit('暂存挂牌隔离人工审核', 'confirm')) {
         return;
       }
       if (!followupRecordId) {
@@ -4392,7 +4396,7 @@ export default function ConstructionManagementPage() {
   );
 
   const handleSubmitPendingManualReviews = useCallback(() => {
-    if (!requireConstructionEdit('提交人工审核')) {
+    if (!requireConstructionEdit('提交人工审核', 'confirm')) {
       return;
     }
     if (pendingManualReviews.length === 0) {
@@ -5547,7 +5551,7 @@ export default function ConstructionManagementPage() {
               <Button
                 type="button"
                 className="h-11 rounded-lg bg-[#1e63ff] px-5 text-white shadow-[0_12px_28px_rgba(0,30,130,0.24)] hover:bg-[#1554df]"
-                disabled={!canEditConstruction}
+                disabled={!canCreateConstruction}
                 onClick={handleOpenNewApplication}
               >
                 <Plus className="h-4 w-4" />
@@ -5559,7 +5563,7 @@ export default function ConstructionManagementPage() {
                 className="h-11 rounded-lg border-white/20 bg-white px-5 text-slate-700 shadow-[0_10px_24px_rgba(0,24,84,0.18)] hover:bg-blue-50"
                 onClick={handleFollowupDialogOpen}
                 disabled={
-                  !canEditConstruction || !visibleConstructionItems.length
+                  !(canEditConstruction || canConfirmConstruction) || !visibleConstructionItems.length
                 }
               >
                 <FileUp className="h-4 w-4" />
@@ -9602,6 +9606,7 @@ function AttachmentTraceRow({
 }: {
   attachment: LifecycleStageAttachmentView;
 }) {
+  const canDownload = canUsePageAction(useAccess(), 'construction', 'export', true);
   const isComplete = attachment.count > 0;
   const isIssue = attachment.status === 'issue';
 
@@ -9629,11 +9634,11 @@ function AttachmentTraceRow({
             return (
               <a
                 key={`${attachment.label}-${file.fileToken}-${index}`}
-                href={getConstructionAttachmentDownloadUrl(
+                href={canDownload ? getConstructionAttachmentDownloadUrl(
                   file.fileToken,
                   fileName,
                   { tmpUrl: file.tmpUrl },
-                )}
+                ) : undefined}
                 download={fileName}
                 className="inline-flex max-w-full items-center rounded-md border border-current/15 bg-white/70 px-2 py-0.5 text-[11px] font-medium underline-offset-2 hover:underline"
                 title={fileName}
@@ -9684,6 +9689,7 @@ function ConstructionIssueCard({
   compact?: boolean;
   className?: string;
 }) {
+  const canDownload = canUsePageAction(useAccess(), 'construction', 'export', true);
   const files = item.constructionIssues || [];
   const hasIssues = files.length > 0;
 
@@ -9724,11 +9730,11 @@ function ConstructionIssueCard({
             return (
               <a
                 key={`${file.fileToken}-${index}`}
-                href={getConstructionAttachmentDownloadUrl(
+                href={canDownload ? getConstructionAttachmentDownloadUrl(
                   file.fileToken,
                   fileName,
                   { tmpUrl: file.tmpUrl },
-                )}
+                ) : undefined}
                 download={fileName}
                 title={fileName}
                 className="inline-flex max-w-full items-center rounded-md border border-rose-200 bg-white/80 px-2 py-0.5 text-[11px] font-medium text-rose-700 underline-offset-2 hover:underline"
@@ -10651,6 +10657,7 @@ function FollowupDialog({
     decision: ConstructionPermitManualReviewDecision,
   ) => void | Promise<void>;
 }) {
+  const canUpdate = canUsePageAction(useAccess(), 'construction', 'update', true);
   const submitPending = submitting || manualReviewRefreshing;
   const submitPendingLabel =
     dailyChecklistFocus === 'workType'
@@ -12210,7 +12217,7 @@ function FollowupDialog({
             </Button>
             <Button
               type="button"
-              disabled={submitPending}
+              disabled={submitPending || !canUpdate}
               onClick={onSubmit}
               className="bg-blue-600 text-white hover:bg-blue-700"
             >
@@ -12632,6 +12639,7 @@ function ManualReviewBatchSubmitBar({
   disabled?: boolean;
   onSubmit: () => void | Promise<void>;
 }) {
+  const canConfirm = canUsePageAction(useAccess(), 'construction', 'confirm', true);
   if (count <= 0) {
     return null;
   }
@@ -12645,7 +12653,7 @@ function ManualReviewBatchSubmitBar({
       <Button
         type="button"
         size="sm"
-        disabled={disabled}
+        disabled={disabled || !canConfirm}
         onClick={() => void onSubmit()}
         className="h-8 bg-blue-600 px-3 text-white hover:bg-blue-700"
       >
@@ -12796,6 +12804,7 @@ function DailyIsolationPhotoAuditAction({
     decision: ConstructionPermitManualReviewDecision,
   ) => void | Promise<void>;
 }) {
+  const canConfirm = canUsePageAction(useAccess(), 'construction', 'confirm', true);
   if (manualReviewAutoApproved) {
     return <AutomaticManualReviewBadge label="挂牌审核默认通过" />;
   }
@@ -12824,7 +12833,7 @@ function DailyIsolationPhotoAuditAction({
         ? AlertCircle
         : HelpCircle;
   const controlDisabled =
-    disabled || refreshing || !onRequestManualReview || !followupRecordId;
+    disabled || !canConfirm || refreshing || !onRequestManualReview || !followupRecordId;
   const actionLabel = followupRecordId
     ? '先暂存，点击提交人工审核后同步多维表'
     : '当前记录未创建，提交每日准备后可人工审核';
@@ -13098,6 +13107,9 @@ function DailyPermitVerificationCard({
   ) => void | Promise<void>;
   className?: string;
 }) {
+  const access = useAccess();
+  const canDownload = canUsePageAction(access, 'construction', 'export', true);
+  const canReview = canUsePageAction(access, 'construction', 'confirm', true);
   const blocking = getBlockingDailyPermitIssues(verifications);
   const allValid = verifications.every(
     (item) => getDailyPermitVerificationTone(item) === 'valid',
@@ -13309,11 +13321,11 @@ function DailyPermitVerificationCard({
                         return (
                           <a
                             key={`${item.fileKey}-${file.fileToken}-${index}`}
-                            href={getConstructionAttachmentDownloadUrl(
+                            href={canDownload ? getConstructionAttachmentDownloadUrl(
                               file.fileToken,
                               fileName,
                               { tmpUrl: file.tmpUrl },
-                            )}
+                            ) : undefined}
                             target="_blank"
                             rel="noreferrer"
                             className="inline-flex max-w-full items-center gap-1 rounded-md border border-current/15 bg-white/80 px-2 py-0.5 text-[11px] font-semibold underline-offset-2 hover:underline"
@@ -13330,7 +13342,7 @@ function DailyPermitVerificationCard({
                   未匹配到可预览附件
                 </div>
               )}
-              {manualReviewAutoApproved && (
+              {manualReviewAutoApproved && canReview && (
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   <label className="block">
                     <span className="text-[11px] font-semibold">
@@ -13442,6 +13454,7 @@ function DailyPermitManualReviewBadge({
     validUntil: string | null,
   ) => void | Promise<void>;
 }) {
+  const canConfirm = canUsePageAction(useAccess(), 'construction', 'confirm', true);
   const review = verification.manualReview;
   const [manualValidFrom, setManualValidFrom] = useState(
     review.validFrom || '',
@@ -13478,7 +13491,7 @@ function DailyPermitManualReviewBadge({
     ? '先暂存，点击提交人工审核后同步多维表'
     : '提交每日准备后可人工审核';
   const controlDisabled =
-    disabled || refreshing || !onRequestManualReview || !hasFollowupRecord;
+    disabled || !canConfirm || refreshing || !onRequestManualReview || !hasFollowupRecord;
   const handleDecision = (decision: ConstructionPermitManualReviewDecision) => {
     if (controlDisabled) {
       return;
@@ -14345,6 +14358,7 @@ function FilePickerField({
   onUploadedFileRemove?: (fieldKey: string, fileToken: string) => void;
   onFilesChange: React.Dispatch<React.SetStateAction<FileBucket>>;
 }) {
+  const canDownload = canUsePageAction(useAccess(), 'construction', 'export', true);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const openFilePicker = useCallback(() => {
@@ -14450,7 +14464,7 @@ function FilePickerField({
                 className="flex min-w-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white/85 px-2 py-1 text-[11px] font-semibold text-slate-600"
               >
                 <a
-                  href={getConstructionAttachmentPreviewUrl(file, fileName)}
+                  href={canDownload ? getConstructionAttachmentPreviewUrl(file, fileName) : undefined}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex min-w-0 flex-1 items-center gap-1 underline-offset-2 hover:text-blue-700 hover:underline"

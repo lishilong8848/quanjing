@@ -86,8 +86,11 @@ export interface AccessPrincipal {
   specialties?: readonly ProfessionalSpecialty[];
   buildings?: readonly BuildingAdminBuilding[];
   personalRules?: readonly import('./business-permissions').PersonalPermissionRule[];
+  effectiveAuthorization?: import('./authorization-profile').EffectiveAuthorization;
   /** 服务端从已匹配的接口生成，前端从当前页面生成；不能使用客户端请求体赋值。 */
   permissionContext?: import('./business-permissions').BusinessPermissionContext;
+  /** Server-selected requirements for compound requests, never populated from request bodies. */
+  permissionRequirements?: readonly import('./business-permissions').BusinessPermissionContext[];
 }
 
 export interface PrivilegedAccessPrincipal extends AccessPrincipal {

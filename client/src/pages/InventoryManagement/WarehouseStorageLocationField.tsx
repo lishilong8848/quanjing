@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { useAccess } from '@/access/AccessProvider';
+import { businessBuildingsForAction } from '@shared/business-permissions';
 import { Check, ChevronDown, Loader2, MapPinPlus, Search } from 'lucide-react';
 
 import {
@@ -150,6 +152,8 @@ export function WarehouseStorageLocationField({
   onChange,
   onCreatingChange,
 }: WarehouseStorageLocationFieldProps) {
+  const principal = useAccess();
+  const canCreate = !principal.effectiveAuthorization || businessBuildingsForAction(principal, { module: 'inventory', action: 'create' }).includes(building as never);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState<WarehouseStorageLocation[]>([]);
@@ -285,7 +289,7 @@ export function WarehouseStorageLocationField({
   }
 
   function openCreatePanel() {
-    if (disabled || creating) return;
+    if (!canCreate || disabled || creating) return;
     setCreateOpen(true);
     setCreateDraft((current) =>
       current.name.trim() || !query.trim()
@@ -301,7 +305,7 @@ export function WarehouseStorageLocationField({
   }
 
   async function createLocation() {
-    if (createInFlightRef.current) return;
+    if (!canCreate || createInFlightRef.current) return;
 
     let prepared: PreparedStorageLocationCreate | null;
     try {
@@ -394,7 +398,7 @@ export function WarehouseStorageLocationField({
           className="h-7 border-slate-200 bg-slate-100 px-2 text-xs text-slate-600 hover:bg-slate-200"
           aria-controls={createPanelId}
           aria-expanded={createOpen}
-          disabled={disabled || creating}
+          disabled={disabled || creating || !canCreate}
           onClick={openCreatePanel}
         >
           <MapPinPlus className="h-3.5 w-3.5" />
@@ -561,7 +565,7 @@ export function WarehouseStorageLocationField({
             <Button
               type="button"
               size="sm"
-              disabled={creating || !createDraft.name.trim()}
+              disabled={!canCreate || creating || !createDraft.name.trim()}
               onClick={createLocation}
             >
               {creating && <Loader2 className="h-4 w-4 animate-spin" />}

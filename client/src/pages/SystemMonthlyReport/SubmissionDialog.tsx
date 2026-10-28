@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
@@ -89,6 +91,9 @@ export function SubmissionDialog({
   onTaskChange,
   onSynced,
 }: SubmissionDialogProps) {
+  const access = useAccess();
+  const canCreate = canUsePageAction(access, 'system_reports', 'create', true);
+  const canRetry = canUsePageAction(access, 'system_reports', 'update', true);
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
@@ -138,6 +143,7 @@ export function SubmissionDialog({
   }, [file?.name, reportMonth, reportYear, room, stage]);
 
   const submit = async () => {
+    if (!canCreate) return;
     if (!room || !file || submitting) {
       if (!file) setLocalError('请先选择要提交的月报附件。');
       return;
@@ -175,6 +181,7 @@ export function SubmissionDialog({
   };
 
   const retry = async () => {
+    if (!canRetry) return;
     if (!task || submitting) return;
     setSubmitting(true);
     setLocalError('');
@@ -370,7 +377,7 @@ export function SubmissionDialog({
               {state === 'success' ? '完成' : '关闭'}
             </Button>
             {task && ['error', 'uncertain'].includes(task.status) ? (
-              <Button type="button" onClick={retry} disabled={submitting}>
+              <Button type="button" onClick={retry} disabled={submitting || !canRetry}>
                 {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                 重新提交
               </Button>
@@ -379,7 +386,7 @@ export function SubmissionDialog({
               <Button
                 type="button"
                 onClick={submit}
-                disabled={!file || submitting}
+                disabled={!canCreate || !file || submitting}
               >
                 {submitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

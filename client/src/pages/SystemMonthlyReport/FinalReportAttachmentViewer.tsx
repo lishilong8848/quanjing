@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Download,
@@ -32,6 +34,8 @@ export function FinalReportAttachmentViewer({
   item: SystemMonthlyReportHistoryItem | null;
   canDownload: boolean;
 }) {
+  const access = useAccess();
+  canDownload = canDownload && canUsePageAction(access, 'system_reports', 'export', true);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [preview, setPreview] =
     useState<SystemMonthlyReportArchivePreview | null>(null);
@@ -80,6 +84,7 @@ export function FinalReportAttachmentViewer({
   };
 
   const download = async (attachmentId: string) => {
+    if (!canDownload) return;
     setError('');
     setBusyAction(`${attachmentId}:download`);
     try {

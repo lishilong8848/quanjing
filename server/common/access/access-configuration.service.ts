@@ -12,7 +12,8 @@ import { normalizeAccessDisplayName } from './access-display-name';
 import { createAccessPasswordHash, matchesAccessPassword, validAccessPasswordHash } from './access-password';
 import { feishuIdentityFingerprint } from './feishu-access-approved-grants';
 import { ID_PATTERN, OPEN_ID_PATTERN, requireMutation, ruleKey, validAccount, validCardRule } from './access-configuration.validation';
-import { normalizeProfessionalScope } from '../../../shared/professional-access';
+import { normalizeProfessionalScope, professionalScopeIsValid } from '../../../shared/professional-access';
+import { validBuildingScope } from '../../../shared/building-access';
 import type { ConfigurationDirectorySnapshot } from './access-configuration.directory';
 import { BUSINESS_PERMISSION_CATALOG, BUSINESS_ACTION_LABELS } from '../../../shared/business-permissions';
 import { capturePersonnelPermission } from './personnel-permission-archive';
@@ -25,6 +26,10 @@ import { readCurrentPersonnelDutyMembers, resolveCurrentPersonnelDutyRoutePeople
 import { splitHandoverPermissionGrants } from './personnel-handover.ownership';
 import { acknowledgePersonnelSourceAssignments, markPersonnelSourceError, reconcilePersonnelSource } from './personnel-source.policy';
 import { sourceOwnsCardRole } from '../../../shared/personnel-source.interface';
+import type { AuthorizationAccountChange, AuthorizationAccountPreview, AuthorizationRoleList, AuthorizationRoleMutation, AuthorizationRolePreview } from '../../../shared/authorization-profile';
+import { authorizationPages, authorizationPolicyFingerprint, authorizationTemplateId, createAuthorizationTemplates, projectAuthorization, resolveAuthorization, validAuthorizationBinding, validAuthorizationOverrides } from './authorization-profile.policy';
+import { accountAuthorizationChange, authorizationMigrationPreview, bindUnconfiguredAuthorization, captureIndependentAuthorization, migrateAuthorizationState, reprojectAuthorizationState, roleAuthorizationChange } from './authorization-profile.configuration';
+import { effectiveCardDuties } from './effective-card-duties';
 
 @Injectable()
 export class AccessConfigurationService implements OnModuleInit {
@@ -35,9 +40,45 @@ export class AccessConfigurationService implements OnModuleInit {
   private defaultInitialization?: Promise<void>;
   onModuleInit(): Promise<void> {
     this.store.read();
-    return runHotfixInitialization(this, () => this.defaultInitialization ||= this.initializeProfessionalDefaults());
+    return runHotfixInitialization(this, () => this.defaultInitialization ||= this.initializeAuthorizationConfiguration());
   }
   async onModuleDestroy(): Promise<void> { await cancelHotfixInitialization(this); }
+  private async initializeAuthorizationConfiguration(): Promise<void> {
+    await this.initializeProfessionalDefaults();
+    const state=this.store.read();
+    if(state.schemaVersion === 2) await this.refreshDefaultCredentials(state);
+  }
+  previewAuthorizationMigration() {
+    return authorizationMigrationPreview(this.store.read(), this.defaults);
+  }
+  /** Explicit operator-only initialization; ordinary reads and module startup never upgrade V1. */
+  async migrateAuthorizationConfiguration(request: Pick<AccountMutation,'clientMutationId'|'expectedRevision'>, actor:AccessPrincipal):Promise<AccessConfigurationResponse> {
+    requireMutation(request,['clientMutationId','expectedRevision']);
+    this.assertActor(actor,this.store.read());
+    if(this.store.read().schemaVersion === 2) return this.snapshot();
+    await this.store.mutate(request.expectedRevision,request.clientMutationId,this.fingerprint(request,actor),state=>{
+      this.assertActor(actor,state);migrateAuthorizationState(state,this.defaults);
+    },{migrationOnly:true});
+    return this.snapshot();
+  }
+  private async refreshDefaultCredentials(state: ConfigurationState): Promise<void> {
+    const changed=Object.values(state.accounts).filter(account=>account.credentialSource === 'default' &&
+      (account.passwordHash !== this.defaultPasswordHash(account.id) || account.enabled && !this.defaults[account.id]?.enabled));
+    if(!changed.length) return;
+    const id=`default-credentials-${randomUUID()}`;
+    await this.store.mutate(state.revision,id,id,current=>{
+      for(const previous of changed) {
+        const account=current.accounts[previous.id],hash=this.defaultPasswordHash(previous.id);
+        if(!account || account.credentialSource !== 'default') throw new ConflictException('默认凭据状态已变化，请重新启动核对');
+        account.version+=1;account.enabled=account.enabled && !!hash && this.defaults[account.id]?.enabled === true;
+        if(hash)account.passwordHash=hash;else delete account.passwordHash;
+      }
+    });
+  }
+  private defaultPasswordHash(id: string): string | undefined {
+    const value=this.defaults[id]?.passwordHash;
+    return validAccessPasswordHash(value) ? value : undefined;
+  }
   private async initializeProfessionalDefaults(): Promise<void> {
     const appId = process.env.FEISHU_APP_ID?.trim() || '';
     const defaults = Object.values(this.defaults).filter(account => account.role === 'professional_admin');
@@ -47,21 +88,79 @@ export class AccessConfigurationService implements OnModuleInit {
     await this.store.mutate(state.revision, mutationId, mutationId, current => {
       for (const account of defaults) {
         const previous = current.accounts[account.id];
-        if (previous?.role === 'professional_admin') continue;
+        if (previous?.role === 'professional_admin' || (previous?.authorizationBinding && previous.permissionSource === 'manual')) continue;
         if (previous) this.preservePermission(current,previous);
         current.accounts[account.id] = { ...account, version: (previous?.version || account.version) + (previous ? 1 : 0) };
         this.audit(current, { role: 'admin', purchaseBuilding: null, displayName: '授权初始化' }, account.name, '初始化专业主管', previous ? describe(previous) : '无授权', describe(current.accounts[account.id]));
       }
       current.professionalDefaultsAppId = appId;
+      reprojectAuthorizationState(current);
     });
   }
 
-  private accounts(state = this.store.read()): Record<string, StoredAccount> { return Object.fromEntries(Object.entries({ ...this.defaults, ...state.accounts }).map(([id, account]) => [id, account.kind === 'feishu' && account.source === 'default' && !account.external && !account.permissionSource ? { ...account, permissionSource: 'personnel' as const } : account])); }
+  private accounts(state = this.store.read()): Record<string, StoredAccount> {
+    return Object.fromEntries(Object.entries({ ...this.defaults, ...state.accounts }).map(([id, original]) => {
+      let account=original.kind === 'feishu' && original.source === 'default' && !original.external && !original.permissionSource ? { ...original, permissionSource:'personnel' as const } : original;
+      if(account.credentialSource === 'default') {
+        const hash=this.defaultPasswordHash(id),changed=account.passwordHash !== hash;
+        account={...account,passwordHash:hash,enabled:account.enabled && !!hash && this.defaults[id]?.enabled === true,
+          ...(changed ? {version:parseInt(createHash('sha256').update(JSON.stringify(['default-credential',account.version,hash || ''])).digest('hex').slice(0,13),16)+1} : {})};
+      }
+      if(state.schemaVersion === 2 && !account.authorizationBinding) account=bindUnconfiguredAuthorization(account,state);
+      return [id,account];
+    }));
+  }
   pagePermissions(role: import('../../../shared/access-control.interface').AccessRole, accountId?: string, authorizationVersion?: number) {
     const state = this.store.read();
     const account=accountId ? this.accounts(state)[accountId] : undefined;
     const pages=account && !this.employmentInactive(account,state) && account.role === role && this.validateSession(accountId,authorizationVersion,role,account.building,account.specialties,account.buildings) ? account.pagePaths : undefined;
-    return { paths: effectiveAccountPagePaths(role,state.rolePageRules,pages), revision: state.revision, configured: state.rolePageRules?.[role] !== undefined || !!pages?.length };
+    const effective = account && pages !== undefined && account.effectiveAuthorization ? account.effectiveAuthorization :
+      account && !this.employmentInactive(account,state) && this.validateSession(accountId,authorizationVersion,role,account.building,account.specialties,account.buildings) ? account.effectiveAuthorization : undefined;
+    return { paths: effective ? authorizationPages(effective) : effectiveAccountPagePaths(role,state.rolePageRules,pages), revision: state.revision, configured: !!effective || state.rolePageRules?.[role] !== undefined || !!pages?.length };
+  }
+
+  authorizationRoles(state = this.store.read()): AuthorizationRoleList {
+    const templates = state.authorizationTemplates || createAuthorizationTemplates(state.rolePageRules, roleName);
+    const accounts = Object.values(this.accounts(state));
+    return { revision: state.revision, roles: Object.values(templates).map(role => ({ ...structuredClone(role), followerCount: accounts.filter(account =>
+      account.authorizationBinding?.mode === 'follow' ? account.authorizationBinding.templateId === role.id : !account.authorizationBinding && authorizationTemplateId(account.role) === role.id).length })) };
+  }
+  effectiveAuthorization(accountId: string): AuthorizationAccountPreview {
+    const state = this.store.read(), accounts=this.accounts(state);
+    const account=typeof accountId === 'string' && Object.hasOwn(accounts,accountId) ? accounts[accountId] : undefined;
+    if (!account || account.deleted) throw new BadRequestException('账号不存在');
+    const effective = resolveAuthorization(account, state.authorizationTemplates, state.rolePageRules);
+    return { revision: state.revision, accountId, before: effective, after: structuredClone(effective), sessionWillBeRevoked: false };
+  }
+  previewAuthorization(change: AuthorizationAccountChange): AuthorizationAccountPreview {
+    if (!change || typeof change !== 'object' || Object.keys(change).some(key => !['accountId','expectedRevision','binding','overrides','building','buildings','specialties'].includes(key))) throw new BadRequestException('权限预览字段无效');
+    const state = this.store.read(); migrateAuthorizationState(state, this.defaults);
+    return accountAuthorizationChange(state, change).preview;
+  }
+  previewAuthorizationRole(request: AuthorizationRoleMutation): AuthorizationRolePreview {
+    this.validateRoleMutation(request);
+    const state = this.store.read(); migrateAuthorizationState(state, this.defaults);
+    return roleAuthorizationChange(state, request);
+  }
+  async saveAuthorizationRole(request: AuthorizationRoleMutation, actor: AccessPrincipal): Promise<AccessConfigurationResponse> {
+    this.validateRoleMutation(request);
+    await this.store.mutate(request.expectedRevision, request.clientMutationId, this.fingerprint(request, actor), state => {
+      this.assertActor(actor, state); migrateAuthorizationState(state, this.defaults);
+      const preview = roleAuthorizationChange(state, request);
+      if (request.deleted) delete state.authorizationTemplates![preview.role.id];
+      else state.authorizationTemplates![preview.role.id] = preview.role;
+      for (const change of preview.affectedAccounts) {
+        const previous = state.accounts[change.accountId]; this.preservePermission(state, previous);
+        state.accounts[change.accountId] = projectAuthorization({ ...previous, version: previous.version + (change.sessionWillBeRevoked ? 1 : 0) }, state.authorizationTemplates!);
+      }
+      this.assertAdministratorRemains(this.accounts(state), state);
+      if (preview.affectedAccounts.some(change => change.sessionWillBeRevoked)) state.legacySessionsRevoked = true;
+      this.audit(state, actor, preview.role.name, request.deleted ? '删除权限角色' : '保存权限角色', request.id || '新角色', `${preview.affectedAccounts.length}个跟随账号；个人例外保留`);
+    });
+    return this.snapshot();
+  }
+  private validateRoleMutation(request: AuthorizationRoleMutation): void {
+    requireMutation(request, ['clientMutationId','expectedRevision','id','name','description','enabled','policy','deleted']);
   }
   async savePageRole(request: PageRoleMutation, actor: AccessPrincipal): Promise<AccessConfigurationResponse> {
     requireMutation(request, ['clientMutationId', 'expectedRevision', 'role', 'pages', 'restoreDefault']);
@@ -69,11 +168,19 @@ export class AccessConfigurationService implements OnModuleInit {
       (request.restoreDefault !== undefined && typeof request.restoreDefault !== 'boolean')) throw new BadRequestException('页面权限配置无效，管理员权限固定');
     await this.store.mutate(request.expectedRevision, request.clientMutationId, this.fingerprint(request, actor), state => {
       this.assertActor(actor, state);
+      migrateAuthorizationState(state, this.defaults);
       for (const account of Object.values(this.accounts(state))) if (account.role === request.role) this.preservePermission(state,account);
       const before = effectivePagePaths(request.role, state.rolePageRules);
       state.rolePageRules ||= {};
       if (request.restoreDefault) delete state.rolePageRules[request.role];
       else state.rolePageRules[request.role] = [...request.pages].sort();
+      const template = state.authorizationTemplates![authorizationTemplateId(request.role)];
+      template.policy.pages = effectivePagePaths(request.role, state.rolePageRules); template.version += 1;
+      for (const account of Object.values(state.accounts)) if (account.authorizationBinding?.mode === 'follow' && account.authorizationBinding.templateId === template.id) {
+        const next = projectAuthorization(account, state.authorizationTemplates!);
+        if (authorizationPolicyFingerprint(account.effectiveAuthorization!) !== authorizationPolicyFingerprint(next.effectiveAuthorization!)) next.version += 1;
+        state.accounts[account.id] = next;
+      }
       const labels = (paths: string[]) => PAGE_ACCESS_CATALOG.filter(page => paths.includes(page.path)).map(page => page.label).join('、') || '无';
       this.audit(state, actor, roleName(request.role), request.restoreDefault ? '恢复默认页面权限' : '保存页面读取权限', labels(before), labels(effectivePagePaths(request.role, state.rolePageRules)));
     });
@@ -81,11 +188,11 @@ export class AccessConfigurationService implements OnModuleInit {
   }
   snapshot(): AccessConfigurationResponse {
     const state = this.store.read();
-    return { revision: state.revision, appId: process.env.FEISHU_APP_ID?.trim() || '',
-      accounts: Object.values(this.accounts(state)).map(({ passwordHash, personnelSuspended, ...account }) => ({ ...account, enabled:account.enabled && !this.employmentInactive(account,state),
-        ...(this.employmentInactive(account,state) ? {permissionsRevoked:true,guestLoginAllowed:this.canAuthenticatePersonnel({...account,passwordHash,personnelSuspended},state)} : {}),
+    return { revision: state.revision, schemaVersion: state.schemaVersion, authorizationTemplates: this.authorizationRoles(state).roles, appId: process.env.FEISHU_APP_ID?.trim() || '',
+      accounts: Object.values(this.accounts(state)).map(({ passwordHash, personnelSuspended, credentialSource, ...account }) => ({ ...account, enabled:account.enabled && !this.employmentInactive(account,state),
+        ...((this.employmentInactive(account,state) || account.reactivationRequired) ? {permissionsRevoked:true,guestLoginAllowed:false} : {}),
         ...(account.kind === 'local' ? { name: account.loginMethod ? account.name : account.name.replace(/共享入口$/, '密码登录'), passwordConfigured: validAccessPasswordHash(passwordHash) } : {}) })),
-      cardRules: Object.values(state.cardRules), audit: state.audit.slice().reverse(), personnelSync: state.personnelSync, rolePageRules: state.rolePageRules,
+      cardRules: Object.values(state.cardRules), effectiveCardDuties:effectiveCardDuties(state,process.env.FEISHU_APP_ID?.trim() || ''), audit: state.audit.slice().reverse(), personnelSync: state.personnelSync, rolePageRules: state.rolePageRules,
       ...(state.personnelSource ? { personnelSource: structuredClone(state.personnelSource) } : {}),
       ...(state.personnelBaseline ? {personnelBaseline:(()=>{const row=state.personnelBaseline!.confirmations[state.personnelBaseline!.currentId];return {id:row.id,confirmedAt:row.confirmedAt,actorName:row.actorName,count:Object.keys(row.rows).length};})()} : {}),
       ...(state.personnelDutyAssignments ? {personnelDutyAssignments:state.personnelDutyAssignments} : {}) };
@@ -106,46 +213,48 @@ export class AccessConfigurationService implements OnModuleInit {
     const state = this.store.read(), appId = process.env.FEISHU_APP_ID?.trim() || '';
     return resolveCurrentPersonnelDutyRoutePeople(state, appId, kind, target);
   }
-  localTargets(): { hash: string; principal: PrivilegedAccessPrincipal }[] {
-    return Object.values(this.accounts()).filter(account => account.kind === 'local' && account.loginMethod === undefined && account.role !== 'guest' && account.enabled && !account.deleted && validAccessPasswordHash(account.passwordHash))
-      .map(account => ({ hash: account.passwordHash!, principal: toPrincipal(account) as PrivilegedAccessPrincipal }));
+  localTargets(): { hash: string; principal: TrustedAccessPrincipal; credentialRole?: PrivilegedAccessPrincipal['role']; credentialBuilding?: StoredAccount['building'] }[] {
+    return Object.values(this.accounts()).filter(account => account.kind === 'local' && account.loginMethod === undefined &&
+      this.defaults[account.id]?.kind === 'local' && this.defaults[account.id]?.role !== 'guest' && account.enabled && !account.deleted && validAccessPasswordHash(account.passwordHash))
+      .map(account => ({ hash: account.passwordHash!, principal: toPrincipal(account) as TrustedAccessPrincipal,
+        credentialRole:this.defaults[account.id].role as PrivilegedAccessPrincipal['role'],credentialBuilding:this.defaults[account.id].building }));
   }
   employeeTargets(name: string): { hash: string; principal: AccessPrincipal }[] {
     const state=this.store.read();
     const accounts = Object.values(this.accounts(state)).filter(account => account.loginMethod === 'personnel-password' && account.name === name && this.canAuthenticatePersonnel(account,state));
     if (accounts.length !== 1) return [];
     const account = accounts[0];
-    return [{ hash: account.passwordHash!, principal: this.employmentInactive(account,state) ? toGuestPrincipal(account) : toPrincipal(account) }];
+    return [{ hash: account.passwordHash!, principal: toPrincipal(account) }];
   }
   feishuPrincipal(openId: string, appId: string): TrustedAccessPrincipal | null {
     const state=this.store.read(), account=this.accounts(state)[`feishu-${feishuIdentityFingerprint(appId, openId)}`];
     if (!account || account.kind !== 'feishu' || account.appId !== appId || !this.canAuthenticatePersonnel(account,state)) return null;
-    if (this.employmentInactive(account,state)) return toGuestPrincipal(account) as TrustedAccessPrincipal;
-    return account.role === 'guest' ? { role:'guest',purchaseBuilding:null,accountId:account.id,authorizationVersion:account.version,displayName:account.name,...(account.personalRules ? { personalRules:account.personalRules } : {}) } : toPrincipal(account) as PrivilegedAccessPrincipal;
+    if (this.employmentInactive(account,state)) return null;
+    return toPrincipal(account) as TrustedAccessPrincipal;
   }
   canUseFeishuGuestIdentity(accountId: string | undefined, appId: string): boolean {
     if (appId !== process.env.FEISHU_APP_ID?.trim()) return false;
     if (!accountId) return true;
     const state=this.store.read(), account=this.accounts(state)[accountId];
+    if (state.personnelEmployment?.appId === appId && (state.personnelEmployment.inactive[accountId] === true || state.personnelEmployment.loginBlocked?.[accountId])) return false;
     return !account || (account.kind === 'feishu' && account.appId === appId && this.canAuthenticatePersonnel(account,state));
   }
   canUseFeishuBusinessIdentity(accountId: string | undefined, appId: string): boolean {
     if (appId !== process.env.FEISHU_APP_ID?.trim() || !accountId) return false;
     const state=this.store.read(),account=this.accounts(state)[accountId];
-    const revoked=state.personnelEmployment?.appId === appId && state.personnelEmployment.inactive[accountId] === true;
-    return !revoked && (!account || (account.kind === 'feishu' && account.appId === appId && account.enabled && !account.deleted && !this.employmentInactive(account,state)));
+    const revoked=state.personnelEmployment?.appId === appId && (state.personnelEmployment.inactive[accountId] === true || !!state.personnelEmployment.loginBlocked?.[accountId]);
+    return !revoked && (!account || (account.kind === 'feishu' && account.appId === appId && account.enabled && !account.deleted && !account.reactivationRequired && !this.loginBlocked(account,state) && !this.employmentInactive(account,state)));
   }
   currentPrincipal(id: string | undefined, version: number | undefined): AccessPrincipal | undefined {
     if (!id) return undefined;
     const account = this.accounts()[id];
-    if (account && this.employmentInactive(account,this.store.read()) && this.validateSession(id,version,'guest',null)) return toGuestPrincipal(account);
     return account && account.version === version && this.validateSession(id, version, account.role, account.building, account.specialties, account.buildings) ? toPrincipal(account) : undefined;
   }
   validateSession(id: string | undefined, version: number | undefined, role: string, building: string | null, specialties?: readonly string[], buildings?: readonly string[]): boolean {
     const state = this.store.read();
     if (!id) return !['professional_admin', 'professional_engineer'].includes(role) && !state.legacySessionsRevoked;
     const account = this.accounts(state)[id];
-    if (account && this.employmentInactive(account,state)) return role === 'guest' && building === null && specialties === undefined && buildings === undefined && account.version === version && this.canAuthenticatePersonnel(account,state);
+    if (account && (this.employmentInactive(account,state) || account.reactivationRequired || this.loginBlocked(account,state))) return false;
     return !!account && account.enabled && !account.deleted && !this.employmentInactive(account,state) && (account.role !== 'site_member' || account.siteMember === true || account.id === SITE_MEMBER_BACKUP_ACCOUNT_ID) && account.version === version && account.role === role && account.building === building && JSON.stringify(account.buildings) === JSON.stringify(buildings) &&
       (!['professional_admin', 'professional_engineer'].includes(role) || JSON.stringify(account.specialties) === JSON.stringify(specialties)) &&
       (account.kind === 'local' ? validAccessPasswordHash(account.passwordHash) && (account.loginMethod === undefined || (account.personnelActive === true && account.personnelAppId === process.env.FEISHU_APP_ID?.trim())) : account.appId === process.env.FEISHU_APP_ID?.trim());
@@ -169,6 +278,7 @@ export class AccessConfigurationService implements OnModuleInit {
     }
     const mutationId = `personnel-sync-${randomUUID()}`;
     await this.store.mutate(state.revision, mutationId, mutationId, current => {
+      migrateAuthorizationState(current, this.defaults);
       let changed = 0;
       for (const account of Object.values(this.accounts(current))) this.preservePermission(current,account);
       this.updateEmployment(current,directory);
@@ -217,14 +327,12 @@ export class AccessConfigurationService implements OnModuleInit {
       for (const account of Object.values(this.accounts(current))) {
         if (account.deleted) continue;
         const blocked=this.employmentInactive(account,current);
-        if (blocked && account.enabled) {
-          const next:StoredAccount={...account,enabled:false,personnelSuspended:true,version:account.version+1}; current.accounts[account.id]=next;
+        if (blocked && (account.enabled || !account.reactivationRequired)) {
+          const next:StoredAccount={...account,enabled:false,personnelSuspended:true,reactivationRequired:true,version:account.version+1}; current.accounts[account.id]=next;
           this.audit(current,actor,account.name,'人员状态停用',describe(account),describe(next)); changed++;
-        } else if (!blocked && account.personnelSuspended) {
-          const next:StoredAccount={...account,enabled:true,version:account.version+1}; delete next.personnelSuspended; current.accounts[account.id]=next;
-          this.audit(current,actor,account.name,'人员状态恢复',describe(account),describe(next)); changed++;
         }
       }
+      reprojectAuthorizationState(current);
       reconcilePersonnelSource(current, directory);
       const sourceError = current.personnelSource?.error;
       current.personnelSync = { ...current.personnelSync, status: sourceError ? 'error' : 'success', lastAttemptAt: new Date().toISOString(),
@@ -251,18 +359,24 @@ export class AccessConfigurationService implements OnModuleInit {
     });
   }
   async saveAccount(request: AccountMutation, actor: AccessPrincipal): Promise<AccessConfigurationResponse> {
-    requireMutation(request, ['clientMutationId','expectedRevision','id','kind','name','role','building','enabled','deleted','openId','password','external','specialties','buildings','personalRules','pagePaths']);
+    requireMutation(request, ['clientMutationId','expectedRevision','id','kind','name','role','building','enabled','deleted','openId','password','external','specialties','buildings','personalRules','pagePaths','authorizationBinding','authorizationOverrides','confirmReactivation']);
+    // Validate the submitted scope before projection can normalize away invalid fields.
+    if (!PAGE_ACCESS_ROLES.includes(request.role) || !validBuildingScope(request.role,request.building,request.buildings) ||
+      (['professional_admin','professional_engineer'].includes(request.role) ? !professionalScopeIsValid(request.specialties) : request.specialties !== undefined)) throw new BadRequestException('角色或楼栋专业范围无效');
     if (typeof request.name !== 'string' || normalizeAccessDisplayName(request.name) !== request.name || typeof request.enabled !== 'boolean' ||
       (request.deleted !== undefined && typeof request.deleted !== 'boolean') || !['local','feishu'].includes(request.kind) ||
       (request.id !== undefined && (typeof request.id !== 'string' || !ID_PATTERN.test(request.id))) ||
       (request.password !== undefined && (typeof request.password !== 'string' || request.password.length < 8 || request.password.length > 256))) throw new BadRequestException('账号信息或密码无效，密码需为8至256字符');
     const appId = process.env.FEISHU_APP_ID?.trim() || '';
     if (request.pagePaths !== undefined && !validPersonalPagePaths(request.role,request.pagePaths)) throw new BadRequestException('个人页面读取配置无效');
+    if ((request.authorizationBinding !== undefined && !validAuthorizationBinding(request.authorizationBinding)) ||
+      (request.authorizationOverrides !== undefined && !validAuthorizationOverrides(request.authorizationOverrides))) throw new BadRequestException('角色绑定或个人例外无效');
     if (request.external !== undefined && (typeof request.external !== 'boolean' || (request.kind !== 'feishu' && request.external))) throw new BadRequestException('外部人员只能使用飞书账号');
     if (request.kind === 'feishu' && request.openId !== undefined && !OPEN_ID_PATTERN.test(request.openId)) throw new BadRequestException('飞书 Open ID 无效');
     if (request.kind === 'feishu' && request.password !== undefined) throw new BadRequestException('飞书账号不能设置本地密码');
     await this.store.mutate(request.expectedRevision, request.clientMutationId, this.fingerprint(request, actor), async state => {
       this.assertActor(actor, state);
+      migrateAuthorizationState(state, this.defaults);
       const accounts = this.accounts(state);
       const id = request.id || (request.kind === 'feishu' && request.openId ? `feishu-${feishuIdentityFingerprint(appId, request.openId)}` : '');
       if (!id) throw new BadRequestException('请选择已有本地共享入口或填写飞书身份');
@@ -272,19 +386,47 @@ export class AccessConfigurationService implements OnModuleInit {
       if (!request.id && previous && !previous.deleted) throw new ConflictException('飞书授权已存在，请编辑已有账号');
       if (previous && (previous.kind !== request.kind || (request.kind === 'feishu' && request.openId && previous.identityHash !== feishuIdentityFingerprint(appId, request.openId)))) throw new BadRequestException('账号稳定身份不能修改');
       if (previous?.loginMethod === 'personnel-password' && (request.name !== previous.name || request.password !== undefined || (request.enabled && previous.personnelActive !== true))) throw new BadRequestException('外部员工姓名、密码和在职状态请在人员表维护');
-      const next: StoredAccount = { ...previous, id, kind: request.kind, name: request.name, role: request.role, building: request.building, buildings: request.buildings ? [...request.buildings] : undefined,
+      let next: StoredAccount = { ...previous, id, kind: request.kind, name: request.name, role: request.role, building: request.building, buildings: request.buildings ? [...request.buildings] : undefined,
         specialties: ['professional_admin', 'professional_engineer'].includes(request.role) ? request.specialties : undefined,
         personalRules: request.personalRules === undefined ? previous?.personalRules : request.personalRules,
         pagePaths: request.pagePaths === undefined ? previous?.pagePaths : [...request.pagePaths].sort(),
-        permissionSource: previous && request.role === previous.role && request.building === previous.building && JSON.stringify(request.buildings) === JSON.stringify(previous.buildings) && JSON.stringify(request.specialties) === JSON.stringify(previous.specialties) ? previous.permissionSource : 'manual',
+        permissionSource: previous && request.role === previous.role && request.building === previous.building && JSON.stringify(request.buildings) === JSON.stringify(previous.buildings) && JSON.stringify(request.specialties) === JSON.stringify(previous.specialties) &&
+          (request.authorizationBinding === undefined || JSON.stringify(request.authorizationBinding) === JSON.stringify(previous.authorizationBinding)) &&
+          (request.authorizationOverrides === undefined || JSON.stringify(request.authorizationOverrides) === JSON.stringify(previous.authorizationOverrides)) &&
+          (request.personalRules === undefined || JSON.stringify(request.personalRules) === JSON.stringify(previous.personalRules)) &&
+          (request.pagePaths === undefined || JSON.stringify(request.pagePaths) === JSON.stringify(previous.pagePaths)) ? previous.permissionSource : 'manual',
         ...(request.external !== undefined ? { external: request.external } : {}),
         enabled: request.enabled && !request.deleted, deleted: !!request.deleted, version: (previous?.version || 0) + 1, source: 'configuration',
         ...(request.kind === 'feishu' ? { appId, identityHash: feishuIdentityFingerprint(appId, request.openId || previous?.openId || ''), openId: request.openId || previous?.openId } : {}) };
       if (request.kind === 'feishu' && !request.openId && previous) { next.identityHash = previous.identityHash; next.appId = previous.appId; }
       if (next.kind === 'local' && !validAccessPasswordHash(next.passwordHash)) delete next.passwordHash;
-      delete next.personnelSuspended;
+      if (request.confirmReactivation !== undefined && typeof request.confirmReactivation !== 'boolean') throw new BadRequestException('复职确认无效');
+      if (request.enabled && this.employmentInactive(next,state)) throw new BadRequestException('人员状态仍为离职，不能启用登录');
+      if (request.enabled && (next.reactivationRequired || this.loginBlocked(next,state)) && !request.confirmReactivation) throw new BadRequestException('复职账号须由管理员明确确认恢复登录');
+      if (request.confirmReactivation) {
+        if (!request.enabled || this.employmentInactive(next,state)) throw new BadRequestException('请核对在职状态后确认恢复登录');
+        this.confirmAccountReactivation(next,state); delete next.personnelSuspended; next.reactivationRequired=false;
+      }
+      if (request.authorizationBinding || request.authorizationOverrides) {
+        const requestedNative=request.authorizationBinding?.mode === 'follow' ? state.authorizationTemplates?.[request.authorizationBinding.templateId]?.policy.nativeRole :
+          request.authorizationBinding?.mode === 'independent' ? request.authorizationBinding.policy.nativeRole : previous?.effectiveAuthorization?.baseline.nativeRole;
+        if(requestedNative === 'admin' && previous?.role !== 'admin') throw new BadRequestException('管理员身份不能通过普通模板分配');
+        const candidateState = { ...state, accounts: { ...state.accounts, [id]: { ...next, role: previous?.role || next.role } } };
+        const changed = accountAuthorizationChange(candidateState, { accountId:id,expectedRevision:state.revision,
+          binding: request.authorizationBinding || previous?.authorizationBinding || { mode:'follow',templateId:authorizationTemplateId(request.role) },
+          overrides: request.authorizationOverrides || previous?.authorizationOverrides || { rules:next.personalRules || [],allowPages:next.pagePaths || [],denyPages:[] },
+          building:request.building, buildings:request.buildings, specialties:request.specialties });
+        next = { ...changed.account, version:(previous?.version || 0)+1 };
+      } else {
+        if (!previous?.authorizationBinding || previous.role !== request.role) next.authorizationBinding={mode:'follow',templateId:authorizationTemplateId(request.role)};
+        next.authorizationOverrides={rules:request.personalRules === undefined ? previous?.authorizationOverrides?.rules || next.personalRules || [] : request.personalRules,
+          allowPages:request.pagePaths === undefined ? previous?.authorizationOverrides?.allowPages || next.pagePaths || [] : request.pagePaths,
+          denyPages:previous?.authorizationOverrides?.denyPages || []};
+        next=projectAuthorization(next,state.authorizationTemplates!);
+      }
       if (!validAccount(next) || (request.kind === 'local' && !this.defaults[id] && previous?.loginMethod !== 'personnel-password')) throw new BadRequestException('角色或楼栋范围无效');
       if (request.password !== undefined) {
+        delete next.credentialSource;
         for (const other of Object.values(accounts)) {
           if (other.id !== id && other.kind === 'local' && other.loginMethod === undefined && other.enabled && !other.deleted && other.passwordHash && await matchesAccessPassword(request.password, other.passwordHash)) throw new BadRequestException('此密码已用于其他共享入口，请使用不同密码');
         }
@@ -299,6 +441,8 @@ export class AccessConfigurationService implements OnModuleInit {
           if (linked.id === id || linked.personnelIdentity !== next.personnelIdentity || !linked.siteMember || linked.external || linked.deleted ||
             (linked.kind === 'feishu' ? linked.appId !== appId : linked.personnelAppId !== appId || !linked.personnelActive)) continue;
           const updated: StoredAccount = { ...linked, role: next.role, building: next.building, buildings: next.buildings, specialties: next.specialties, personalRules: next.personalRules, pagePaths:next.pagePaths,
+            authorizationBinding:structuredClone(next.authorizationBinding!),authorizationOverrides:structuredClone(next.authorizationOverrides!),effectiveAuthorization:structuredClone(next.effectiveAuthorization!),
+            ...(request.confirmReactivation ? {enabled:true,personnelSuspended:undefined,reactivationRequired:false} : {}),
             permissionSource: next.permissionSource, version: linked.version + 1 };
           if (!validAccount(updated)) throw new BadRequestException('关联账号权限无效，未保存');
           this.preservePermission(state,linked);
@@ -400,7 +544,7 @@ export class AccessConfigurationService implements OnModuleInit {
         if (item.after.specialties) next.specialties=[...item.after.specialties];
         if (item.after.personalRules) next.personalRules=structuredClone(item.after.personalRules);
         this.preservePermission(state,previous);
-        state.accounts[next.id]=next;
+        state.accounts[next.id]=state.schemaVersion === 2 ? captureIndependentAuthorization(next,state,item.after.effectiveAuthorization) : next;
         this.audit(state,{role:'admin',purchaseBuilding:null,accountId:batch.actorId,displayName:batch.actorName},next.name,'交接继承权限',describe(previous),describe(next));
       }
       if(preview.dutyRouting) {
@@ -412,7 +556,7 @@ export class AccessConfigurationService implements OnModuleInit {
         const previous=accounts[sourceId],after=split.retained,next:StoredAccount={...previous,role:after.role,building:after.building,pagePaths:[...after.pagePaths],version:previous.version+1,permissionSource:'manual'};
         delete next.buildings;delete next.specialties;delete next.personalRules;
         if(after.buildings)next.buildings=[...after.buildings];if(after.specialties)next.specialties=[...after.specialties];if(after.personalRules)next.personalRules=structuredClone(after.personalRules);
-        this.preservePermission(state,previous);state.accounts[sourceId]=next;
+        this.preservePermission(state,previous);state.accounts[sourceId]=state.schemaVersion === 2 ? captureIndependentAuthorization(next,state,after.effectiveAuthorization) : next;
         this.audit(state,{role:'admin',purchaseBuilding:null,accountId:batch.actorId,displayName:batch.actorName},next.name,'轮岗保留其他任职权限',describe(previous),describe(next));
       }
     });
@@ -425,9 +569,22 @@ export class AccessConfigurationService implements OnModuleInit {
     return previous?.revision;
   }
   private canAuthenticatePersonnel(account: StoredAccount, state: ConfigurationState): boolean {
-    if (account.deleted || (!account.enabled && !(account.personnelSuspended && this.employmentInactive(account,state)))) return false;
+    if (account.deleted || !account.enabled || account.reactivationRequired || this.employmentInactive(account,state) || this.loginBlocked(account,state)) return false;
     if (account.kind === 'feishu') return account.appId === process.env.FEISHU_APP_ID?.trim();
     return account.loginMethod === 'personnel-password' && account.personnelActive === true && account.personnelAppId === process.env.FEISHU_APP_ID?.trim() && validAccessPasswordHash(account.passwordHash);
+  }
+  private loginBlocked(account: StoredAccount, state: ConfigurationState): boolean {
+    const registry=state.personnelEmployment, appId=account.kind === 'feishu' ? account.appId : account.personnelAppId;
+    return !!registry && registry.appId === appId && !!(registry.loginBlocked?.[account.id] || (account.personnelIdentity && registry.loginBlocked?.[account.personnelIdentity]));
+  }
+  private confirmAccountReactivation(account: StoredAccount, state: ConfigurationState): void {
+    const registry=state.personnelEmployment;
+    if (!registry || registry.appId !== (account.appId || account.personnelAppId) || Date.now()-registry.snapshotAt > 5*60_000 ||
+      !(registry.inactive[account.id] === false || (account.personnelIdentity && registry.inactive[account.personnelIdentity] === false)))
+      throw new BadRequestException('请先同步并确认人员在职状态，再恢复登录');
+    const linked=Object.values(this.accounts(state)).filter(other=>other.id === account.id || (!!account.personnelIdentity && other.personnelIdentity === account.personnelIdentity));
+    if (linked.some(other=>this.employmentInactive(other,state))) throw new BadRequestException('关联身份仍为离职，不能恢复登录');
+    for(const key of [account.id,account.personnelIdentity,...linked.map(other=>other.id)].filter((key):key is string=>!!key)) if(registry.loginBlocked) delete registry.loginBlocked[key];
   }
   private employmentInactive(account: StoredAccount, state: ConfigurationState): boolean {
     const registry=state.personnelEmployment, appId=account.kind === 'feishu' ? account.appId : account.personnelAppId;
@@ -457,17 +614,19 @@ export class AccessConfigurationService implements OnModuleInit {
       if (account.kind === 'feishu' && account.appId === directory.appId && account.personnelIdentity && inactive[account.personnelIdentity] === true && !native.has(account.id)) inactive[account.id]=true;
       if (account.kind === 'feishu' && account.appId === directory.appId && account.personnelIdentity && inactive[account.id] === true) inactive[account.personnelIdentity]=true;
     }
-    state.personnelEmployment={appId:directory.appId,snapshotAt:directory.snapshotAt,inactive};
+    const loginBlocked={...(state.personnelEmployment?.appId === directory.appId ? state.personnelEmployment.loginBlocked : {})};
+    for(const [id,flag] of Object.entries(inactive)) if(flag) loginBlocked[id]=true;
+    state.personnelEmployment={appId:directory.appId,snapshotAt:directory.snapshotAt,inactive,loginBlocked};
   }
   private assertAdministratorRemains(accounts: Record<string, StoredAccount>, state: ConfigurationState): void {
     const secret = process.env.LOCAL_ACCESS_SESSION_SECRET || process.env.LOCAL_ADMIN_SESSION_SECRET || '';
     const bytes = Buffer.from(secret.trim(), 'base64');
     const hasSecret = bytes.length === 32 && bytes.toString('base64') === secret.trim();
     const feishuReady = !!process.env.FEISHU_APP_ID?.trim() && !!process.env.FEISHU_APP_SECRET?.trim();
-    if (!hasSecret || !Object.values(accounts).some(account => account.role === 'admin' && account.enabled && !account.deleted && !this.employmentInactive(account,state) &&
+    if (!hasSecret || !Object.values(accounts).some(account => account.role === 'admin' && account.enabled && !account.deleted && !account.reactivationRequired && !this.loginBlocked(account,state) && !this.employmentInactive(account,state) &&
       (account.kind === 'local' ? validAccessPasswordHash(account.passwordHash) && (account.loginMethod === undefined || (account.personnelActive === true && account.personnelAppId === process.env.FEISHU_APP_ID?.trim())) : feishuReady && account.appId === process.env.FEISHU_APP_ID?.trim()))) throw new BadRequestException('必须保留至少一个可用管理员，未保存');
   }
-  private fingerprint(request: AccountMutation | CardRoleMutation | PageRoleMutation, actor: AccessPrincipal): string {
+  private fingerprint(request: AccountMutation | CardRoleMutation | PageRoleMutation | AuthorizationRoleMutation | Pick<AccountMutation,'clientMutationId'|'expectedRevision'>, actor: AccessPrincipal): string {
     const secret = process.env.LOCAL_ACCESS_SESSION_SECRET || process.env.LOCAL_ADMIN_SESSION_SECRET;
     if (!secret) throw new ServiceUnavailableException('管理会话密钥未配置');
     const fields = { ...request, ...('password' in request ? { password: request.password } : {}), ...('openId' in request ? { openId: request.openId } : {}) };
@@ -477,14 +636,12 @@ export class AccessConfigurationService implements OnModuleInit {
     state.audit.push({ id: randomUUID(), at: new Date().toISOString(), actorId: actor.accountId || 'legacy-local-admin', actorName: actor.displayName || '管理员共享入口', target, action, before, after });
   }
 }
-function toGuestPrincipal(account: StoredAccount): AccessPrincipal {
-  return { role: 'guest', purchaseBuilding: null, displayName: account.name, accountId: account.id, authorizationVersion: account.version };
-}
 function handoverPermissionMutationFingerprint(batch: HandoverBatch): string {
   return createHash('sha256').update(JSON.stringify([batch.id,batch.clientMutationId,batch.actorId,batch.preview.fingerprint])).digest('hex');
 }
 function toPrincipal(account: StoredAccount): AccessPrincipal {
   return { role: account.role, purchaseBuilding: account.building, ...(account.buildings ? { buildings: [...account.buildings] } : {}), displayName: account.name, accountId: account.id, authorizationVersion: account.version,
+    ...(account.effectiveAuthorization ? { effectiveAuthorization:structuredClone(account.effectiveAuthorization) } : {}),
     ...(account.specialties ? { specialties: [...account.specialties] } : {}), ...(account.personalRules ? { personalRules: structuredClone(account.personalRules) } : {}) };
 }
 function describe(account: StoredAccount): string {

@@ -13,6 +13,8 @@ export function ledgerAccessBuilding(
   principal?: AccessPrincipal,
   pageRead = false,
 ): string | null {
+  // The service evaluates each record against personal and inherited business scope.
+  if (isProfessionalBusinessPrincipal(principal)) return null;
   if (pageRead && principal) {
     const scope = accessBuildings(principal);
     if (scope === null) return null;

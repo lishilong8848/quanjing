@@ -1,5 +1,5 @@
 import { cancelHotfixInitialization, runHotfixInitialization } from '../../common/hotfix-runtime-activation';
-import { businessPermissionScopeKey, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { businessAuthorizationIdentityKey, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import {
   BadRequestException,
   ForbiddenException,
@@ -163,7 +163,10 @@ export class InventoryInboundTaskService
       throw new ForbiddenException('入库后台任务不存在或无权访问');
     }
     assertInventoryMovementDeletionRole(principal);
-    if (isProfessionalBusinessPrincipal(principal) && (businessPermissionScopeKey(principal) !== businessPermissionScopeKey(entry.principal))) throw new ForbiddenException('无权查看该入库任务');
+    // The accepted request already binds the exact operation and record scope. Querying
+    // its result must keep that owner/version/policy, without requiring list-read grants.
+    if ((principal.accountId || entry.principal.accountId || isProfessionalBusinessPrincipal(principal) || isProfessionalBusinessPrincipal(entry.principal)) &&
+      businessAuthorizationIdentityKey(principal) !== businessAuthorizationIdentityKey(entry.principal)) throw new ForbiddenException('无权查看该入库任务');
     if (entry.kind === 'purchase') {
       assertPurchaseInboundScope(
         principal,

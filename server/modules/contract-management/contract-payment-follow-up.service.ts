@@ -3,6 +3,7 @@ import { assertProfessionalBitableRecord, assertProfessionalRecordScope, recordP
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AccessConfigurationService } from '../../common/access/access-configuration.service';
 import { assertCurrentContractMutation } from './contract-current-authority';
+import { assertContractSelectorAccess, CONTRACT_PAYMENT_SELECTOR_ACTIONS } from './contract-selector-access';
 import type {
   ContractCreateNotificationResult,
   ContractCreatePersonOption,
@@ -99,15 +100,18 @@ export class ContractPaymentFollowUpService {
 
   async getOptions(
     contractRecordId: string,
+    principal?:AccessPrincipal,
   ): Promise<ContractPaymentFollowUpOptionsResponse> {
     const cleanContractId = recordId(contractRecordId, '合同');
+    const current=principal ? await this.gateway.getRecord('execution',cleanContractId) : undefined;
+    if(principal) assertContractSelectorAccess(principal,current,CONTRACT_PAYMENT_SELECTOR_ACTIONS);
     const cached = this.getCachedDisplayOptions(cleanContractId);
     if (cached) return cached;
     const existing = this.displayOptionsInFlight.get(cleanContractId);
     if (existing) return existing;
 
     const generation = this.displayCacheGeneration;
-    const pending = this.loadDisplayOptions(cleanContractId).then((options) => {
+    const pending = this.loadDisplayOptions(cleanContractId,current).then((options) => {
       if (generation === this.displayCacheGeneration) {
         this.cacheDisplayOptions(cleanContractId, options);
       }
@@ -262,9 +266,10 @@ export class ContractPaymentFollowUpService {
 
   private async loadDisplayOptions(
     cleanContractId: string,
+    current?:BitableRecordItem,
   ): Promise<ContractPaymentFollowUpOptionsResponse> {
     const [contract, records] = await Promise.all([
-      this.gateway.getRecord('execution', cleanContractId),
+      current ? Promise.resolve(current) : this.gateway.getRecord('execution', cleanContractId),
       this.loadDisplayRecordsSnapshot(),
     ]);
     return this.buildContext(

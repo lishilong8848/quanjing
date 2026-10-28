@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { useEffect, useMemo, useState } from 'react';
 import { axiosForBackend } from '@lark-apaas/client-toolkit/utils/getAxiosForBackend';
 import {
@@ -155,6 +157,7 @@ function DetailRow({
 }
 
 export default function MonthlyAlarmOverviewPage() {
+  const canRefresh = canUsePageAction(useAccess(), 'alarms', 'refresh', true);
   const [data, setData] = useState<MonthlyAlarmOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -169,7 +172,7 @@ export default function MonthlyAlarmOverviewPage() {
     axiosForBackend<MonthlyAlarmOverviewResponse>({
       url: '/api/risk-inspection/monthly-alarm-overview',
       method: 'GET',
-      params: reload ? { refresh: '1' } : undefined,
+      params: reload && canRefresh ? { refresh: '1' } : undefined,
       timeout: 40000,
     })
       .then(({ data: next }) => {
@@ -189,7 +192,7 @@ export default function MonthlyAlarmOverviewPage() {
     return () => {
       active = false;
     };
-  }, [reload]);
+  }, [reload, canRefresh]);
 
   const monthRecords = useMemo(
     () => (data?.records ?? []).filter((row) => row.month === month),

@@ -1,3 +1,4 @@
+import { canUsePageAction } from '../business-action-access';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, ClipboardList, UserRound, Pencil } from 'lucide-react';
 import { useAccess } from '@/access/AccessProvider';
@@ -26,10 +27,11 @@ export function LatestMeetingActions({
   onSynced: (job: WeeklyJob) => void;
   onDeferred: (job: WeeklyJob) => void;
 }) {
-  const { role, principalFingerprint } = useAccess();
-  const editable = (role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer')) || role === 'editor';
+  const access = useAccess();
+  const { role, principalFingerprint } = access;
+  const editable = canUsePageAction(access, 'meetings', 'update', (role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer')) || role === 'editor');
   const [editing, setEditing] = useState<MeetingAction | null>(null);
-  const { sync, tasks } = useActionEditSync(principalFingerprint || role);
+  const { sync, tasks } = useActionEditSync(principalFingerprint || role, editable);
   const seen = useRef(new Set<string>());
   useEffect(() => {
     for (const task of tasks) {

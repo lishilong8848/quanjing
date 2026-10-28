@@ -18,7 +18,7 @@ import type {
   CampusCertificateExpiryNotificationRequest,
   ScheduleSnapshotRevisionResponse,
 } from '../../../shared/api.interface';
-import type { AccessRole } from '../../../shared/access-control.interface';
+import type { AccessRole, AccessPrincipal } from '../../../shared/access-control.interface';
 import { canViewPersonProfileDetails } from '../../../shared/person-profile-access';
 import {
   canViewOrganizationPersonProfile,
@@ -39,7 +39,7 @@ import {
   type PersonProfileScope,
 } from './person-profile-source';
 
-type BitableSyncAccessRequest = Request & { accessRole?: AccessRole };
+type BitableSyncAccessRequest = Request & { accessRole?: AccessRole; accessPrincipal?:AccessPrincipal };
 
 @Controller('api/bitable')
 export class BitableSyncController {
@@ -307,7 +307,7 @@ export class BitableSyncController {
     @Param('recordId') recordId: string,
     @Req() request: BitableSyncAccessRequest,
   ) {
-    if (!canViewOrganizationPersonProfile(request.accessRole ?? 'guest')) {
+    if (!canViewOrganizationPersonProfile(request.accessPrincipal ?? request.accessRole ?? 'guest')) {
       throw new ForbiddenException('当前身份无权查看人员档案');
     }
     let parsedSource;
@@ -357,10 +357,12 @@ export class BitableSyncController {
     } catch {
       throw new BadRequestException('人员资料范围无效');
     }
-    return this.bitableSyncService.getPersonProfiles(
+    const result = await this.bitableSyncService.getPersonProfiles(
       forceRefresh === '1' || forceRefresh === 'true',
       parsedScope,
     );
+    return {organizations:result.organizations.map(({supervisorText,position,buildingsSpecialties,shift})=>({supervisorText,position,buildingsSpecialties,shift})),
+      ...(result.changeRequestSubmitters ? {changeRequestSubmitters:result.changeRequestSubmitters}: {})};
   }
 
   @Get('person-profile-details')
@@ -371,7 +373,7 @@ export class BitableSyncController {
     @Query('forceRefresh') forceRefresh?: string,
     @Query('scope') scope?: string,
   ) {
-    if (!canViewPersonProfileDetails(request.accessRole ?? 'guest')) {
+    if (!canViewPersonProfileDetails(request.accessPrincipal ?? request.accessRole ?? 'guest')) {
       throw new ForbiddenException('当前身份无权查看人员详细资料');
     }
     let parsedScope: PersonProfileScope;
@@ -390,8 +392,14 @@ export class BitableSyncController {
    * GET /api/bitable/duty-staff - 获取值班人员列表
    */
   @Get('duty-staff')
-  async getDutyStaff() {
-    return this.bitableSyncService.getDutyStaff();
+  async getDutyStaff(@Req() request?:BitableSyncAccessRequest) {
+    const result=await this.bitableSyncService.getDutyStaff();
+    const principal=request?.accessPrincipal ?? request?.accessRole ?? 'guest';
+    if(canViewPersonProfileDetails(principal) || canViewOrganizationPersonProfile(principal)) return result;
+    const basic=(person:NonNullable<typeof result.staff[number]['shifts'][number]['staff']>|null)=>person?{
+      id:person.id,profileSource:person.profileSource,appName:person.appName,position:person.position,buildingProfessional:person.buildingProfessional,shift:person.shift,
+    }:null;
+    return {...result,staff:result.staff.map(group=>({...group,shifts:group.shifts.map(shift=>({...shift,leader:basic(shift.leader),staff:basic(shift.staff)}))}))};
   }
 
   @Get('employee-photo/:recordId')
@@ -401,7 +409,7 @@ export class BitableSyncController {
     @Query('scope') scope: string | undefined,
     @Res() res: Response,
   ) {
-    if (!canViewPersonProfileDetails(request.accessRole ?? 'guest')) {
+    if (!canViewPersonProfileDetails(request.accessPrincipal ?? request.accessRole ?? 'guest')) {
       throw new ForbiddenException('当前身份无权查看人员照片');
     }
     let parsedScope: PersonProfilePhotoScope;
@@ -434,7 +442,7 @@ export class BitableSyncController {
     @Query('scope') scope: string | undefined,
     @Res() res: Response,
   ) {
-    if (!canViewPersonProfileDetails(request.accessRole ?? 'guest')) {
+    if (!canViewPersonProfileDetails(request.accessPrincipal ?? request.accessRole ?? 'guest')) {
       throw new ForbiddenException('当前身份无权发起人员会话');
     }
     let parsedScope: PersonProfileScope;

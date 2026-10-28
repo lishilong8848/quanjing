@@ -1,4 +1,6 @@
 import { toGuestScheduleOverview } from './guest-schedule-overview';
+import { hasBusinessPermissionSomewhere, type BusinessAction, type BusinessModule } from '../../../shared/business-permissions';
+import { changeAttachmentMutationPermission } from '../../../shared/change-attachment-permission';
 import { bindLeaveRequestApplicant } from './leave-request-applicant';
 import { bindSelfServiceApplicant } from '@server/common/access/self-service-applicant';
 import { bindWorkforceRequestApplicant } from '@server/common/access/workforce-request-applicant';
@@ -583,8 +585,10 @@ export class DutyScheduleController {
   @Post('duty-schedules/batch')
   async batchUpsertDutySchedules(
     @Body() body: BatchDutyScheduleRequest,
+    @Req() request:Request & {accessPrincipal?:AccessPrincipal},
   ): Promise<BatchDutyScheduleResponse> {
-    return this.dutyScheduleService.batchUpsertDutySchedules(body.schedules);
+    if (!request?.accessPrincipal) throw new ForbiddenException('请先确认登录身份');
+    return this.dutyScheduleService.batchUpsertDutySchedules(body.schedules,request.accessPrincipal);
   }
 
   @PublicAccess()
@@ -857,10 +861,7 @@ export class DutyScheduleController {
       const normalizedOwnerMutationId =
         normalizeChangeAttachmentOwnerMutationId(ownerMutationId);
       if (
-        !canStageChangeAttachmentForRole(
-          accessRequest?.accessRole,
-          normalizedOwnerMutationId,
-        )
+        !canConfiguredChangeAttachmentAction(accessRequest, normalizedOwnerMutationId)
       ) {
         throw new ForbiddenException('当前身份无权暂存变更总结附件');
       }
@@ -907,10 +908,7 @@ export class DutyScheduleController {
     const normalizedOwnerMutationId =
       normalizeChangeAttachmentOwnerMutationId(ownerMutationId);
     if (
-      !canStageChangeAttachmentForRole(
-        accessRequest.accessRole,
-        normalizedOwnerMutationId,
-      )
+      !canConfiguredChangeAttachmentAction(accessRequest, normalizedOwnerMutationId)
     ) {
       throw new ForbiddenException('当前身份无权删除变更总结附件');
     }
@@ -945,16 +943,15 @@ export class DutyScheduleController {
     if (ownerMutationId?.trim()) {
       const normalizedOwnerMutationId =
         normalizeChangeAttachmentOwnerMutationId(ownerMutationId);
+      if (!canConfiguredChangeAttachmentAction(request, normalizedOwnerMutationId)) {
+        throw new ForbiddenException('当前身份无权读取该申请附件');
+      }
       signedUrl = await this.changeAttachmentStorage.getSignedDownloadUrl(
         id,
         300,
         { ownerMutationId: normalizedOwnerMutationId },
       );
-    } else if (
-      request.accessRole === 'admin' ||
-      request.accessRole === 'editor' ||
-      request.accessRole === 'duty_editor'
-    ) {
+    } else if (canConfiguredChangeAction(request,'export',['admin','editor','duty_editor'].includes(request.accessRole || ''),'change_documents')) {
       signedUrl =
         await this.changeAttachmentStorage.getSignedDownloadUrlForTrustedServer(
           id,
@@ -1125,9 +1122,7 @@ export class DutyScheduleController {
     @Req() accessRequest: DutyScheduleAccessRequest,
   ): Promise<ChangeAdjustmentResponse> {
     if (
-      accessRequest.accessRole !== 'admin' &&
-      accessRequest.accessRole !== 'editor' &&
-      accessRequest.accessRole !== 'duty_editor'
+      !canConfiguredChangeAction(accessRequest,'update',['admin','editor','duty_editor'].includes(accessRequest.accessRole || ''))
     ) {
       throw new ForbiddenException('当前身份无权提交变更调整');
     }
@@ -1140,8 +1135,7 @@ export class DutyScheduleController {
     @Req() accessRequest: DutyScheduleAccessRequest,
   ): Promise<ChangeDrillReportCreateResponse> {
     if (
-      !accessRequest.accessRole ||
-      !canSubmitChangeDrillReportForRole(accessRequest.accessRole)
+      !canConfiguredChangeAction(accessRequest,'create',!!accessRequest.accessRole && canSubmitChangeDrillReportForRole(accessRequest.accessRole))
     ) {
       throw new ForbiddenException('当前身份无权提交演练报告');
     }
@@ -1154,8 +1148,7 @@ export class DutyScheduleController {
     @Req() accessRequest: DutyScheduleAccessRequest,
   ): Promise<ChangeSummaryReportCreateResponse> {
     if (
-      !accessRequest.accessRole ||
-      !canSubmitChangeSummaryReportForRole(accessRequest.accessRole)
+      !canConfiguredChangeAction(accessRequest,'create',!!accessRequest.accessRole && canSubmitChangeSummaryReportForRole(accessRequest.accessRole))
     ) {
       throw new ForbiddenException('当前身份无权提交变更总结');
     }
@@ -1172,8 +1165,7 @@ export class DutyScheduleController {
     @Req() accessRequest: DutyScheduleAccessRequest,
   ): Promise<ChangeSummaryReportAbandonResponse> {
     if (
-      !accessRequest.accessRole ||
-      !canSubmitChangeSummaryReportForRole(accessRequest.accessRole)
+      !canConfiguredChangeAction(accessRequest,'delete',!!accessRequest.accessRole && canSubmitChangeSummaryReportForRole(accessRequest.accessRole))
     ) {
       throw new ForbiddenException('当前身份无权放弃变更总结');
     }
@@ -1189,8 +1181,7 @@ export class DutyScheduleController {
     @Req() accessRequest: DutyScheduleAccessRequest,
   ): Promise<ChangeSummaryReportSyncTaskResponse> {
     if (
-      !accessRequest.accessRole ||
-      !canSubmitChangeSummaryReportForRole(accessRequest.accessRole)
+      !canConfiguredChangeAction(accessRequest,'create',!!accessRequest.accessRole && canSubmitChangeSummaryReportForRole(accessRequest.accessRole))
     ) {
       throw new ForbiddenException('当前身份无权查看变更总结同步状态');
     }
@@ -1311,9 +1302,7 @@ export class DutyScheduleController {
     @Res() response: Response,
   ): Promise<void> {
     if (
-      accessRequest.accessRole !== 'admin' &&
-      accessRequest.accessRole !== 'editor' &&
-      accessRequest.accessRole !== 'duty_editor'
+      !canConfiguredChangeAction(accessRequest,'read',['admin','editor','duty_editor'].includes(accessRequest.accessRole || ''),'change_documents')
     ) {
       throw new ForbiddenException('当前身份无权访问变更附件');
     }
@@ -1938,4 +1927,14 @@ export class DutyScheduleController {
       refresh === '1' || refresh === 'true',
     );
   }
+}
+
+function canConfiguredChangeAction(request:DutyScheduleAccessRequest|undefined,action:BusinessAction,legacyAllowed:boolean,module:BusinessModule='change_management'):boolean {
+  return request?.accessPrincipal && (request.accessPrincipal.effectiveAuthorization || request.accessPrincipal.personalRules?.length)
+    ? hasBusinessPermissionSomewhere(request.accessPrincipal,{module,action}) : legacyAllowed;
+}
+function canConfiguredChangeAttachmentAction(request:DutyScheduleAccessRequest|undefined,ownerMutationId:string):boolean {
+  const permission=changeAttachmentMutationPermission(ownerMutationId);
+  return !!permission && canConfiguredChangeAction(request,permission.action,
+    canStageChangeAttachmentForRole(request?.accessRole,ownerMutationId),permission.module);
 }

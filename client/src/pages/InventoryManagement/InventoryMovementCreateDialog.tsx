@@ -2,6 +2,7 @@ import { isProfessionalBusinessPrincipal, canPerformBusinessAction } from '@shar
 import { accessBuildings } from '@shared/building-access';
 import { PROFESSIONAL_SPECIALTIES } from '@shared/professional-access';
 import { useAccess } from '@/access/AccessProvider';
+import { canUseInventoryAction } from './inventory-action-access';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
@@ -592,6 +593,7 @@ export function InventoryMovementCreateDialog({
   onCreated,
 }: InventoryMovementCreateDialogProps) {
   const principal = useAccess();
+  const canCreate = canUseInventoryAction(principal, 'create');
   const scope = accessBuildings(principal);
   const allowedBuildings = WAREHOUSE_BUILDINGS.filter(value => !scope || scope.includes(value));
   const [form, setForm] = useState<FormState>(() =>
@@ -1095,9 +1097,11 @@ export function InventoryMovementCreateDialog({
   }
 
   function submitInbound() {
+    if (!canCreate) { setErrors({ submit: '当前权限不能新增入库' }); return; }
     if (inboundSubmitGuard.current || creatingStorageLocation) return;
 
     const draft = createInboundDraft();
+    if (!canUseInventoryAction(principal, 'create', { building: draft.building, specialty: draft.mode === 'new' ? draft.newItem.specialty : draft.selectedItem?.specialty })) { setErrors({ submit: '当前权限不能操作所选物品和楼栋' }); return; }
     const nextErrors = validateInventoryInboundDraft(draft);
     if (isProfessionalBusinessPrincipal(principal) && draft.mode === 'new' && !draft.newItem.specialty) nextErrors.submit = '请选择物品专业';
     setErrors(nextErrors);
@@ -1136,6 +1140,7 @@ export function InventoryMovementCreateDialog({
   }
 
   async function submitOutbound() {
+    if (!canCreate) { setErrors({ submit: '当前权限不能新增出库' }); return; }
     if (outboundSubmitGuard.current) return;
 
     if (outboundBatchMode) {
@@ -1216,6 +1221,7 @@ export function InventoryMovementCreateDialog({
   }
 
   async function submitBorrow() {
+    if (!canCreate || !canUseInventoryAction(principal, 'create', { building: form.building, specialty: selectedItem?.specialty })) { setErrors({ submit: '当前权限不能借调所选物品' }); return; }
     if (
       type !== 'borrow' ||
       !validateBorrow() ||
@@ -1802,9 +1808,9 @@ export function InventoryMovementCreateDialog({
               void submitBorrow();
             }}
             disabled={
-              type === 'borrow'
+              !canCreate || (type === 'borrow'
                 ? submitting || itemLoading
-                : itemLoading || (type === 'inbound' && creatingStorageLocation)
+                : itemLoading || (type === 'inbound' && creatingStorageLocation))
             }
             className="min-w-28 bg-blue-600 hover:bg-blue-700"
           >

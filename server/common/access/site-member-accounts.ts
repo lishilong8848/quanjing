@@ -32,7 +32,7 @@ export function reconcileSiteMemberAccounts(
     };
     after.siteMember = !!person;
     if (person) after.personnelIdentity = person.passwordAccountId;
-    if (after.permissionSource === 'personnel' && ['guest', 'site_member', 'professional_engineer'].includes(after.role)) {
+    if (after.permissionSource === 'personnel' && (!after.authorizationBinding || (after.authorizationBinding.mode === 'follow' && after.authorizationBinding.templateId.startsWith('builtin-'))) && ['guest', 'site_member', 'professional_engineer'].includes(after.role)) {
       if (person) {
         after.name = person.name;
         if (person.engineerScope) {

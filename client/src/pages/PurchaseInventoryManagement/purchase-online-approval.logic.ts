@@ -1,5 +1,6 @@
 import { canAccessBuilding } from '@shared/building-access';
 import type { AccessPrincipal } from '@shared/access-control.interface';
+import { decideBusinessPermission, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
 import type {
   PurchaseInventoryRequestItem,
   PurchaseInventoryResponse,
@@ -9,6 +10,12 @@ export function canApprovePurchaseOnline(
   principal: AccessPrincipal,
   item: PurchaseInventoryRequestItem,
 ): boolean {
+  if (item.stage !== 'approval' || !item.executionRecordId || item.purchaseCompleted) return false;
+  const context={module:'purchase' as const,action:'approve' as const};
+  if(principal.effectiveAuthorization || isProfessionalBusinessPrincipal({...principal,permissionContext:context})) {
+    const decision=decideBusinessPermission(principal,{...context,building:item.building,specialty:item.specialty});
+    return decision.allowed;
+  }
   return (
     (principal.role === 'admin' ||
       (principal.role === 'building_admin' &&

@@ -113,6 +113,7 @@ interface AccessSessionPayloadV6 extends Omit<AccessSessionPayloadV3, 'version' 
 type AccessSessionPayload = AccessSessionPayloadV2 | AccessSessionPayloadV3 | AccessSessionPayloadV4 | AccessSessionPayloadV5 | AccessSessionPayloadV6 | AccessSessionPayloadV7 | AccessSessionPayloadV8 | AccessSessionPayloadV9 | AccessSessionPayloadV10;
 
 interface ResolvedAccessSessionPayload {
+  effectiveAuthorization?: import('../../../shared/authorization-profile').EffectiveAuthorization;
   personalRules?: import('../../../shared/business-permissions').PersonalPermissionRule[];
   buildings?: import('../../../shared/access-control.interface').BuildingAdminBuilding[];
   specialties?: import('../../../shared/professional-access').ProfessionalSpecialty[];
@@ -298,6 +299,7 @@ export class UnifiedAccessService {
         ...(payload.buildings ? { buildings: [...payload.buildings] } : {}),
         ...(payload.specialties ? { specialties: payload.specialties } : {}),
         ...(payload.personalRules ? { personalRules: payload.personalRules } : {}),
+        ...(payload.effectiveAuthorization ? { effectiveAuthorization: structuredClone(payload.effectiveAuthorization) } : {}),
         ...(payload.displayName ? { displayName: payload.displayName } : {}),
         ...sessionIdentity(payload),
       },
@@ -318,6 +320,7 @@ export class UnifiedAccessService {
         ...(payload.buildings ? { buildings: [...payload.buildings] } : {}),
         ...(payload.specialties ? { specialties: payload.specialties } : {}),
         ...(payload.personalRules ? { personalRules: payload.personalRules } : {}),
+        ...(payload.effectiveAuthorization ? { effectiveAuthorization: structuredClone(payload.effectiveAuthorization) } : {}),
         ...(payload.displayName ? { displayName: payload.displayName } : {}),
         ...sessionIdentity(payload),
       },
@@ -338,6 +341,7 @@ export class UnifiedAccessService {
         ...(payload.buildings ? { buildings: [...payload.buildings] } : {}),
         ...(payload.specialties ? { specialties: payload.specialties } : {}),
         ...(payload.personalRules ? { personalRules: payload.personalRules } : {}),
+        ...(payload.effectiveAuthorization ? { effectiveAuthorization: structuredClone(payload.effectiveAuthorization) } : {}),
         ...(payload.displayName ? { displayName: payload.displayName } : {}), ...sessionIdentity(payload),
         ...(payload.feishuAppId ? { feishuAppId: payload.feishuAppId } : {}) },
       now,
@@ -373,7 +377,7 @@ export class UnifiedAccessService {
     const sessionConfigured = Boolean(this.sessionSecret);
     if (this.configuration) {
       const targets = this.configuration.localTargets();
-      const has = (role: string, building: string | null = null) => targets.some(target => target.principal.role === role && target.principal.purchaseBuilding === building);
+      const has = (role: string, building: string | null = null) => targets.some(target => (target.credentialRole || target.principal.role) === role && (target.credentialBuilding !== undefined ? target.credentialBuilding : target.principal.purchaseBuilding) === building);
       return { core: sessionConfigured && has('admin') && has('editor'), inventory: sessionConfigured && PURCHASE_ACCESS_BUILDINGS.every(building => has('inventory_admin', building)),
         purchase: sessionConfigured && has('purchase_admin') && PURCHASE_ACCESS_BUILDINGS.every(building => has('purchase_applicant', building)), construction: sessionConfigured && has('construction_admin') };
     }
@@ -414,7 +418,11 @@ export class UnifiedAccessService {
     if (this.configuration) {
       if (request?.accountType === undefined && request?.purchaseBuilding !== undefined) throw invalidCredentials();
       const targets = this.configuration.localTargets();
-      return request?.accountType === undefined ? targets : targets.filter(target => target.principal.role === request.accountType && (request.purchaseBuilding ? canAccessBuilding(target.principal, request.purchaseBuilding) : target.principal.purchaseBuilding === null));
+      return request?.accountType === undefined ? targets : targets.filter(target =>
+        (target.credentialRole || target.principal.role) === request.accountType &&
+        (request.purchaseBuilding ? target.credentialBuilding !== undefined
+          ? target.credentialBuilding === request.purchaseBuilding : canAccessBuilding(target.principal, request.purchaseBuilding)
+          : (target.credentialBuilding !== undefined ? target.credentialBuilding : target.principal.purchaseBuilding) === null));
     }
     if (request?.accountType === undefined) {
       if (request?.purchaseBuilding !== undefined) throw invalidCredentials();
@@ -532,6 +540,7 @@ export class UnifiedAccessService {
       ...(principal.buildings ? { buildings: [...principal.buildings] } : {}),
       ...(principal.specialties ? { specialties: [...principal.specialties] } : {}),
       ...(principal.personalRules ? { personalRules: structuredClone(principal.personalRules) } : {}),
+      ...(principal.effectiveAuthorization ? { effectiveAuthorization: structuredClone(principal.effectiveAuthorization) } : {}),
       ...(principal.displayName ? { displayName: principal.displayName } : {}),
       ...sessionIdentity(principal),
       ...(isValidFeishuGuestPrincipal(principal) && principal.accountId ? { accountId: principal.accountId } : {}),
@@ -641,6 +650,7 @@ export class UnifiedAccessService {
         ...((parsed.version === 8 || parsed.version === 10) ? { buildings: [...parsed.buildings] } : {}),
         ...((parsed.version === 7 || parsed.version === 10) ? { specialties: parsed.specialties } : {}),
         ...(canonicalPrincipal?.personalRules ? { personalRules: [...canonicalPrincipal.personalRules] } : {}),
+        ...(canonicalPrincipal?.effectiveAuthorization ? { effectiveAuthorization: structuredClone(canonicalPrincipal.effectiveAuthorization) } : {}),
         ...(parsed.version === 6 ? { feishuAppId: parsed.feishuAppId, ...(parsed.accountId ? { accountId: parsed.accountId } : {}) } : {}),
         sessionFamilyId:
           parsed.version !== 2
@@ -874,7 +884,7 @@ function isValidManagedGuestPrincipal(value: unknown): value is AccessPrincipal 
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const principal = value as Record<string, unknown>;
   return principal.role === 'guest' && principal.purchaseBuilding === null && principal.buildings === undefined && principal.specialties === undefined && principal.feishuAppId === undefined &&
-    typeof principal.accountId === 'string' && /^(?:local-external|feishu)-[a-f0-9]{64}$/.test(principal.accountId) && Number.isSafeInteger(principal.authorizationVersion) && Number(principal.authorizationVersion) >= 1 &&
+    typeof principal.accountId === 'string' && /^(?:local-[A-Za-z0-9_-]{1,153}|feishu-[a-f0-9]{64})$/.test(principal.accountId) && Number.isSafeInteger(principal.authorizationVersion) && Number(principal.authorizationVersion) >= 1 &&
     typeof principal.displayName === 'string' && normalizeAccessDisplayName(principal.displayName) === principal.displayName;
 }
 

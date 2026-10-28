@@ -8,10 +8,12 @@ import { feishuIdentityFingerprint } from './feishu-access-approved-grants';
 import { professionalScopeIsValid } from '../../../shared/professional-access';
 import { validPersonalRules } from '../../../shared/business-permissions';
 import { validPersonalPagePaths } from '../../../shared/page-access';
+import { validAuthorizationBinding, validAuthorizationOverrides, validEffectiveAuthorization } from './authorization-profile.policy';
 
 export const ID_PATTERN = /^[A-Za-z0-9_-]{1,160}$/u;
 export const OPEN_ID_PATTERN = /^ou_[A-Za-z0-9_-]{1,124}$/u;
 export const HASH_PATTERN = /^[a-f0-9]{64}$/u;
+const SHARED_LOCAL_ACCOUNT = /^local-(?:(?:admin|editor|purchase_admin|construction_admin)-all|(?:inventory_admin|purchase_applicant)-[ABCDEH]|building_admin-(?:[ABCDEH]|110))$/u;
 export function validRoleScope(role: unknown, building: unknown, buildings?: unknown): boolean {
   if (typeof role !== 'string' || !validBuildingScope(role, building, buildings)) return false;
   if (role === 'building_admin' || role === 'professional_engineer') return (BUILDING_ADMIN_BUILDINGS as readonly unknown[]).includes(building);
@@ -25,10 +27,14 @@ export function validAccount(account: ManagedAccount): boolean {
     (account.external === undefined || (typeof account.external === 'boolean' && (account.kind === 'feishu' || !account.external))) &&
     (account.siteMember === undefined || typeof account.siteMember === 'boolean') &&
     typeof account.name === 'string' && normalizeAccessDisplayName(account.name) === account.name &&
-    (account.role === 'guest' ? (account.kind === 'feishu' || account.loginMethod === 'personnel-password') && account.building === null && account.buildings === undefined : validRoleScope(account.role, account.building, account.buildings)) && typeof account.enabled === 'boolean' && typeof account.deleted === 'boolean' &&
+    (account.role === 'guest' ? (account.kind === 'feishu' || account.loginMethod === 'personnel-password' || account.kind === 'local' && account.loginMethod === undefined && SHARED_LOCAL_ACCOUNT.test(account.id) && !!account.authorizationBinding) && account.building === null && account.buildings === undefined : validRoleScope(account.role, account.building, account.buildings)) && typeof account.enabled === 'boolean' && typeof account.deleted === 'boolean' &&
     (['professional_admin', 'professional_engineer'].includes(account.role) ? (account.kind === 'feishu' || account.loginMethod === 'personnel-password') && professionalScopeIsValid(account.specialties) : account.specialties === undefined) &&
     (account.personalRules === undefined || validPersonalRules(account.personalRules)) &&
     (account.pagePaths === undefined || validPersonalPagePaths(account.role,account.pagePaths)) &&
+    (account.authorizationBinding === undefined || validAuthorizationBinding(account.authorizationBinding)) &&
+    (account.authorizationOverrides === undefined || validAuthorizationOverrides(account.authorizationOverrides)) &&
+    (account.reactivationRequired === undefined || typeof account.reactivationRequired === 'boolean') &&
+    (account.effectiveAuthorization === undefined || validEffectiveAuthorization(account.effectiveAuthorization)) &&
     (account.personnelIdentity === undefined || (typeof account.personnelIdentity === 'string' && /^local-external-[a-f0-9]{64}$/.test(account.personnelIdentity))) &&
     (account.permissionSource === undefined || ['personnel', 'manual'].includes(account.permissionSource)) &&
     (account.personnelSpecialties === undefined || (typeof account.personnelSpecialties === 'string' && account.personnelSpecialties.length <= 500)) &&

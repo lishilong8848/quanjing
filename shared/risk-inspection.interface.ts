@@ -28,6 +28,7 @@ export interface AliMonthlyQualityPersonReference {
 
 export interface AliMonthlyQualityIssue {
   id: string;
+  specialty?: string;
   month: string;
   building: string;
   item: string;

@@ -1,3 +1,5 @@
+import { canUsePageAction } from '../business-action-access';
+import { useAccess } from '@/access/AccessProvider';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog,
@@ -40,7 +42,7 @@ export function MeetingActionEditDialog({
   const [peopleError, setPeopleError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const flight = useRef(false);
-  const disabled = false;
+  const disabled = !canUsePageAction(useAccess(), 'meetings', 'update', true);
   useEffect(() => {
     const controller = new AbortController();
     if (!people.length)
@@ -72,7 +74,7 @@ export function MeetingActionEditDialog({
     setError(null);
   };
   const save = () => {
-    if (flight.current || !content.trim()) return;
+    if (disabled || flight.current || !content.trim()) return;
     if (
       owner &&
       owner.kind !== 'unassigned' &&

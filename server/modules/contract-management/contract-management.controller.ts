@@ -1,4 +1,5 @@
 import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { assertGlobalBusinessOperation } from '../../common/access/global-business-operation';
 import { Req, ForbiddenException } from '@nestjs/common';
 import type { Request } from 'express';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
@@ -69,7 +70,9 @@ export class ContractManagementController {
   }
 
   @Get('attachments/storage')
+  @ProfessionalScoped()
   getAttachmentStorageStatus() {
+    // Shared storage health/capability metadata; no contract records are returned.
     return this.attachmentStorage.getStatus();
   }
 
@@ -126,15 +129,13 @@ export class ContractManagementController {
   @Get('contracts/:recordId/payment-follow-up-options')
   @ProfessionalScoped()
   async getContractPaymentFollowUpOptions(@Param('recordId') recordId: string, @Req() request?: Request) {
-    await this.assertContractScope(request, recordId);
-    return this.paymentFollowUp.getOptions(recordId);
+    return this.paymentFollowUp.getOptions(recordId,this.principal(request));
   }
 
   @Get('contracts/:recordId/edit-options')
   @ProfessionalScoped()
   async getContractEditOptions(@Param('recordId') recordId: string, @Req() request?: Request) {
-    await this.assertContractScope(request, recordId);
-    return this.contractEdit.getOptions(recordId);
+    return this.contractEdit.getOptions(recordId,this.principal(request));
   }
 
   @Patch('contracts/:recordId')
@@ -243,10 +244,12 @@ export class ContractManagementController {
   }
 
   @Post('workflows/:code/run')
-  runWorkflow(@Param('code') code: string) {
+  @ProfessionalScoped()
+  runWorkflow(@Param('code') code: string, @Req() request?: Request) {
     if (!isContractWorkflowCode(code)) {
       throw new BadRequestException(`未知合同工作流：${code}`);
     }
+    assertGlobalBusinessOperation(this.principal(request), { module: 'contracts', action: 'notify' });
     return this.workflowService.run(code, { trigger: 'manual' });
   }
   private principal(request?: Request): AccessPrincipal | undefined { return (request as (Request & { accessPrincipal?: AccessPrincipal }) | undefined)?.accessPrincipal; }

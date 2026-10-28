@@ -1,4 +1,4 @@
-import { canPerformBusinessAction, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { canPerformBusinessAction } from '../../../shared/business-permissions';
 import type {
   PurchaseWorkflowAction,
   PurchaseWorkflowApprovalInput,
@@ -15,6 +15,11 @@ import {
 } from './purchase-receipt-material-policy';
 
 export type PurchaseWorkflowFieldPatch = Record<string, unknown>;
+/** Supplied by the service from the current approval roster, never from the request. */
+export type PurchaseWorkflowDutyActor = PurchaseWorkflowUser & {
+  approvalDuty?: boolean;
+  approvalDutyKind?: 'purchase_manager' | 'purchase_approver';
+};
 
 const MANAGER_POSITIONS = new Set(['设施运维经理', '设施运维副经理']);
 const START_POSITIONS = new Set([...MANAGER_POSITIONS, '综合管理']);
@@ -46,25 +51,25 @@ export function resolvePurchaseStage(status: string): PurchaseWorkflowStage {
 
 export function resolveAllowedActions(
   record: PurchaseWorkflowRecord,
-  user: PurchaseWorkflowUser,
+  user: PurchaseWorkflowDutyActor,
 ): PurchaseWorkflowAction[] {
   const stage = resolvePurchaseStage(record.status);
   const actions: PurchaseWorkflowAction[] = [];
-  if (stage === 'application' && isManager(user)) actions.push('approve');
+  if (stage === 'application' && isApprover(user)) actions.push('approve');
   if (stage === 'approval' && canStart(record, user)) actions.push('start');
   if (stage === 'ordering' && canOrder(record, user)) actions.push('order');
   if (stage === 'receipt' && canReceive(record, user)) actions.push('receive');
-  return isProfessionalBusinessPrincipal(user.permissionPrincipal) ? actions.filter(action => canPerformBusinessAction(user.permissionPrincipal!, { module: 'purchase', action: action === 'start' ? 'create' : action, building: record.building, specialty: record.specialty })) : actions;
+  return user.permissionPrincipal ? actions.filter(action => canPerformBusinessAction(user.permissionPrincipal!, { module: 'purchase', action: action === 'start' ? 'create' : action, building: record.building, specialty: record.specialty })) : actions;
 }
 
 export function buildApprovalPatch(
   record: PurchaseWorkflowRecord,
-  actor: PurchaseWorkflowUser,
+  actor: PurchaseWorkflowDutyActor,
   input: PurchaseWorkflowApprovalInput,
 ): PurchaseWorkflowFieldPatch {
-  if (isProfessionalBusinessPrincipal(actor.permissionPrincipal) && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'approve', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
+  if (actor.permissionPrincipal && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'approve', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
   assertStage(record, 'application', '当前状态不能审批');
-  if (!isManager(actor)) throw new Error('无权审批采购申请');
+  if (!isApprover(actor)) throw new Error('无权审批采购申请');
 
   if (input.decision === 'rejected' || input.purchaseMethod === '驳回') {
     return {
@@ -114,7 +119,7 @@ export function buildStartPatch(
   comprehensivePurchaser: PurchaseWorkflowUser,
   purchaseMethodOverride?: PurchaseWorkflowMethod,
 ): PurchaseWorkflowFieldPatch {
-  if (isProfessionalBusinessPrincipal(actor.permissionPrincipal) && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'create', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
+  if (actor.permissionPrincipal && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'create', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
   assertStage(record, 'approval', '当前状态不能启动采购');
   const method = normalizeMethod(
     purchaseMethodOverride || record.purchaseMethod,
@@ -142,7 +147,7 @@ export function buildOrderPatch(
   actor: PurchaseWorkflowUser,
   input: PurchaseWorkflowOrderInput,
 ): PurchaseWorkflowFieldPatch {
-  if (isProfessionalBusinessPrincipal(actor.permissionPrincipal) && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'order', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
+  if (actor.permissionPrincipal && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'order', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
   assertStage(record, 'ordering', '当前状态不能提交下单结果');
   if (!canOrder(record, actor)) throw new Error('无权提交下单结果');
   if (!Number.isFinite(input.actualQuantity) || input.actualQuantity <= 0) {
@@ -167,7 +172,7 @@ export function buildReceiptPatch(
   actor: PurchaseWorkflowUser,
   input: PurchaseWorkflowReceiptInput,
 ): PurchaseWorkflowFieldPatch {
-  if (isProfessionalBusinessPrincipal(actor.permissionPrincipal) && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'receive', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
+  if (actor.permissionPrincipal && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'receive', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
   assertStage(record, 'receipt', '当前状态不能确认签收');
   if (!canReceive(record, actor)) throw new Error('无权确认到货签收');
   if (!clean(input.signer)) throw new Error('请填写签收人');
@@ -210,7 +215,7 @@ function canStart(
   user: PurchaseWorkflowUser,
   method: PurchaseWorkflowMethod = normalizeMethod(record.purchaseMethod),
 ): boolean {
-  if (isSystemAdmin(user) || user.accessRole === 'building_admin' || hasAnyPosition(user, START_POSITIONS)) return true;
+  if (isSystemAdmin(user) || hasAnyPosition(user, START_POSITIONS)) return true;
   const sameBuilding = user.buildings.some(
     (building) =>
       normalizeBuilding(building) === normalizeBuilding(record.building),
@@ -233,14 +238,6 @@ function canOrder(
 ): boolean {
   if (user.accessRole === 'purchase_applicant')
     return isSameBuildingSelfPurchaseApplicant(record, user);
-  if (
-    user.accessRole === 'admin' ||
-    user.accessRole === 'purchase_admin' ||
-    user.accessRole === 'building_admin' ||
-    user.accessRole === 'supply_chain_admin'
-  ) {
-    return true;
-  }
   return isManager(user) || user.openId === record.purchaserOpenId;
 }
 
@@ -251,7 +248,6 @@ function canReceive(
   if (user.accessRole === 'purchase_applicant') {
     return isSameBuildingPurchaseApplicant(record, user);
   }
-  if (user.accessRole === 'building_admin') return true;
   return (
     isManager(user) ||
     user.openId === record.requesterOpenId ||
@@ -282,12 +278,16 @@ function isSameBuildingPurchaseApplicant(
   );
 }
 
-function isManager(user: PurchaseWorkflowUser): boolean {
-  return isSystemAdmin(user) || user.accessRole === 'building_admin' || hasAnyPosition(user, MANAGER_POSITIONS);
+function isManager(user: PurchaseWorkflowDutyActor): boolean {
+  return isSystemAdmin(user) || hasAnyPosition(user, MANAGER_POSITIONS);
+}
+
+function isApprover(user: PurchaseWorkflowDutyActor): boolean {
+  return isSystemAdmin(user) || user.approvalDuty === true;
 }
 
 function isSystemAdmin(user: PurchaseWorkflowUser): boolean {
-  return user.accessRole === 'admin' || user.accessRole === 'professional_admin' || isProfessionalBusinessPrincipal(user.permissionPrincipal);
+  return user.accessRole === 'admin';
 }
 
 function hasAnyPosition(

@@ -17,6 +17,8 @@ export interface StocktakeSyncState {
 }
 export interface StocktakeBulkSummary {
   id: string;
+  /** Returned only when every batch record is visible to the caller. */
+  recordIds?: string[];
   count: number;
   confirmer: PurchaseApplicationApplicant;
   confirmedAt: string;

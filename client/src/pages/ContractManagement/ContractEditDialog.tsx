@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, FilePenLine, Loader2, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAccess } from '@/access/AccessProvider';
+import { businessBuildingLabels } from '@shared/business-permissions';
+import { canUseContractAction, type ContractPermissionScope } from './contract-permissions';
 
 import { getContractEditOptions, updateContractInformation } from '@/api';
 import {
@@ -45,6 +48,8 @@ export function ContractEditDialog({
   onOpenChange,
   onCompleted,
 }: ContractEditDialogProps) {
+  const access = useAccess();
+  const canUpdateRecord = canUseContractAction(access, 'update', contract);
   const [options, setOptions] = useState<ContractEditOptionsResponse | null>(
     null,
   );
@@ -55,9 +60,11 @@ export function ContractEditDialog({
   const [loadError, setLoadError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const contractRecordId = contract?.recordId;
+  const canSave = canUpdateRecord && canUseContractAction(access, 'update', contractEditPermissionScope(contract, draft, options));
 
   useEffect(() => {
     if (!open || !contractRecordId) return;
+    if (!canUpdateRecord) { setLoading(false); setLoadError('当前账号无此合同的修改权限'); return; }
     let cancelled = false;
     setOptions(null);
     setDraft(null);
@@ -91,7 +98,7 @@ export function ContractEditDialog({
     return () => {
       cancelled = true;
     };
-  }, [contractRecordId, open]);
+  }, [contractRecordId, open, canUpdateRecord]);
 
   const groups = useMemo(() => {
     if (!options) return [];
@@ -124,6 +131,7 @@ export function ContractEditDialog({
 
   async function handleSubmit() {
     if (!contractRecordId || !draft || !options || saving) return;
+    if (!canSave) { setFeedback('当前合同或修改后的专业、楼栋超出修改权限范围'); return; }
     const validationErrors = validateContractEditDraft(draft, options);
     if (validationErrors.length > 0) {
       setFieldErrors(
@@ -291,7 +299,7 @@ export function ContractEditDialog({
             <button
               type="button"
               onClick={() => void handleSubmit()}
-              disabled={!draft || loading || saving || Boolean(loadError)}
+              disabled={!draft || loading || saving || Boolean(loadError) || !canSave}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? (
@@ -306,6 +314,17 @@ export function ContractEditDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+export function contractEditPermissionScope(contract: ContractManagementItem | null, draft: ContractEditDraft | null, options: ContractEditOptionsResponse | null): ContractPermissionScope | null {
+  if (!contract) return null;
+  const field = (name: string) => {
+    const id = options?.fields.find(item => item.name === name)?.fieldId;
+    return id && draft && Object.prototype.hasOwnProperty.call(draft.fields, id) ? draft.fields[id] : undefined;
+  };
+  const specialty = field('专业类别'), buildings = field('对应楼栋设备');
+  return { specialty: specialty === undefined ? contract.specialty : typeof specialty === 'string' ? specialty : '',
+    buildings: buildings === undefined ? contract.buildings : businessBuildingLabels(typeof buildings === 'string' ? buildings : Array.isArray(buildings) ? buildings.filter(value => typeof value === 'string').join('、') : '') };
 }
 
 function EditableField({

@@ -54,7 +54,7 @@ import { AccessLoginNamesService } from './access-login-names.service';
       useExisting: UnifiedAccessGuard,
     },
   ],
-  exports: [UnifiedAccessService, FeishuAccessService, AccessConfigurationService],
+  exports: [UnifiedAccessService, FeishuAccessService, AccessConfigurationService, AccessConfigurationDirectory],
 })
 export class UnifiedAccessModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

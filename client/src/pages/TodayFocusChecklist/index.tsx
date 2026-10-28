@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { logger } from '@lark-apaas/client-toolkit/logger';
 import {
@@ -509,6 +511,7 @@ function GenericFocusItem({
 }
 
 export default function TodayFocusChecklistPage() {
+  const canRefresh = canUsePageAction(useAccess(), 'today_focus', 'refresh', true);
   const [data, setData] = useState<TodayFocusChecklistResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -524,7 +527,7 @@ export default function TodayFocusChecklistPage() {
     setError(null);
 
     try {
-      const result = await getTodayFocusChecklist(dateParam, forceRefresh);
+      const result = await getTodayFocusChecklist(dateParam, forceRefresh && canRefresh);
       setData(result);
     } catch (err) {
       logger.error('加载今日园区重点关注清单失败', err);
@@ -533,7 +536,7 @@ export default function TodayFocusChecklistPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dateParam]);
+  }, [dateParam, canRefresh]);
 
   useEffect(() => {
     void loadData();

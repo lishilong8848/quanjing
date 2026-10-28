@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { Test } from '@nestjs/testing';
 import { APP_GUARD } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
-import { randomUUID, randomBytes } from 'node:crypto';
+import { randomUUID, randomBytes, randomInt } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync, realpathSync, lstatSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -24,6 +24,16 @@ import type { AccessPrincipal } from '../../shared/access-control.interface';
 import { handoverPermissionGrantKeys } from '../../server/common/access/personnel-handover.ownership';
 import { accountPermissionTemplate } from '../../server/common/access/personnel-handover.preview';
 import type { PersonnelRecoveryActor, PersonnelRecoveryRequest, PersonnelRecoveryTask } from '../../shared/personnel-task-recovery.interface';
+
+// A system-assigned port can fall in Fetch's blocked service-port list.
+// Only retry bind collisions, never a failed business HTTP operation.
+async function listenOnSafeLoopbackPort(app: INestApplication): Promise<void> {
+  for (let attempt=0;attempt<8;attempt++) {
+    try { await app.listen(randomInt(49152,65536),'127.0.0.1'); return; }
+    catch(error) { if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error; }
+  }
+  throw new Error('合成HTTP测试未获得可用的安全本地端口');
+}
 
 describe('岗位交接真实管理HTTP（合成本地来源）',()=>{
   const appId='cli_http_handover',oldId='local-external-'+'a'.repeat(64),newId='local-external-'+'b'.repeat(64);
@@ -50,7 +60,7 @@ describe('岗位交接真实管理HTTP（合成本地来源）',()=>{
       previewRecoveryTask:async(input:PersonnelRecoveryRequest)=>({task:recoveryRows.find(row=>row.id===input.taskId),version:input.expectedVersion,facts:[],choices:[],canConfirm:true,acknowledgement:'合成核对确认'}),
       recoverTask:async(_input:PersonnelRecoveryRequest,actor:PersonnelRecoveryActor,authorize:()=>void)=>{authorize();recoveryCalls++;recoveryActor=actor;return{status:'completed',message:'合成原任务已核对'};}});
     const module=await Test.createTestingModule({controllers:[AccessConfigurationController],providers:[AccessConfigurationService,UnifiedAccessService,PersonnelHandoverAdminService,{provide:AccessConfigurationDirectory,useValue:{read:async()=>structuredClone(directory)}},{provide:AccessConfigurationCardDirectory,useValue:{}},...Object.entries(PERSONNEL_PREVIEW_READERS).map(([name,token])=>({provide:token,useValue:recoveryAdapter(name)})),{provide:APP_GUARD,useClass:UnifiedAccessGuard}]}).compile();
-    app=module.createNestApplication({logger:false});await app.listen(0,'127.0.0.1');base=await app.getUrl();cookie=issue(admin);
+    app=module.createNestApplication({logger:false});await listenOnSafeLoopbackPort(app);base=await app.getUrl();cookie=issue(admin);
   },30000);
   afterEach(async()=>{
     await app?.close();jest.restoreAllMocks();for(const key of Object.keys(process.env))if(previous[key]===undefined)delete process.env[key];Object.assign(process.env,previous);
@@ -83,7 +93,14 @@ describe('岗位交接真实管理HTTP（合成本地来源）',()=>{
   it('匿名、游客和子管理员不能访问；本站管理员能预览，跨源拒绝',async()=>{
     expect((await post('preview',request,'')).status).toBe(403);
     const access=app.get(UnifiedAccessService),configuration=app.get(AccessConfigurationService);
-    const guest=configuration.feishuPrincipal('ou_http_old',appId);
+    expect(configuration.feishuPrincipal('ou_http_old',appId)).toBeNull();
+    const guestOpenId='ou_http_active_guest',guestId='feishu-'+feishuIdentityFingerprint(appId,guestOpenId);
+    await store.mutate(store.read().revision,'synthetic-seed-active-guest','guest',state=>{
+      state.accounts[guestId]={...other,id:guestId,openId:guestOpenId,identityHash:feishuIdentityFingerprint(appId,guestOpenId),name:'合成在职游客',role:'guest',version:1};
+      state.personnelEmployment!.inactive[guestId]=false;
+    });
+    const guest=configuration.feishuPrincipal(guestOpenId,appId);
+    expect(guest).toMatchObject({role:'guest',accountId:guestId,authorizationVersion:1});
     expect((await post('preview',request,`${access.cookieName}=${access.issueTrustedSession(guest!).token}`)).status).toBe(403);
     const editor={...other,role:'editor' as const,version:2};await store.mutate(store.read().revision,'synthetic-seed-editor','editor',state=>{state.accounts[editor.id]=editor;});
     expect((await post('preview',request,issue(editor))).status).toBe(403);

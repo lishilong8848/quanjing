@@ -10,6 +10,9 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import type { AccessPrincipal } from '@shared/access-control.interface';
+import { assertBusinessOperation } from '@server/common/access/assert-business-operation';
+import { businessAuthorizationSnapshot, businessPermissionScopeKey } from '@shared/business-permissions';
 import {
   getFeishuAuthPayload,
   readEnv,
@@ -213,12 +216,14 @@ export class EmergencyDutyService implements OnModuleInit, OnModuleDestroy {
 
   async upsertSchedule(
     request: EmergencyDutyUpsertRequest,
+    principal?:AccessPrincipal,
   ): Promise<EmergencyDutyUpsertResponse> {
     const normalized = await emergencyDutyPreWriteStep(
       () => Promise.resolve(validateUpsertRequest(request)),
       '应急值班请求校验失败，本次未写入',
     );
-    const fingerprint = mutationFingerprint(normalized);
+    const acceptedPrincipal=principal?businessAuthorizationSnapshot(principal):undefined;
+    const fingerprint = mutationFingerprint(normalized) + (acceptedPrincipal?`:${businessPermissionScopeKey(acceptedPrincipal)}`:'');
     this.pruneCompletedMutations();
 
     const completed = this.completedMutations.get(normalized.clientMutationId);
@@ -241,7 +246,7 @@ export class EmergencyDutyService implements OnModuleInit, OnModuleDestroy {
     }
 
     const promise = this.enqueueTableMutation(() =>
-      this.performUpsert(normalized),
+      this.performUpsert(normalized,acceptedPrincipal),
     );
     this.inFlightMutations.set(normalized.clientMutationId, {
       fingerprint,
@@ -287,6 +292,7 @@ export class EmergencyDutyService implements OnModuleInit, OnModuleDestroy {
 
   private async performUpsert(
     request: ResolvedUpsertRequest,
+    principal?:AccessPrincipal,
   ): Promise<EmergencyDutyUpsertResponse> {
     const personnel = await emergencyDutyPreWriteStep(
       () => this.resolveSelectedPersonnel(request.personKeys),
@@ -312,6 +318,7 @@ export class EmergencyDutyService implements OnModuleInit, OnModuleDestroy {
     }
 
     const existingRecordId = matches[0] ? getRecordId(matches[0]) : '';
+    if (principal) assertBusinessOperation(principal,{module:'schedule_assignments',action:existingRecordId?'update':'create'});
     const canonicalExistingRecord = existingRecordId
       ? findCanonicalScheduleRecord(
           records,

@@ -1,3 +1,4 @@
+import { canUsePageAction } from '../business-action-access';
 import {
   useCallback,
   lazy,
@@ -94,7 +95,8 @@ export default function MeetingManagementPage() {
 }
 
 function MeetingWorkspace() {
-  const { readOnlyPage } = useAccess();
+  const access = useAccess();
+  const canRefresh = canUsePageAction(access, 'meetings', 'refresh', !access.readOnlyPage);
   const [externalJob, setExternalJob] = useState<WeeklyJob | null>(null);
   const location = useLocation();
   const weekly = location.pathname.endsWith('/nantong-weekly');
@@ -120,6 +122,7 @@ function MeetingWorkspace() {
   const snapshotReading = useRef(false);
 
   const load = useCallback(async (refresh = false, background = false) => {
+    refresh = refresh && canRefresh;
     if (background && snapshotReading.current) return;
     snapshotReading.current = true;
     const epoch = snapshotEpoch.current;
@@ -169,7 +172,7 @@ function MeetingWorkspace() {
       if (request.current === controller) snapshotReading.current = false;
       if (!controller.signal.aborted && mounted.current) setLoading(false);
     }
-  }, []);
+  }, [canRefresh]);
 
   const weeklySynced = useCallback((job: WeeklyJob) => {
     snapshotEpoch.current += 1;
@@ -381,7 +384,7 @@ function MeetingWorkspace() {
             : '待读取'
         }
         refreshing={loading || Boolean(syncing)}
-        onRefresh={() => void load(!readOnlyPage)}
+        onRefresh={() => void load(canRefresh)}
       />
       <main className="meeting-main">
         {feedback && (
@@ -391,7 +394,7 @@ function MeetingWorkspace() {
               size="sm"
               variant="outline"
               disabled={loading}
-              onClick={() => void load(!readOnlyPage)}
+              onClick={() => void load(canRefresh)}
             >
               重新加载
             </Button>

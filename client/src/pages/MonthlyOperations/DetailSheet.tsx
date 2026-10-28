@@ -1,3 +1,4 @@
+import { useMonthlyOperationsExport } from './use-export-access';
 import { startTransition, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
@@ -85,6 +86,7 @@ export function DetailSheet({
   onClose: () => void;
   restoreFocus: () => void;
 }) {
+  const { canExport, authorizeExport } = useMonthlyOperationsExport();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
@@ -197,7 +199,7 @@ export function DetailSheet({
   const count = selection.resource ? resourceTable.rows.length : records.length;
   const pageCount = Math.max(1, Math.ceil(count / 10));
   const currentPage = Math.min(page, pageCount);
-  const exportRows = () => {
+  const exportRows = () => void authorizeExport(() => {
     const table = selection.resource
       ? resourceTable
       : {
@@ -238,7 +240,7 @@ export function DetailSheet({
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setExportMessage(`已导出 ${count} 条演示数据`);
-  };
+  }, setExportMessage);
   return (
     <Sheet
       open
@@ -354,7 +356,7 @@ export function DetailSheet({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!count}
+                disabled={!canExport || !count}
                 onClick={exportRows}
               >
                 <Download />

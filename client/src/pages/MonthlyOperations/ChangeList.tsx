@@ -1,3 +1,4 @@
+import { useMonthlyOperationsExport } from './use-export-access';
 import { useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,7 @@ export function ChangeList({
   ready: boolean;
   error?: string;
 }) {
+  const { canExport, authorizeExport } = useMonthlyOperationsExport();
   const [filters, setFilters] = useState<ChangeFilters>(CHANGE_FILTERS);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(10);
@@ -74,7 +76,7 @@ export function ChangeList({
     setPage(1);
     setNotice('');
   };
-  const exportCsv = () => {
+  const exportCsv = () => void authorizeExport(() => {
     const rows = [
       [
         '编号',
@@ -128,7 +130,7 @@ export function ChangeList({
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setNotice(`已导出 ${filtered.length} 条变更`);
-  };
+  }, setNotice);
   if (!ready)
     return (
       <EmptyState
@@ -187,7 +189,7 @@ export function ChangeList({
         </div>
         <Button
           variant="outline"
-          disabled={!filtered.length}
+          disabled={!canExport || !filtered.length}
           onClick={exportCsv}
         >
           <Download />

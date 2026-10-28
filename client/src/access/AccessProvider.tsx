@@ -1,4 +1,4 @@
-import { businessModuleForPage, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
+import { businessModulesForPage, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
 import { defaultCanAccessPage } from '@shared/page-access';
 import {
   type AccessCapabilities,
@@ -149,6 +149,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   const requiresFeishuIdentityRef = React.useRef(feishuAuthStatus === 'success');
   const sessionMutationQueue = React.useRef<Promise<void>>(Promise.resolve());
   const reauthenticationPendingRef = React.useRef(false);
+  const permissionChangeNoticeRef = React.useRef<string | null>(null);
   const lastReauthenticationLoginRef = React.useRef(
     getReauthenticationLoginDefaults(GUEST_SESSION),
   );
@@ -198,6 +199,11 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       .then((nextSession) => {
         if (!sessionCommitCoordinator.canCommit(refreshToken)) return;
         const normalizedSession = normalizeAccessSession(nextSession);
+        if (previousSession.principalFingerprint && hasAuthenticatedAccessIdentity(previousSession) &&
+          !hasAuthenticatedAccessIdentity(normalizedSession) && permissionChangeNoticeRef.current !== previousSession.principalFingerprint) {
+          permissionChangeNoticeRef.current = previousSession.principalFingerprint;
+          toast.warning('登录状态或权限已更新，请重新确认身份。', { id:'access-permission-updated' });
+        }
         rememberReauthenticationLogin(normalizedSession);
         if (hasAuthenticatedAccessIdentity(normalizedSession)) {
           reauthenticationPendingRef.current = false;
@@ -543,8 +549,10 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   const value = React.useMemo<AccessContextValue>(
     () => ({
       ...normalizeAccessSession(session),
-      readOnlyPage: !defaultCanAccessPage(session.role, location.pathname) && !(isProfessionalBusinessPrincipal(session) && businessModuleForPage(location.pathname) && hasBusinessPermissionSomewhere(session, { module: businessModuleForPage(location.pathname)!, action: 'read' })),
-      ...(isProfessionalBusinessPrincipal(session) && businessModuleForPage(location.pathname) ? { capabilities: professionalPageCapabilities(location.pathname, session) } : !defaultCanAccessPage(session.role, location.pathname) ? { capabilities: { canEdit: false, canDelete: false, canForceRefresh: false, canAccessContracts: false } } : {}),
+      readOnlyPage: session.effectiveAuthorization
+        ? !professionalPageCapabilities(location.pathname,session).canEdit && !professionalPageCapabilities(location.pathname,session).canDelete
+        : !defaultCanAccessPage(session.role, location.pathname) && !businessModulesForPage(location.pathname).some(module => isProfessionalBusinessPrincipal({...session,permissionContext:{module,action:'read'}}) && hasBusinessPermissionSomewhere(session,{module,action:'read'})),
+      ...((session.effectiveAuthorization || isProfessionalBusinessPrincipal(session)) && businessModulesForPage(location.pathname).length ? { capabilities: professionalPageCapabilities(location.pathname, session) } : !defaultCanAccessPage(session.role, location.pathname) ? { capabilities: { canEdit: false, canDelete: false, canForceRefresh: false, canAccessContracts: false } } : {}),
       isLoading,
       isConfirmingIdentity: isConfirmingIdentity || callbackPending,
       isChangingIdentity: isLoggingIn || isLoggingOut,

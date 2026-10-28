@@ -1,5 +1,6 @@
 import { businessBuildingsForAction, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
 import { accessBuildings } from '@shared/building-access';
+import { canUsePageAction } from '../business-action-access';
 import {
   lazy,
   Suspense,
@@ -124,21 +125,24 @@ export default function InventoryManagementPage() {
     purchaseBuilding, buildings,
     principalFingerprint,
     isLoading: accessLoading,
-    capabilities: { canEdit, canForceRefresh },
+    capabilities,
   } = principal;
+  const canEdit = canUsePageAction(principal, 'inventory', 'create', capabilities.canEdit);
+  const canForceRefresh = canUsePageAction(principal, 'inventory', 'refresh', capabilities.canForceRefresh);
+  const canReadInventory = canUsePageAction(principal, 'inventory', 'read', true);
+  const canReadStocktake = canUsePageAction(principal, 'stocktake', 'read', true);
+  const allowedSections = INVENTORY_SECTIONS.filter(section => section.key === 'stocktake' ? canReadStocktake : canReadInventory).map(section => section.key);
   const movementDeletionAccess = resolveInventoryMovementDeletionAccess(
     role,
     purchaseBuilding, buildings,
   );
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get('view');
-  const activeSection: InventorySection = INVENTORY_SECTIONS.some(
-    (section) => section.key === requestedSection,
-  )
+  const activeSection: InventorySection = allowedSections.includes(requestedSection as InventorySection)
     ? (requestedSection as InventorySection)
-    : 'overview';
+    : allowedSections[0] || 'overview';
   const executingStocktake =
-    activeSection === 'stocktake' && searchParams.get('action') === 'execute';
+    activeSection === 'stocktake' && (searchParams.get('action') === 'execute' || !canReadInventory);
   const stocktakeMonth = resolveStocktakeMonth(searchParams.get('month'));
   const stocktakeScope: StocktakeScope = searchParams.get('scope') === 'review' ? 'review' : 'sample';
   const draftIdentity = `${principalFingerprint}:${role}:${purchaseBuilding}`;
@@ -174,13 +178,13 @@ export default function InventoryManagementPage() {
       { replace: true },
     );
   };
-  const canExecuteStocktake =
+  const canExecuteStocktake = principal.effectiveAuthorization ? canReadStocktake :
     (isProfessionalBusinessPrincipal(principal) ? hasBusinessPermissionSomewhere(principal, { module: 'stocktake', action: 'read' }) : role === 'admin') ||
     ((role === 'inventory_admin' || role === 'building_admin') &&
       WAREHOUSE_BUILDINGS.some((value) => value === purchaseBuilding));
-  const needsDashboard =
+  const needsDashboard = canReadInventory && (
     activeSection === 'overview' ||
-    (activeSection === 'stocktake' && !executingStocktake);
+    (activeSection === 'stocktake' && !executingStocktake));
   const showHeaderRefresh = needsDashboard || activeSection === 'ledger';
   const [dashboard, setDashboard] =
     useState<InventoryManagementDashboard | null>(null);
@@ -201,7 +205,7 @@ export default function InventoryManagementPage() {
     setProgressRevision((value) => value + 1);
   }, [progressKey]);
   useEffect(() => {
-    if (activeSection !== 'stocktake') return;
+    if (!canReadStocktake || activeSection !== 'stocktake') return;
     if (executingStocktake) {
       progressCache.current.delete(progressKey);
       return;
@@ -246,6 +250,7 @@ export default function InventoryManagementPage() {
     canExecuteStocktake,
     progressKey,
     stocktakeMonth,
+    canReadStocktake,
     progressRevision,
   ]);
   const [items, setItems] = useState<InventoryItemsResponse>(EMPTY_ITEMS);
@@ -418,7 +423,7 @@ export default function InventoryManagementPage() {
           initialFilter={searchParams.get('filter') as StocktakeFilter | null}
           drafts={stocktakeDrafts.current.values}
           key={principalFingerprint || `${role}:${purchaseBuilding}`}
-          allowedBuildings={isProfessionalBusinessPrincipal(principal) ? WAREHOUSE_BUILDINGS.filter(value => businessBuildingsForAction(principal, { module: 'inventory', action: 'create' }).includes(value as never)) : role === 'admin' ? WAREHOUSE_BUILDINGS : WAREHOUSE_BUILDINGS.filter(value => scope?.includes(value))}
+          allowedBuildings={principal.effectiveAuthorization || isProfessionalBusinessPrincipal(principal) ? WAREHOUSE_BUILDINGS.filter(value => businessBuildingsForAction(principal, { module: 'stocktake', action: 'read' }).includes(value as never)) : role === 'admin' ? WAREHOUSE_BUILDINGS : WAREHOUSE_BUILDINGS.filter(value => scope?.includes(value))}
           onBack={() => setSearchParams(current => { const next = new URLSearchParams(current); next.delete('action'); next.delete('filter'); next.delete('building'); return next; })}
         />
       </Suspense>
@@ -445,7 +450,7 @@ export default function InventoryManagementPage() {
           setSearchQuery(value);
           setPage(1);
         }}
-        onRefresh={showHeaderRefresh ? () => void refreshAll() : undefined}
+        onRefresh={showHeaderRefresh && canForceRefresh ? () => void refreshAll() : undefined}
         actions={
           canEdit ? (
             <Button
@@ -481,7 +486,7 @@ export default function InventoryManagementPage() {
           />
         )}
 
-        <InventorySectionNav activeSection={activeSection} />
+        <InventorySectionNav activeSection={activeSection} allowedSections={allowedSections} />
         {activeSection === 'stocktake' && canExecuteStocktake && (
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" onClick={() => openStocktake('sample')}><ClipboardCheck className="h-4 w-4" />重点抽盘</Button>
@@ -568,10 +573,10 @@ export default function InventoryManagementPage() {
             type={activeSection}
             searchQuery=""
             canConfirmOutbound={
-              (isProfessionalBusinessPrincipal(principal) ? hasBusinessPermissionSomewhere(principal, { module: 'inventory', action: 'confirm' }) : role === 'admin') ||
-              ((role === 'inventory_admin' || role === 'building_admin') && Boolean(purchaseBuilding))
+              canUsePageAction(principal, 'inventory', 'confirm', (isProfessionalBusinessPrincipal(principal) ? hasBusinessPermissionSomewhere(principal, { module: 'inventory', action: 'confirm' }) : role === 'admin') ||
+              ((role === 'inventory_admin' || role === 'building_admin') && Boolean(purchaseBuilding)))
             }
-            canDeleteMovements={movementDeletionAccess.canDelete && (!isProfessionalBusinessPrincipal(principal) || hasBusinessPermissionSomewhere(principal, { module: 'inventory', action: 'delete' }))}
+            canDeleteMovements={canUsePageAction(principal, 'inventory', 'delete', movementDeletionAccess.canDelete && (!isProfessionalBusinessPrincipal(principal) || hasBusinessPermissionSomewhere(principal, { module: 'inventory', action: 'delete' })))}
             movementDeletionBuilding={movementDeletionAccess.building}
             outboundConfirmationAccessReady={!accessLoading}
             outboundConfirmationBuilding={

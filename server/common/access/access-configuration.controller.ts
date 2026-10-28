@@ -20,11 +20,32 @@ import { PersonnelSourceService } from './personnel-source.service';
 import type { PersonnelSourceMutation } from '../../../shared/personnel-source.interface';
 import { PersonnelBaselineService } from './personnel-baseline.service';
 import type { PersonnelBaselineMutation } from '../../../shared/personnel-baseline.interface';
+import type { AuthorizationAccountChange, AuthorizationRoleMutation } from '../../../shared/authorization-profile';
+import { withPersonnelDirectoryDeadline } from './personnel-directory-deadline';
+import { createPermissionCatalog } from '../../../shared/permission-catalog';
 
 @Controller('api/access/configuration')
 @AdminOnly()
 export class AccessConfigurationController {
   constructor(private readonly configuration: AccessConfigurationService, private readonly directory: AccessConfigurationDirectory, private readonly access: UnifiedAccessService, private readonly cards: AccessConfigurationCardDirectory, @Optional() private readonly personnelSync?: AccessPersonnelSyncService, @Optional() private readonly personnelPreview?: PersonnelPreviewService, @Optional() private readonly personnelHandover?: PersonnelHandoverAdminService, @Optional() private readonly personnelSource?: PersonnelSourceService, @Optional() private readonly personnelBaseline?:PersonnelBaselineService) {}
+  @Get('permission-catalog')
+  @Header('Cache-Control', 'private, no-store')
+  permissionCatalog(@Req() request: Request) { this.actor(request); return createPermissionCatalog(); }
+  @Get('roles')
+  @Header('Cache-Control', 'private, no-store')
+  roles(@Req() request: Request) { this.actor(request); return this.configuration.authorizationRoles(); }
+  @Post('roles/preview')
+  @Header('Cache-Control', 'private, no-store')
+  previewRole(@Req() request: Request, @Body() body: AuthorizationRoleMutation) { this.actor(request,true); return this.configuration.previewAuthorizationRole(body); }
+  @Post('roles')
+  @Header('Cache-Control', 'private, no-store')
+  saveRole(@Req() request: Request, @Body() body: AuthorizationRoleMutation) { return this.configuration.saveAuthorizationRole(body,this.actor(request,true)); }
+  @Get('permissions/effective')
+  @Header('Cache-Control', 'private, no-store')
+  permissions(@Req() request: Request, @Query('accountId') accountId: string) { this.actor(request); return this.configuration.effectiveAuthorization(accountId); }
+  @Post('permissions/preview')
+  @Header('Cache-Control', 'private, no-store')
+  previewPermissions(@Req() request: Request, @Body() body: AuthorizationAccountChange) { this.actor(request,true); return this.configuration.previewAuthorization(body); }
   @Post('personnel-baseline/preview')
   @Header('Cache-Control', 'private, no-store')
   baselinePreview(@Req() request:Request,@Body() body:Record<string,never>){
@@ -108,7 +129,7 @@ export class AccessConfigurationController {
   @Header('Cache-Control', 'private, no-store')
   async people(@Req() request: Request) {
     this.actor(request);
-    const directory = await this.directory.read();
+    const directory = await withPersonnelDirectoryDeadline<Awaited<ReturnType<AccessConfigurationDirectory['read']>>>(this.directory.read());
     const { externalEmployees: _credentials, ...publicDirectory } = directory;
     const configuration = this.configuration.enrichedSnapshot(directory.people);
     return { ...publicDirectory, accounts: configuration.accounts,

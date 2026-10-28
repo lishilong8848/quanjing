@@ -36,6 +36,8 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import type { ContractManagementItem } from '@shared/contract-management.interface';
+import { useAccess } from '@/access/AccessProvider';
+import { canUseContractAction } from './contract-permissions';
 import {
   DEFAULT_PREVIEW_ZOOM,
   MAX_PREVIEW_ZOOM,
@@ -48,7 +50,7 @@ import {
 type ContractAttachmentViewerContract = Pick<
   ContractManagementItem,
   'code' | 'name' | 'attachments'
->;
+> & Partial<Pick<ContractManagementItem, 'specialty' | 'buildings'>>;
 
 interface ContractAttachmentViewerProps {
   contract: ContractAttachmentViewerContract | null;
@@ -65,6 +67,10 @@ export function ContractAttachmentViewer({
   open,
   onOpenChange,
 }: ContractAttachmentViewerProps) {
+  const access = useAccess();
+  const scope = contract && typeof contract.specialty === 'string' ? { specialty: contract.specialty, buildings: contract.buildings } : null;
+  const canPreview = canUseContractAction(access, 'read', scope);
+  const canDownload = canUseContractAction(access, 'export', scope);
   const [attachmentIndex, setAttachmentIndex] = useState(0);
   const [page, setPage] = useState(1);
   const [manifest, setManifest] = useState<ContractAttachmentManifest | null>(
@@ -100,7 +106,7 @@ export function ContractAttachmentViewer({
     };
   }, [attachment, manifest]);
   const pageCount = effectiveManifest?.pageCount || 0;
-  const previewReady = effectiveManifest?.previewStatus === 'ready';
+  const previewReady = canPreview && effectiveManifest?.previewStatus === 'ready';
   const storageUnavailable =
     effectiveManifest?.unavailableReason === 'storage_not_configured';
   const wheelZoomStateRef = useRef({ open, previewReady });
@@ -199,7 +205,7 @@ export function ContractAttachmentViewer({
   }, [contract, initialAccessId, initialPage, open]);
 
   useEffect(() => {
-    if (!open || !attachment?.accessId) return undefined;
+    if (!open || !attachment?.accessId || !canPreview) return undefined;
     let cancelled = false;
     let timer: number | undefined;
     let failedAttempts = 0;
@@ -234,7 +240,7 @@ export function ContractAttachmentViewer({
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [attachment?.accessId, manifestRetryKey, open]);
+  }, [attachment?.accessId, manifestRetryKey, open, canPreview]);
 
   useEffect(() => {
     if (!previewReady || !attachment || page >= pageCount) return;
@@ -329,9 +335,9 @@ export function ContractAttachmentViewer({
               <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
                 <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
                   <ShieldCheck className="h-4 w-4" />
-                  统一管理员权限
+                  合同附件权限
                 </div>
-                {attachment && !storageUnavailable && (
+                {attachment && !storageUnavailable && canDownload && (
                   <a
                     href={getContractAttachmentDownloadUrl(attachment.accessId)}
                     className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
@@ -367,6 +373,8 @@ export function ContractAttachmentViewer({
             >
               {!attachment ? (
                 <PreviewMessage icon={FileText} label="暂无合同附件" />
+              ) : !canPreview ? (
+                <PreviewMessage icon={ShieldCheck} label="当前账号无此合同附件的预览权限" />
               ) : storageUnavailable ? (
                 <PreviewMessage
                   icon={AlertCircle}
@@ -430,7 +438,7 @@ export function ContractAttachmentViewer({
                     className="select-none rounded-sm bg-white object-contain shadow-lg shadow-slate-900/15"
                   />
                 </div>
-              ) : effectiveManifest?.originalAvailable ? (
+              ) : effectiveManifest?.originalAvailable && canDownload ? (
                 <div className="flex h-full w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                   <div className="flex shrink-0 items-center justify-between gap-3 border-b border-blue-100 bg-blue-50 px-4 py-2 text-xs text-blue-800">
                     <span className="font-semibold">

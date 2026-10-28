@@ -34,6 +34,7 @@ import {
   createPurchaseOnlineApprovalSubmissionGate,
 } from './purchase-online-approval.logic';
 import { PurchasePrincipalRequestGate } from './purchase-principal-request-gate';
+import { purchaseUiPrincipal, purchaseUiPrincipalKey } from './purchase-ui-principal';
 
 interface PurchaseOnlineApprovalDialogProps {
   item: PurchaseInventoryRequestItem | null;
@@ -54,12 +55,12 @@ export function PurchaseOnlineApprovalDialog({
   onOptimisticDecision,
   onTaskSettled,
 }: PurchaseOnlineApprovalDialogProps) {
-  const { role, purchaseBuilding, buildings } = useAccess();
+  const access = useAccess();
   const principal = useMemo(
-    () => ({ role, purchaseBuilding, buildings }),
-    [purchaseBuilding, buildings, role],
+    () => purchaseUiPrincipal(access),
+    [access],
   );
-  const principalIdentityKey = `${role}:${purchaseBuilding || ''}:${(buildings || []).join(',')}`;
+  const principalIdentityKey = purchaseUiPrincipalKey(principal);
   const [principalRequestGate] = useState(
     () => new PurchasePrincipalRequestGate(principalIdentityKey),
   );
@@ -84,7 +85,7 @@ export function PurchaseOnlineApprovalDialog({
   if (!item || !canApprove) return null;
 
   async function decide(decision: PurchaseOnlineApprovalDecision) {
-    if (!item.executionRecordId || !submissionGate.tryStart()) return;
+    if (!canApprove || !item.executionRecordId || !submissionGate.tryStart()) return;
     const requestToken = principalRequestGate.capture();
     setSubmitting(true);
     setError('');

@@ -1,3 +1,5 @@
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
@@ -99,6 +101,9 @@ export function ReviewWorkbench({
   onTaskChange,
   onSynced,
 }: ReviewWorkbenchProps) {
+  const access = useAccess();
+  const canApprove = canUsePageAction(access, 'system_reports', 'approve', true);
+  const canRetry = canUsePageAction(access, 'system_reports', 'update', true);
   const [drafts, setDrafts] =
     useState<Record<SystemMonthlyReportModuleKey, ModuleDraft>>(emptyDrafts);
   const [completed, setCompleted] = useState(false);
@@ -140,6 +145,7 @@ export function ReviewWorkbench({
   };
 
   const submit = async () => {
+    if (!canApprove) return;
     if (!room || submitting) return;
     const invalid = MODULES.find(
       ({ key }) =>
@@ -194,6 +200,7 @@ export function ReviewWorkbench({
   };
 
   const retry = async () => {
+    if (!canRetry) return;
     if (!task || submitting) return;
     setSubmitting(true);
     setError('');
@@ -493,13 +500,13 @@ export function ReviewWorkbench({
                   {task?.status === 'success' ? '完成' : '关闭'}
                 </Button>
                 {task && ['error', 'uncertain'].includes(task.status) ? (
-                  <Button onClick={retry} disabled={submitting}>
+                  <Button onClick={retry} disabled={submitting || !canRetry}>
                     {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                     重新提交
                   </Button>
                 ) : !task ||
                   !['accepted', 'syncing', 'success'].includes(task.status) ? (
-                  <Button onClick={submit} disabled={submitting || !completed}>
+                  <Button onClick={submit} disabled={!canApprove || submitting || !completed}>
                     {submitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (

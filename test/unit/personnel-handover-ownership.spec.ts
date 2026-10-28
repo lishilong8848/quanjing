@@ -11,7 +11,11 @@ describe('权限归属按确认清单拆分',()=>{
     expect(handoverPermissionGrantKeys(source())).toEqual(['role','rule:extra-A-electric','rule:keep-H-hvac']);
     const before=source(),bytes=JSON.stringify(before),result=splitHandoverPermissionGrants(before,choices(),['recDutyA']);
     expect(result.retained.role).toBe('professional_engineer');expect(result.retained.personalRules?.map(rule=>rule.id)).toEqual(['keep-H-hvac','limit-delete']);
-    expect(result.transfer.role).toBe('site_member');expect(result.transfer.personalRules?.map(rule=>rule.id)).toEqual(['extra-A-electric','limit-delete']);expect(JSON.stringify(before)).toBe(bytes);
+    expect(result.transfer.role).toBe('site_member');expect(result.transfer.personalRules?.map(rule=>rule.id)).toEqual(['extra-A-electric','limit-delete','handover-base-schedule_assignments','handover-base-non_duty_schedule']);
+    expect(result.transfer.personalRules?.slice(2)).toEqual([
+      {id:'handover-base-schedule_assignments',effect:'deny',module:'schedule_assignments',actions:['read'],buildings:null,specialties:null},
+      {id:'handover-base-non_duty_schedule',effect:'deny',module:'non_duty_schedule',actions:['read'],buildings:null,specialties:null},
+    ]);expect(JSON.stringify(before)).toBe(bytes);
   });
   it('默认岗位权限转交后降为基地员工；仍需该默认权限时必须显式选择双方保留',()=>{
     for(const disposition of ['transfer','shared'] as const){const selected=choices().map(row=>row.key==='role'?{...row,disposition,dutyRecordId:'recDutyA'}:row);const result=splitHandoverPermissionGrants(source(),selected,['recDutyA']);expect(result.transfer.role).toBe('professional_engineer');expect(result.retained.role).toBe(disposition==='shared'?'professional_engineer':'site_member');expect(result.transfer.buildings).toEqual(['B楼']);if(disposition==='transfer'){expect(result.retained.building).toBeNull();expect(result.retained.specialties).toBeUndefined();}}

@@ -3,7 +3,9 @@ import { ActionEditSync, type ActionEditTask } from './action-edit-sync';
 import { weeklyMutation, weeklyJob, retryWeeklyJob } from './weekly-api';
 import { meetingError } from './api';
 const sessions = new Map<string, ActionEditSync>();
-export function useActionEditSync(account: string) {
+const writePermissions = new Map<string, boolean>();
+export function useActionEditSync(account: string, canWrite = true) {
+  writePermissions.set(account, canWrite);
   const sync = useMemo(() => {
     const existing = sessions.get(account);
     if (existing) return existing;
@@ -25,9 +27,9 @@ export function useActionEditSync(account: string) {
     }
     const next = new ActionEditSync(
       {
-        submit: (command) => weeklyMutation('actions', command),
+        submit: (command) => writePermissions.get(account) ? weeklyMutation('actions', command) : Promise.reject(new Error('当前权限不能修改待办，草稿已保留')),
         job: (id) => weeklyJob(id, new AbortController().signal),
-        retry: (id) => retryWeeklyJob(id),
+        retry: (id) => writePermissions.get(account) ? retryWeeklyJob(id) : Promise.reject(new Error('当前权限不能重试写入，原任务可继续查询')),
         error: meetingError,
         wait: () => new Promise((resolve) => setTimeout(resolve, 1000)),
       },

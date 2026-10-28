@@ -90,11 +90,12 @@ describe('实际配置交接事务',()=>{
     expect(accountPermissionTemplate(service.snapshot().accounts.find(account=>account.id===target.id)!)).toEqual({...batch.preview.permissions[0].after,sourceVersion:target.version+1});
     const bytes=readFileSync(file,'utf8');await authority().applyPermissions(batch,handoverItemMutationId(batch.id,'permissions'));expect(readFileSync(file,'utf8')).toBe(bytes);expect((await authority().restoreContext(batch.preview,batch)).from.active).toBe(true);
   });
-  it('仅继承权限，保留接任身份；前任继续实名游客，审计不含凭证',async()=>{
+  it('仅继承权限，保留接任身份；离职前任禁止登录，审计不含凭证',async()=>{
     const before=store.read();await apply(service,batch);const after=store.read();
     expect(after.accounts[target.id]).toMatchObject({...target,role:'building_admin',building:'C楼',buildings:['C楼'],version:2,permissionSource:'manual'});
     expect(after.accounts[source.id]).toEqual(before.accounts[source.id]);expect(after.personnelEmployment).toEqual(before.personnelEmployment);
-    expect(service.snapshot().accounts.find(a=>a.id===source.id)).toMatchObject({permissionsRevoked:true,guestLoginAllowed:true});
+    expect(service.snapshot().accounts.find(a=>a.id===source.id)).toMatchObject({permissionsRevoked:true,guestLoginAllowed:false});
+    expect(service.feishuPrincipal(from.openId!,appId)).toBeNull();
     expect(after.audit).toHaveLength(1);expect(JSON.stringify(after.audit)).not.toMatch(/passwordHash|appToken/);
   });
   it('轮岗前任的姓名登录没有同类接任账号时，仍与飞书同步保留其他任职权限',async()=>{
@@ -146,7 +147,8 @@ describe('实际配置交接事务',()=>{
   it('先前授权后人员撤权，原事务恢复也不会再次授予业务权限',async()=>{
     await apply(service,batch);await store.mutate(store.read().revision,'fixture-revoke-target','revoke',state=>{state.personnelEmployment!.inactive[target.id]=true;state.personnelEmployment!.inactive[to.id]=true;state.accounts[target.id].enabled=false;state.accounts[target.id].personnelSuspended=true;state.accounts[target.id].version++;});
     const before=readFileSync(file,'utf8');await apply(new AccessConfigurationService(),batch);expect(readFileSync(file,'utf8')).toBe(before);
-    expect(service.snapshot().accounts.find(a=>a.id===target.id)).toMatchObject({enabled:false,permissionsRevoked:true,guestLoginAllowed:true});
+    expect(service.snapshot().accounts.find(a=>a.id===target.id)).toMatchObject({enabled:false,permissionsRevoked:true,guestLoginAllowed:false});
+    expect(service.feishuPrincipal(to.openId!,appId)).toBeNull();
   });
   it('未执行前账号版本变化拒绝，不把旧预览写到新版本上',async()=>{
     await store.mutate(store.read().revision,'fixture-change-account','change',state=>{state.accounts[target.id].version++;});

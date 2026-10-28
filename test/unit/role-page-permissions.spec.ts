@@ -147,7 +147,9 @@ describe('persistent page rule administration', () => {
   it('existing signed session sees new page rules without changing identity or business role', async () => {
     const session = access.issueTrustedSession(actor);
     await config.savePageRole(command(), actor);
-    expect(access.readSession(session.token).principal).toEqual(session.principal);
+    const renewed=access.readSession(session.token).principal;
+    expect(renewed).toMatchObject(session.principal);
+    expect(renewed?.effectiveAuthorization?.baseline.nativeRole).toBe('admin');
     expect(access.pagePermissions('guest').paths).toEqual(['/meeting-management']);
     await config.savePageRole({ ...command(), pages: [], expectedRevision: 1, clientMutationId:'page-role-fixture-002' }, actor);
     expect(access.pagePermissions('guest').paths).toEqual([]);

@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import { canAccessPage } from '@/access/access-policy';
 import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
+import { businessBuildingsForAction } from '@shared/business-permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -168,7 +170,7 @@ export default function OperationsToolsManagementPage() {
   const externalOpened = useRef(false),
     lastRefresh = useRef(0),
     refreshInFlight = useRef(false);
-  const scope = accessBuildings(access);
+  const scope = access.effectiveAuthorization ? businessBuildingsForAction(access, { module: 'tools', action: 'read' }) : accessBuildings(access);
   const locked = Boolean(scope && scope.length === 1);
   const effectiveBuilding = locked ? (access.purchaseBuilding ?? '') : building;
   const model = useMemo(
@@ -204,7 +206,7 @@ export default function OperationsToolsManagementPage() {
       await queryClient.cancelQueries({ queryKey, exact: true });
       await queryClient.fetchQuery({
         queryKey,
-        queryFn: ({ signal }) => getToolsSnapshot(access.capabilities.canForceRefresh, signal),
+        queryFn: ({ signal }) => getToolsSnapshot(canUsePageAction(access, 'tools', 'refresh', access.capabilities.canForceRefresh), signal),
         staleTime: 0,
       });
     } catch {
@@ -213,7 +215,7 @@ export default function OperationsToolsManagementPage() {
       refreshInFlight.current = false;
       setManualRefresh(false);
     }
-  }, [access.capabilities.canForceRefresh, queryClient, queryKey]);
+  }, [access, queryClient, queryKey]);
   useEffect(() => {
     setSelection(null);
     setBuilding('');

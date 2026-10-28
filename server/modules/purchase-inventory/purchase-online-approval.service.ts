@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -16,6 +17,9 @@ import type {
 } from '../../../shared/purchase-inventory.interface';
 import type { PurchaseWorkflowMethod } from '../../../shared/purchase-workflow.interface';
 import { PurchaseWorkflowGateway } from './purchase-workflow.gateway';
+import type { AccessPrincipal } from '../../../shared/access-control.interface';
+import { businessAuthorizationIdentityKey } from '../../../shared/business-permissions';
+import { PurchaseWorkflowService, type PurchaseWebApprovalAuthority, type PurchaseWorkflowSession } from './purchase-workflow.service';
 
 const RECORD_ID_PATTERN = /^rec[A-Za-z0-9_-]+$/;
 const PURCHASE_METHOD_FIELD = '1️⃣物品采购方式';
@@ -35,13 +39,40 @@ export class PurchaseOnlineApprovalService {
   private readonly recordDecisionTails = new Map<string, Promise<void>>();
   private readonly decisionTasks = new Map<string, PurchaseOnlineApprovalTask>();
   private readonly taskBuildingScopes = new Map<string, string>();
+  private readonly taskAuthorities = new Map<string, PurchaseWebApprovalAuthority>();
 
-  constructor(private readonly gateway: PurchaseWorkflowGateway) {}
+  constructor(private readonly gateway: PurchaseWorkflowGateway, @Optional() private readonly workflow?: PurchaseWorkflowService) {}
+
+  async acceptAuthorizedDecision(recordIdValue: string, input: PurchaseOnlineApprovalRequest, session: PurchaseWorkflowSession): Promise<PurchaseOnlineApprovalAcceptedResponse> {
+    const recordId = normalizeRecordId(recordIdValue), decision = normalizeDecision(input?.decision);
+    if (!this.workflow || !session.permissionPrincipal?.accountId) throw new ForbiddenException('采购审批登录身份不可用');
+    const prior = [...this.decisionTasks.values()].reverse().find(task => task.recordId === recordId && ['pending', 'running', 'completed'].includes(task.status));
+    if (prior) {
+      this.assertTaskOwner(prior.id, session.permissionPrincipal, session.openId);
+      if (prior.decision !== decision) throw new ConflictException('该采购申请已有相反审批决定');
+      return accepted(prior);
+    }
+    const authority = await this.workflow.prepareWebApprovalAuthority(recordId, session);
+    return this.acceptDecision(recordId, input, authority.scope.building, authority);
+  }
+
+  getAuthorizedDecisionTaskStatus(taskId: string, principal: AccessPrincipal): PurchaseOnlineApprovalTaskStatusResponse {
+    const normalized = clean(taskId);
+    this.assertTaskOwner(normalized, principal);
+    return this.getDecisionTaskStatus(normalized);
+  }
+
+  private assertTaskOwner(taskId: string, principal: AccessPrincipal, actorOpenId?: string): void {
+    const authority = this.taskAuthorities.get(taskId);
+    if (!authority || !principal.accountId || businessAuthorizationIdentityKey(authority.principal) !== businessAuthorizationIdentityKey(principal) ||
+      actorOpenId !== undefined && actorOpenId !== authority.actorOpenId) throw new ForbiddenException('审批后台任务不存在或无权访问');
+  }
 
   acceptDecision(
     recordIdValue: string,
     input: PurchaseOnlineApprovalRequest,
     requiredBuilding?: string,
+    authority?: PurchaseWebApprovalAuthority,
   ): PurchaseOnlineApprovalAcceptedResponse {
     const recordId = normalizeRecordId(recordIdValue);
     const decision = normalizeDecision(input?.decision);
@@ -51,6 +82,7 @@ export class PurchaseOnlineApprovalService {
         (task.status === 'pending' || task.status === 'running'),
     );
     if (activeTask) {
+      if (authority) this.assertTaskOwner(activeTask.id, authority.principal, authority.actorOpenId);
       if (activeTask.decision !== decision) {
         throw new ConflictException('该采购申请已有相反审批决定正在同步');
       }
@@ -66,6 +98,7 @@ export class PurchaseOnlineApprovalService {
       createdAt: new Date().toISOString(),
     };
     this.decisionTasks.set(task.id, task);
+    if (authority) this.taskAuthorities.set(task.id, structuredClone(authority));
     if (requiredBuilding) this.taskBuildingScopes.set(task.id, requiredBuilding);
     this.pruneDecisionTasks();
     setImmediate(() => void this.executeDecisionTask(task.id));
@@ -89,12 +122,13 @@ export class PurchaseOnlineApprovalService {
     recordIdValue: string,
     input: PurchaseOnlineApprovalRequest,
     requiredBuilding?: string,
+    authority?: PurchaseWebApprovalAuthority,
   ): Promise<PurchaseOnlineApprovalResponse> {
     const startedAt = Date.now();
     const recordId = normalizeRecordId(recordIdValue);
     const decision = normalizeDecision(input?.decision);
     return this.runSerialized(recordId, () =>
-      this.decideCurrentRecord(recordId, decision, startedAt, requiredBuilding),
+      this.decideCurrentRecord(recordId, decision, startedAt, requiredBuilding, authority),
     );
   }
 
@@ -103,6 +137,7 @@ export class PurchaseOnlineApprovalService {
     decision: PurchaseOnlineApprovalDecision,
     startedAt: number,
     requiredBuilding?: string,
+    authority?: PurchaseWebApprovalAuthority,
   ): Promise<PurchaseOnlineApprovalResponse> {
     const record = await this.gateway.getExecutionRecordAsApp(recordId);
     if (requiredBuilding && record.building !== requiredBuilding) {
@@ -134,6 +169,13 @@ export class PurchaseOnlineApprovalService {
       [WORKFLOW_STATUS_FIELD]:
         decision === 'rejected' ? '驳回申请' : '审批通过（待下单）',
     };
+    // Recheck after acquiring the record queue and reading the current record,
+    // immediately before the first write. A completed matching result above is
+    // a read-only reconciliation of this already accepted command.
+    if (authority) {
+      if (!this.workflow) throw new ForbiddenException('采购审批当前授权端口未配置');
+      this.workflow.assertWebApprovalAuthority(authority, record);
+    }
     await this.gateway.updateExecutionRecordAsApp(recordId, fields);
 
     return result(recordId, decision, false, startedAt);
@@ -175,7 +217,7 @@ export class PurchaseOnlineApprovalService {
       try {
         task.result = await this.decide(task.recordId, {
           decision: task.decision,
-        }, this.taskBuildingScopes.get(task.id));
+        }, this.taskBuildingScopes.get(task.id), this.taskAuthorities.get(task.id));
         task.status = 'completed';
         task.message = `采购申请${task.result.resultLabel}`;
         task.completedAt = new Date().toISOString();
@@ -203,6 +245,7 @@ export class PurchaseOnlineApprovalService {
       if (task.status === 'pending' || task.status === 'running') continue;
       this.decisionTasks.delete(taskId);
       this.taskBuildingScopes.delete(taskId);
+      this.taskAuthorities.delete(taskId);
       if (this.decisionTasks.size <= MAX_RETAINED_TASKS) return;
     }
   }
@@ -226,7 +269,7 @@ function cloneTask(task: PurchaseOnlineApprovalTask): PurchaseOnlineApprovalTask
 }
 
 function isRetryable(error: unknown): boolean {
-  return !(error instanceof BadRequestException || error instanceof ConflictException);
+  return !(error instanceof BadRequestException || error instanceof ConflictException || error instanceof ForbiddenException);
 }
 
 function approvalErrorMessage(error: unknown): string {

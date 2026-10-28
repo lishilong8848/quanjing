@@ -304,6 +304,8 @@ describe('UnifiedAccessGuard', () => {
       expect(request.accessPrincipal).toEqual({
         role,
         purchaseBuilding: null,
+        permissionContext: { module: 'change_requests', action: 'create' },
+        ...(role === 'professional_admin' ? { permissionRequirements: [{ module: 'change_requests', action: 'create' }] } : {}),
       });
     },
   );
@@ -1642,7 +1644,9 @@ describe('UnifiedAccessGuard', () => {
       });
 
       expect(guard.canActivate(context)).toBe(true);
-      expect(request.accessPrincipal).toEqual(principal);
+      expect(request.accessPrincipal).toMatchObject(principal);
+      expect(request.accessPrincipal?.permissionContext?.module).toBe('purchase');
+      expect(principal.permissionContext).toBeUndefined();
       expect(request.accessRole).toBe('purchase_applicant');
     },
   );

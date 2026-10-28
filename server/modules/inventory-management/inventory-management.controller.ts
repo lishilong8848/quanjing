@@ -59,6 +59,7 @@ import {
   scopePendingPurchaseInbounds,
   scopeStorageLocationQuery,
 } from './inventory-access-policy';
+import { assertGlobalBusinessOperation } from '../../common/access/global-business-operation';
 
 const PURCHASE_INBOUND_WORKFLOW_CODES = new Set([
   'purchase_h',
@@ -394,6 +395,7 @@ export class InventoryManagementController {
   }
 
   @Post('storage-locations')
+  @ProfessionalScoped()
   createStorageLocation(
     @Req() request: AccessRequest,
     @Body() body: WarehouseStorageLocationCreateRequest,
@@ -521,13 +523,15 @@ export class InventoryManagementController {
   }
 
   @Post('workflows/:code/run')
-  runWorkflow(@Param('code') code: string) {
+  @ProfessionalScoped()
+  runWorkflow(@Param('code') code: string, @Req() request: AccessRequest) {
     if (!isInventoryWorkflowCode(code)) {
       throw new BadRequestException('未知库存工作流代码');
     }
     if (PURCHASE_INBOUND_WORKFLOW_CODES.has(code)) {
       throw new BadRequestException('采购入库已改为库房人工确认');
     }
+    assertGlobalBusinessOperation(requirePrincipal(request), { module: 'inventory', action: 'notify' });
     return this.workflowService.run(code, { trigger: 'manual' });
   }
 }

@@ -459,7 +459,7 @@ describe('leave workflow cards', () => {
     expect(serialized).not.toContain('callback');
   });
 
-  it('creates a separate versioned substitute adjustment card after approval', () => {
+  it('initially shows the current substitute and a versioned editing entry after approval', () => {
     const serialized = JSON.stringify(
       buildLeaveSubstituteAdjustmentCard(
         {
@@ -483,10 +483,28 @@ describe('leave workflow cards', () => {
     expect(serialized).toContain('替班调整');
     expect(serialized).toContain('当前替班');
     expect(serialized).toContain('李四');
+    expect(serialized).toContain('调整人员');
+    expect(serialized).toContain('人员无误，无需点击调整');
+    expect(serialized).toContain('return_to_substitute_adjustment');
+    expect(serialized).toContain('"expectedRevision":2');
+    expect(serialized).not.toContain('rec_substitute_new');
+    expect(serialized).not.toContain('select_static');
+    expect(serialized).not.toContain('form_action_type');
+    expect(serialized).not.toContain('提交替班调整');
+  });
+
+  it('shows the legacy single-person editor and reset only after opening editing', () => {
+    const serialized = JSON.stringify(buildLeaveSubstituteAdjustmentCard({
+      ...context,
+      substituteName: '李四',
+      substituteCandidates: [{ personRecordId: 'rec_substitute_new', name: '王五', openId: '', position: '备岗', buildings: ['E楼'] }],
+    }, 2, true));
+    expect(serialized).toContain('select_static');
     expect(serialized).toContain('rec_substitute_new');
-    expect(serialized).toContain(
-      'leave_substitute_update_submit:rec_leave_1:2',
-    );
+    expect(serialized).toContain('leave_substitute_update_submit:rec_leave_1:2');
+    expect(serialized).toContain('提交替班调整');
+    expect(serialized).toContain('重新选择');
+    expect(serialized).not.toContain('"content":"调整人员"');
   });
 
   it('terminalizes a substitute adjustment card without any callback', () => {

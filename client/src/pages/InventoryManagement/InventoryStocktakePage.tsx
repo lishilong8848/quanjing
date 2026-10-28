@@ -60,6 +60,8 @@ import './inventory-stocktake.css';
 import { StocktakeMonthPicker } from './StocktakeMonthPicker';
 import { StocktakeBulkDialog } from './StocktakeBulkDialog';
 import { StocktakeUndoDialog } from './StocktakeUndoDialog';
+import { useAccess } from '@/access/AccessProvider';
+import { canUseStocktakeAction, canUseStocktakeLines, canUndoStocktakeBatch } from './stocktake-action-access';
 
 const PAGE_SIZE = 50;
 const currentMonth = stocktakeCurrentMonth;
@@ -84,6 +86,8 @@ export default function InventoryStocktakePage({
   initialFilter: StocktakeFilter | null;
   drafts: Map<string, StocktakeLocalDraft>;
 }) {
+  const principal = useAccess();
+  const canCreate = canUseStocktakeAction(principal, 'create');
   const [building, setBuilding] = useState<WarehouseBuilding>(
     initialBuilding && allowedBuildings.includes(initialBuilding)
       ? initialBuilding
@@ -91,6 +95,9 @@ export default function InventoryStocktakePage({
   );
   const [overview, setOverview] = useState<StocktakeOverview | null>(null);
   const [sheet, setSheet] = useState<StocktakeSheet | null>(null);
+  const canConfirm = canUseStocktakeLines(principal, 'confirm', sheet?.lines || []);
+  const canUpdate = canUseStocktakeLines(principal, 'update', sheet?.lines || []);
+  const canDelete = canUndoStocktakeBatch(principal, sheet);
   const [phase, setPhase] = useState<
     'loading' | 'ready' | 'submitting' | 'error'
   >('loading');
@@ -178,7 +185,7 @@ export default function InventoryStocktakePage({
     };
   }, [month, building, scope, sheet?.version, syncEpoch]);
   async function retrySync() {
-    if (syncRetryLock.current) return;
+    if (!canUpdate || syncRetryLock.current) return;
     syncRetryLock.current = true;
     const selectedKey = cacheKey;
     if (syncRetryId.current?.key !== selectedKey)
@@ -429,7 +436,7 @@ export default function InventoryStocktakePage({
     return value;
   };
   async function start() {
-    if (actionLock.current || !editable) return;
+    if (!canCreate || actionLock.current || !editable) return;
     actionLock.current = true;
     setGenerationRequest('submitting');
     setGenerationError('');
@@ -452,7 +459,7 @@ export default function InventoryStocktakePage({
     }
   }
   async function finish() {
-    if (!sheet || actionLock.current || busy.size) return;
+    if (!canConfirm || !sheet || actionLock.current || busy.size) return;
     if (confirmed !== sheet.lines.length) {
       setFilter('pending');
       setPage(1);
@@ -591,7 +598,7 @@ export default function InventoryStocktakePage({
                   <RefreshCw className="h-4 w-4" />
                   刷新
                 </Button>
-                {editable && (
+                {editable && canCreate && (
                   <Button
                     size="sm"
                     disabled={
@@ -764,7 +771,7 @@ export default function InventoryStocktakePage({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={syncRetrying}
+                        disabled={syncRetrying || !canUpdate}
                         onClick={() => void retrySync()}
                       >
                         {syncRetrying ? '提交中…' : '重试同步'}
@@ -822,6 +829,7 @@ export default function InventoryStocktakePage({
                       ))}
                     </div>
                     {scope === 'review' &&
+                      canConfirm &&
                       editable &&
                       sheet.status === 'open' && (
                         <Button
@@ -839,6 +847,7 @@ export default function InventoryStocktakePage({
                         </Button>
                       )}
                     {scope === 'review' &&
+                      canDelete &&
                       editable &&
                       sheet.latestBulk?.status === 'confirmed' && (
                         <Button
@@ -950,6 +959,7 @@ export default function InventoryStocktakePage({
                     </Button>
                     <Button
                       disabled={
+                        !canConfirm ||
                         !editable ||
                         navigationDisabled ||
                         sheet.status === 'completed'

@@ -1,4 +1,5 @@
-import type { AccessRole } from './access-control.interface';
+import type { AccessRole, AccessPrincipal } from './access-control.interface';
+import { hasBusinessPermissionSomewhere } from './business-permissions';
 import type { AliMonthlyQualityEvidence } from './risk-inspection.interface';
 
 export const ORGANIZATION_PERSON_PROFILE_ROLES = [
@@ -6,9 +7,10 @@ export const ORGANIZATION_PERSON_PROFILE_ROLES = [
   'editor',
 ] as const satisfies readonly AccessRole[];
 
-export function canViewOrganizationPersonProfile(role: AccessRole): boolean {
+export function canViewOrganizationPersonProfile(principal: AccessRole | AccessPrincipal): boolean {
+  if(typeof principal!=='string' && principal.effectiveAuthorization) return hasBusinessPermissionSomewhere(principal,{module:'organization_profile',action:'read'});
   return (ORGANIZATION_PERSON_PROFILE_ROLES as readonly AccessRole[]).includes(
-    role,
+    typeof principal==='string'?principal:principal.role,
   );
 }
 

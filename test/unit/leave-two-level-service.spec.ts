@@ -429,7 +429,7 @@ describe('two-level leave service flow', () => {
     expect(summary).toContain(primary.name); expect(summary).toContain('原岗补位'); expect(summary).toContain(backup.name); expect(summary).toContain('C楼');
   });
   it('reviews an adjustment before changing the original-post backup and keeps final submission a business action', () => {
-    const card = buildLeaveSubstituteAdjustmentCard({ ...data().cardContext, shiftAssignments: data().assignments, assignmentRevision: 0 }, 0);
+    const card = buildLeaveSubstituteAdjustmentCard({ ...data().cardContext, shiftAssignments: data().assignments, assignmentRevision: 0 }, 0, true);
     expect(JSON.stringify(card)).toContain('leave_substitute_review_update_submit:');
     const payload = { event_type: 'card.action.trigger', operator: { open_id: 'ou_supervisor' }, context: { open_message_id: 'om_test_two_level' }, action: { tag: 'button', name: `leave_substitute_review_update_submit:${data().application.recordId}:0:g1:r0`, form_value: { [`leave_shift_substitute_${Buffer.from(data().selection.shiftKey).toString('base64url')}`]: primary.personRecordId } } };
     expect(parseLeaveLongConnectionCardAction(payload)).toMatchObject({ kind: 'adjustment_view', expectedRevision: 0, shiftSelections: [{ shiftKey: data().selection.shiftKey, substitutePersonRecordId: primary.personRecordId }] });

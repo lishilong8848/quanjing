@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, ForbiddenException } from '@nestjs/common';
+import type { Request } from 'express';
+import type { AccessPrincipal } from '@shared/access-control.interface';
 import { GuestReadable } from '@server/common/access/unified-access.decorators';
 import type {
   EmergencyDutyOptionsResponse,
@@ -29,7 +31,9 @@ export class EmergencyDutyController {
   @Post()
   upsertSchedule(
     @Body() request: EmergencyDutyUpsertRequest,
+    @Req() httpRequest:Request & {accessPrincipal?:AccessPrincipal},
   ): Promise<EmergencyDutyUpsertResponse> {
-    return this.emergencyDutyService.upsertSchedule(request);
+    if (!httpRequest?.accessPrincipal) throw new ForbiddenException('请先确认登录身份');
+    return this.emergencyDutyService.upsertSchedule(request,httpRequest.accessPrincipal);
   }
 }

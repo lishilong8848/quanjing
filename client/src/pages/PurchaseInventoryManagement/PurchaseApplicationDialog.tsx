@@ -24,6 +24,9 @@ import {
 import { toast } from 'sonner';
 
 import { useAccess } from '@/access/AccessProvider';
+import { purchaseUiPrincipal, purchaseUiPrincipalKey } from './purchase-ui-principal';
+import { businessBuildingsForAction, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
+import { canManageProfessionalRecord } from '@shared/professional-access';
 import { hasAuthenticatedAccessIdentity } from '@/access/access-policy';
 import { resolveSelfServiceApplicant } from '@shared/self-service-applicant';
 import {
@@ -121,15 +124,16 @@ export function PurchaseApplicationDialog({
   onSubmissionSettled,
 }: PurchaseApplicationDialogProps) {
   const access = useAccess();
-  const { role, purchaseBuilding, buildings, principalFingerprint, accountId, displayName } = access;
+  const { role, principalFingerprint, accountId, displayName } = access;
   const authenticated = hasAuthenticatedAccessIdentity(access);
   const applicantIdentity = useMemo(() => resolveSelfServiceApplicant(access, authenticated, '提交采购申请'),
     [role, accountId, displayName, authenticated, principalFingerprint]);
   const principal = useMemo(
-    () => ({ role, purchaseBuilding, buildings, principalFingerprint, accountId, displayName }),
-    [principalFingerprint, purchaseBuilding, buildings, role, accountId, displayName],
+    () => purchaseUiPrincipal(access),
+    [access],
   );
-  const scope = accessBuildings(principal);
+  const scope = isProfessionalBusinessPrincipal({...principal,permissionContext:{module:'purchase',action:'create'}})
+    ? businessBuildingsForAction(principal,{module:'purchase',action:'create'}) : accessBuildings(principal);
   const fixedBuilding = scope?.length === 1 ? scope[0] : null;
   const [draft, setDraft] = useState<PurchaseApplicationBatchRequest>(() =>
     createBlankDraft(),
@@ -186,7 +190,7 @@ export function PurchaseApplicationDialog({
   onSubmissionStartedRef.current = onSubmissionStarted;
   onSubmissionSettledRef.current = onSubmissionSettled;
   recoveryJournalRef.current = recoveryJournal;
-  const principalIdentityKey = `${role}:${purchaseBuilding || ''}:${(buildings || []).join(',')}:${principalFingerprint || ''}:${accountId || ''}:${displayName || ''}`;
+  const principalIdentityKey = `${purchaseUiPrincipalKey(principal)}:${displayName || ''}`;
   const [principalRequestGate] = useState(
     () => new PurchasePrincipalRequestGate(principalIdentityKey),
   );
@@ -950,6 +954,10 @@ export function PurchaseApplicationDialog({
       );
       focusFirstInvalidPurchaseField();
       toast.warning('请先补全标红的申请信息');
+      return;
+    }
+    if(!canManageProfessionalRecord(principal,submissionDraft.shared.specialty,submissionDraft.shared.building,{module:'purchase',action:'create'})) {
+      toast.error('当前账号未获所选楼栋和专业的采购新增权限');
       return;
     }
 

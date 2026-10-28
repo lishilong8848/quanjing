@@ -13,7 +13,7 @@ import { buildPersonnelDutyRoutingChanges, personnelDutyAssignmentFingerprint } 
 import { feishuIdentityFingerprint } from './feishu-access-approved-grants';
 import { createHash } from 'node:crypto';
 import { effectivePagePaths } from '../../../shared/page-access';
-import { handoverPermissionGrantKeys, normalizeHandoverPermissionOwnership, splitHandoverPermissionGrants } from './personnel-handover.ownership';
+import { handoverPermissionGrantKeys, handoverPermissionGrantMetadata, normalizeHandoverPermissionOwnership, splitHandoverPermissionGrants } from './personnel-handover.ownership';
 import { isAuthorityDutyKey } from '../../../shared/personnel-authority.interface';
 
 function dutyFingerprint(duty:AuthorityDuty):string {
@@ -68,7 +68,8 @@ export function buildHandoverAuthoritySnapshot(directory:ConfigurationDirectoryS
   }));
   const permissionOwnership=sourceTemplates.map(source=>{
     const grantKeys=handoverPermissionGrantKeys(source.template,effectivePagePaths(source.template.role,state.rolePageRules),effectivePagePaths('site_member',state.rolePageRules));
-    return {sourceAccountId:source.account.id,kind:source.account.kind,source:source.template,required:request.mode==='rotation'||ownership!==undefined||grantKeys.length>1,grantKeys};
+    const grantMetadata=handoverPermissionGrantMetadata(source.template);
+    return {sourceAccountId:source.account.id,kind:source.account.kind,source:source.template,required:request.mode==='rotation'||ownership!==undefined||grantKeys.length>1,grantKeys,...(Object.keys(grantMetadata).length?{grantMetadata}:{})};
   });
   const unresolved=permissionOwnership.some(source=>source.required&&!splits.has(source.sourceAccountId));
   if(splits.size===sourceTemplates.length && [...splits.values()].some(split=>semantic(split.retained)!==semantic([...splits.values()][0].retained)||semantic(split.transfer)!==semantic([...splits.values()][0].transfer)))throw new ConflictException('前任不同登录方式的权限归属不一致，请统一选择');

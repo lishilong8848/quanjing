@@ -1,4 +1,4 @@
-import { businessPermissionScopeKey, canPerformBusinessAction, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { businessAuthorizationSnapshot, businessPermissionScopeKey, canPerformBusinessAction, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import { canAccessBuilding } from '../../../shared/building-access';
 import { assertProfessionalRecordScope } from '../../common/access/professional-record-scope';
 import { AccessConfigurationService } from '../../common/access/access-configuration.service';
@@ -15,7 +15,7 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import type { AccessRole } from '../../../shared/access-control.interface';
+import type { AccessPrincipal, AccessRole } from '../../../shared/access-control.interface';
 import type {
   InventoryMovementCreateResponse,
   InventoryMovementItem,
@@ -36,7 +36,7 @@ import type {
   PurchaseWorkflowSelfTestResponse,
 } from '../../../shared/purchase-workflow.interface';
 import { readEnv } from '../../common/config/external-services.config';
-import { useConfiguredCardAuthorizationSnapshots } from '../../common/access/access-configuration.service';
+import { readConfiguredCardMembers, useConfiguredCardAuthorizationSnapshots } from '../../common/access/access-configuration.service';
 import {
   buildInventoryInboundCompletedCard,
   buildManualInventoryInboundCompletedCard,
@@ -57,6 +57,7 @@ import {
   resolveAllowedActions,
   resolvePurchaseStage,
   type PurchaseWorkflowFieldPatch,
+  type PurchaseWorkflowDutyActor,
 } from './purchase-workflow.rules';
 import { mergeReceiptAttachmentTokens } from './purchase-receipt-material-policy';
 import {
@@ -71,7 +72,7 @@ import {
   type PurchaseWorkflowCardActionClaimInput,
 } from './purchase-workflow.store';
 import { parsePurchaseBatchFulfillmentCommandContext } from './purchase-batch-fulfillment-card';
-import { purchaseAuthorityTarget } from './purchase-authority-target';
+import { purchaseAuthorityTarget, type PurchaseAuthorityTarget } from './purchase-authority-target';
 import { isPurchaseManagerApprovalEnabled, readPurchaseManagerApprovers } from './purchase-manager-approval.config';
 import { InventoryBatchCardService } from '../inventory-outbound-approval/inventory-batch-card.service';
 import { inventoryNotificationBatchId } from '../inventory-outbound-approval/inventory-batch-notification-id';
@@ -88,6 +89,14 @@ export interface PurchaseWorkflowSession {
   purchaseBuildings?: import('../../../shared/access-control.interface').BuildingAdminBuilding[];
   specialties?: ProfessionalSpecialty[];
   authenticationMode?: 'delegated-app';
+}
+
+export interface PurchaseWebApprovalAuthority {
+  recordId: string;
+  scope: PurchaseAuthorityTarget;
+  principal: AccessPrincipal;
+  actorOpenId: string;
+  approvalDutyKind?: 'purchase_manager' | 'purchase_approver';
 }
 
 const DISABLED_REASON = '程序工作流尚未接管，原飞书工作流仍在运行';
@@ -216,10 +225,8 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     recordId: string,
     session: PurchaseWorkflowSession,
   ): Promise<PurchaseWorkflowDetail> {
-    const [record, actor] = await Promise.all([
-      this.gateway.getExecutionRecord(recordId, session.accessToken),
-      session.openId ? this.resolveActor(session) : Promise.resolve(null),
-    ]);
+    const record = await this.gateway.getExecutionRecord(recordId, session.accessToken);
+    const actor = session.openId ? await this.resolveActor(session, record) : null;
     assertBuildingAdministratorWorkflowScope(record, session);
     const enabled = this.isEnabled();
     const adminOverride = session.accessRole === 'admin';
@@ -298,6 +305,27 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     );
   }
 
+  async prepareWebApprovalAuthority(recordId: string, session: PurchaseWorkflowSession): Promise<PurchaseWebApprovalAuthority> {
+    if (!this.accessConfiguration) throw new ServiceUnavailableException('采购审批当前授权端口未配置');
+    if (!session.permissionPrincipal?.accountId) throw new ForbiddenException('需要有效的采购审批登录身份');
+    const record = await this.gateway.getExecutionRecord(recordId, session.accessToken);
+    const scope = purchaseAuthorityTarget(record);
+    if (record.recordId !== recordId || !scope) throw new ConflictException('采购审批记录或授权范围不明确');
+    const actor = await this.resolveActor(session, record);
+    this.assertCurrentCommandAuthority('approve', record, session, actor);
+    if (!resolveAllowedActions(record, actor).includes('approve')) throw new ForbiddenException('当前人员或阶段无权审批该采购申请');
+    return { recordId, scope, principal: businessAuthorizationSnapshot(session.permissionPrincipal), actorOpenId: session.openId,
+      ...(actor.approvalDutyKind ? { approvalDutyKind: actor.approvalDutyKind } : {}) };
+  }
+
+  assertWebApprovalAuthority(authority: PurchaseWebApprovalAuthority, record: PurchaseWorkflowRecord): void {
+    const scope = purchaseAuthorityTarget(record);
+    if (record.recordId !== authority.recordId || !scope || scope.building !== authority.scope.building || scope.specialty !== authority.scope.specialty) throw new ConflictException('采购审批记录范围已变化，请重新核对');
+    const session: PurchaseWorkflowSession = { accessToken: '', openId: authority.actorOpenId, userName: '', accessRole: authority.principal.role, permissionPrincipal: authority.principal };
+    this.assertCurrentCommandAuthority('approve', record, session, { openId: authority.actorOpenId, name: '', positions: [], buildings: [], approvalDutyKind: authority.approvalDutyKind });
+    if (resolvePurchaseStage(record.status) !== 'application') throw new ConflictException('采购申请已处于其他流程阶段');
+  }
+
   async start(
     recordId: string,
     session: PurchaseWorkflowSession,
@@ -359,7 +387,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     const appId = process.env.FEISHU_APP_ID?.trim() || '';
     if (!/^cli_[A-Za-z0-9_-]+$/.test(appId)) throw new ServiceUnavailableException('采购应用身份尚未配置');
     const record = await this.gateway.getExecutionRecord(recordId, session.accessToken);
-    const actor = await this.resolveActor(session), scope = purchaseAuthorityTarget(record);
+    const actor = await this.resolveActor(session, record), scope = purchaseAuthorityTarget(record);
     if (record.recordId !== recordId || !scope) throw new ConflictException('采购记录范围尚未明确');
     assertBuildingAdministratorWorkflowScope(record, session);
     if (this.accessConfiguration) this.assertCurrentCommandAuthority('receive', record, session);
@@ -1940,7 +1968,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     );
     if(session.acceptedFulfillment){const current=purchaseAuthorityTarget(record);if(session.acceptedFulfillment.building!==(current?.building||record.building)||session.acceptedFulfillment.specialty&&session.acceptedFulfillment.specialty!==current?.specialty)throw new ConflictException('原受理采购范围已变化，请核对原命令');}
     assertBuildingAdministratorWorkflowScope(record, session);
-    const actor = await this.resolveActor(session);
+    const actor = await this.resolveActor(session, record);
     let prepared: Awaited<ReturnType<typeof prepare>>;
     try {
       prepared = await prepare(record, actor);
@@ -1973,7 +2001,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       authenticationMode: session.authenticationMode || 'unknown',
       startedAt,
       ...(orderNotice ? { orderNotice } : {}),
-    }, this.accessConfiguration ? () => this.assertCurrentCommandAuthority(action, record, session) : undefined,session.acceptedFulfillment?.proof);
+    }, this.accessConfiguration ? () => this.assertCurrentCommandAuthority(action, record, session, actor) : undefined,session.acceptedFulfillment?.proof);
     if (!claim.claimed) {
       const result = await this.resolveExistingCommand(
         claim.entry,
@@ -2121,7 +2149,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     throw new ConflictException('该采购执行正在同步中，请稍后刷新');
   }
 
-  private assertCurrentCommandAuthority(action: PurchaseWorkflowAction, record: PurchaseWorkflowRecord, session: PurchaseWorkflowSession): void {
+  private assertCurrentCommandAuthority(action: PurchaseWorkflowAction, record: PurchaseWorkflowRecord, session: PurchaseWorkflowSession, actor?: PurchaseWorkflowDutyActor): void {
     const configuration=this.accessConfiguration!;
     const principal=session.permissionPrincipal;
     if (!principal) {
@@ -2131,6 +2159,26 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     }
     const current=configuration.currentPrincipal(principal.accountId,principal.authorizationVersion);
     if (!current || current.role!==principal.role || current.role!==session.accessRole || !canPerformBusinessAction(current,{module:'purchase',action:action==='start'?'create':action,building:record.building,specialty:record.specialty})) throw new ForbiddenException('当前采购操作权限已变化，请重新核对登录和授权');
+    if (action === 'approve' && current.role !== 'admin') {
+      const roster = this.webApprovalRoster(record);
+      if (actor?.approvalDutyKind !== roster.kind || !roster.openIds.includes(session.openId)) throw new ForbiddenException('当前采购审批岗位已变化，请使用现任人员办理');
+    }
+  }
+
+  private webApprovalRoster(record: PurchaseWorkflowRecord) {
+    const scope = purchaseAuthorityTarget(record);
+    if (!scope) throw new ForbiddenException('采购审批记录范围不明确');
+    const kind = isPurchaseManagerApprovalEnabled() ? 'purchase_manager' as const : 'purchase_approver' as const;
+    const routed = this.accessConfiguration?.currentDutyRoutePeople(kind, scope);
+    const configured = routed ?? (kind === 'purchase_manager' ? readPurchaseManagerApprovers() : readConfiguredCardMembers('purchase_approvers', scope.building, scope.specialty) ??
+      readEnv('PURCHASE_WORKFLOW_APPROVER_OPEN_IDS').split(',').map(openId => ({ openId: openId.trim() })));
+    return { kind, openIds: configured.map(person => person.openId).filter(openId => /^ou_[A-Za-z0-9_-]+$/.test(openId)) };
+  }
+
+  private withWebApprovalDuty(actor: PurchaseWorkflowDutyActor, record: PurchaseWorkflowRecord): PurchaseWorkflowDutyActor {
+    if (actor.accessRole === 'admin' || resolvePurchaseStage(record.status) !== 'application') return actor;
+    const roster = this.webApprovalRoster(record);
+    return { ...actor, approvalDuty: roster.openIds.includes(actor.openId), approvalDutyKind: roster.kind };
   }
 
   private async acceptedCardSession(session:PurchaseWorkflowSession,recordId:string,action:'order'|'receive',input:PurchaseWorkflowOrderInput|PurchaseWorkflowReceiptInput,proof:PurchaseFulfillmentClaimProof|undefined):Promise<PurchaseWorkflowSession>{
@@ -2145,34 +2193,29 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
 
   private async resolveActor(
     session: PurchaseWorkflowSession,
-  ): Promise<PurchaseWorkflowUser> {
+    record?: PurchaseWorkflowRecord,
+  ): Promise<PurchaseWorkflowDutyActor> {
     if(session.acceptedFulfillment)return structuredClone(session.acceptedFulfillment.actor);
     const actor = await this.gateway.resolveUser(
       requireText(session.openId, '当前飞书用户标识缺失'),
       session.accessToken,
     );
-    if (
-      session.authenticationMode === 'delegated-app' &&
-      !actor.name &&
-      !actor.positions.length &&
-      !actor.buildings.length
-    ) {
-      throw new ServiceUnavailableException(
-        '配置的采购工作流操作人未在组织架构表中找到',
-      );
-    }
-    return {
+    const resolved = {
       ...actor,
       name: actor.name || session.userName,
       buildings:
-        (session.accessRole === 'purchase_applicant' ||
-          session.accessRole === 'building_admin') &&
+        session.accessRole === 'purchase_applicant' &&
         session.purchaseBuilding
           ? (session.purchaseBuildings || [session.purchaseBuilding])
           : actor.buildings,
       accessRole: session.accessRole,
       ...(session.permissionPrincipal ? { permissionPrincipal: session.permissionPrincipal } : {}),
     };
+    const current: PurchaseWorkflowDutyActor = record ? this.withWebApprovalDuty(resolved, record) : resolved;
+    if (session.authenticationMode === 'delegated-app' && !actor.name && !actor.positions.length && !actor.buildings.length && !current.approvalDuty) {
+      throw new ServiceUnavailableException('配置的采购工作流操作人未在组织架构表中找到');
+    }
+    return current;
   }
 
   private async appCardSession(

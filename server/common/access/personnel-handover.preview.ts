@@ -7,22 +7,27 @@ import { BUILDING_ADMIN_BUILDINGS } from '../../../shared/access-control.interfa
 import { PROFESSIONAL_SPECIALTIES, professionalScopeIsValid } from '../../../shared/professional-access';
 import { BUSINESS_PERMISSION_CATALOG, BUSINESS_ACTION_LABELS, decideBusinessPermission, personalPermissionPagePaths, validPersonalRules, type PersonalPermissionRule } from '../../../shared/business-permissions';
 import type { AccountPermissionTemplate, PermissionInheritancePreview, PendingDuty } from '../../../shared/personnel-handover.interface';
+import { authorizationPages, validEffectiveAuthorization } from './authorization-profile.policy';
+import { mergeHandoverAuthorization } from './personnel-handover.authorization';
 
 function copyTemplate(value: AccountPermissionTemplate): AccountPermissionTemplate {
   if (!(PAGE_ACCESS_ROLES as readonly string[]).includes(value.role) || !validBuildingScope(value.role,value.building,value.buildings) ||
     !validPagePaths(value.pagePaths) || !Number.isSafeInteger(value.sourceVersion) || value.sourceVersion < 1 ||
     (['professional_admin','professional_engineer'].includes(value.role) ? !professionalScopeIsValid(value.specialties) : value.specialties !== undefined) ||
-    (value.personalRules !== undefined && !validPersonalRules(value.personalRules))) throw new BadRequestException('岗位权限模板无效，请核对楼栋、专业和个人规则');
+    (value.personalRules !== undefined && !validPersonalRules(value.personalRules)) ||
+    (value.effectiveAuthorization !== undefined && (!validEffectiveAuthorization(value.effectiveAuthorization) || value.role !== (value.effectiveAuthorization.baseline.nativeRole || 'guest')))) throw new BadRequestException('岗位权限模板无效，请核对楼栋、专业和个人规则');
   return { role:value.role,building:value.building,sourceVersion:value.sourceVersion,pagePaths:[...value.pagePaths],
     ...(value.buildings ? { buildings:[...value.buildings] } : {}), ...(value.specialties ? { specialties:[...value.specialties] } : {}),
-    ...(value.personalRules ? { personalRules:value.personalRules.map(rule => ({ id:rule.id,effect:rule.effect,module:rule.module,actions:[...rule.actions],buildings:rule.buildings ? [...rule.buildings] : null,specialties:rule.specialties ? [...rule.specialties] : null })) } : {}) };
+    ...(value.personalRules ? { personalRules:value.personalRules.map(rule => ({ id:rule.id,effect:rule.effect,module:rule.module,actions:[...rule.actions],buildings:rule.buildings ? [...rule.buildings] : null,specialties:rule.specialties ? [...rule.specialties] : null })) } : {}),
+    ...(value.effectiveAuthorization ? {effectiveAuthorization:structuredClone(value.effectiveAuthorization)} : {}) };
 }
-function principal(template: AccountPermissionTemplate) { return { role:template.role,purchaseBuilding:template.building,buildings:template.buildings,specialties:template.specialties,personalRules:template.personalRules }; }
+function principal(template: AccountPermissionTemplate) { return { role:template.role,purchaseBuilding:template.building,buildings:template.buildings,specialties:template.specialties,personalRules:template.personalRules,effectiveAuthorization:template.effectiveAuthorization }; }
 export function copyAccountPermissionTemplate(value: AccountPermissionTemplate): AccountPermissionTemplate { return copyTemplate(value); }
 export function accountPermissionTemplate(account: ManagedAccount, pageRules?: RolePageRules): AccountPermissionTemplate {
-  const actor = { role:account.role,purchaseBuilding:account.building,buildings:account.buildings,specialties:account.specialties,personalRules:account.personalRules };
+  const actor = { role:account.role,purchaseBuilding:account.building,buildings:account.buildings,specialties:account.specialties,personalRules:account.personalRules,effectiveAuthorization:account.effectiveAuthorization };
   return copyTemplate({ role:account.role,building:account.building,buildings:account.buildings,specialties:account.specialties,personalRules:account.personalRules,sourceVersion:account.version,
-    pagePaths: account.role === 'admin' ? effectivePagePaths(account.role,pageRules) : personalPermissionPagePaths(actor,effectiveAccountPagePaths(account.role,pageRules,account.pagePaths)) });
+    ...(account.effectiveAuthorization ? {effectiveAuthorization:structuredClone(account.effectiveAuthorization)} : {}),
+    pagePaths: account.role === 'admin' ? effectivePagePaths(account.role,pageRules) : personalPermissionPagePaths(actor,account.effectiveAuthorization ? authorizationPages(account.effectiveAuthorization) : effectiveAccountPagePaths(account.role,pageRules,account.pagePaths)) });
 }
 function mergeRules(rules: readonly PersonalPermissionRule[]): PersonalPermissionRule[] {
   const unique = new Map<string,PersonalPermissionRule>(), ids = new Set<string>();
@@ -35,7 +40,7 @@ function mergeRules(rules: readonly PersonalPermissionRule[]): PersonalPermissio
   }
   return [...unique.values()];
 }
-function roleIsPreciselyEvaluated(template: AccountPermissionTemplate): boolean { return ['admin','professional_admin','professional_engineer'].includes(template.role); }
+function roleIsPreciselyEvaluated(template: AccountPermissionTemplate): boolean { return !!template.effectiveAuthorization || ['admin','professional_admin','professional_engineer'].includes(template.role); }
 function permissionLosses(from: AccountPermissionTemplate, after: AccountPermissionTemplate, defaults: boolean): string[] {
   const problems = new Set<string>();
   for (const definition of BUSINESS_PERMISSION_CATALOG) for (const action of definition.actions) {
@@ -52,6 +57,18 @@ export function previewPermissionInheritance(sourceInput: AccountPermissionTempl
   const conflicts: string[] = [], warnings: string[] = [];
   if (options.replacePersonnelDefault !== undefined && typeof options.replacePersonnelDefault !== 'boolean') throw new BadRequestException('岗位授权替换条件无效');
   const replace = options.replacePersonnelDefault === true;
+  if(source.effectiveAuthorization || before.effectiveAuthorization) {
+    try {
+      after=mergeHandoverAuthorization(source,before,replace);
+      after.pagePaths=personalPermissionPagePaths(principal(after),after.pagePaths);
+      const sourceLosses=permissionLosses(source,after,true),ownLosses=replace ? [] : permissionLosses(before,after,true);
+      if(sourceLosses.length) conflicts.push(`前任权限无法完整继承：${sourceLosses.join('、')}`);
+      if(ownLosses.length) conflicts.push(`继承会缩减接任者现有权限：${ownLosses.join('、')}`);
+      if(source.pagePaths.some(path=>!after.pagePaths.includes(path))) conflicts.push('前任页面读取权限无法完整继承');
+    } catch(error) { conflicts.push(error instanceof Error ? error.message : '交接权限无法安全合并'); }
+    if(conflicts.length) after=copyTemplate(before);
+    return {source,before,after:copyTemplate(after),conflicts,warnings,addedPages:after.pagePaths.filter(path=>!before.pagePaths.includes(path)),removedPages:before.pagePaths.filter(path=>!after.pagePaths.includes(path))};
+  }
   const ownRules = before.personalRules || [], inheritedRules = source.personalRules || [];
   if (before.role === 'admin') warnings.push('保留接任者现有管理员权限');
   else if (replace || ['guest','site_member'].includes(before.role)) after = { ...copyTemplate(source),sourceVersion:before.sourceVersion };

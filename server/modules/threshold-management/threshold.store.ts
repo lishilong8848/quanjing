@@ -34,6 +34,8 @@ import {
   type ThresholdSyncState,
 } from '../../../shared/threshold-management.interface';
 
+export type ThresholdMutationScopeCheck = (records: readonly ThresholdRecord[]) => void;
+
 interface Ledger extends ThresholdSnapshot {
   schema: 1;
   importedSeeds?: string[];
@@ -46,6 +48,12 @@ interface Ledger extends ThresholdSnapshot {
       before?: ThresholdRecord | null;
     }
   >;
+}
+function mutationScopeRecords(ledger: Ledger, id: string): ThresholdRecord[] {
+  const receipt = ledger.mutations[id];
+  if (!receipt) throw new NotFoundException('同步任务不存在');
+  return structuredClone([receipt.before, receipt.result.record, ledger.records.find(record => record.id === receipt.result.id)]
+    .filter((record): record is ThresholdRecord => !!record));
 }
 export class ThresholdStore {
   private readonly path: string;
@@ -167,11 +175,12 @@ export class ThresholdStore {
       return true;
     });
   }
-  syncResults(ids: string[]): ThresholdMutationResult[] {
+  syncResults(ids: string[], authorize?: ThresholdMutationScopeCheck): ThresholdMutationResult[] {
     const ledger = this.read();
     return ids.map((id) => {
       const receipt = ledger.mutations[id];
       if (!receipt) throw new NotFoundException('同步任务不存在');
+      authorize?.(mutationScopeRecords(ledger, id));
       return structuredClone(receipt.result);
     });
   }
@@ -204,13 +213,14 @@ export class ThresholdStore {
       this.write(ledger);
     });
   }
-  retrySync(id: string, actor: string): ThresholdMutationResult {
+  retrySync(id: string, actor: string, authorize?: ThresholdMutationScopeCheck): ThresholdMutationResult {
     return this.withLock(() => {
       const ledger = this.read();
       const receipt = ledger.mutations[id];
       if (!receipt?.result.sync) throw new NotFoundException('同步任务不存在');
       if (receipt.actor !== actor && !actor.startsWith('admin:'))
         throw new ForbiddenException('无权重试该同步任务');
+      authorize?.(mutationScopeRecords(ledger, id));
       if (
         receipt.result.sync.leaseExpiresAt &&
         Date.parse(receipt.result.sync.leaseExpiresAt) > Date.now()
@@ -229,8 +239,9 @@ export class ThresholdStore {
       return structuredClone(receipt.result);
     });
   }
-  conflictJob(id: string, actor: string): ThresholdSyncJob {
-    const receipt = this.read().mutations[id];
+  conflictJob(id: string, actor: string, authorize?: ThresholdMutationScopeCheck): ThresholdSyncJob {
+    const ledger = this.read();
+    const receipt = ledger.mutations[id];
     if (
       !receipt?.before ||
       receipt.result.sync?.state !== 'error' ||
@@ -239,6 +250,7 @@ export class ThresholdStore {
       throw new ConflictException('该任务没有可恢复的云端冲突');
     if (receipt.actor !== actor && !actor.startsWith('admin:'))
       throw new ForbiddenException('无权处理该同步任务');
+    authorize?.(mutationScopeRecords(ledger, id));
     return {
       actor: receipt.actor || '',
       before: receipt.before,
@@ -249,13 +261,15 @@ export class ThresholdStore {
     id: string,
     actor: string,
     record: ThresholdRecord | null,
+    authorize?: ThresholdMutationScopeCheck,
   ): ThresholdMutationResult {
     if (record) validateInput(record);
     return this.withLock(() => {
-      const job = this.conflictJob(id, actor);
+      const job = this.conflictJob(id, actor, authorize);
       const ledger = this.read();
       if (record && record.id !== job.result.id)
         throw new ConflictException('云端记录标识不符');
+      authorize?.([...mutationScopeRecords(ledger, id), ...(record ? [structuredClone(record)] : [])]);
       ledger.records = ledger.records.filter((r) => r.id !== job.result.id);
       if (record) ledger.records.unshift(record);
       ledger.revision += 1;

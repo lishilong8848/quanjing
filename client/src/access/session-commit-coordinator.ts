@@ -29,7 +29,7 @@ export function isConfirmedLoginSession(
   confirmed: LoginSessionSnapshot,
 ): boolean {
   return (
-    (submitted.role !== 'guest' || (typeof submitted.accountId === 'string' && /^local-external-[a-f0-9]{64}$/.test(submitted.accountId) && !!submitted.displayName && submitted.principalFingerprint !== null)) &&
+    (submitted.role !== 'guest' || (typeof submitted.accountId === 'string' && /^(?:local-[A-Za-z0-9_-]{1,153}|feishu-[a-f0-9]{64})$/.test(submitted.accountId) && Number.isSafeInteger(submitted.authorizationVersion) && Number(submitted.authorizationVersion) >= 1 && !!submitted.displayName && submitted.principalFingerprint !== null)) &&
     submitted.accountId === confirmed.accountId && submitted.authorizationVersion === confirmed.authorizationVersion && submitted.displayName === confirmed.displayName && JSON.stringify(submitted.specialties) === JSON.stringify(confirmed.specialties) &&
     confirmed.role === submitted.role &&
     confirmed.purchaseBuilding === submitted.purchaseBuilding && JSON.stringify(confirmed.buildings) === JSON.stringify(submitted.buildings) &&

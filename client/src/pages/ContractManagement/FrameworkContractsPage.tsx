@@ -11,6 +11,8 @@ import {
 import { Link } from 'react-router-dom';
 
 import { getContractManagementDashboard } from '@/api';
+import { useAccess } from '@/access/AccessProvider';
+import { businessPermissionScopeKey } from '@shared/business-permissions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -31,6 +33,7 @@ import {
 } from './framework-contracts.logic';
 import { getContractSourceIssue } from './contract-source-health';
 import { createLatestRequestCoordinator } from './latest-request';
+import { canUseContractAction } from './contract-permissions';
 
 const EMPTY_FRAMEWORKS: readonly ContractFrameworkRelationItem[] = [];
 const frameworkFilters: Array<{
@@ -85,6 +88,9 @@ const updatedAtFormatter = new Intl.DateTimeFormat('zh-CN', {
 });
 
 export default function FrameworkContractsPage() {
+  const principal = useAccess();
+  const principalKey = businessPermissionScopeKey(principal);
+  const canRefresh = canUseContractAction(principal, 'refresh');
   const [dashboard, setDashboard] =
     useState<ContractManagementDashboard | null>(null);
   const [query, setQuery] = useState('');
@@ -98,6 +104,13 @@ export default function FrameworkContractsPage() {
   const [requestCoordinator] = useState(createLatestRequestCoordinator);
   const relationshipRef = useRef<HTMLElement | null>(null);
 
+  useEffect(() => {
+    requestCoordinator.invalidate();
+    dashboardRef.current = null;
+    setDashboard(null);
+    setSelectedId(null);
+  }, [principalKey, requestCoordinator]);
+
   const loadDashboard = useCallback(
     async (forceRefresh = false) => {
       if (forceRefresh) {
@@ -109,7 +122,7 @@ export default function FrameworkContractsPage() {
       }
 
       await requestCoordinator.run(
-        getContractManagementDashboard(forceRefresh),
+        getContractManagementDashboard(forceRefresh && canRefresh),
         {
           onSuccess: (response) => {
             dashboardRef.current = response;
@@ -135,7 +148,7 @@ export default function FrameworkContractsPage() {
         },
       );
     },
-    [requestCoordinator],
+    [canRefresh, principalKey, requestCoordinator],
   );
 
   useEffect(() => {
@@ -209,7 +222,7 @@ export default function FrameworkContractsPage() {
           })
         }
         onSearchChange={setQuery}
-        onRefresh={() => void loadDashboard(true)}
+        onRefresh={canRefresh ? () => void loadDashboard(true) : undefined}
       />
       <main className="mx-auto max-w-[1920px] space-y-5 px-4 py-5 sm:px-6 xl:px-8">
         <Card className="border-slate-200 bg-white">

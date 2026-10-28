@@ -1,4 +1,5 @@
-import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { canPerformBusinessAction, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { canManageProfessionalRecord, PROFESSIONAL_SPECIALTIES } from '../../../shared/professional-access';
 import { accessBuildings, canAccessBuilding } from '../../../shared/building-access';
 import { filterProfessionalRecords } from '../../common/access/professional-record-scope';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
@@ -34,6 +35,9 @@ export function scopeInventoryDashboard(
   principal: AccessPrincipal,
   dashboard: InventoryManagementDashboard,
 ): InventoryManagementDashboard {
+  // The mapper already filters individual rows by the full policy before it
+  // computes these aggregates. A raw-role clamp here would discard explicit grants.
+  if (isProfessionalBusinessPrincipal(principal)) return dashboard;
   const scope = inventoryAdministratorBuildings(principal);
   if (!scope) return dashboard;
   if (scope.length > 1) {
@@ -96,6 +100,7 @@ export function scopeInventoryDashboard(
 }
 
 export function scopeInventoryItemsQuery(principal: AccessPrincipal, query: InventoryItemsQuery): InventoryItemsQuery {
+  if (isProfessionalBusinessPrincipal(principal)) return query;
   const scope = inventoryAdministratorBuildings(principal);
   if (!scope) return query;
   if (scope.length === 1) return { ...query, building: scope[0] };
@@ -104,6 +109,7 @@ export function scopeInventoryItemsQuery(principal: AccessPrincipal, query: Inve
 }
 
 export function scopeInventoryMovementsQuery(principal: AccessPrincipal, query: InventoryMovementsQuery): InventoryMovementsQuery {
+  if (isProfessionalBusinessPrincipal(principal)) return query;
   const scope = inventoryAdministratorBuildings(principal);
   if (!scope) return query;
   if (scope.length === 1) return { ...query, building: scope[0] };
@@ -112,6 +118,7 @@ export function scopeInventoryMovementsQuery(principal: AccessPrincipal, query: 
 }
 
 export function scopeInventoryMovementOptionsQuery(principal: AccessPrincipal, query: InventoryMovementOptionsQuery): InventoryMovementOptionsQuery {
+  if (isProfessionalBusinessPrincipal(principal)) return query;
   const scope = inventoryAdministratorBuildings(principal);
   if (!scope) return query;
   if (scope.length === 1) return { ...query, building: scope[0] };
@@ -120,6 +127,12 @@ export function scopeInventoryMovementOptionsQuery(principal: AccessPrincipal, q
 }
 
 export function scopeStorageLocationQuery(principal: AccessPrincipal, query: WarehouseStorageLocationQuery): WarehouseStorageLocationQuery {
+  if (isProfessionalBusinessPrincipal(principal)) {
+    const context = { module: 'inventory' as const, action: principal.permissionContext?.action || 'read' as const };
+    const allowed = BUILDING_ADMIN_BUILDINGS.filter(building => PROFESSIONAL_SPECIALTIES.some(specialty => canManageProfessionalRecord(principal, specialty, building, context)));
+    if (!allowed.length || query.building && !allowed.includes(query.building)) denyAccess();
+    return { ...query, building: query.building || allowed[0] };
+  }
   const scope = inventoryAdministratorBuildings(principal);
   if (!scope) return query;
   if (scope.length === 1) return { ...query, building: scope[0] };
@@ -131,6 +144,11 @@ export function assertStorageLocationCreateScope(
   principal: AccessPrincipal,
   request: WarehouseStorageLocationCreateRequest,
 ): WarehouseStorageLocationCreateRequest {
+  if (isProfessionalBusinessPrincipal(principal)) {
+    // A storage location has no specialty; a single-specialty grant cannot create shared infrastructure.
+    if (!PROFESSIONAL_SPECIALTIES.every(specialty => canPerformBusinessAction(principal, { module: 'inventory', action: 'create', building: request?.building, specialty }))) denyAccess();
+    return request;
+  }
   const building = inventoryAdministratorBuildings(principal);
   if (building && !canAccessBuilding(principal, request?.building)) denyAccess();
   return request;
@@ -246,6 +264,9 @@ export function assertInventoryMovementDeletionScope(
 }
 
 function inventoryAdministratorBuildings(principal: AccessPrincipal): readonly WarehouseBuilding[] | null {
+  // Scoped callers retain their full policy and are checked against authoritative
+  // catalog/execution records before writes. Do not intersect it with a legacy role.
+  if (isProfessionalBusinessPrincipal(principal)) return null;
   if (principal.role !== 'inventory_admin' && principal.role !== 'building_admin') return null;
   const scope = accessBuildings(principal);
   if (!scope?.length) denyAccess();

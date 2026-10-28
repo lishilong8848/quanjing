@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useAccess } from '@/access/AccessProvider';
+import { canUsePageAction } from '../business-action-access';
 import { logger } from '@lark-apaas/client-toolkit/logger';
 import {
   AlertTriangle,
@@ -221,6 +223,10 @@ function TaskRow({
 }
 
 export default function AliMonthlyReportPage() {
+  const access = useAccess();
+  const canCreate = canUsePageAction(access, 'monthly_reports', 'create', true);
+  const canNotify = canUsePageAction(access, 'monthly_reports', 'notify', true);
+  const canExport = canUsePageAction(access, 'monthly_reports', 'export', true);
   const [config, setConfig] =
     useState<AliMonthlyReportConfigResponse>(fallbackConfig);
   const [configLoading, setConfigLoading] = useState(true);
@@ -366,6 +372,7 @@ export default function AliMonthlyReportPage() {
   }, [defaultEmailSubject]);
 
   const handleGenerate = async () => {
+    if (!canCreate) return;
     setGenerating(true);
     setError(null);
     setResult(null);
@@ -395,6 +402,7 @@ export default function AliMonthlyReportPage() {
   };
 
   const handleBundleFourItems = async () => {
+    if (!canCreate) return;
     if (bundleInFlightRef.current) {
       return;
     }
@@ -441,6 +449,7 @@ export default function AliMonthlyReportPage() {
   };
 
   const handleSendEmail = async () => {
+    if (!canNotify) return;
     setSendingEmail(true);
     setEmailError(null);
     setEmailResult(null);
@@ -470,6 +479,7 @@ export default function AliMonthlyReportPage() {
     file: AliMonthlyReportFile,
     action: 'open' | 'reveal',
   ) => {
+    if (access.role !== 'admin') return;
     if (fileActionInFlightRef.current) return;
 
     const actionKey = `${action}:${file.id}`;
@@ -704,7 +714,7 @@ export default function AliMonthlyReportPage() {
                     type="button"
                     variant="outline"
                     className="h-12 min-w-48 border-blue-200 bg-white text-base font-semibold text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-                    disabled={busy || !config.toolReady}
+                    disabled={!canCreate || busy || !config.toolReady}
                     onClick={handleBundleFourItems}
                   >
                     {bundling ? (
@@ -717,7 +727,7 @@ export default function AliMonthlyReportPage() {
                   <Button
                     type="button"
                     className="h-12 min-w-48 bg-blue-600 text-base font-semibold text-white hover:bg-blue-700"
-                    disabled={busy || !config.toolReady}
+                    disabled={!canCreate || busy || !config.toolReady}
                     onClick={handleGenerate}
                   >
                     {generating ? (
@@ -832,7 +842,7 @@ export default function AliMonthlyReportPage() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button asChild variant="outline" className="bg-white">
-                          <a href={file.downloadUrl}>
+                          <a href={canExport ? file.downloadUrl : undefined} aria-disabled={!canExport}>
                             <Download className="h-4 w-4" />
                             下载
                           </a>
@@ -841,7 +851,7 @@ export default function AliMonthlyReportPage() {
                           type="button"
                           variant="outline"
                           className="bg-white"
-                          disabled={Boolean(fileActionKey)}
+                          disabled={access.role !== 'admin' || Boolean(fileActionKey)}
                           onClick={() => void handleFileAction(file, 'open')}
                         >
                           {fileActionKey === `open:${file.id}` ? (
@@ -857,7 +867,7 @@ export default function AliMonthlyReportPage() {
                           type="button"
                           variant="outline"
                           className="bg-white"
-                          disabled={Boolean(fileActionKey)}
+                          disabled={access.role !== 'admin' || Boolean(fileActionKey)}
                           onClick={() => void handleFileAction(file, 'reveal')}
                         >
                           {fileActionKey === `reveal:${file.id}` ? (
@@ -950,7 +960,7 @@ export default function AliMonthlyReportPage() {
                   type="button"
                   className="h-12 min-w-48 bg-blue-600 text-base font-semibold text-white hover:bg-blue-700"
                   disabled={
-                    busy || !config.emailReady || !emailRecipient.trim()
+                    !canNotify || busy || !config.emailReady || !emailRecipient.trim()
                   }
                   onClick={handleSendEmail}
                 >

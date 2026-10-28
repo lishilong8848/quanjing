@@ -1,4 +1,4 @@
-import { businessModuleForPage, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
+import { businessModulesForPage, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
 import { canReadPage, validPagePaths, effectivePagePaths } from '@shared/page-access';
 import { canAccessBuilding } from '@shared/building-access';
 import type {
@@ -17,8 +17,8 @@ const PROFESSIONAL_PAGES = new Set(['/operations-kb', '/meeting-management', '/s
 export function professionalPageCapabilities(pathname: string, principal?: AccessPrincipal): AccessCapabilities {
   const path = normalizePagePath(pathname);
   const allowed = [...PROFESSIONAL_PAGES].some(page => path === page || path.startsWith(`${page}/`));
-  const module = businessModuleForPage(path);
-  if (principal && module) return { canEdit: ['create', 'update', 'approve', 'order', 'receive', 'confirm'].some(action => hasBusinessPermissionSomewhere(principal, { module, action: action as never })), canDelete: hasBusinessPermissionSomewhere(principal, { module, action: 'delete' }), canForceRefresh: hasBusinessPermissionSomewhere(principal, { module, action: 'refresh' }), canAccessContracts: hasBusinessPermissionSomewhere(principal, { module: 'contracts', action: 'read' }) };
+  const modules = businessModulesForPage(path);
+  if (principal && modules.length) return { canEdit: modules.some(module => ['create', 'update', 'approve', 'order', 'receive', 'confirm'].some(action => hasBusinessPermissionSomewhere(principal, { module, action: action as never }))), canDelete: modules.some(module => hasBusinessPermissionSomewhere(principal, { module, action: 'delete' })), canForceRefresh: modules.some(module => hasBusinessPermissionSomewhere(principal, { module, action: 'refresh' })), canAccessContracts: hasBusinessPermissionSomewhere(principal, { module: 'contracts', action: 'read' }) };
   return { canEdit: allowed, canDelete: allowed, canForceRefresh: allowed, canAccessContracts: allowed };
 }
 
@@ -207,6 +207,7 @@ export function normalizeAccessSession(
 export function canCreatePurchaseApplication(
   principal: AccessPrincipal,
 ): boolean {
+  if (principal.effectiveAuthorization || isProfessionalBusinessPrincipal({...principal,permissionContext:{module:'purchase',action:'create'}})) return hasBusinessPermissionSomewhere(principal,{module:'purchase',action:'create'});
   return (
     isProfessionalBusinessPrincipal(principal) ||
     principal.role === 'building_admin' ||
@@ -219,6 +220,7 @@ export function canCreatePurchaseApplication(
 }
 
 export function canManagePurchaseWorkflow(principal: AccessPrincipal): boolean {
+  if (principal.effectiveAuthorization) return (['approve','order','receive'] as const).some(action=>hasBusinessPermissionSomewhere(principal,{module:'purchase',action}));
   return (
     isProfessionalBusinessPrincipal(principal) ||
     principal.role === 'building_admin' ||
@@ -280,6 +282,8 @@ export function canEditPurchaseRecord(
   principal: AccessPrincipal,
   item: PurchaseInventoryRequestItem,
 ): boolean {
+  if (principal.role !== 'admin' && item.stage === 'rejected') return false;
+  if (principal.role === 'purchase_applicant' && !canApplicantMaintainPurchaseRecord(principal,item)) return false;
   if (isProfessionalBusinessPrincipal(principal)) return canManageProfessionalRecord(principal, item.specialty, item.building, { module: 'purchase', action: 'update' });
 
   if (principal.role === 'admin') return true;
@@ -301,6 +305,8 @@ export function canDeletePurchaseRecord(
   principal: AccessPrincipal,
   item: PurchaseInventoryRequestItem,
 ): boolean {
+  if (principal.role === 'editor' && item.stage !== 'stocked') return false;
+  if (principal.role === 'purchase_applicant' && !canApplicantMaintainPurchaseRecord(principal,item)) return false;
   if (isProfessionalBusinessPrincipal(principal)) return canManageProfessionalRecord(principal, item.specialty, item.building, { module: 'purchase', action: 'delete' });
 
   if (
@@ -319,6 +325,7 @@ export function canDeletePurchaseRecord(
 export function canDeleteCompletedPurchaseRecords(
   principal: AccessPrincipal,
 ): boolean {
+  if (principal.effectiveAuthorization) return hasBusinessPermissionSomewhere(principal,{module:'purchase',action:'delete'});
   return (
     isProfessionalBusinessPrincipal(principal) ||
     principal.role === 'building_admin' ||
