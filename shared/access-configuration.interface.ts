@@ -115,6 +115,15 @@ export interface AccountMutation {
   authorizationOverrides?: import('./authorization-profile').AuthorizationOverrides;
   confirmReactivation?: boolean;
 }
+
+// 脱敏与保存校验共用请求字段，避免合法授权字段在中间件被丢弃。
+export const ACCOUNT_MUTATION_FIELDS = [
+  'clientMutationId', 'expectedRevision', 'id', 'kind', 'name', 'role',
+  'building', 'enabled', 'deleted', 'openId', 'password', 'external',
+  'specialties', 'buildings', 'personalRules', 'pagePaths',
+  'authorizationBinding', 'authorizationOverrides', 'confirmReactivation',
+] as const satisfies readonly (keyof AccountMutation)[];
+
 export interface CardRoleMutation {
   clientMutationId: string;
   expectedRevision: number;

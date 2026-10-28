@@ -1,16 +1,30 @@
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
 import * as React from 'react';
 import { hasBusinessPermissionSomewhere } from '@shared/business-permissions';
-import { Outlet, useLocation } from 'react-router-dom';
+import type { AccessPrincipal } from '@shared/access-control.interface';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
 import { isPurchaseApplicationDirectPath } from '@/navigation/purchase-application-route';
 import { useAccess } from './AccessProvider';
 import {
   canAccessPage,
+  getPostLoginPath,
   hasAuthenticatedAccessIdentity,
   isControlledScreenshotPageRequest,
 } from './access-policy';
+
+const CREATE_ONLY_APPLICATIONS = [
+  { path: '/monthly-schedule/apply/leave', module: 'leave_requests' },
+  { path: '/monthly-schedule/apply/overtime', module: 'overtime_requests' },
+  { path: '/purchase-inventory-management/apply/new', module: 'purchase' },
+] as const;
+
+function canAccessCreateOnlyPage(access: AccessPrincipal, pathname: string): boolean {
+  const entry = CREATE_ONLY_APPLICATIONS.find(item => item.path === pathname.toLowerCase().replace(/\/+$/, ''));
+  return !!access.effectiveAuthorization && !!entry &&
+    hasBusinessPermissionSomewhere(access, { module: entry.module, action: 'create' });
+}
 
 export default function RouteAccessGuard() {
   const location = useLocation();
@@ -23,13 +37,15 @@ export default function RouteAccessGuard() {
     location.search,
   );
   const guestAllowed = canAccessPage('guest', location.pathname);
-  const directApplication = location.pathname.replace(/\/+$/,'');
-  const createOnlyAllowed = !!access.effectiveAuthorization && (
-    directApplication==='/monthly-schedule/apply/leave' && hasBusinessPermissionSomewhere(access,{module:'leave_requests',action:'create'}) ||
-    directApplication==='/monthly-schedule/apply/overtime' && hasBusinessPermissionSomewhere(access,{module:'overtime_requests',action:'create'}) ||
-    isPurchaseApplicationDirectPath(directApplication) && hasBusinessPermissionSomewhere(access,{module:'purchase',action:'create'}));
+  const createOnlyAllowed = canAccessCreateOnlyPage(access, location.pathname);
   const allowed =
     controlledScreenshotRequest || createOnlyAllowed || canAccessPage(role, location.pathname, pagePaths);
+  const preferredLanding = getPostLoginPath(role, '/nantong-base', pagePaths);
+  const landingPath = !allowed && authenticated
+    ? canAccessPage(role, preferredLanding, pagePaths)
+      ? preferredLanding
+      : CREATE_ONLY_APPLICATIONS.find(entry => canAccessCreateOnlyPage(access, entry.path))?.path
+    : undefined;
   const reason = getRouteAccessReason(role, location.pathname);
   const preferredAccountType = isPurchaseApplicationDirectPath(
     location.pathname,
@@ -69,7 +85,8 @@ export default function RouteAccessGuard() {
     requestLogin,
   ]);
 
-  if (isConfirmingIdentity || (isLoading && !sessionError && role === 'guest' && !guestAllowed)) {
+  if (isConfirmingIdentity || (isLoading && !sessionError &&
+    (role === 'guest' && !guestAllowed || authenticated && !allowed))) {
     return (
       <main
         className="flex min-h-screen items-center justify-center bg-slate-50 px-4"
@@ -103,6 +120,10 @@ export default function RouteAccessGuard() {
 
   if (allowed) return <Outlet key={JSON.stringify(pagePaths)} />;
 
+  if (authenticated && !isLoading && landingPath && landingPath !== location.pathname) {
+    return <Navigate to={landingPath} replace />;
+  }
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
       <section className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 text-center shadow-sm">
@@ -110,7 +131,7 @@ export default function RouteAccessGuard() {
           <LockKeyhole className="size-6" aria-hidden="true" />
         </div>
         <h1 className="mt-4 text-xl font-semibold text-slate-900">
-          {authenticated ? '当前账号未获此页面权限' : '当前页面需要登录权限'}
+          {authenticated ? '当前账号暂无可访问页面' : '当前页面需要登录权限'}
         </h1>
         <p className="mt-2 text-sm leading-6 text-slate-600">{authenticated ? '请联系管理员调整页面权限，或切换有权限的账号。' : reason}</p>
         <Button

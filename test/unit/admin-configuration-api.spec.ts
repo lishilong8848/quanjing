@@ -19,9 +19,14 @@ describe('configuration request recovery', () => {
     request.mockRejectedValueOnce(new Error('Network Error'));
     await expect(loadConfiguration()).rejects.toThrow('请求失败，请检查网络后重试');
   });
-  it('preserves the server conflict message and the caller draft for retry', async () => {
-    request.mockRejectedValueOnce({ response: { status: 409, data: { message: '配置已更新，请刷新当前记录后重试，草稿已保留' } } });
-    await expect(saveAccount(mutation)).rejects.toThrow('草稿已保留');
+  it.each([
+    [400, '请求包含服务端不支持的字段，请确认页面与服务端版本一致后重试'],
+    [409, '配置已更新，请刷新当前记录后重试，草稿已保留'],
+  ])('preserves HTTP %i status/message and the caller draft for retry', async (status, message) => {
+    const before = JSON.stringify(mutation);
+    request.mockRejectedValueOnce({ response: { status, data: { message } } });
+    await expect(saveAccount(mutation)).rejects.toMatchObject({ message, status });
+    expect(JSON.stringify(mutation)).toBe(before);
     expect(mutation.expectedRevision).toBe(2);
     expect(mutation.name).toBe('合成人员');
   });

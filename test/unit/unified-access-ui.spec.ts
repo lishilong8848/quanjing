@@ -118,7 +118,7 @@ describe('unified access frontend integration', () => {
       "const guestAllowed = canAccessPage('guest', location.pathname);",
     );
     expect(guardSource).toContain(
-      "isLoading && !sessionError && role === 'guest' && !guestAllowed",
+      "(role === 'guest' && !guestAllowed || authenticated && !allowed)",
     );
     expect(guardSource).not.toContain('if (isLoading) {');
   });
@@ -533,7 +533,7 @@ describe('unified access frontend integration', () => {
     expect(guardSource).toContain(
       'const allowed =\n    controlledScreenshotRequest || createOnlyAllowed || canAccessPage(role, location.pathname, pagePaths);',
     );
-    expect(guardSource).toContain('const createOnlyAllowed = !!access.effectiveAuthorization && (');
+    expect(guardSource).toContain('const createOnlyAllowed = canAccessCreateOnlyPage(access, location.pathname);');
     expect(guardSource).toContain('if (allowed) {');
     expect(guardSource).toContain('isLoading ||');
     expect(guardSource).toContain(

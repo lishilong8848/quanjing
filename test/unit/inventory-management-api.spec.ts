@@ -844,6 +844,7 @@ describe('inventory management movement controller', () => {
   };
   const controller = new InventoryManagementController(
     {} as never,
+    {} as never,
     movementCommandService as never,
     {} as never,
     {} as never,
@@ -1013,6 +1014,7 @@ describe('inventory management purchase inbound controller', () => {
   const controller = new InventoryManagementController(
     {} as never,
     {} as never,
+    {} as never,
     purchaseInboundService as never,
     {} as never,
     {} as never,
@@ -1145,6 +1147,7 @@ describe('inventory management asynchronous inbound controller', () => {
   const storageLocationService = { resolveSelectedLocation: jest.fn() };
   const controller = new InventoryManagementController(
     {} as never,
+    {} as never,
     movementCommandService as never,
     purchaseInboundService as never,
     {} as never,
@@ -1265,6 +1268,7 @@ describe('inventory management storage location controller', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
     storageLocationService as never,
     {} as never,
   );
@@ -1330,6 +1334,7 @@ describe('inventory management outbound confirmation controller', () => {
     }),
   };
   const controller = new InventoryManagementController(
+    {} as never,
     {} as never,
     {} as never,
     {} as never,

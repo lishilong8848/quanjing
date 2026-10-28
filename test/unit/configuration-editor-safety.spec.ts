@@ -144,24 +144,50 @@ describe('unified configuration editor safety boundaries', () => {
     expect(nodes(updated).find(node => node.props.type === 'submit')!.props.disabled).toBe(true);
     expect(saveAccount).not.toHaveBeenCalled();
   });
-  it('preserves all draft layers and the mutation identity after a server conflict; closing is not automatic', async () => {
-    const props = fixture();
-    (previewAccountAuthorization as jest.Mock).mockResolvedValue({ revision: 7, accountId: props.account.id, before: original(), after: original(), sessionWillBeRevoked: true });
-    (saveAccount as jest.Mock).mockRejectedValue(Object.assign(new Error('配置版本已变化'), { status: 409 }));
-    button(render(() => AccountEditor(props)), '核对权限').props.onClick(); await flush();
+  it.each([
+    [400, '请求包含服务端不支持的字段，请确认页面与服务端版本一致后重试'],
+    [409, '配置版本已变化'],
+  ])('preserves name, scope, permissions and mutation identity after HTTP %i without closing', async (status, message) => {
+    const props = { ...fixture(), external: true };
+    const authorization = original(); authorization.templateId = 'builtin-professional_engineer'; authorization.baseline.nativeRole = 'professional_engineer';
+    props.account = { ...props.account, role: 'professional_engineer', building: 'A楼', buildings: ['A楼'], specialties: ['电气'], effectiveAuthorization: authorization };
+    props.data = { ...props.data, accounts: [props.account] };
+    props.roles = { ...props.roles, roles: props.roles.roles.map((role, index) => index === 0 ? { ...role, id: authorization.templateId!, builtin: true, policy: authorization.baseline } : role) };
     let tree = render(() => AccountEditor(props));
-    const check = nodes(tree).find(node => node.type === 'input' && node.props.type === 'checkbox')!;
+    nodes(tree).find(node => node.props.id === 'config-account-name')!.props.onChange({ target: { value: '合成草稿姓名' } });
+    const selectScope = (title: string, option: string) => {
+      const scope = nodes(tree).find(node => node.type === 'fieldset' && words(node.props.children).startsWith(title))!;
+      const label = nodes(scope).find(node => node.type === 'label' && words(node.props.children) === option)!;
+      nodes(label).find(node => node.type === 'input')!.props.onChange({ target: { checked: true } });
+    };
+    selectScope('任职楼栋', 'B楼'); selectScope('任职专业', '暖通');
+    const draft: EffectiveAuthorization = { ...editor(tree).props.value, overrides: { ...empty(), denyPages: ['/meeting-management'], rules: [{ id: 'synthetic-draft-permission', module: 'inventory', actions: ['update'], effect: 'deny', buildings: ['B楼'], specialties: ['暖通'] }] } };
+    editor(tree).props.onChange(draft);
+    (previewAccountAuthorization as jest.Mock).mockResolvedValue({ revision: 7, accountId: props.account.id, before: authorization, after: draft, sessionWillBeRevoked: true });
+    (saveAccount as jest.Mock).mockRejectedValue(Object.assign(new Error(message), { status }));
+    button(render(() => AccountEditor(props)), '核对权限').props.onClick(); await flush();
+    tree = render(() => AccountEditor(props));
+    const preview = field(tree, '账号权限变更预览');
+    const check = nodes(preview).find(node => node.type === 'input' && node.props.type === 'checkbox')!;
     check.props.onChange({ target: { checked: true } });
     tree = render(() => AccountEditor(props));
     nodes(tree).find(node => node.type === 'form')!.props.onSubmit({ preventDefault: jest.fn() }); await flush();
     tree = render(() => AccountEditor(props));
-    expect(words(tree)).toContain('配置版本已变化');
-    expect(editor(tree).props.value).toEqual(original());
+    expect(words(tree)).toContain(message);
+    expect(editor(tree).props.value).toEqual(draft);
+    expect(editor(tree).props.principal).toMatchObject({ purchaseBuilding: 'A楼', buildings: ['A楼', 'B楼'], specialties: ['电气', '暖通'] });
+    expect(nodes(tree).find(node => node.props.id === 'config-account-name')!.props.value).toBe('合成草稿姓名');
+    expect(tree.props.open).toBe(true);
     expect(props.onClose).not.toHaveBeenCalled(); expect(props.onSaved).not.toHaveBeenCalled();
     const first = (saveAccount as jest.Mock).mock.calls[0][0];
-    expect(first.authorizationOverrides).toEqual(original().overrides);
+    expect(first).toMatchObject({ name: '合成草稿姓名', building: 'A楼', buildings: ['A楼', 'B楼'], specialties: ['电气', '暖通'], authorizationBinding: { mode: 'follow', templateId: authorization.templateId }, authorizationOverrides: draft.overrides });
+    for (const readOnlyField of ['preview', 'fingerprint', 'effectiveAuthorization', 'source', 'version', 'passwordConfigured']) expect(first).not.toHaveProperty(readOnlyField);
     nodes(tree).find(node => node.type === 'form')!.props.onSubmit({ preventDefault: jest.fn() }); await flush();
+    expect(saveAccount).toHaveBeenCalledTimes(2);
+    expect((saveAccount as jest.Mock).mock.calls[1][0]).toEqual(first);
     expect((saveAccount as jest.Mock).mock.calls[1][0].clientMutationId).toBe(first.clientMutationId);
+    expect(props.onClose).not.toHaveBeenCalled(); expect(props.onSaved).not.toHaveBeenCalled();
+    expect(props.account.name).toBe('合成人员'); expect(props.account.buildings).toEqual(['A楼']);
   });
   it('matrix detail switching and closing leave filters and the underlying rows intact without a write', () => {
     enableMatrixEffects();

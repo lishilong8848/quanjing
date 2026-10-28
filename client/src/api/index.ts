@@ -1637,6 +1637,19 @@ export async function searchPurchaseApplicationApplicants(
   return response.data;
 }
 
+export async function searchInventoryApplicants(
+  params: PurchaseApplicationApplicantSearchParams,
+): Promise<PurchaseApplicationApplicant[]> {
+  const response = await axiosForBackend({
+    url: '/api/inventory-management/applicant-search',
+    method: 'GET',
+    params,
+    timeout: params.self ? 15_000 : 120_000,
+  });
+  if (!Array.isArray(response.data)) throw new Error('申请人搜索返回格式无效');
+  return response.data;
+}
+
 export async function submitPurchaseApplications(
   payload: PurchaseApplicationBatchRequest,
   files: File[],

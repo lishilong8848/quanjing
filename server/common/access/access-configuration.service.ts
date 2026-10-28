@@ -5,7 +5,7 @@ import { PAGE_ACCESS_ROLES, PAGE_ACCESS_CATALOG, effectivePagePaths, effectiveAc
 import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException, UnauthorizedException, type OnModuleInit } from '@nestjs/common';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import type { AccessPrincipal, PrivilegedAccessPrincipal, TrustedAccessPrincipal } from '../../../shared/access-control.interface';
-import type { AccessConfigurationResponse, PageRoleMutation, AccountMutation, CardRoleMutation, CardRoleCode, ConfigurationPerson } from '../../../shared/access-configuration.interface';
+import { ACCOUNT_MUTATION_FIELDS, type AccessConfigurationResponse, type PageRoleMutation, type AccountMutation, type CardRoleMutation, type CardRoleCode, type ConfigurationPerson } from '../../../shared/access-configuration.interface';
 import { AccessConfigurationStore, getAccessConfigurationStore, type ConfigurationState, type StoredAccount } from './access-configuration.store';
 import { defaultAccessAccounts, roleName } from './access-configuration.defaults';
 import { normalizeAccessDisplayName } from './access-display-name';
@@ -359,7 +359,7 @@ export class AccessConfigurationService implements OnModuleInit {
     });
   }
   async saveAccount(request: AccountMutation, actor: AccessPrincipal): Promise<AccessConfigurationResponse> {
-    requireMutation(request, ['clientMutationId','expectedRevision','id','kind','name','role','building','enabled','deleted','openId','password','external','specialties','buildings','personalRules','pagePaths','authorizationBinding','authorizationOverrides','confirmReactivation']);
+    requireMutation(request, ACCOUNT_MUTATION_FIELDS);
     // Validate the submitted scope before projection can normalize away invalid fields.
     if (!PAGE_ACCESS_ROLES.includes(request.role) || !validBuildingScope(request.role,request.building,request.buildings) ||
       (['professional_admin','professional_engineer'].includes(request.role) ? !professionalScopeIsValid(request.specialties) : request.specialties !== undefined)) throw new BadRequestException('角色或楼栋专业范围无效');

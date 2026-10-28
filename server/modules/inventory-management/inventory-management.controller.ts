@@ -60,6 +60,8 @@ import {
   scopeStorageLocationQuery,
 } from './inventory-access-policy';
 import { assertGlobalBusinessOperation } from '../../common/access/global-business-operation';
+import { hasBusinessPermissionSomewhere } from '../../../shared/business-permissions';
+import { PurchaseApplicationService } from '../purchase-inventory/purchase-application.service';
 
 const PURCHASE_INBOUND_WORKFLOW_CODES = new Set([
   'purchase_h',
@@ -84,6 +86,7 @@ type AccessRequest = Request & {
 export class InventoryManagementController {
   constructor(
     private readonly service: InventoryManagementService,
+    private readonly applicationService: PurchaseApplicationService,
     private readonly movementCommandService: InventoryMovementCommandService,
     private readonly purchaseInboundService: PurchaseInboundConfirmationService,
     private readonly workflowService: InventoryWorkflowService,
@@ -192,6 +195,25 @@ export class InventoryManagementController {
       }),
       principal,
     );
+  }
+
+  @ProfessionalScoped()
+  @Get('applicant-search')
+  async searchApplicants(
+    @Req() request: AccessRequest,
+    @Query('query') query = '',
+    @Query('limit') limit = '30',
+    @Query('self') self = 'false',
+  ) {
+    const principal = requirePrincipal(request);
+    if (!hasBusinessPermissionSomewhere(principal, { module: 'inventory', action: 'create' })) {
+      throw new ForbiddenException('当前账号没有办理出入库权限');
+    }
+    if (self === 'true') {
+      return [await this.applicationService.resolveCurrentApplicant(principal, '')];
+    }
+    // Applicant identity is independent of the item's authorized building and specialty.
+    return this.applicationService.searchApplicants({ query, limit: Number(limit) }, false);
   }
 
   @ProfessionalScoped()

@@ -2,6 +2,8 @@ import { isProfessionalBusinessPrincipal, canPerformBusinessAction } from '@shar
 import { accessBuildings } from '@shared/building-access';
 import { PROFESSIONAL_SPECIALTIES } from '@shared/professional-access';
 import { useAccess } from '@/access/AccessProvider';
+import { hasAuthenticatedAccessIdentity } from '../../access/access-policy';
+import { isPersonalAccessAccount } from '@shared/self-service-applicant';
 import { canUseInventoryAction } from './inventory-action-access';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -21,7 +23,7 @@ import { toast } from 'sonner';
 import {
   createInventoryMovement,
   getInventoryMovementOptions,
-  searchPurchaseApplicationApplicants,
+  searchInventoryApplicants,
 } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -1687,8 +1689,9 @@ export function InventoryMovementCreateDialog({
 
             {type !== 'inbound' && (
               <EmployeePicker
-                key={`applicant-${type}-${open}`}
+                key={`applicant-${type}-${open}-${principal.principalFingerprint || ''}`}
                 label="物品申请人"
+                defaultToSelf={type === 'outbound' && !initialOutboundDraft && hasAuthenticatedAccessIdentity(principal) && isPersonalAccessAccount(principal)}
                 required
                 value={applicant}
                 onChange={(value) => {
@@ -1831,16 +1834,20 @@ function EmployeePicker({
   value,
   onChange,
   error,
+  defaultToSelf = false,
 }: {
   label: string;
   required?: boolean;
   value: PurchaseApplicationApplicant | null;
   onChange: (value: PurchaseApplicationApplicant | null) => void;
   error?: string;
+  defaultToSelf?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PurchaseApplicationApplicant[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [retry, setRetry] = useState(0);
   const sequence = useRef(0);
   const invalidateEmployeeSearch = useCallback(() => {
     sequence.current += 1;
@@ -1860,16 +1867,19 @@ function EmployeePicker({
     }
     const current = sequence.current + 1;
     sequence.current = current;
+    setSearchError('');
+    setLoading(true);
     const timer = window.setTimeout(async () => {
-      setLoading(true);
       try {
-        const found = await searchPurchaseApplicationApplicants({
+        const found = await searchInventoryApplicants({
           query: query.trim(),
           limit: 20,
         });
         if (sequence.current === current) setResults(found);
-      } catch {
-        if (sequence.current === current) toast.error(`${label}搜索失败`);
+      } catch (error) {
+        if (sequence.current === current) {
+          setSearchError(errorMessage(error, `${label}搜索失败，请重试`));
+        }
       } finally {
         if (sequence.current === current) setLoading(false);
       }
@@ -1880,18 +1890,50 @@ function EmployeePicker({
         invalidateEmployeeSearch();
       }
     };
-  }, [invalidateEmployeeSearch, label, query, value]);
+  }, [invalidateEmployeeSearch, label, query, retry, value]);
+
+  // Initialize only once; typing or selecting takes ownership of the applicant.
+  useEffect(() => {
+    if (!defaultToSelf || value || query.trim()) return;
+    const current = ++sequence.current;
+    setSearchError('');
+    setLoading(true);
+    void searchInventoryApplicants({ self: true, limit: 1 })
+      .then((found) => {
+        if (sequence.current !== current) return;
+        const person = found.length === 1 ? found[0] : null;
+        if (!person?.recordId?.trim() || !person.openId?.trim()) {
+          throw new Error('未匹配到当前申请人，请输入姓名选择');
+        }
+        onChange(person);
+        setQuery(person.name);
+      })
+      .catch((error) => {
+        if (sequence.current === current) {
+          setSearchError(errorMessage(error, '当前申请人加载失败，请搜索选择或重试'));
+        }
+      })
+      .finally(() => {
+        if (sequence.current === current) setLoading(false);
+      });
+    return () => {
+      if (sequence.current === current) invalidateEmployeeSearch();
+    };
+  }, [defaultToSelf, retry]);
 
   return (
     <FieldBlock label={label} required={required} error={error}>
       <div className="relative">
         <UserRound className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
         <Input
+          aria-label={label}
           value={query}
           onChange={(event) => {
             invalidateEmployeeSearch();
             setQuery(event.target.value);
             onChange(null);
+            setSearchError('');
+            setLoading(Boolean(event.target.value.trim()));
           }}
           placeholder={`输入姓名或工号搜索${label}`}
           className="pl-9 pr-9"
@@ -1899,9 +1941,31 @@ function EmployeePicker({
         {loading && (
           <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-blue-500" />
         )}
-        {!value && query.trim() && !loading && (
+        {!value && (query.trim() || loading || searchError) && (
           <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-blue-100 bg-white p-1 shadow-xl">
-            {results.length ? (
+            {loading ? (
+              <p role="status" className="px-3 py-4 text-center text-xs text-slate-400">
+                正在搜索…
+              </p>
+            ) : searchError ? (
+              <div role="alert" className="space-y-2 px-3 py-3 text-sm text-rose-600">
+                <p className="break-words">{searchError}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11"
+                  onClick={() => {
+                    invalidateEmployeeSearch();
+                    setSearchError('');
+                    setLoading(true);
+                    setRetry((current) => current + 1);
+                  }}
+                >
+                  重新搜索
+                </Button>
+              </div>
+            ) : results.length ? (
               results.map((person) => (
                 <button
                   key={person.openId}

@@ -151,6 +151,7 @@ export function getPostLoginPath(role: AccessRole, currentPath: string, pagePath
   const preferred = defaultPostLoginPath(role, currentPath);
   if (pagePaths === undefined) return preferred;
   if (canAccessPage(role, currentPath, pagePaths)) return normalizePagePath(currentPath);
+  if (canAccessPage(role, '/nantong-base', pagePaths)) return '/nantong-base';
   if (canAccessPage(role, preferred, pagePaths)) return preferred;
   return pagePaths.find(path => path === '/nantong-base') || pagePaths.find(path => path.startsWith('/')) || '/nantong-base';
 }

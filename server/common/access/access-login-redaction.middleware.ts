@@ -1,5 +1,6 @@
 import { Injectable, type NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
+import { ACCOUNT_MUTATION_FIELDS } from '../../../shared/access-configuration.interface';
 
 type RequestWithBody = Omit<Request, 'body'> & { body?: unknown };
 
@@ -9,7 +10,6 @@ const LOGIN_BODY_FIELDS = [
   'purchaseBuilding',
   'password',
 ] as const;
-const CONFIGURATION_BODY_FIELDS = ['clientMutationId','expectedRevision','id','kind','name','role','building','enabled','deleted','openId','password','external','specialties','buildings','personalRules','pagePaths'] as const;
 
 export const ACCESS_LOGIN_MIDDLEWARE_PATH = 'api/access/login';
 
@@ -27,8 +27,8 @@ function redactLoginBody(
 ): Record<string, unknown> {
   const redacted = Object.create(null) as Record<string, unknown>;
   try {
-    if (configuration && Object.keys(body).some(key => !(CONFIGURATION_BODY_FIELDS as readonly string[]).includes(key))) redacted.invalidFields = true;
-    for (const field of configuration ? CONFIGURATION_BODY_FIELDS : LOGIN_BODY_FIELDS) {
+    if (configuration && Object.keys(body).some(key => !(ACCOUNT_MUTATION_FIELDS as readonly string[]).includes(key))) redacted.invalidFields = true;
+    for (const field of configuration ? ACCOUNT_MUTATION_FIELDS : LOGIN_BODY_FIELDS) {
       if (!Object.prototype.hasOwnProperty.call(body, field)) continue;
       const value = body[field];
       if (field === 'password' || field === 'openId' || field === 'employeeName') {

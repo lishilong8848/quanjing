@@ -186,7 +186,7 @@ describe('inventory movement entry UI', () => {
     expect(managementPage).toContain('onCreateRequestHandled=');
     expect(movementPage).toContain('createRequested?: boolean;');
     expect(movementPage).toContain('onCreateRequestHandled?: () => void;');
-    expect(movementPage).toMatch(/if \(!createRequested\)\s*{\s*return;\s*}/);
+    expect(movementPage).toMatch(/if \(!createRequested \|\| !canCreate\)\s*{\s*return;\s*}/);
     expect(movementPage).not.toContain("type === 'inbound' && inboundSyncing");
     expect(movementPage).toMatch(
       /setCreateOpen\(true\);\s*onCreateRequestHandled\?\.\(\);/,
@@ -386,7 +386,7 @@ describe('inventory movement entry UI', () => {
     );
     expect(dialog).toContain("next.destinationBuilding = '请选择去向楼栋'");
     expect(dialog).not.toContain('将触发原“物品确认”工作流');
-    expect(dialog).toContain('searchPurchaseApplicationApplicants');
+    expect(dialog).toContain('searchInventoryApplicants');
     expect(dialog).toContain('getInventoryMovementOptions');
     expect(dialog).toContain('createInventoryMovement');
     expect(dialog).toContain('sm:max-w-3xl');
@@ -1206,7 +1206,7 @@ describe('inventory movement entry UI', () => {
     );
     expect(
       employeePicker.match(/sequence\.current === current/g) ?? [],
-    ).toHaveLength(4);
+    ).toHaveLength(7);
     expect(employeePicker).toContain('}, 250)');
   });
 

@@ -23,6 +23,7 @@ import {
   getPurchaseApplicationSubmissionTaskStatus,
   getPurchaseApplicationOptions,
   searchPurchaseApplicationApplicants,
+  searchInventoryApplicants,
   searchPurchaseApplicationCatalog,
   submitPurchaseApplications,
 } from '../../client/src/api';
@@ -134,6 +135,25 @@ describe('purchase application api', () => {
     await expect(
       searchPurchaseApplicationApplicants({ query: '马', limit: 20 }),
     ).rejects.toThrow('申请人搜索返回格式无效');
+  });
+
+  it('uses the inventory selector and canonical self lookup without procurement authorization', async () => {
+    (axiosForBackend as jest.Mock).mockResolvedValue({ data: [] });
+    await searchInventoryApplicants({ query: '合成', limit: 20 });
+    await searchInventoryApplicants({ self: true, limit: 1 });
+    expect(axiosForBackend).toHaveBeenNthCalledWith(1, {
+      url: '/api/inventory-management/applicant-search', method: 'GET',
+      params: { query: '合成', limit: 20 }, timeout: 120_000,
+    });
+    expect(axiosForBackend).toHaveBeenNthCalledWith(2, {
+      url: '/api/inventory-management/applicant-search', method: 'GET',
+      params: { self: true, limit: 1 }, timeout: 15_000,
+    });
+  });
+
+  it('rejects malformed inventory selector data without altering a pending draft', async () => {
+    (axiosForBackend as jest.Mock).mockResolvedValue({ data: '<html>error</html>' });
+    await expect(searchInventoryApplicants({ query: '合成' })).rejects.toThrow('申请人搜索返回格式无效');
   });
 });
 

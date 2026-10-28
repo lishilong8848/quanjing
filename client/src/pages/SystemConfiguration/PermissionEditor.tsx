@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import type { AccessPrincipal, BuildingAdminBuilding } from '@shared/access-control.interface';
+import type { AccessPrincipal } from '@shared/access-control.interface';
 import { BUILDING_ADMIN_BUILDINGS } from '@shared/access-control.interface';
-import { PROFESSIONAL_SPECIALTIES, type ProfessionalSpecialty } from '@shared/professional-access';
-import { BUSINESS_ACTION_LABELS, decideBusinessPermission, personalPermissionPagePaths, type BusinessAction, type BusinessModule, type PersonalPermissionRule } from '@shared/business-permissions';
+import { PROFESSIONAL_SPECIALTIES } from '@shared/professional-access';
+import { BUSINESS_ACTION_LABELS, personalPermissionPagePaths, type BusinessAction, type BusinessModule } from '@shared/business-permissions';
 import type { EffectiveAuthorization } from '@shared/authorization-profile';
 import { createPermissionCatalog } from '@shared/permission-catalog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { authorizationPageMode, editAuthorizationAction, editAuthorizationPage } from './authorization-editing';
+import { authorizationModuleState, authorizationPageMode, editAuthorizationAction, editAuthorizationPage, editAuthorizationScope } from './authorization-editing';
 import { personalPermissionMode, type PersonalPermissionMode } from './personal-permission-editing';
 
 type CatalogModule = { id: BusinessModule; label: string; scoped: boolean; actions: readonly BusinessAction[]; conditions?: readonly string[] };
@@ -60,26 +60,40 @@ function ModulePermissions({ module, value, principal, template, inherited, lock
   module: CatalogModule; value: EffectiveAuthorization; principal: AccessPrincipal; template: boolean; inherited: boolean; locked: boolean; readOnly: boolean;
   onChange: (value: EffectiveAuthorization) => void; onError: (message: string) => void;
 }) {
-  const [buildings, setBuildings] = useState<PersonalPermissionRule['buildings']>(principal.buildings?.length ? [...principal.buildings] : null);
-  const [specialties, setSpecialties] = useState<PersonalPermissionRule['specialties']>(principal.specialties?.length ? [...principal.specialties] : null);
+  const state = useMemo(() => authorizationModuleState(value, principal, module.id, template), [value, principal, module.id, template]);
+  const { buildings, specialties } = state.scope;
   const scope = { module: module.id, buildings: module.scoped ? buildings : null, specialties: module.scoped ? specialties : null };
   const validScope = !module.scoped || buildings?.length !== 0 && specialties?.length !== 0;
-  const points = useMemo<{ building?: BuildingAdminBuilding; specialty?: ProfessionalSpecialty }[]>(() => module.scoped ? (buildings || BUILDING_ADMIN_BUILDINGS).flatMap(building => (specialties || PROFESSIONAL_SPECIALTIES).map(specialty => ({ building, specialty }))) : [{}], [module.scoped, buildings, specialties]);
-  const actions = useMemo(() => module.actions.map(action => {
-    const decisions = points.map(point => decideBusinessPermission(template && point.building && point.specialty ? { ...principal, purchaseBuilding: point.building, buildings: [point.building], specialties: [point.specialty] } : principal, { module: module.id, action, ...point }));
+  const actions = useMemo(() => state.actions.map(({ action, points }) => {
+    const decisions = points.filter(point => readOnly || !module.scoped ||
+      (!buildings || !!point.building && buildings.includes(point.building)) && (!specialties || !!point.specialty && specialties.includes(point.specialty)));
     const allowed = decisions.filter(decision => decision.allowed).length;
     const state: 'none' | 'allow' | 'mixed' | 'deny' = !decisions.length ? 'none' : allowed === decisions.length ? 'allow' : allowed ? 'mixed' : 'deny';
     const sources = [...new Set(decisions.map(decision => decision.source))].map(source => ({ role: '角色或独立基线', allow: '明确允许', deny: '明确限制', none: '未授权' }[source])).join('、');
-    return { action, state, sources };
-  }), [module, points, principal, template]);
+    const groups = new Map<string, { buildings: string[]; specialties: string[] }>();
+    for (const building of BUILDING_ADMIN_BUILDINGS) {
+      const permitted = PROFESSIONAL_SPECIALTIES.filter(specialty => decisions.some(point => point.allowed && point.building === building && point.specialty === specialty));
+      if (!permitted.length) continue;
+      const key = permitted.join('、'), group = groups.get(key) || { buildings: [], specialties: permitted };
+      group.buildings.push(building); groups.set(key, group);
+    }
+    const ranges = [...groups.values()].map(group => `${group.buildings.length === BUILDING_ADMIN_BUILDINGS.length ? '全部楼栋' : group.buildings.join('、')} · ${group.specialties.length === PROFESSIONAL_SPECIALTIES.length ? '全部专业' : group.specialties.join('、')}`);
+    return { action, state, sources, ranges };
+  }), [state.actions, module.scoped, buildings, specialties, readOnly]);
+  function changeScope(next: typeof scope) {
+    try { onChange(editAuthorizationScope(value, template, next)); }
+    catch (failure) { onError((failure as Error).message); }
+  }
   return <fieldset className="min-w-0 space-y-3 rounded-lg border bg-card p-3">
     <legend className="px-1 text-sm font-medium">{module.label}</legend>
     {module.conditions?.map(condition => <p key={condition} className="text-xs text-muted-foreground">{condition}</p>)}
-    {module.scoped && <div className="grid gap-3 sm:grid-cols-2"><Scope label={`${module.label}楼栋范围`} options={BUILDING_ADMIN_BUILDINGS} selected={buildings} onChange={setBuildings} disabled={locked && !readOnly} /><Scope label={`${module.label}专业范围`} options={PROFESSIONAL_SPECIALTIES} selected={specialties} onChange={setSpecialties} disabled={locked && !readOnly} /></div>}
-    {module.scoped && inherited && !readOnly && <p className="text-xs text-muted-foreground">当前选择仅决定要编辑的范围；“允许”只增补此范围，不会收回角色已有权限。只保留部分范围时，请将其余范围设为“限制”。</p>}
+    {module.scoped && !readOnly && <div className="grid gap-3 sm:grid-cols-2"><Scope label={`${module.label}楼栋范围`} options={BUILDING_ADMIN_BUILDINGS} selected={buildings} onChange={buildings => changeScope({ ...scope, buildings })} disabled={locked} /><Scope label={`${module.label}专业范围`} options={PROFESSIONAL_SPECIALTIES} selected={specialties} onChange={specialties => changeScope({ ...scope, specialties })} disabled={locked} /></div>}
+    {module.scoped && !readOnly && <p className="text-xs text-muted-foreground">所选范围是此功能所有操作的上限，保存后生效；“全部”不代表全部已授权，各操作的实际范围如下。</p>}
     {module.scoped && template && <p className="text-xs text-muted-foreground">系统角色按所选任职范围预览，具体人员仍受其任职范围约束。</p>}
-    {actions.map(({ action, state, sources }) => <div key={action} className="grid min-w-0 gap-2 border-t pt-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
-      <div className="min-w-0 space-y-1 text-sm"><p className="font-medium">{BUSINESS_ACTION_LABELS[action]} <span className="font-normal text-muted-foreground">· {!validScope ? '请选择范围' : state === 'allow' ? '允许' : state === 'mixed' ? '部分允许' : '限制'}</span></p><p className="break-words text-xs text-muted-foreground">{sources}</p></div>
+    {actions.map(({ action, state, sources, ranges }) => <div key={action} className={`grid min-w-0 gap-2 border-t pt-3${readOnly ? '' : ' sm:grid-cols-[minmax(0,1fr)_11rem]'}`}>
+      <div className="min-w-0 space-y-1 text-sm"><p className="font-medium">{BUSINESS_ACTION_LABELS[action]} <span className="font-normal text-muted-foreground">· {!validScope && !readOnly ? '请选择范围' : state === 'allow' ? '允许' : state === 'mixed' ? '部分允许' : '限制'}</span></p><p className="break-words text-xs text-muted-foreground">{sources}</p>
+        {module.scoped && <div className="space-y-1 text-xs text-muted-foreground" aria-label={`${module.label}${BUSINESS_ACTION_LABELS[action]}生效范围`}>{ranges.length ? ranges.map(range => <p key={range} className="break-words">{range}</p>) : <p>无可用楼栋及专业</p>}</div>}
+      </div>
       {!readOnly && <ModeSelect label={`${module.label}${BUSINESS_ACTION_LABELS[action]}权限`} inherited={inherited} disabled={locked || !validScope} value={inherited ? personalPermissionMode(value.overrides.rules, scope, action) : state === 'none' ? 'deny' : state} onChange={mode => { try { onChange(editAuthorizationAction(value, template, scope, action, mode, () => crypto.randomUUID())); } catch (failure) { onError((failure as Error).message); } }} />}
     </div>)}
   </fieldset>;

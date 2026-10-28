@@ -243,6 +243,10 @@ export class UnifiedAccessGuard implements CanActivate {
 
     if (isAuthorizedCampusOperationsScreenshotRequest(request, path, now)) return true;
 
+    if (!principal.effectiveAuthorization && request.method === 'GET' && path === '/api/inventory-management/applicant-search') {
+      return hasBusinessPermissionSomewhere(principal, { module: 'inventory', action: 'create' });
+    }
+
     if (principal.effectiveAuthorization && principal.role !== 'admin') {
       if (!validEffectiveAuthorization(principal.effectiveAuthorization) || classification.kind === 'admin' || classification.kind === 'denied') return false;
       if (classification.kind === 'business') {
