@@ -250,6 +250,26 @@ export class AccessConfigurationService implements OnModuleInit {
     const account = this.accounts()[id];
     return account && account.version === version && this.validateSession(id, version, account.role, account.building, account.specialties, account.buildings) ? toPrincipal(account) : undefined;
   }
+  impersonationTarget(id: string): AccessPrincipal | undefined {
+    const account = this.accounts()[id];
+    return account ? this.currentPrincipal(id, account.version) : undefined;
+  }
+  impersonationStopped(family: string): boolean {
+    return !!this.store.read().mutations[`impersonation-stop-${family}`];
+  }
+  async recordImpersonation(actor: AccessPrincipal, target: string, family: string, action: 'start' | 'stop', fingerprint: string, times: { issuedAt: number; expiresAt: number }): Promise<{ issuedAt: number; expiresAt: number }> {
+    const id = `impersonation-${action}-${family}`;
+    const state = await this.store.mutate(this.store.read().revision, id, fingerprint, current => {
+      this.assertActor(actor, current);
+      current.audit.push({ id, at: new Date(times.issuedAt).toISOString(), actorId: actor.accountId!, actorName: actor.displayName || '管理员',
+        target, action: action === 'start' ? '开始代登录' : '结束代登录', before: '', after: JSON.stringify(times) });
+    });
+    const entry = state.audit.find(item => item.id === id);
+    if (!entry) throw new ConflictException('代登录记录已过期，请重新发起');
+    const recorded = JSON.parse(entry.after) as typeof times;
+    if (!Number.isSafeInteger(recorded.issuedAt) || !Number.isSafeInteger(recorded.expiresAt)) throw new ServiceUnavailableException('代登录记录无法核对');
+    return recorded;
+  }
   validateSession(id: string | undefined, version: number | undefined, role: string, building: string | null, specialties?: readonly string[], buildings?: readonly string[]): boolean {
     const state = this.store.read();
     if (!id) return !['professional_admin', 'professional_engineer'].includes(role) && !state.legacySessionsRevoked;
@@ -475,7 +495,7 @@ export class AccessConfigurationService implements OnModuleInit {
     return this.snapshot();
   }
   private assertActor(actor: AccessPrincipal, state: ConfigurationState): void {
-    if (actor.role !== 'admin' || (actor.accountId && !this.validateSession(actor.accountId, actor.authorizationVersion, actor.role, actor.purchaseBuilding)) || (!actor.accountId && state.legacySessionsRevoked)) throw new UnauthorizedException('管理权限已变化，请重新登录');
+    if (actor.role !== 'admin' || actor.impersonation || (actor.accountId && !this.validateSession(actor.accountId, actor.authorizationVersion, actor.role, actor.purchaseBuilding)) || (!actor.accountId && state.legacySessionsRevoked)) throw new UnauthorizedException('管理权限已变化，请重新登录');
   }
   private preservePermission(state: ConfigurationState, account: StoredAccount): void {
     if (this.employmentInactive(account,state)) return;

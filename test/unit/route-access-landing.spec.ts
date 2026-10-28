@@ -119,6 +119,12 @@ describe('authenticated page access landing', () => {
     mockLocation.pathname = '/nantong-base';
     expect(outlet()).toBeDefined();
   });
+  it('does not open automatic login over an expired impersonation recovery context', () => {
+    mockAccess.role = 'guest'; mockAccess.expiresAt = null; mockAccess.principalFingerprint = null;
+    mockAccess.pagePaths = []; mockAccess.impersonation = { actorAccountId: 'synthetic-admin', actorName: '合成管理员', targetName: '合成人员', expiresAt: Date.now() - 1 };
+    render(); mockEffects.forEach(effect => effect());
+    expect(mockAccess.requestLogin).not.toHaveBeenCalled();
+  });
   it('keeps administrators and controlled screenshot requests on their current route', () => {
     mockAccess.role = 'admin'; mockAccess.pagePaths = [];
     expect(outlet()).toBeDefined();

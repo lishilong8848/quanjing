@@ -272,6 +272,7 @@ export function GlobalNavigation() {
     <header
       data-global-navigation="true"
       data-screenshot-hidden="true"
+      style={{ top: 'var(--access-impersonation-height, 0px)' }}
       className="duty-desktop-utility-nav fixed inset-x-0 top-0 z-40 h-16 border-b border-slate-200/90 bg-slate-50/95 shadow-[0_1px_3px_hsl(220_25%_20%/0.08)] backdrop-blur-xl"
     >
       <div className="mx-auto flex h-full w-full max-w-[1600px] items-center gap-2 px-3 sm:px-4 lg:px-6">

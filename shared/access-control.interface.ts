@@ -78,6 +78,7 @@ export type AccessLoginAccountType =
   | 'construction_admin';
 
 export interface AccessPrincipal {
+  impersonation?: { actorAccountId: string; actorName: string; targetName: string; expiresAt: number };
   role: AccessRole;
   purchaseBuilding: PurchaseAccessBuilding | BuildingAdminBuilding | null;
   displayName?: string;

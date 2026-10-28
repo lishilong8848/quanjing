@@ -70,8 +70,8 @@ describe('unified access reauthentication defaults', () => {
     expect(source).toContain('rememberReauthenticationLogin');
     expect(source).toContain('markReauthenticationPending');
     expect(source).toContain('markSessionExpired');
-    expect(source).toContain('initialPurchaseBuilding=');
-    expect(source).toContain('setPurchaseBuilding(initialPurchaseBuilding);');
+    expect(source).toContain('preferredAccountType: resolvedAccountType');
+    expect(source).toContain('preferredPurchaseBuilding: resolvedPurchaseBuilding');
     expect(source).not.toContain('shouldRequestLoginAfterInvalidation');
     expect(source).not.toContain('requestReauthentication');
     expect(source).toMatch(/remainingMs <= 0[\s\S]*?markSessionExpired\(\)/);

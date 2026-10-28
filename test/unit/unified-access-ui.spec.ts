@@ -808,7 +808,7 @@ describe('unified access frontend integration', () => {
     expect(providerSource).toContain('if (requiresFeishuIdentityRef.current) void retrySession();');
     expect(providerSource).toContain('else void refreshSession(true);');
     expect(guardSource.indexOf('if (isConfirmingIdentity || (')).toBeLessThan(guardSource.indexOf('if (allowed) return <Outlet'));
-    expect(guardSource).toContain('if (isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;');
+    expect(guardSource).toContain('if (access.impersonation || isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;');
     const errorStart = guardSource.indexOf('if (sessionError) {');
     expect(errorStart).toBeGreaterThan(-1);
     expect(errorStart).toBeLessThan(guardSource.indexOf('if (allowed) return <Outlet'));

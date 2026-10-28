@@ -55,7 +55,7 @@ export default function RouteAccessGuard() {
   const automaticLoginRequestKey = `${location.pathname}\n${reason}\n${preferredAccountType || ''}`;
 
   React.useEffect(() => {
-    if (isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;
+    if (access.impersonation || isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;
     if (allowed) {
       lastAutomaticLoginRequestRef.current = '';
       return;
@@ -74,6 +74,7 @@ export default function RouteAccessGuard() {
   }, [
     allowed,
     authenticated,
+    access.impersonation,
     automaticLoginRequestKey,
     isLoading,
     isConfirmingIdentity,

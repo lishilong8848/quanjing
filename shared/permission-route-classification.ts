@@ -57,6 +57,8 @@ export const PERMISSION_ROUTE_CLASSIFICATIONS: readonly PermissionRouteDefinitio
   {"method":"POST","path":"/api/access/login","kind":"protocol","protection":"authentication-session-handler","source":"server/common/access/unified-access.controller.ts#login"},
   {"method":"GET","path":"/api/access/session","kind":"protocol","protection":"authentication-session-handler","source":"server/common/access/unified-access.controller.ts#session"},
   {"method":"POST","path":"/api/access/logout","kind":"protocol","protection":"authentication-session-handler","source":"server/common/access/unified-access.controller.ts#logout"},
+  {"method":"POST","path":"/api/access/impersonation/start","kind":"admin","protection":"live-native-administrator-same-origin-idempotent-audit","source":"server/common/access/unified-access.controller.ts#startImpersonation"},
+  {"method":"POST","path":"/api/access/impersonation/stop","kind":"protocol","protection":"signed-delegation-and-original-administrator-owner-cookie","source":"server/common/access/unified-access.controller.ts#stopImpersonation"},
   {"method":"GET","path":"/api/access/feishu/authorize","kind":"protocol","protection":"authentication-session-handler","source":"server/common/access/unified-access.controller.ts#feishuAuthorize"},
   {"method":"GET","path":"/api/access/feishu/callback","kind":"protocol","protection":"authentication-session-handler","source":"server/common/access/unified-access.controller.ts#feishuCallback"},
   {"method":"GET","path":"/api/ali-monthly-report/config","kind":"business","permission":{"module":"monthly_reports","action":"read"},"source":"server/modules/ali-monthly-report/ali-monthly-report.controller.ts#getConfig"},

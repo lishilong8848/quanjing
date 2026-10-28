@@ -226,7 +226,7 @@ export class UnifiedAccessGuard implements CanActivate {
     request.accessPrincipalFingerprint = renewed?.principalFingerprint;
     request.accessRole = principal.role;
 
-    if (path.startsWith('/api/access/configuration')) return principal.role === 'admin';
+    if (path.startsWith('/api/access/configuration')) return principal.role === 'admin' && !principal.impersonation;
 
     const classification = classifyBusinessRequest(path, request.method, hasForcedRefresh(request) || hasPageReadSideEffect(request));
     const business = classification.permission;
@@ -550,11 +550,12 @@ export function readAccessCookie(
   header: string | undefined,
   access: UnifiedAccessService,
   now = Date.now(),
+  names = { cookieName: access.cookieName, firstPartyName: FIRST_PARTY_ACCESS_COOKIE_NAME },
 ): StrictCookieResult & { diagnostic?: 'duplicate' | 'malformed' | 'rejected' } {
-  const firstParty = readStrictCookie(header, FIRST_PARTY_ACCESS_COOKIE_NAME);
-  const legacy = readStrictCookie(header, access.cookieName);
+  const firstParty = readStrictCookie(header, names.firstPartyName);
+  const legacy = readStrictCookie(header, names.cookieName);
   const selected = firstParty.present ? firstParty : legacy;
-  const selectedName = firstParty.present ? FIRST_PARTY_ACCESS_COOKIE_NAME : access.cookieName;
+  const selectedName = firstParty.present ? names.firstPartyName : names.cookieName;
   if (selected.present && !selected.value) {
     const matches = typeof header === 'string'
       ? header.split(';').filter(part => part.split('=', 1)[0].trim() === selectedName).length
@@ -580,6 +581,7 @@ export function writeAccessCookie(
   name: string,
   session: AccessLoginResult,
   now: number,
+  firstPartyName = FIRST_PARTY_ACCESS_COOKIE_NAME,
 ): void {
   const options = accessCookieSecurityOptions(request);
   const { partitioned, ...unpartitionedOptions } = options;
@@ -591,7 +593,7 @@ export function writeAccessCookie(
     maxAge: Math.max(0, session.expiresAt - now),
   });
   if (options.secure) {
-    response.cookie(FIRST_PARTY_ACCESS_COOKIE_NAME, session.token, {
+    response.cookie(firstPartyName, session.token, {
       httpOnly: true, secure: true, sameSite: 'lax', path: '/',
       expires: new Date(session.expiresAt),
       maxAge: Math.max(0, session.expiresAt - now),
@@ -603,6 +605,7 @@ export function clearAccessCookie(
   response: Response,
   request: Request,
   name: string,
+  firstPartyName = FIRST_PARTY_ACCESS_COOKIE_NAME,
 ): void {
   const options = accessCookieSecurityOptions(request);
   const { partitioned, ...unpartitionedOptions } = options;
@@ -610,7 +613,7 @@ export function clearAccessCookie(
   response.clearCookie(name, options);
   if (options.secure) {
     // A container may refuse partitioned deletion; block legacy fallback until every old session expires.
-    response.cookie(FIRST_PARTY_ACCESS_COOKIE_NAME, LOGGED_OUT_COOKIE_VALUE, {
+    response.cookie(firstPartyName, LOGGED_OUT_COOKIE_VALUE, {
       httpOnly: true, secure: true, sameSite: 'lax', path: '/',
       maxAge: ACCESS_SESSION_TTL_MS,
       expires: new Date(Date.now() + ACCESS_SESSION_TTL_MS),

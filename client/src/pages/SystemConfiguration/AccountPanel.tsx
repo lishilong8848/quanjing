@@ -1,5 +1,5 @@
-import { memo, useDeferredValue, useMemo, useState } from 'react';
-import { Plus, Search, KeyRound, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
+import { memo, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { Plus, Search, KeyRound, Pencil, ChevronLeft, ChevronRight, LogIn, Loader2 } from 'lucide-react';
 import type { ManagedAccount } from '@shared/access-configuration.interface';
 import type { AuthorizationTemplate } from '@shared/authorization-profile';
 import { BUILDING_ADMIN_BUILDINGS } from '@shared/access-control.interface';
@@ -9,8 +9,28 @@ import { Input } from '@/components/ui/input';
 import { FeishuIcon } from '@/components/FeishuIcon';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ROLE_LABELS, accountStatus, accountAuthorizationKey, accountAuthorizationLabel } from './model';
+import { useAccess } from '@/access/AccessProvider';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from '@/components/ui/alert-dialog';
+
+export function canImpersonateAccount(account: ManagedAccount): boolean {
+  return account.enabled && !account.deleted && account.personnelActive !== false && !account.reactivationRequired && (!account.permissionsRevoked || account.guestLoginAllowed === true);
+}
 
 export const AccountPanel = memo(function AccountPanel({ accounts, templates = [], onEdit, external = false, personnelPassword = false }: { accounts: ManagedAccount[]; templates?: readonly AuthorizationTemplate[]; onEdit: (account?: ManagedAccount) => void; external?: boolean; personnelPassword?: boolean }) {
+  const access = useAccess();
+  const mayImpersonate = access.role === 'admin' && !access.impersonation;
+  const [selected, setSelected] = useState<ManagedAccount>();
+  const [impersonationError, setImpersonationError] = useState('');
+  const mutation = useRef<string | undefined>(undefined);
+  const pending = useRef(false);
+  const chooseImpersonation = (account: ManagedAccount) => { setSelected(account); setImpersonationError(''); mutation.current = crypto.randomUUID(); };
+  const startImpersonation = async () => {
+    if (!selected || pending.current || access.isChangingIdentity || !mayImpersonate || !canImpersonateAccount(selected)) return;
+    pending.current = true; setImpersonationError('');
+    try { if (await access.startImpersonation(selected.id, mutation.current!)) setSelected(undefined); }
+    catch (failure) { setImpersonationError((failure as Error).message); }
+    finally { pending.current = false; }
+  };
   const [query, setQuery] = useState(''), [kind, setKind] = useState('all'), [role, setRole] = useState('all'), [building, setBuilding] = useState('all'), [status, setStatus] = useState('all'), [page, setPage] = useState(0);
   const deferred = useDeferredValue(query);
   const filtered = useMemo(() => accounts.filter(account => (!deferred || `${account.name} ${account.openId || ''}`.toLowerCase().includes(deferred.toLowerCase())) &&
@@ -31,11 +51,12 @@ export const AccountPanel = memo(function AccountPanel({ accounts, templates = [
     <p className="text-xs text-muted-foreground">{personnelPassword ? '使用姓名和密码登录；在此配置权限。' : external ? '员工及组织架构目录之外的飞书人员，由管理员填写姓名和当前应用 Open ID。' : '备用密码用于通用登录身份；个人可使用飞书或姓名登录。'}</p>
     <div className="rounded-lg border bg-card">
       <Table className="hidden md:table"><TableHeader><TableRow><TableHead>姓名 / 登录入口</TableHead><TableHead>账号类型</TableHead><TableHead>权限角色</TableHead><TableHead>生效范围</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>
-        {visible.map(account => <TableRow key={account.id}><TableCell><div className="max-w-72 truncate font-medium" title={account.name}>{account.name}</div><div className="mt-1 text-xs text-muted-foreground">{account.permissionSource === 'personnel' ? '人员表同步' : account.permissionSource === 'manual' ? '手工维护' : account.source === 'default' ? '现有授权' : '系统配置'}</div></TableCell><TableCell><span className="inline-flex items-center gap-2">{account.kind === 'feishu' ? <FeishuIcon /> : <KeyRound className="size-4 text-muted-foreground" />}{account.kind === 'feishu' ? '飞书' : '本地'}</span></TableCell><TableCell>{accountAuthorizationLabel(account, templates)}{!!account.personalRules?.length && <p className="mt-1 text-xs text-primary">个人规则 {account.personalRules.length} 条</p>}</TableCell><TableCell>{[account.buildings?.join('、') || account.building, account.specialties?.join('、')].filter(Boolean).join(' · ') || '全基地'}</TableCell><TableCell><Badge variant={account.enabled && !account.deleted ? 'secondary' : 'outline'}>{accountStatus(account)}</Badge></TableCell><TableCell className="text-right"><Button variant="ghost" size="sm" aria-label={`编辑${account.name}`} onClick={() => onEdit(account)}><Pencil className="size-4" />编辑</Button></TableCell></TableRow>)}
+        {visible.map(account => <TableRow key={account.id}><TableCell><div className="max-w-72 truncate font-medium" title={account.name}>{account.name}</div><div className="mt-1 text-xs text-muted-foreground">{account.permissionSource === 'personnel' ? '人员表同步' : account.permissionSource === 'manual' ? '手工维护' : account.source === 'default' ? '现有授权' : '系统配置'}</div></TableCell><TableCell><span className="inline-flex items-center gap-2">{account.kind === 'feishu' ? <FeishuIcon /> : <KeyRound className="size-4 text-muted-foreground" />}{account.kind === 'feishu' ? '飞书' : '本地'}</span></TableCell><TableCell>{accountAuthorizationLabel(account, templates)}{!!account.personalRules?.length && <p className="mt-1 text-xs text-primary">个人规则 {account.personalRules.length} 条</p>}</TableCell><TableCell>{[account.buildings?.join('、') || account.building, account.specialties?.join('、')].filter(Boolean).join(' · ') || '全基地'}</TableCell><TableCell><Badge variant={account.enabled && !account.deleted ? 'secondary' : 'outline'}>{accountStatus(account)}</Badge></TableCell><TableCell className="text-right"><div className="flex flex-wrap justify-end gap-1"><Button variant="ghost" size="sm" aria-label={`编辑${account.name}`} onClick={() => onEdit(account)}><Pencil className="size-4" />编辑</Button>{mayImpersonate && <Button variant="outline" size="sm" className="min-h-11" aria-label={`代登录${account.name}`} disabled={access.isChangingIdentity || !canImpersonateAccount(account)} title={canImpersonateAccount(account) ? undefined : '该账号当前不能登录'} onClick={() => chooseImpersonation(account)}><LogIn className="size-4" />代登录</Button>}</div></TableCell></TableRow>)}
       </TableBody></Table>
-      <div className="divide-y md:hidden">{visible.map(account => <div key={account.id} className="flex gap-3 p-4"><div className="min-w-0 flex-1"><p className="truncate font-medium" title={account.name}>{account.name}</p><p className="mt-1 text-sm text-muted-foreground">{accountAuthorizationLabel(account, templates)} · {[account.buildings?.join('、') || account.building, account.specialties?.join('、')].filter(Boolean).join(' · ') || '全基地'}</p><div className="mt-2 flex items-center gap-2 text-xs"><Badge variant="outline">{account.kind === 'feishu' ? '飞书' : '本地'}</Badge><Badge variant="secondary">{accountStatus(account)}</Badge></div></div><Button variant="outline" size="sm" aria-label={`编辑${account.name}`} onClick={() => onEdit(account)}>编辑</Button></div>)}</div>
+      <div className="divide-y md:hidden">{visible.map(account => <div key={account.id} className="flex gap-3 p-4"><div className="min-w-0 flex-1"><p className="truncate font-medium" title={account.name}>{account.name}</p><p className="mt-1 text-sm text-muted-foreground">{accountAuthorizationLabel(account, templates)} · {[account.buildings?.join('、') || account.building, account.specialties?.join('、')].filter(Boolean).join(' · ') || '全基地'}</p><div className="mt-2 flex items-center gap-2 text-xs"><Badge variant="outline">{account.kind === 'feishu' ? '飞书' : '本地'}</Badge><Badge variant="secondary">{accountStatus(account)}</Badge></div></div><div className="flex shrink-0 flex-col gap-2"><Button variant="outline" size="sm" aria-label={`编辑${account.name}`} onClick={() => onEdit(account)}>编辑</Button>{mayImpersonate && <Button variant="outline" size="sm" className="min-h-11" aria-label={`代登录${account.name}`} disabled={access.isChangingIdentity || !canImpersonateAccount(account)} onClick={() => chooseImpersonation(account)}>代登录</Button>}</div></div>)}</div>
       {!visible.length && <p className="p-8 text-center text-sm text-muted-foreground">没有符合条件的账号</p>}
     </div>
     <div className="flex items-center justify-between text-sm text-muted-foreground"><span>共 {filtered.length} 项</span><div className="flex items-center gap-2"><Button variant="outline" size="icon" aria-label="上一页" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft className="size-4" /></Button><span>{currentPage + 1} / {Math.max(1, Math.ceil(filtered.length / 20))}</span><Button variant="outline" size="icon" aria-label="下一页" disabled={(currentPage + 1) * 20 >= filtered.length} onClick={() => setPage(currentPage + 1)}><ChevronRight className="size-4" /></Button></div></div>
+    <AlertDialog open={!!selected} onOpenChange={open => { if (!open && !pending.current) setSelected(undefined); }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>代登录“{selected?.name}”</AlertDialogTitle><AlertDialogDescription>进入该账号的实际权限，后续业务操作会真实生效。页面将持续显示代登录状态，可随时返回管理员。</AlertDialogDescription></AlertDialogHeader>{impersonationError && <p role="alert" className="break-words text-sm text-destructive">{impersonationError}</p>}<AlertDialogFooter><AlertDialogCancel disabled={access.isChangingIdentity}>取消</AlertDialogCancel><Button type="button" disabled={access.isChangingIdentity || !mayImpersonate} onClick={() => void startImpersonation()}>{access.isChangingIdentity && <Loader2 className="size-4 animate-spin" />}{access.isChangingIdentity ? '正在进入…' : '确认代登录'}</Button></AlertDialogFooter></AlertDialogContent></AlertDialog>
   </section>;
 });

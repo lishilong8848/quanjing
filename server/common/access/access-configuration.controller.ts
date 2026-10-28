@@ -170,7 +170,7 @@ export class AccessConfigurationController {
   private actor(request: Request, write = false): AccessPrincipal {
     const cookie = readAccessCookie(request.headers.cookie, this.access);
     const actor = this.access.readSession(cookie.value).principal;
-    if (actor.role !== 'admin') throw new UnauthorizedException('需要管理员登录');
+    if (actor.role !== 'admin' || actor.impersonation) throw new UnauthorizedException('请返回管理员身份后维护权限配置');
     if (write) {
       const origin = request.headers.origin;
       const publicUrl = process.env.PUBLIC_BASE_URL?.trim();

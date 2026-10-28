@@ -4,6 +4,8 @@ import { professionalScopeIsValid } from '../../../shared/professional-access';
 import {
   HttpException,
   HttpStatus,
+  ForbiddenException,
+  BadRequestException,
   Injectable,
   Optional,
   ServiceUnavailableException,
@@ -27,6 +29,7 @@ import { normalizeAccessDisplayName } from './access-display-name';
 import { verifyPersonnelPassword } from './personnel-password';
 import { effectivePagePaths } from '../../../shared/page-access';
 import { AccessConfigurationService } from './access-configuration.service';
+import { IMPERSONATION_TTL_MS, validImpersonationPayload, type ImpersonationPayload } from './access-impersonation';
 import {
   createHash,
   createHmac,
@@ -113,10 +116,12 @@ interface AccessSessionPayloadV6 extends Omit<AccessSessionPayloadV3, 'version' 
 type AccessSessionPayload = AccessSessionPayloadV2 | AccessSessionPayloadV3 | AccessSessionPayloadV4 | AccessSessionPayloadV5 | AccessSessionPayloadV6 | AccessSessionPayloadV7 | AccessSessionPayloadV8 | AccessSessionPayloadV9 | AccessSessionPayloadV10;
 
 interface ResolvedAccessSessionPayload {
+  impersonationSession?: ImpersonationPayload;
+  impersonation?: AccessPrincipal['impersonation'];
   effectiveAuthorization?: import('../../../shared/authorization-profile').EffectiveAuthorization;
-  personalRules?: import('../../../shared/business-permissions').PersonalPermissionRule[];
-  buildings?: import('../../../shared/access-control.interface').BuildingAdminBuilding[];
-  specialties?: import('../../../shared/professional-access').ProfessionalSpecialty[];
+  personalRules?: AccessPrincipal['personalRules'];
+  buildings?: AccessPrincipal['buildings'];
+  specialties?: AccessPrincipal['specialties'];
   displayName?: string;
   accountId?: string;
   authorizationVersion?: number;
@@ -302,6 +307,7 @@ export class UnifiedAccessService {
         ...(payload.effectiveAuthorization ? { effectiveAuthorization: structuredClone(payload.effectiveAuthorization) } : {}),
         ...(payload.displayName ? { displayName: payload.displayName } : {}),
         ...sessionIdentity(payload),
+        ...(payload.impersonation ? { impersonation: payload.impersonation } : {}),
       },
       expiresAt: payload.expiresAt,
     };
@@ -323,6 +329,7 @@ export class UnifiedAccessService {
         ...(payload.effectiveAuthorization ? { effectiveAuthorization: structuredClone(payload.effectiveAuthorization) } : {}),
         ...(payload.displayName ? { displayName: payload.displayName } : {}),
         ...sessionIdentity(payload),
+        ...(payload.impersonation ? { impersonation: payload.impersonation } : {}),
       },
       expiresAt: payload.expiresAt,
       principalFingerprint: this.fingerprintFor(payload.sessionFamilyId),
@@ -336,6 +343,11 @@ export class UnifiedAccessService {
   renew(token: string | undefined, now = Date.now()): AccessLoginResult | null {
     const payload = this.readPayload(token, now);
     if (!payload) return null;
+    if (payload.impersonationSession) {
+      const session = this.readSessionIdentity(token, now);
+      if (session.expiresAt === null) return null;
+      return { token: token!, principal: session.principal, expiresAt: payload.expiresAt, principalFingerprint: this.fingerprintFor(payload.sessionFamilyId) };
+    }
     return this.issueSession(
       { role: payload.role, purchaseBuilding: payload.purchaseBuilding,
         ...(payload.buildings ? { buildings: [...payload.buildings] } : {}),
@@ -347,6 +359,59 @@ export class UnifiedAccessService {
       now,
       payload.sessionFamilyId,
     );
+  }
+
+  async startImpersonation(token: string | undefined, request: { accountId: string; clientMutationId: string }, now = Date.now()): Promise<AccessLoginResult> {
+    if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).sort().join(',') !== 'accountId,clientMutationId' ||
+      typeof request.accountId !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(request.accountId) ||
+      typeof request.clientMutationId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(request.clientMutationId)) throw new BadRequestException('代登录请求格式不正确');
+    const original = this.readPayload(token, now);
+    if (original?.impersonationSession) {
+      if (original.impersonationSession.clientMutationId === request.clientMutationId && original.accountId === request.accountId) return this.renew(token, now)!;
+      throw new ForbiddenException('请先返回管理员身份，再选择其他账号');
+    }
+    const actor = this.configuration?.currentPrincipal(original?.accountId, original?.authorizationVersion);
+    if (!this.accessControlEnabled || !original || !actor || actor.role !== 'admin') throw new ForbiddenException('只有已登录的系统管理员可以代登录');
+    const target = this.configuration!.impersonationTarget(request.accountId);
+    if (!target?.accountId || !target.authorizationVersion) throw new ForbiddenException('该账号当前不能登录，请核对账号和在职状态');
+    const family = createHmac('sha256', this.sessionSecret!).update('vnet-impersonation-v1\0').update(JSON.stringify([original.sessionFamilyId, request.clientMutationId])).digest().subarray(0, 16).toString('base64url');
+    if (this.configuration!.impersonationStopped(family)) throw new ForbiddenException('此次代登录已结束，请重新发起');
+    const fingerprint = createHash('sha256').update(JSON.stringify([original.accountId, original.authorizationVersion, original.sessionFamilyId, target.accountId, target.authorizationVersion])).digest('hex');
+    const times = await this.configuration!.recordImpersonation(actor, `${target.displayName || target.accountId}（${target.accountId}）`, family, 'start', fingerprint,
+      { issuedAt: now, expiresAt: Math.min(now + IMPERSONATION_TTL_MS, original.expiresAt) });
+    const payload: ImpersonationPayload = { version: 11, accountId: target.accountId, authorizationVersion: target.authorizationVersion,
+      actorAccountId: original.accountId!, actorAuthorizationVersion: original.authorizationVersion!, actorSessionFamilyId: original.sessionFamilyId, actorExpiresAt: original.expiresAt,
+      sessionFamilyId: family, ...times, actorName: actor.displayName || '管理员', targetName: target.displayName || target.accountId, clientMutationId: request.clientMutationId };
+    const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const signed = `${encoded}.${sign(encoded, this.sessionSecret!)}`;
+    const result = this.renew(signed, now);
+    if (!result) throw new ForbiddenException('账号权限已变化或此次代登录已过期，请重新核对');
+    return result;
+  }
+
+  async stopImpersonation(token: string | undefined, ownerToken: string | undefined, clientMutationId: string, now = Date.now()): Promise<AccessLoginResult> {
+    if (typeof clientMutationId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientMutationId)) throw new BadRequestException('代登录请求编号不正确');
+    const payload = this.readImpersonationPayload(token, now), owner = this.readPayload(ownerToken, now);
+    if (!payload || !this.impersonationReturnContext(token, ownerToken, now) || !owner) throw new UnauthorizedException('管理员会话已失效，请重新登录');
+    const actor = this.configuration!.currentPrincipal(payload.actorAccountId, payload.actorAuthorizationVersion)!;
+    const fingerprint = createHash('sha256').update(JSON.stringify([payload.actorAccountId, payload.actorAuthorizationVersion, payload.actorSessionFamilyId, payload.accountId, payload.authorizationVersion])).digest('hex');
+    await this.configuration!.recordImpersonation(actor, `${payload.targetName}（${payload.accountId}）`, payload.sessionFamilyId, 'stop', fingerprint, { issuedAt: now, expiresAt: payload.actorExpiresAt });
+    const currentActor = this.configuration!.currentPrincipal(payload.actorAccountId, payload.actorAuthorizationVersion);
+    if (currentActor?.role !== 'admin') throw new UnauthorizedException('管理员权限已变化，请重新登录');
+    return this.issueSession(currentActor, now, payload.actorSessionFamilyId, Math.min(payload.actorExpiresAt, owner.expiresAt));
+  }
+
+  impersonationReturnContext(token: string | undefined, ownerToken: string | undefined, now = Date.now()): AccessPrincipal['impersonation'] {
+    const payload = this.readImpersonationPayload(token, now), owner = this.readPayload(ownerToken, now);
+    if (!payload || !owner || owner.impersonationSession || owner.role !== 'admin' || owner.accountId !== payload.actorAccountId ||
+      owner.authorizationVersion !== payload.actorAuthorizationVersion || owner.sessionFamilyId !== payload.actorSessionFamilyId || owner.expiresAt !== payload.actorExpiresAt) return undefined;
+    return { actorAccountId: payload.actorAccountId, actorName: payload.actorName, targetName: payload.targetName, expiresAt: payload.expiresAt };
+  }
+
+  private readImpersonationPayload(token: string | undefined, now: number): ImpersonationPayload | undefined {
+    const payload = this.readSignedPayload(token);
+    if (!validImpersonationPayload(payload, now) || !this.accessControlEnabled || this.configuration?.currentPrincipal(payload.actorAccountId, payload.actorAuthorizationVersion)?.role !== 'admin') return undefined;
+    return payload;
   }
 
   issueTrustedSession(
@@ -526,7 +591,9 @@ export class UnifiedAccessService {
     principal: AccessPrincipal & { feishuAppId?: string },
     issuedAt: number,
     sessionFamilyId = randomBytes(16).toString('base64url'),
+    expiresAt = issuedAt + ACCESS_SESSION_TTL_MS,
   ): AccessLoginResult {
+    if (principal.impersonation) throw new UnauthorizedException('代登录会话不能转换为普通会话');
     if (!isValidPrivilegedPrincipal(principal) && !isValidFeishuGuestPrincipal(principal) && !isValidManagedGuestPrincipal(principal)) {
       throw new UnauthorizedException('访问身份无效');
     }
@@ -545,7 +612,7 @@ export class UnifiedAccessService {
       ...sessionIdentity(principal),
       ...(isValidFeishuGuestPrincipal(principal) && principal.accountId ? { accountId: principal.accountId } : {}),
     };
-    const expiresAt = issuedAt + ACCESS_SESSION_TTL_MS;
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= issuedAt || expiresAt - issuedAt > ACCESS_SESSION_TTL_MS) throw invalidCredentials();
     if (!SESSION_FAMILY_ID_PATTERN.test(sessionFamilyId)) {
       throw new UnauthorizedException('访问会话身份无效');
     }
@@ -608,10 +675,7 @@ export class UnifiedAccessService {
     return principalFingerprint(sessionFamilyId, this.sessionSecret);
   }
 
-  private readPayload(
-    token: string | undefined,
-    now: number,
-  ): ResolvedAccessSessionPayload | null {
+  private readSignedPayload(token: string | undefined): unknown {
     if (!this.sessionSecret || !token) return null;
     try {
       if (token.length > 4096) return null;
@@ -634,7 +698,23 @@ export class UnifiedAccessService {
         return null;
       }
 
-      const parsed = JSON.parse(payloadBytes.toString('utf8')) as unknown;
+      return JSON.parse(payloadBytes.toString('utf8')) as unknown;
+    } catch { return null; }
+  }
+
+  private readPayload(
+    token: string | undefined,
+    now: number,
+  ): ResolvedAccessSessionPayload | null {
+    try {
+      const parsed = this.readSignedPayload(token);
+      if (validImpersonationPayload(parsed, now)) {
+        const target = this.configuration?.currentPrincipal(parsed.accountId, parsed.authorizationVersion);
+        if (!this.accessControlEnabled || parsed.expiresAt <= now || !target || this.configuration?.impersonationStopped(parsed.sessionFamilyId) ||
+          this.configuration?.currentPrincipal(parsed.actorAccountId, parsed.actorAuthorizationVersion)?.role !== 'admin') return null;
+        return { ...target, issuedAt: parsed.issuedAt, expiresAt: parsed.expiresAt, sessionFamilyId: parsed.sessionFamilyId,
+          impersonationSession: parsed, impersonation: { actorAccountId: parsed.actorAccountId, actorName: parsed.actorName, targetName: parsed.targetName, expiresAt: parsed.expiresAt } };
+      }
       if (!validSessionPayload(parsed, now)) return null;
       if (parsed.version === 6 && this.configuration?.canUseFeishuGuestIdentity?.(parsed.accountId,parsed.feishuAppId) === false) return null;
       if ((parsed.version === 7 || parsed.version === 8 || (parsed.version === 9 || parsed.version === 10) || parsed.role === 'site_member') && !this.configuration) return null;
@@ -655,7 +735,7 @@ export class UnifiedAccessService {
         sessionFamilyId:
           parsed.version !== 2
             ? parsed.sessionFamilyId
-            : deriveLegacySessionFamilyId(encodedPayload, this.sessionSecret),
+            : deriveLegacySessionFamilyId(token!.split('.')[0], this.sessionSecret!),
       };
     } catch {
       return null;

@@ -86,6 +86,7 @@ describe('UnifiedAccessController', () => {
     cookieName: string;
     login: jest.Mock;
     readSessionIdentity: jest.Mock;
+    impersonationReturnContext: jest.Mock;
     renew: jest.Mock;
     issueTrustedSession: jest.Mock;
     configurationReadiness: jest.Mock;
@@ -114,6 +115,7 @@ describe('UnifiedAccessController', () => {
         expiresAt: null,
         principalFingerprint: null,
       }),
+      impersonationReturnContext: jest.fn().mockReturnValue(undefined),
       renew: jest.fn().mockReturnValue(null),
       issueTrustedSession: jest.fn(),
       isAccessControlEnabled: jest.fn().mockReturnValue(true),

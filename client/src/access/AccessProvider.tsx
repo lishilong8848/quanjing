@@ -38,6 +38,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LoginNameField } from './LoginNameField';
+import { ImpersonationBanner } from './ImpersonationBanner';
+import { requestImpersonation, reloadImpersonationPage, type ImpersonationFailure } from './impersonation';
 import { useFeishuLogin } from './use-feishu-login';
 import {
   createFeishuSessionConfirmation,
@@ -79,6 +81,8 @@ interface AccessContextValue extends AccessSessionResponse {
   logout: () => Promise<boolean>;
   refreshSession: () => Promise<void>;
   retrySession: () => Promise<void>;
+  startImpersonation: (accountId: string, clientMutationId: string) => Promise<boolean>;
+  stopImpersonation: (clientMutationId: string) => Promise<boolean>;
   readOnlyPage: boolean;
   requestLogin: (
     reason?: string,
@@ -121,6 +125,8 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   const [isLoggingIn, setIsLoggingIn] = React.useState(false);
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
   const logoutPendingRef = React.useRef(false);
+  const impersonationPendingRef = React.useRef(false);
+  const [isImpersonating, setIsImpersonating] = React.useState(false);
   const [dismissedLoginPath, setDismissedLoginPath] = React.useState<string | null>(null);
   const sessionRef = React.useRef(session);
   sessionRef.current = session;
@@ -187,7 +193,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   );
 
   const refreshSession = React.useCallback((silent = false): Promise<void> => {
-    if (requiresFeishuIdentityRef.current || feishuConfirmation.isPending() || logoutPendingRef.current) return Promise.resolve();
+    if (requiresFeishuIdentityRef.current || feishuConfirmation.isPending() || logoutPendingRef.current || impersonationPendingRef.current) return Promise.resolve();
     if (refreshPromise.current) return refreshPromise.current;
 
     const refreshToken = sessionCommitCoordinator.captureRefresh();
@@ -211,6 +217,13 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
             setDismissedLoginPath(null);
             setDialog(current => current.automatic && current.requestKey === requestKey ? { ...current, open: false } : current);
           }
+        }
+        if ((previousSession.accountId || previousSession.impersonation) &&
+          JSON.stringify(previousSession.impersonation || null) !== JSON.stringify(normalizedSession.impersonation || null)) {
+          impersonationPendingRef.current = true;
+          flushSync(() => { setIsImpersonating(true); setSession(normalizedSession); setSessionError(null); });
+          reloadImpersonationPage(normalizedSession, !normalizedSession.impersonation && normalizedSession.role === 'admin');
+          return;
         }
         setSession(current => canApplyPagePermissionSnapshot(current, normalizedSession) ? normalizedSession : current);
         setSessionError(null);
@@ -300,6 +313,17 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   React.useEffect(() => {
     const removeInterceptor =
       installUnifiedAccessResponseInterceptor(axiosForBackend);
+    const changingIdentityInterceptor = axiosForBackend.interceptors.request.use(config => {
+      const path = new URL(config.url || '', window.location.origin).pathname;
+      const base = (process.env.CLIENT_BASE_PATH || '').replace(/\/+$/, '');
+      const normalized = base && path.startsWith(`${base}/`) ? path.slice(base.length) : path;
+      const method = String(config.method || 'GET').toUpperCase();
+      const identityRequest = method === 'GET' && normalized === '/api/access/session' || method === 'POST' && ['/api/access/impersonation/start', '/api/access/impersonation/stop'].includes(normalized);
+      if (impersonationPendingRef.current && !identityRequest) {
+        throw Object.assign(new Error('正在切换登录身份，请稍后重试'), { code: 'ERR_CANCELED' });
+      }
+      return config;
+    });
     const handleInvalidated = () => {
       accessInvalidationVersionRef.current += 1;
       if (reauthenticationPendingRef.current) return;
@@ -332,6 +356,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       window.removeEventListener('focus', checkPermissions);
       document.removeEventListener('visibilitychange', checkPermissions);
       removeInterceptor();
+      axiosForBackend.interceptors.request.eject(changingIdentityInterceptor);
       window.removeEventListener(
         UNIFIED_ACCESS_INVALIDATED_EVENT,
         handleInvalidated,
@@ -347,6 +372,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       preferredPurchaseBuilding?: PurchaseAccessBuilding | BuildingAdminBuilding,
       automatic = false,
     ) => {
+      if (impersonationPendingRef.current || automatic && sessionRef.current.impersonation) return;
       const rememberedLogin = reauthenticationPendingRef.current
         ? lastReauthenticationLoginRef.current
         : getReauthenticationLoginDefaults(GUEST_SESSION);
@@ -380,7 +406,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   const markSessionExpired = React.useCallback(() => {
     markReauthenticationPending();
     clearBackgroundSessionWarning();
-    setSession(GUEST_SESSION);
+    setSession(current => current.impersonation ? { ...GUEST_SESSION, impersonation: current.impersonation } : GUEST_SESSION);
   }, [clearBackgroundSessionWarning, markReauthenticationPending]);
 
   React.useEffect(() => {
@@ -400,7 +426,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
 
   const login = React.useCallback(
     async (request: AccessLoginRequest): Promise<boolean> => {
-      if (logoutPendingRef.current) return false;
+      if (logoutPendingRef.current || impersonationPendingRef.current) return false;
       const submittedRequestKey = dialog.requestKey;
       const submittedMutationToken = sessionCommitCoordinator.beginMutation();
       requiresFeishuIdentityRef.current = false;
@@ -498,7 +524,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   );
 
   const logout = React.useCallback(async (): Promise<boolean> => {
-    if (logoutPendingRef.current) return false;
+    if (logoutPendingRef.current || impersonationPendingRef.current) return false;
     logoutPendingRef.current = true;
     setIsLoggingOut(true);
     const submittedMutationToken = sessionCommitCoordinator.beginMutation();
@@ -546,6 +572,38 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
     }
   }, [clearBackgroundSessionWarning, enqueueSessionMutation, sessionCommitCoordinator]);
 
+  const changeImpersonation = React.useCallback(async (action: 'start' | 'stop', clientMutationId: string, accountId?: string): Promise<boolean> => {
+    if (impersonationPendingRef.current || logoutPendingRef.current || isLoggingIn || feishuConfirmation.isPending()) return false;
+    const previous = sessionRef.current;
+    const actorAccountId = action === 'start' ? previous.accountId : previous.impersonation?.actorAccountId;
+    if (!actorAccountId || action === 'start' && (previous.role !== 'admin' || previous.impersonation)) throw new Error('只有管理员可以开始代登录');
+    if (action === 'stop' && !previous.impersonation) throw new Error('当前未处于代登录状态');
+    impersonationPendingRef.current = true; setIsImpersonating(true);
+    const token = sessionCommitCoordinator.beginMutation();
+    let reloading = false;
+    try {
+      await refreshPromise.current?.catch(() => undefined);
+      const confirmed = await enqueueSessionMutation(() => requestImpersonation({ action, actorAccountId, accountId, clientMutationId }));
+      const committed = sessionCommitCoordinator.commitMutation(token);
+      if (committed === null) return false;
+      flushSync(() => { setSession(normalizeAccessSession(confirmed)); setSessionError(null); setDialog(current => ({ ...current, open: false })); });
+      reloading = true;
+      reloadImpersonationPage(confirmed, action === 'stop');
+      return true;
+    } catch (error) {
+      if (!sessionCommitCoordinator.canCommit(token)) return false;
+      const failure = error as ImpersonationFailure;
+      if (failure.currentSession) {
+        const confirmed = normalizeAccessSession(failure.currentSession);
+        setSession(confirmed); setSessionError(null);
+        if (confirmed.accountId !== previous.accountId || !!confirmed.impersonation !== !!previous.impersonation) { reloading = true; reloadImpersonationPage(confirmed, false); }
+      } else if (failure.outcomeUnknown) setSessionError(failure.message);
+      throw error;
+    } finally { if (!reloading) { impersonationPendingRef.current = false; setIsImpersonating(false); } }
+  }, [enqueueSessionMutation, feishuConfirmation, isLoggingIn, sessionCommitCoordinator]);
+  const startImpersonation = React.useCallback((accountId: string, clientMutationId: string) => changeImpersonation('start', clientMutationId, accountId), [changeImpersonation]);
+  const stopImpersonation = React.useCallback((clientMutationId: string) => changeImpersonation('stop', clientMutationId), [changeImpersonation]);
+
   const value = React.useMemo<AccessContextValue>(
     () => ({
       ...normalizeAccessSession(session),
@@ -555,13 +613,15 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       ...((session.effectiveAuthorization || isProfessionalBusinessPrincipal(session)) && businessModulesForPage(location.pathname).length ? { capabilities: professionalPageCapabilities(location.pathname, session) } : !defaultCanAccessPage(session.role, location.pathname) ? { capabilities: { canEdit: false, canDelete: false, canForceRefresh: false, canAccessContracts: false } } : {}),
       isLoading,
       isConfirmingIdentity: isConfirmingIdentity || callbackPending,
-      isChangingIdentity: isLoggingIn || isLoggingOut,
+      isChangingIdentity: isLoggingIn || isLoggingOut || isImpersonating,
       dismissedLoginPath,
       sessionError,
       login,
       logout,
       refreshSession,
       retrySession,
+      startImpersonation,
+      stopImpersonation,
       requestLogin,
     }),
     [
@@ -569,12 +629,15 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       isConfirmingIdentity,
       isLoggingIn,
       isLoggingOut,
+      isImpersonating,
       dismissedLoginPath,
       callbackPending,
       login,
       logout,
       refreshSession,
       retrySession,
+      startImpersonation,
+      stopImpersonation,
       requestLogin,
       session,
       sessionError,
@@ -584,6 +647,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
 
   return (
     <AccessContext.Provider value={value}>
+      <ImpersonationBanner />
       {children}
       <AccessLoginDialog
         key={dialog.requestKey}
@@ -600,6 +664,12 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
         }}
         onSubmit={login}
       />
+      <Dialog open={isImpersonating}>
+        <DialogContent showCloseButton={false} onEscapeKeyDown={event => event.preventDefault()} onPointerDownOutside={event => event.preventDefault()}>
+          <DialogHeader><DialogTitle>正在切换身份…</DialogTitle><DialogDescription>请稍候，正在确认登录身份并重新加载页面。</DialogDescription></DialogHeader>
+          <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" aria-hidden="true" />当前操作暂不可用</p>
+        </DialogContent>
+      </Dialog>
     </AccessContext.Provider>
   );
 }

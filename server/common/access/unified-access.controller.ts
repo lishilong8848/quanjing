@@ -1,6 +1,8 @@
 import { personalPermissionPagePaths } from '../../../shared/business-permissions';
 import {
   BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
   Body,
   Controller,
   Get,
@@ -36,6 +38,7 @@ import {
 } from './unified-access.guard';
 import { normalizeAccessDisplayName } from './access-display-name';
 import { UnifiedAccessService } from './unified-access.service';
+import { IMPERSONATION_ACTOR_COOKIE, IMPERSONATION_ACTOR_HOST_COOKIE } from './access-impersonation';
 
 import { AccessLoginNamesService } from './access-login-names.service';
 import type { AccessLoginNamesResponse } from '../../../shared/access-login-names.interface';
@@ -123,6 +126,7 @@ export class UnifiedAccessController {
         : {}),
     };
     const result = await this.access.login(loginRequest, source);
+    this.clearImpersonationOwner(response, request);
     writeAccessCookie(response, request, this.access.cookieName, result, now);
     return this.toSessionResponse(
       result.principal,
@@ -134,6 +138,48 @@ export class UnifiedAccessController {
   private toSessionResponse(principal: AccessPrincipal, expiresAt: number | null, fingerprint: string | null): AccessSessionResponse {
     const permissions = this.access.pagePermissions?.(principal.role,principal.accountId,principal.authorizationVersion);
     return { ...toSessionResponse(principal, expiresAt, fingerprint), ...(permissions ? { pagePaths: personalPermissionPagePaths(principal, permissions.paths), pagePermissionsRevision: permissions.revision } : {}) };
+  }
+  @PublicAccess()
+  @Post('impersonation/start')
+  async startImpersonation(@Body() body: { accountId: string; clientMutationId: string }, @Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<AccessSessionResponse> {
+    response.setHeader('Cache-Control', 'private, no-store');
+    this.assertIdentityOrigin(request);
+    const now = Date.now(), current = readAccessCookie(request.headers.cookie, this.access, now).value;
+    const session = this.access.readSessionIdentity(current, now);
+    const previousOwner = this.readImpersonationOwner(request, now);
+    if (session.principal.impersonation && !this.access.impersonationReturnContext(current, previousOwner, now)) throw new UnauthorizedException('管理员会话已失效，请重新登录');
+    const result = await this.access.startImpersonation(current, body, now);
+    const owner = session.principal.impersonation ? this.access.readSessionIdentity(previousOwner, now) : session;
+    if (!owner.expiresAt || !owner.principalFingerprint) throw new UnauthorizedException('管理员会话已失效，请重新登录');
+    if (!session.principal.impersonation) writeAccessCookie(response, request, IMPERSONATION_ACTOR_COOKIE,
+      { token: current!, principal: owner.principal, expiresAt: owner.expiresAt, principalFingerprint: owner.principalFingerprint }, now, IMPERSONATION_ACTOR_HOST_COOKIE);
+    // Keep the signed return envelope until the original administrator deadline.
+    writeAccessCookie(response, request, this.access.cookieName, { ...result, expiresAt: owner.expiresAt }, now);
+    return this.toSessionResponse(result.principal, result.expiresAt, result.principalFingerprint);
+  }
+  @PublicAccess()
+  @Post('impersonation/stop')
+  async stopImpersonation(@Body() body: { clientMutationId: string }, @Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<AccessSessionResponse> {
+    response.setHeader('Cache-Control', 'private, no-store');
+    this.assertIdentityOrigin(request);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).join(',') !== 'clientMutationId') throw new BadRequestException('代登录请求格式不正确');
+    const now = Date.now(), cookie = readAccessCookie(request.headers.cookie, this.access, now);
+    const result = await this.access.stopImpersonation(cookie.value, this.readImpersonationOwner(request, now), body.clientMutationId, now);
+    writeAccessCookie(response, request, this.access.cookieName, result, now);
+    this.clearImpersonationOwner(response, request);
+    return this.toSessionResponse(result.principal, result.expiresAt, result.principalFingerprint);
+  }
+  private assertIdentityOrigin(request: Request): void {
+    const configured = process.env.PUBLIC_BASE_URL?.trim();
+    const expected = configured ? new URL(configured).origin : `${request.protocol}://${request.get('host')}`;
+    if (request.headers.origin !== expected || request.headers['sec-fetch-site'] === 'cross-site') throw new ForbiddenException('身份切换必须由本站页面提交');
+  }
+  private readImpersonationOwner(request: Request, now: number): string | undefined {
+    return readAccessCookie(request.headers.cookie, this.access, now, { cookieName: IMPERSONATION_ACTOR_COOKIE, firstPartyName: IMPERSONATION_ACTOR_HOST_COOKIE }).value;
+  }
+  private clearImpersonationOwner(response: Response, request: Request): void {
+    if (!readStrictCookie(request.headers.cookie, IMPERSONATION_ACTOR_COOKIE).present && !readStrictCookie(request.headers.cookie, IMPERSONATION_ACTOR_HOST_COOKIE).present) return;
+    clearAccessCookie(response, request, IMPERSONATION_ACTOR_COOKIE, IMPERSONATION_ACTOR_HOST_COOKIE);
   }
   @PublicAccess()
   @Get('session')
@@ -160,6 +206,7 @@ export class UnifiedAccessController {
     // Session reads must not rotate the cookie: an older response could arrive
     // after logout or an account switch and restore the previous privileges.
     const result = this.access.readSessionIdentity(cookie.value, now);
+    const recovery = result.expiresAt === null ? this.access.impersonationReturnContext(cookie.value, this.readImpersonationOwner(request, now), now) : undefined;
     response.setHeader(
       'X-Access-Session-Cookie',
       cookie.diagnostic ?? (!cookie.present ? 'absent'
@@ -168,7 +215,7 @@ export class UnifiedAccessController {
               : 'rejected'),
     );
     return this.toSessionResponse(
-      result.principal,
+      recovery ? { ...result.principal, impersonation: recovery } : result.principal,
       result.expiresAt,
       result.principalFingerprint,
     );
@@ -181,6 +228,7 @@ export class UnifiedAccessController {
     @Res({ passthrough: true }) response: Response,
   ): AccessSessionResponse {
     clearAccessCookie(response, request, this.access.cookieName);
+    this.clearImpersonationOwner(response, request);
     clearLegacyPurchaseCookie(response, request);
     if (!this.access.isAccessControlEnabled()) {
       return this.toSessionResponse(
@@ -211,6 +259,7 @@ export class UnifiedAccessController {
       response.redirect(302, authorizationUrl);
     } catch (error) {
       clearAccessCookie(response, request, this.access.cookieName);
+      this.clearImpersonationOwner(response, request);
       clearOAuthCookies(response, request);
       response.redirect(
         302,
@@ -286,6 +335,7 @@ export class UnifiedAccessController {
       const principal = await this.feishu.exchangeAuthorizationCode(code);
       const now = Date.now();
       const session = this.access.issueTrustedSession(principal, now);
+      this.clearImpersonationOwner(response, request);
       writeAccessCookie(
         response,
         request,
@@ -311,6 +361,7 @@ export class UnifiedAccessController {
     response: Response,
   ): void {
     clearAccessCookie(response, request, this.access.cookieName);
+    this.clearImpersonationOwner(response, request);
     response.redirect(302, withFeishuAuthStatus(returnTo, status));
   }
 }
