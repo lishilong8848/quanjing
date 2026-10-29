@@ -6,10 +6,11 @@ import type {
   SealingInfo,
 } from '../../../shared/api.interface';
 import type { TodayOperationsKpiResponse } from '../../../shared/today-operations-kpi.interface';
-import { canonicalizeNantongPublicUrl } from '../../common/config/nantong-public-url';
+import { readPublicApplicationUrl } from '../../common/config/public-application-url';
 import { BitableSyncService } from '../bitable-sync/bitable-sync.service';
 import { TodayOperationsKpiService } from '../bitable-sync/today-operations-kpi.service';
 import { TodayOperationsAnomalyService } from '../bitable-sync/today-operations-anomaly.service';
+import { TodayOperationsFollowUpCardService } from '../bitable-sync/today-operations-follow-up-card.service';
 import type { AttendanceSummarySection } from './attendance-automation.card';
 import { buildDailyOperationsPatrolCard } from './daily-operations-patrol.card';
 import { DailyOperationsPatrolGateway } from './daily-operations-patrol.gateway';
@@ -52,6 +53,7 @@ export class DailyOperationsPatrolService {
     private readonly gateway: DailyOperationsPatrolGateway,
     @Optional()
     private readonly followUpService?: TodayOperationsAnomalyService,
+    @Optional() private readonly followUpCards?: TodayOperationsFollowUpCardService,
   ) {}
 
   isEnabled(): boolean {
@@ -80,6 +82,7 @@ export class DailyOperationsPatrolService {
     card: object,
     businessDate: string,
     deliveryIdentity?: string,
+    followUpCardId?: string,
   ): Promise<string> {
     assertBusinessDate(businessDate);
     const existing = deliveryIdentity
@@ -87,6 +90,7 @@ export class DailyOperationsPatrolService {
       : await this.store.getDelivery(businessDate);
     if (existing?.status === 'sent' && existing.messageId) {
       await this.gateway.updateCard(existing.messageId, card);
+      if (followUpCardId) await this.requireFollowUpCards().bindMessage(followUpCardId, existing.messageId, card as Record<string, unknown>);
       return existing.messageId;
     }
     const digest = createHash('sha256')
@@ -101,6 +105,7 @@ export class DailyOperationsPatrolService {
       const messageId = deliveryIdentity
         ? await this.gateway.sendCard(card, businessDate, deliveryIdentity)
         : await this.gateway.sendCard(card, businessDate);
+      if (followUpCardId) await this.requireFollowUpCards().bindMessage(followUpCardId, messageId, card as Record<string, unknown>);
       if (deliveryIdentity) {
         await this.store.markSent(businessDate, messageId, deliveryIdentity);
       } else {
@@ -124,15 +129,22 @@ export class DailyOperationsPatrolService {
     patrol: DailyOperationsPatrolReport | null;
     sections: readonly AttendanceSummarySection[];
     detectedAt: string;
-  }): Promise<{ recordIds: string[]; followUpUrl: string }> {
+  }): Promise<{ recordIds: string[]; followUpCardId: string }> {
     if (!this.followUpService) {
       const hasAnomalies =
         Boolean(input.patrol?.totalIssues) ||
         input.sections.some((section) => section.anomalies.length > 0);
       if (hasAnomalies) throw new Error('异常跟进服务未配置');
-      return { recordIds: [], followUpUrl: '' };
+      return { recordIds: [], followUpCardId: await this.requireFollowUpCards().prepare([], input.detectedAt.slice(0, 10)) };
     }
-    return this.followUpService.syncMorningFollowUps(input);
+    const result = await this.followUpService.syncMorningFollowUps(input);
+    const identity = input.patrol?.businessDate || input.sections.map(section => section.date).sort().join(':') || input.detectedAt.slice(0, 10);
+    return { ...result, followUpCardId: await this.requireFollowUpCards().prepare(result.recordIds, identity) };
+  }
+
+  private requireFollowUpCards(): TodayOperationsFollowUpCardService {
+    if (!this.followUpCards) throw new Error('异常跟进卡片服务未配置');
+    return this.followUpCards;
   }
 
   private async execute(
@@ -153,13 +165,12 @@ export class DailyOperationsPatrolService {
       .digest('hex');
     await this.store.prepare(businessDate, digest);
     try {
+      const card = buildDailyOperationsPatrolCard(report, { ...this.cardUrls(), followUpCardId: followUp.followUpCardId });
       const messageId = await this.gateway.sendCard(
-        buildDailyOperationsPatrolCard(report, {
-          ...this.cardUrls(),
-          followUpUrl: followUp.followUpUrl,
-        }),
+        card,
         businessDate,
       );
+      await this.requireFollowUpCards().bindMessage(followUp.followUpCardId, messageId, card);
       await this.store.markSent(businessDate, messageId);
       return { sent: true, skipped: false, report, messageId };
     } catch (error) {
@@ -337,11 +348,9 @@ export class DailyOperationsPatrolService {
   }
 
   private cardUrls(): { dashboardUrl?: string; scheduleUrl?: string } {
-    const baseUrl = canonicalizeNantongPublicUrl(
-      process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL ||
-        process.env.PUBLIC_BASE_URL ||
-        '',
-    ).replace(/\/+$/u, '');
+    const baseUrl = readPublicApplicationUrl([
+      'NANTONG_DAILY_PATROL_PUBLIC_BASE_URL',
+    ]).replace(/\/+$/u, '');
     if (!baseUrl) return {};
     return {
       dashboardUrl: `${baseUrl}/today-operations-panorama`,

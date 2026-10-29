@@ -1,9 +1,11 @@
 import { UnauthorizedException } from '@nestjs/common';
+import { readPublicApplicationUrl } from '../../common/config/public-application-url';
 import {
   buildAttendanceFollowUpEvents,
   buildPatrolFollowUpEvent,
 } from './today-operations-follow-up';
 import {
+  TodayOperationsFollowUpTicketService,
   buildTodayOperationsFollowUpUrl,
   issueTodayOperationsFollowUpTicket,
   verifyTodayOperationsFollowUpTicket,
@@ -13,8 +15,20 @@ import type { AttendanceSummarySection } from '../duty-schedule/attendance-autom
 import type { DailyOperationsPatrolReport } from '../duty-schedule/daily-operations-patrol.types';
 
 const secret = 'test-follow-up-secret-value-123456';
+const PUBLIC_URL_ENV_KEYS = [
+  'PUBLIC_BASE_URL',
+  'NANTONG_DAILY_PATROL_PUBLIC_BASE_URL',
+  'FEISHU_PUBLIC_BASE_URL',
+  'APP_PUBLIC_URL',
+] as const;
 
 describe('unified today operations follow-up', () => {
+  const previousEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...previousEnv };
+  });
+
   it('maps patrol alerts into one stable daily event and ignores normal checks', () => {
     const report: DailyOperationsPatrolReport = {
       businessDate: '2026-09-09',
@@ -146,17 +160,116 @@ describe('unified today operations follow-up', () => {
     expect(url.hash).toBe('');
   });
 
-  it('uses the canonical Nantong host for the follow-up page', () => {
+  it('keeps the configured hostname, port and base path unchanged for the follow-up page', () => {
     const url = new URL(
       buildTodayOperationsFollowUpUrl(
-        'https://www.sm.sjhl.online:3001/',
+        'https://www.sm.sjhl.online:3001/ops/',
         'abc.DEF',
       ),
     );
 
     expect(url.origin + url.pathname).toBe(
-      'https://sm.sjhl.online:3001/attendance-anomaly-follow-up',
+      'https://www.sm.sjhl.online:3001/ops/attendance-anomaly-follow-up',
     );
+  });
+
+  it('rejects non-HTTPS or invalid follow-up base addresses and tickets', () => {
+    expect(() =>
+      buildTodayOperationsFollowUpUrl('http://sm.sjhl.online/', 'abc.DEF'),
+    ).toThrow('必须使用 HTTPS');
+    expect(() =>
+      buildTodayOperationsFollowUpUrl('https://user:pass@sm.sjhl.online/', 'abc.DEF'),
+    ).toThrow('必须使用 HTTPS');
+    expect(() =>
+      buildTodayOperationsFollowUpUrl('not a url', 'abc.DEF'),
+    ).toThrow('公网地址无效');
+    expect(() =>
+      buildTodayOperationsFollowUpUrl('https://www.sm.sjhl.online/', 'not-a-ticket'),
+    ).toThrow('令牌无效');
+  });
+
+  it('prefers PUBLIC_BASE_URL over conflicting fallback config when issuing the card link', () => {
+    process.env.PUBLIC_BASE_URL = '  https://www.sm.sjhl.online:3001/  ';
+    process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL = 'https://patrol.example.test/';
+    process.env.FEISHU_PUBLIC_BASE_URL = 'https://feishu.example.test/';
+    process.env.APP_PUBLIC_URL = 'https://app.example.test/';
+    prepareTicketEnvironment();
+
+    const url = new URL(
+      new TodayOperationsFollowUpTicketService().issueUrl({
+        from: '2026-09-01',
+        through: '2026-09-09',
+      }),
+    );
+
+    expect(url.origin + url.pathname).toBe(
+      'https://www.sm.sjhl.online:3001/attendance-anomaly-follow-up',
+    );
+    expect(url.searchParams.get('ticket')).toMatch(
+      /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u,
+    );
+  });
+
+  it.each([undefined, '   '])('falls back to the patrol base URL when PUBLIC_BASE_URL is %p', (publicUrl) => {
+    for (const key of PUBLIC_URL_ENV_KEYS) delete process.env[key];
+    if (publicUrl !== undefined) process.env.PUBLIC_BASE_URL = publicUrl;
+    process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL = 'https://patrol.example.test/app/';
+    process.env.CLIENT_BASE_PATH = '/app';
+    process.env.FEISHU_PUBLIC_BASE_URL = 'https://feishu.example.test/';
+    process.env.APP_PUBLIC_URL = 'https://app.example.test/';
+    prepareTicketEnvironment();
+
+    const url = new URL(
+      new TodayOperationsFollowUpTicketService().issueUrl({
+        from: '2026-09-01',
+        through: '2026-09-09',
+      }),
+    );
+
+    expect(url.origin + url.pathname).toBe(
+      'https://patrol.example.test/app/attendance-anomaly-follow-up',
+    );
+  });
+
+  it('includes CLIENT_BASE_PATH after the canonical public path for new follow-up links', () => {
+    process.env.PUBLIC_BASE_URL = 'https://www.sm.sjhl.online:3001/gateway/';
+    process.env.CLIENT_BASE_PATH = ' /app/ ';
+    process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL = 'https://old.example.test/app';
+    prepareTicketEnvironment();
+
+    const url = new URL(new TodayOperationsFollowUpTicketService().issueUrl({
+      from: '2026-09-01', through: '2026-09-09',
+    }));
+
+    expect(url.origin + url.pathname).toBe(
+      'https://www.sm.sjhl.online:3001/gateway/app/attendance-anomaly-follow-up',
+    );
+  });
+
+  it.each([
+    ['https://example.test', '//evil.test'],
+    ['https://example.test', 'https://evil.test'],
+    ['https://example.test', '/app?redirect=evil'],
+    ['https://example.test', '/app#fragment'],
+    ['https://example.test', '/app\\other'],
+    ['https://example.test', '/app/../other'],
+    ['https://example.test', '/%2e%2e/other'],
+    ['https://example.test', '/%252e%252e/other'],
+    ['https://example.test', '/%25252e%25252e/other'],
+    ['https://example.test', '/%2f%2fevil.test'],
+    ['https://example.test', '/bad%xy'],
+    ['https://example.test', '/app\u0000other'],
+    ['https://example.test/../other', '/app'],
+    ['https://example.test/%2e%2e/other', '/app'],
+    ['https://example.test?query=value', '/app'],
+    ['https://example.test#fragment', '/app'],
+    ['https://example.test\\other', '/app'],
+    ['https://user:pass@example.test', '/app'],
+  ])('rejects unsafe public mounts without using a fallback: %p, %p', (publicUrl, clientPath) => {
+    process.env.PUBLIC_BASE_URL = publicUrl;
+    process.env.CLIENT_BASE_PATH = clientPath;
+    process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL = 'https://safe.example.test';
+    expect(() => readPublicApplicationUrl(['NANTONG_DAILY_PATROL_PUBLIC_BASE_URL'])).toThrow('配置无效');
   });
 
   it('renders a lightweight modal page with explicit states, ticket scrubbing, idempotent saves, and exit fallback', () => {
@@ -176,6 +289,14 @@ describe('unified today operations follow-up', () => {
     expect(html).not.toContain('飞书多维表');
   });
 });
+
+function prepareTicketEnvironment(): void {
+  process.env.DAILY_OPERATIONS_FOLLOW_UP_TICKET_SECRET =
+    'test-follow-up-ticket-secret-1234';
+  process.env.FEISHU_CARD_ACTION_CONSUMER_PROFILE = 'production';
+  process.env.FEISHU_APP_ID = 'cli_test_app';
+  process.env.FEISHU_APP_SECRET = 'test-feishu-app-secret-value';
+}
 
 function attendanceSection(
   title: AttendanceSummarySection['title'],

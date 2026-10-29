@@ -438,7 +438,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
       }),
       prepareMorningFollowUps: jest.fn().mockResolvedValue({
         recordIds: ['follow-up-1'],
-        followUpUrl: 'https://ops.example.com/attendance-anomaly-follow-up',
+        followUpCardId: 'b'.repeat(32),
       }),
       sendMorningBriefCard: jest.fn().mockResolvedValue('om_group'),
     };
@@ -467,12 +467,18 @@ describe('AttendanceAutomationCoordinatorService', () => {
       expect.any(Object),
       '2026-09-11',
       'unified-full-v4',
+      'b'.repeat(32),
     );
     const serialized = JSON.stringify(
       patrol.sendMorningBriefCard.mock.calls[0][0],
     );
     expect(serialized).toContain('考勤异常 1 项');
     expect(serialized).not.toContain('考勤待核验');
+    expect(serialized).toContain('today_operations_followup');
+    expect(serialized).toContain('b'.repeat(32));
+    expect(serialized).not.toContain('attendance-anomaly-follow-up');
+    expect(patrol.prepareMorningFollowUps.mock.invocationCallOrder[0])
+      .toBeLessThan(patrol.sendMorningBriefCard.mock.invocationCallOrder[0]);
   });
 
   it('runs independent overtime through the existing single scheduled pull and shares one verified leave snapshot with both schedule readers', async () => {
@@ -1053,6 +1059,8 @@ describe('AttendanceAutomationCoordinatorService', () => {
       feishuGateway as any,
       undefined,
       patrol as any,
+      undefined,
+      { getDashboard: jest.fn().mockResolvedValue({ sourceStatus: 'fresh', summary: { tagAnomalyTotal: 0 } }) } as never,
     );
 
     const live = {

@@ -1251,7 +1251,7 @@ export class AttendanceAutomationCoordinatorService {
               detectedAt: new Date().toISOString(),
             }),
           )
-        : { recordIds: [], followUpUrl: '' };
+        : { recordIds: [], followUpCardId: undefined };
     const trainingParticipation =
       Number(run.date.slice(8, 10)) >= 25
         ? await this.trainingDashboardService
@@ -1276,7 +1276,7 @@ export class AttendanceAutomationCoordinatorService {
       patrol,
       trainingParticipation,
       archiveRecordCount: summary.archiveRecordCount,
-      followUpUrl: followUp.followUpUrl,
+      followUpCardId: followUp.followUpCardId,
       alarmTagAnomalies: alarmDashboard?.sourceStatus === 'fresh' ? {
         date: archiveDate,
         count: alarmDashboard.summary.tagAnomalyTotal,
@@ -1289,6 +1289,7 @@ export class AttendanceAutomationCoordinatorService {
         card,
         run.date,
         MORNING_BRIEF_DELIVERY_IDENTITY,
+        followUp.followUpCardId,
       ),
     );
     this.markCompleted(deliveryKey);

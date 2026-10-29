@@ -386,7 +386,7 @@ function readHobbies(
   return normalized as EmployeeOnboardingHobby[];
 }
 
-function isValidIdentityNumber(value: string): boolean {
+export function isValidIdentityNumber(value: string): boolean {
   if (!IDENTITY_NUMBER_PATTERN.test(value)) return false;
 
   const birthDate = `${value.slice(6, 10)}-${value.slice(10, 12)}-${value.slice(12, 14)}`;

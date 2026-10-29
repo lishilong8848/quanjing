@@ -81,14 +81,27 @@ describe('PBKDF2目录同步与实际姓名登录', () => {
     expect(JSON.stringify(configuration.snapshot())).not.toContain(hash);
     expect(readFileSync(process.env.ACCESS_CONFIGURATION_FILE!, 'utf8')).not.toContain(password);
   });
-  it('损坏的算法格式不作为明文退化，离职账号没有凭据', async () => {
+  it('损坏的算法格式不作为明文退化；保留离职凭据摘要也不能登录或续用旧会话', async () => {
     for (const value of [hash.replace('600000', '600001'), 'pbkdf2_sha256$broken', 'argon2$unsupported', ` ${hash}`, `\n${hash}`]) {
       const people = await build(value);
       expect(people[0]).toMatchObject({ active: false });
       expect(people[0].passwordHash).toBeUndefined();
     }
-    const people = await buildExternalEmployeeCredentials([{ record_id: 'recPBKDFTest', fields: { 姓名: '哈希验收员工', 密码: hash, '离职/异动情况': true } }], process.env.FEISHU_APP_ID!, 'synthetic-base', 'tblSynthetic');
-    expect(people[0]).toMatchObject({ active: false });
-    expect(people[0].passwordHash).toBeUndefined();
+    const people = await build(hash);
+    const configuration = new AccessConfigurationService();
+    const access = new UnifiedAccessService(configuration);
+    const snapshot = { appId: process.env.FEISHU_APP_ID!, people: [], employees: [], snapshotAt: Date.now(), personnelComplete: true, externalEmployees: people,
+      employmentState: { complete: true, entries: [{ personnelIdentity: people[0].id, inactive: false }] } };
+    await configuration.synchronizePersonnel(snapshot);
+    const session = await access.login({ employeeName: people[0].name, password }, 'synthetic-source');
+    const departed = await buildExternalEmployeeCredentials([{ record_id: 'recPBKDFTest', fields: { 姓名: '哈希验收员工', 密码: hash, '离职/异动情况': true } }], process.env.FEISHU_APP_ID!, 'synthetic-base', 'tblSynthetic');
+    expect(departed[0]).toMatchObject({ active: true, passwordHash: hash });
+    await configuration.synchronizePersonnel({ ...snapshot, externalEmployees: departed,
+      employmentState: { complete: true, entries: [{ personnelIdentity: people[0].id, inactive: true }] } });
+    await expect(access.login({ employeeName: people[0].name, password }, 'synthetic-source')).rejects.toThrow('登录凭据无效');
+    expect(access.readSession(session.token).expiresAt).toBeNull();
+    expect(access.renew(session.token)).toBeNull();
+    await configuration.synchronizePersonnel(snapshot);
+    await expect(access.login({ employeeName: people[0].name, password }, 'synthetic-source')).rejects.toThrow('登录凭据无效');
   });
 });

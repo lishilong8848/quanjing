@@ -49,8 +49,7 @@ describe('daily operations patrol card', () => {
         },
       ]),
       {
-        followUpUrl:
-          'https://sm.example.test/attendance-anomaly-follow-up?ticket=signed.ticket',
+        followUpCardId: 'b'.repeat(32),
       },
     );
     const text = JSON.stringify(card);
@@ -61,7 +60,12 @@ describe('daily operations patrol card', () => {
     expect(text).not.toContain('异常 9');
     expect(text).toContain('另 2 项请打开看板核对');
     expect(text).toContain('异常跟进');
-    expect(text).toContain('signed.ticket');
+    const button = findButton(card, '异常跟进');
+    expect(button.behaviors).toEqual([{ type: 'callback', value: {
+      workflowType: 'today_operations_followup', version: 1, batchId: 'b'.repeat(32), action: 'list', page: 0,
+    } }]);
+    expect(text).not.toContain('attendance-anomaly-follow-up');
+    expect(text).not.toContain('open_url');
   });
 
   it('omits navigation buttons when public URLs are unavailable', () => {
@@ -112,3 +116,9 @@ function normal(
 
 const _optionsTypeCheck: DailyOperationsPatrolCardOptions = {};
 void _optionsTypeCheck;
+
+function findButton(value: any, label: string): any {
+  if (!value || typeof value !== 'object') return undefined;
+  if (value.tag === 'button' && value.text?.content === label) return value;
+  return Object.values(value).map(child => findButton(child, label)).find(Boolean);
+}

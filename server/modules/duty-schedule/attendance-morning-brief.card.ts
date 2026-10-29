@@ -4,6 +4,7 @@ import type {
 } from './attendance-automation.card';
 import type { DailyOperationsPatrolReport } from './daily-operations-patrol.types';
 import type { TrainingParticipation } from '../../../shared/campus-training-dashboard.interface';
+import { buildFollowUpEntryButton } from '../bitable-sync/today-operations-follow-up-card';
 
 export interface AttendanceMorningBriefInput {
   reportDate: string;
@@ -14,7 +15,7 @@ export interface AttendanceMorningBriefInput {
   archiveRecordCount?: number;
   scheduleUrl: string;
   dashboardUrl: string;
-  followUpUrl?: string;
+  followUpCardId?: string;
   attendanceUnavailableReason?: string;
   alarmTagAnomalies?: { date: string; count: number; detailsUrl: string };
   alarmTagsUnavailable?: boolean;
@@ -186,17 +187,15 @@ export function buildAttendanceMorningBrief(
     }
   }
   const actions: CardElements = [];
+  if (input.followUpCardId) actions.push(buildFollowUpEntryButton(input.followUpCardId));
   for (const [label, url] of [
-    ...(input.followUpUrl
-      ? ([['异常跟进', input.followUpUrl]] as Array<[string, string]>)
-      : []),
     ['查看实际排班', input.scheduleUrl],
     ['查看全景看板', input.dashboardUrl],
   ]) {
     if (!/^https?:\/\//i.test(url)) throw new Error('每日简报链接无效');
     actions.push({
       tag: 'button',
-      type: label === '异常跟进' ? 'primary_filled' : 'default',
+      type: 'default',
       width: 'fill',
       text: { tag: 'plain_text', content: label },
       behaviors: [{ type: 'open_url', default_url: url }],

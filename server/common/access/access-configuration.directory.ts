@@ -18,7 +18,7 @@ import { buildPersonnelEmploymentEvidence } from './personnel-employment-evidenc
 
 export interface ConfigurationEmployee extends ConfigurationPerson { position: string; specialties: string; inactive: boolean; }
 export interface PersonnelEmploymentEvidence { complete: boolean; entries: { personnelIdentity: string; openId?: string; inactive: boolean }[]; }
-export interface ConfigurationDirectorySnapshot { appId: string; people: ConfigurationPerson[]; employees: ConfigurationEmployee[]; snapshotAt: number; personnelComplete: boolean; personnelProblems?: string[]; personnelWarnings?: string[]; externalEmployees?: ExternalEmployeeCredential[]; activeMembers?: SiteMemberIdentity[]; activeMembersComplete?: boolean; employmentState?: PersonnelEmploymentEvidence; personnelAuthority?: PersonnelAuthoritySnapshot; }
+export interface ConfigurationDirectorySnapshot { appId: string; people: ConfigurationPerson[]; employees: ConfigurationEmployee[]; snapshotAt: number; personnelComplete: boolean; personnelProblems?: string[]; personnelWarnings?: string[]; externalEmployees?: ExternalEmployeeCredential[]; credentialsComplete?: boolean; activeMembers?: SiteMemberIdentity[]; activeMembersComplete?: boolean; employmentState?: PersonnelEmploymentEvidence; personnelAuthority?: PersonnelAuthoritySnapshot; }
 
 @Injectable()
 export class AccessConfigurationDirectory {
@@ -124,7 +124,7 @@ export class AccessConfigurationDirectory {
       const merged = new Map(people.filter(person => !blockedOpenIds.has(person.openId)).map(person => [person.openId, person]));
       for(const person of activeMembers) if('openId' in person&&person.openId&&merged.has(person.openId)) merged.set(person.openId,{openId:person.openId,name:person.name});
       for (const person of organizationPeople) if (!merged.has(person.openId)) merged.set(person.openId, person);
-      this.cached = { appId, people: [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.openId.localeCompare(b.openId)), employees: employees.filter(person => !blockedOpenIds.has(person.openId)), externalEmployees, activeMembers, activeMembersComplete:true, employmentState, personnelWarnings, personnelAuthority, snapshotAt: Date.now(),
+      this.cached = { appId, people: [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.openId.localeCompare(b.openId)), employees: employees.filter(person => !blockedOpenIds.has(person.openId)), externalEmployees, credentialsComplete: externalEmployees !== undefined, activeMembers, activeMembersComplete:true, employmentState, personnelWarnings, personnelAuthority, snapshotAt: Date.now(),
         personnelComplete: !problems.some(problem => problem !== '人员身份重复'), personnelProblems: problems };
       this.logger.log(`人员目录读取完成：耗时 ${Date.now() - startedAt}ms，人员 ${records.length}，职责 ${dutyRecords.length}`);
       return this.cached;

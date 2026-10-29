@@ -2,13 +2,14 @@ import type {
   DailyOperationsPatrolCheckResult,
   DailyOperationsPatrolReport,
 } from './daily-operations-patrol.types';
+import { buildFollowUpEntryButton } from '../bitable-sync/today-operations-follow-up-card';
 
 const MAX_EXPANDED_ISSUES = 8;
 
 export interface DailyOperationsPatrolCardOptions {
   dashboardUrl?: string;
   scheduleUrl?: string;
-  followUpUrl?: string;
+  followUpCardId?: string;
 }
 
 export function buildDailyOperationsPatrolCard(
@@ -64,7 +65,7 @@ export function buildDailyOperationsPatrolCard(
 
   return {
     schema: '2.0',
-    config: { wide_screen_mode: true },
+    config: { wide_screen_mode: true, update_multi: true },
     header: {
       template: hasAlerts ? 'red' : 'green',
       title: {
@@ -121,7 +122,7 @@ function buildActions(
   options: DailyOperationsPatrolCardOptions,
 ): Array<Record<string, unknown>> {
   const actions = [
-    button('异常跟进', options.followUpUrl, 'primary_filled'),
+    options.followUpCardId ? buildFollowUpEntryButton(options.followUpCardId) : null,
     button('打开南通全景看板', options.dashboardUrl, 'default'),
     button('打开南通排班', options.scheduleUrl, 'default'),
   ].filter((value): value is Record<string, unknown> => Boolean(value));

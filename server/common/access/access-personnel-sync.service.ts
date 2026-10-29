@@ -1,5 +1,5 @@
 import { cancelHotfixInitialization, runHotfixInitialization } from '../hotfix-runtime-activation';
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { AccessConfigurationDirectory } from './access-configuration.directory';
 import { AccessConfigurationService } from './access-configuration.service';
 
@@ -17,6 +17,7 @@ export class AccessPersonnelSyncService implements OnModuleInit, OnModuleDestroy
   private readonly logger = new Logger(AccessPersonnelSyncService.name);
   private timer?: NodeJS.Timeout;
   private pending?: Promise<ReturnType<AccessConfigurationService['snapshot']>>;
+  private nextLoginRefreshAt = 0;
   constructor(private readonly configuration: AccessConfigurationService, private readonly directory: AccessConfigurationDirectory) {}
   async onModuleInit(): Promise<void> {
     return runHotfixInitialization(this, async () => {
@@ -48,6 +49,25 @@ export class AccessPersonnelSyncService implements OnModuleInit, OnModuleDestroy
       }
       await this.run(now);
     } catch { this.logger.warn('人员权限同步失败，现有授权保留'); }
+  }
+  /** Missing credentials may belong to a new employee added after the daily sync. */
+  async refreshForLogin(): Promise<void> {
+    const now = Date.now();
+    if (!this.pending && now < this.nextLoginRefreshAt) return;
+    this.nextLoginRefreshAt = now + 60_000;
+    const pending = this.pending || this.run();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        pending,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new ServiceUnavailableException('人员登录资料正在同步，请稍后重试')), 8_000);
+        }),
+      ]);
+      if (result.personnelSync?.status === 'error') throw new ServiceUnavailableException('人员登录资料暂时无法同步，请稍后重试');
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
   run(now = new Date()) {
     if (this.pending) return this.pending;

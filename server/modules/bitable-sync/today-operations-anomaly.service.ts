@@ -96,7 +96,7 @@ export class TodayOperationsAnomalyService {
     patrol: DailyOperationsPatrolReport | null;
     sections: readonly AttendanceSummarySection[];
     detectedAt: string;
-  }): Promise<{ recordIds: string[]; followUpUrl: string }> {
+  }): Promise<{ recordIds: string[] }> {
     const events = [
       ...(input.patrol
         ? [buildPatrolFollowUpEvent(input.patrol)].filter(
@@ -109,19 +109,7 @@ export class TodayOperationsAnomalyService {
     for (const event of events) {
       recordIds.push(await this.gateway.ensureFollowUpEvent(event));
     }
-    const dates = [
-      ...events.map((event) => event.businessDate),
-      ...(input.patrol ? [input.patrol.businessDate] : []),
-      ...input.sections.map((section) => section.date),
-    ].sort();
-    if (!dates.length) return { recordIds, followUpUrl: '' };
-    return {
-      recordIds,
-      followUpUrl: this.issueFollowUpUrl({
-        from: dates[0],
-        through: dates[dates.length - 1],
-      }),
-    };
+    return { recordIds };
   }
 
   issueFollowUpUrl(input: { from: string; through: string }): string {

@@ -47,11 +47,20 @@ describe('DailyOperationsPatrolService', () => {
       '2026-09-07',
       'om_patrol',
     );
+    expect(fixture.followUpCards.prepare).toHaveBeenCalledWith(['recPatrol'], '2026-09-07');
+    expect(fixture.followUpCards.bindMessage).toHaveBeenCalledWith('b'.repeat(32), 'om_patrol', card);
+    expect(fixture.followUpCards.prepare.mock.invocationCallOrder[0]).toBeLessThan(fixture.gateway.sendCard.mock.invocationCallOrder[0]);
+    expect(fixture.gateway.sendCard.mock.invocationCallOrder[0]).toBeLessThan(fixture.followUpCards.bindMessage.mock.invocationCallOrder[0]);
+    expect(fixture.followUpCards.bindMessage.mock.invocationCallOrder[0]).toBeLessThan(fixture.store.markSent.mock.invocationCallOrder[0]);
+    expect(JSON.stringify(card)).toContain('today_operations_followup');
+    expect(JSON.stringify(card)).not.toContain('attendance-anomaly-follow-up');
   });
 
-  it('uses the canonical Nantong host for card navigation links', async () => {
+  it.each([undefined, '   '])('keeps the configured host and port when PUBLIC_BASE_URL is %p', async (publicUrl) => {
     process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL =
-      'https://www.sm.sjhl.online:3001/';
+      '  https://www.sm.sjhl.online:3001/  ';
+    if (publicUrl === undefined) delete process.env.PUBLIC_BASE_URL;
+    else process.env.PUBLIC_BASE_URL = publicUrl;
     const fixture = createFixture();
     const service = createService(fixture);
 
@@ -62,10 +71,63 @@ describe('DailyOperationsPatrolService', () => {
 
     const card = JSON.stringify(fixture.gateway.sendCard.mock.calls[0][0]);
     expect(card).toContain(
-      'https://sm.sjhl.online:3001/today-operations-panorama',
+      'https://www.sm.sjhl.online:3001/today-operations-panorama',
     );
-    expect(card).toContain('https://sm.sjhl.online:3001/monthly-schedule');
-    expect(card).not.toContain('https://www.sm.sjhl.online:3001');
+    expect(card).toContain('https://www.sm.sjhl.online:3001/monthly-schedule');
+    expect(card).not.toContain('https://sm.sjhl.online:3001');
+  });
+
+  it('prefers PUBLIC_BASE_URL over the patrol fallback for card navigation links', async () => {
+    process.env.PUBLIC_BASE_URL = '  https://www.sm.sjhl.online:3001/portal/  ';
+    process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL =
+      'https://patrol.example.test/';
+    const fixture = createFixture();
+    const service = createService(fixture);
+
+    await service.runForBusinessDate(
+      '2026-09-07',
+      new Date('2026-09-07T01:30:00.000Z'),
+    );
+
+    const card = JSON.stringify(fixture.gateway.sendCard.mock.calls[0][0]);
+    expect(card).toContain(
+      'https://www.sm.sjhl.online:3001/portal/today-operations-panorama',
+    );
+    expect(card).toContain(
+      'https://www.sm.sjhl.online:3001/portal/monthly-schedule',
+    );
+    expect(card).not.toContain('https://patrol.example.test');
+  });
+
+  it('omits card navigation links when no public base URL is configured', async () => {
+    delete process.env.PUBLIC_BASE_URL;
+    delete process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL;
+    const fixture = createFixture();
+    const service = createService(fixture);
+
+    await service.runForBusinessDate(
+      '2026-09-07',
+      new Date('2026-09-07T01:30:00.000Z'),
+    );
+
+    const card = JSON.stringify(fixture.gateway.sendCard.mock.calls[0][0]);
+    expect(card).not.toContain('/today-operations-panorama');
+    expect(card).not.toContain('/monthly-schedule');
+  });
+
+  it('includes CLIENT_BASE_PATH after the public path for both patrol navigation links', async () => {
+    process.env.PUBLIC_BASE_URL = 'https://www.sm.sjhl.online:3001/gateway/';
+    process.env.CLIENT_BASE_PATH = '/app/';
+    process.env.NANTONG_DAILY_PATROL_PUBLIC_BASE_URL = 'https://old.example.test/app';
+    const fixture = createFixture();
+
+    await createService(fixture).runForBusinessDate(
+      '2026-09-07', new Date('2026-09-07T01:30:00.000Z'),
+    );
+
+    const card = JSON.stringify(fixture.gateway.sendCard.mock.calls[0][0]);
+    expect(card).toContain('https://www.sm.sjhl.online:3001/gateway/app/today-operations-panorama');
+    expect(card).toContain('https://www.sm.sjhl.online:3001/gateway/app/monthly-schedule');
   });
 
   it('does not evaluate data dated on the patrol day', async () => {
@@ -197,7 +259,7 @@ describe('DailyOperationsPatrolService', () => {
     const second = service.runForBusinessDate('2026-09-07');
 
     expect(second).toBe(first);
-    await Promise.resolve();
+    await new Promise<void>(resolve => setImmediate(resolve));
     release('om_patrol');
     await Promise.all([first, second]);
     expect(fixture.gateway.sendCard).toHaveBeenCalledTimes(1);
@@ -248,6 +310,8 @@ describe('DailyOperationsPatrolService', () => {
     const messageId = await service.sendMorningBriefCard(
       recoveredCard,
       '2026-09-08',
+      undefined,
+      'b'.repeat(32),
     );
 
     expect(messageId).toBe('om_existing_patrol');
@@ -257,6 +321,7 @@ describe('DailyOperationsPatrolService', () => {
     );
     expect(fixture.gateway.sendCard).not.toHaveBeenCalled();
     expect(fixture.store.prepare).not.toHaveBeenCalled();
+    expect(fixture.followUpCards.bindMessage).toHaveBeenCalledWith('b'.repeat(32), 'om_existing_patrol', recoveredCard);
   });
 
   it('posts the versioned complete brief beside a legacy degraded card and then reuses it', async () => {
@@ -318,6 +383,38 @@ describe('DailyOperationsPatrolService', () => {
       'unified-full-v4',
     );
   });
+
+  it('does not mark the morning card sent until its record scope is durably bound, and retries the same delivery identity', async () => {
+    const fixture = createFixture(), service = createService(fixture);
+    const card = { schema: '2.0', header: { title: '合成巡视卡片' } };
+    fixture.followUpCards.bindMessage.mockRejectedValueOnce(new Error('synthetic binding failed'));
+    await expect(service.sendMorningBriefCard(card, '2026-09-11', 'unified-full-v4', 'b'.repeat(32))).rejects.toThrow('binding failed');
+    expect(fixture.store.markSent).not.toHaveBeenCalled();
+    expect(fixture.store.markFailed).toHaveBeenCalledWith('2026-09-11', expect.objectContaining({ message: 'synthetic binding failed' }), 'unified-full-v4');
+    await expect(service.sendMorningBriefCard(card, '2026-09-11', 'unified-full-v4', 'b'.repeat(32))).resolves.toBe('om_patrol');
+    expect(fixture.gateway.sendCard.mock.calls).toEqual([[card, '2026-09-11', 'unified-full-v4'], [card, '2026-09-11', 'unified-full-v4']]);
+    expect(fixture.followUpCards.bindMessage).toHaveBeenNthCalledWith(2, 'b'.repeat(32), 'om_patrol', card);
+    expect(fixture.store.markSent).toHaveBeenCalledTimes(1);
+    expect(fixture.followUpCards.bindMessage.mock.invocationCallOrder[1]).toBeLessThan(fixture.store.markSent.mock.invocationCallOrder[0]);
+  });
+
+  it('does not send the standalone patrol card when the native record scope cannot be prepared', async () => {
+    const fixture = createFixture();
+    fixture.followUpCards.prepare.mockRejectedValueOnce(new Error('synthetic scope unavailable'));
+    await expect(createService(fixture).runForBusinessDate('2026-09-07')).rejects.toThrow('scope unavailable');
+    expect(fixture.gateway.sendCard).not.toHaveBeenCalled();
+    expect(fixture.store.prepare).not.toHaveBeenCalled();
+    expect(fixture.store.markSent).not.toHaveBeenCalled();
+  });
+
+  it('keeps an empty normal-day scope as an in-card list instead of creating a web ticket', async () => {
+    const fixture = createFixture();
+    fixture.followUp.syncMorningFollowUps.mockResolvedValueOnce({ recordIds: [] });
+    await expect(createService(fixture).prepareMorningFollowUps({ patrol: null, sections: [], detectedAt: '2026-09-07T01:30:00Z' }))
+      .resolves.toEqual({ recordIds: [], followUpCardId: 'b'.repeat(32) });
+    expect(fixture.followUpCards.prepare).toHaveBeenCalledWith([], '2026-09-07');
+    expect(fixture.gateway.sendCard).not.toHaveBeenCalled();
+  });
 });
 
 function createService(fixture: ReturnType<typeof createFixture>) {
@@ -328,6 +425,7 @@ function createService(fixture: ReturnType<typeof createFixture>) {
     fixture.store as unknown as DailyOperationsPatrolStore,
     fixture.gateway as unknown as DailyOperationsPatrolGateway,
     fixture.followUp as never,
+    fixture.followUpCards as never,
   );
 }
 
@@ -381,9 +479,11 @@ function createFixture() {
     followUp: {
       syncMorningFollowUps: jest.fn().mockResolvedValue({
         recordIds: ['recPatrol'],
-        followUpUrl:
-          'https://sm.example.test/attendance-anomaly-follow-up?ticket=signed.ticket',
       }),
+    },
+    followUpCards: {
+      prepare: jest.fn().mockResolvedValue('b'.repeat(32)),
+      bindMessage: jest.fn().mockResolvedValue(undefined),
     },
   };
 }

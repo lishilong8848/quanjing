@@ -2,6 +2,7 @@ import { HttpService } from '@nestjs/axios';
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   Injectable,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
@@ -18,6 +19,7 @@ import type {
   TodayOperationsFollowUpSource,
   TodayOperationsFollowUpUpdate,
 } from './today-operations-anomaly.types';
+import { followUpRecordFingerprint } from './today-operations-follow-up-card.types';
 
 const DEFAULT_SOURCE_URL =
   'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblCGU1ry3tanQ20&view=vewX0MdewN';
@@ -54,6 +56,7 @@ interface Target {
 
 @Injectable()
 export class TodayOperationsAnomalyGateway {
+  private readonly followUpWrites = new Map<string, Promise<TodayOperationsFollowUpRecord>>();
   private tenantToken: TenantTokenState | null = null;
   private tenantTokenPromise: Promise<string> | null = null;
   private targetPromise: Promise<Target> | null = null;
@@ -286,9 +289,19 @@ export class TodayOperationsAnomalyGateway {
     return record;
   }
 
-  async updateFollowUp(
+  updateFollowUp(
     input: TodayOperationsFollowUpUpdate,
+    expected?: TodayOperationsFollowUpRecord,
   ): Promise<TodayOperationsFollowUpRecord> {
+    input = structuredClone(input);
+    expected = expected && structuredClone(expected);
+    const previous = this.followUpWrites.get(input.recordId) || Promise.resolve();
+    const write = previous.catch(() => undefined).then(() => this.writeFollowUp(input, expected));
+    this.followUpWrites.set(input.recordId, write);
+    return write.finally(() => { if (this.followUpWrites.get(input.recordId) === write) this.followUpWrites.delete(input.recordId); });
+  }
+
+  private async writeFollowUp(input: TodayOperationsFollowUpUpdate, expected?: TodayOperationsFollowUpRecord): Promise<TodayOperationsFollowUpRecord> {
     const fields = buildTodayOperationsFollowUpUpdateFields(input);
     const current = await this.getFollowUp(input.recordId);
     const target = await this.target();
@@ -299,6 +312,9 @@ export class TodayOperationsAnomalyGateway {
       input.recordId,
     );
     if (existingMutationId === input.clientMutationId) return current;
+    if (expected && followUpRecordFingerprint(expected) !== followUpRecordFingerprint(current)) {
+      throw new ConflictException('异常跟进记录已变化，请核对后重新提交');
+    }
     const response = await this.httpService.axiosRef.put(
       `${recordsUrl(target)}/${encodeURIComponent(input.recordId)}`,
       { fields },
@@ -538,8 +554,13 @@ export function buildTodayOperationsFollowUpUpdateFields(
   if (!/^[A-Za-z0-9:_-]{8,160}$/u.test(clientMutationId)) {
     throw new BadRequestException('异常跟进请求标识无效');
   }
-  const treatmentMeasure = cleanLong(input.treatmentMeasure, 500);
-  if (input.completed && treatmentMeasure.length < 2) {
+  if (typeof input.treatmentMeasure !== 'string' || typeof input.acknowledged !== 'boolean' || typeof input.completed !== 'boolean') {
+    throw new BadRequestException('异常跟进状态或处理措施无效');
+  }
+  const treatmentMeasure = input.treatmentMeasure.normalize('NFC')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, ' ').trim();
+  const measureLength = Array.from(treatmentMeasure).length;
+  if (measureLength > 500 || (input.completed && measureLength < 2)) {
     throw new BadRequestException('标记完成前请填写 2–500 字处理措施');
   }
   const acknowledged = Boolean(input.acknowledged || input.completed);

@@ -19,6 +19,15 @@ function rawCardUpdate(type: string) {
   return { type: 'raw', data: resolvedCard(type) };
 }
 
+function followUpPayload(submit = false) {
+  return { event_type: 'card.action.trigger', event_id: submit ? 'evt_followup_submit' : 'evt_followup_list',
+    operator: { open_id: 'ou_followup_operator' }, context: { open_message_id: 'om_followup_group' },
+    action: { tag: 'button', ...(submit
+      ? { name: `today_followup_submit:${'b'.repeat(32)}:0:1`, form_value: { follow_up_status: 'completed', follow_up_measure: '已完成核查' } }
+      : { value: { workflowType: 'today_operations_followup', version: 1, batchId: 'b'.repeat(32), action: 'list', page: 0 } }) },
+  };
+}
+
 function overtimePayload(action: 'approve' | 'reject' = 'approve') {
   return {
     schema: '2.0',
@@ -340,6 +349,7 @@ describe('FeishuCardActionRouter', () => {
     handleCardAction: jest.Mock;
     runPending: jest.Mock;
   };
+  let followUp: { isEnabled: jest.Mock; handle: jest.Mock };
 
   beforeEach(async () => {
     const activation = currentHotfixActivation(); activation.completeBootstrap(); await activation.refresh();
@@ -417,6 +427,7 @@ describe('FeishuCardActionRouter', () => {
       }),
       runPending: jest.fn().mockResolvedValue({ processed: 1, failed: 0 }),
     };
+    followUp = { isEnabled: jest.fn(() => true), handle: jest.fn().mockResolvedValue({ toast: { type: 'info', content: '已打开异常跟进' } }) };
   });
 
   afterEach(() => {
@@ -434,6 +445,8 @@ describe('FeishuCardActionRouter', () => {
       anomaly as never,
       inventoryOutbound as never,
       threshold as never,
+      undefined,
+      followUp as never,
     );
   }
 
@@ -539,7 +552,42 @@ describe('FeishuCardActionRouter', () => {
     expect(router.isAnyEnabled()).toBe(true);
 
     inventoryOutbound.isEnabled.mockReturnValue(false);
+    expect(router.isAnyEnabled()).toBe(true);
+    followUp.isEnabled.mockReturnValue(false);
     expect(router.isAnyEnabled()).toBe(false);
+  });
+
+  it('routes native follow-up navigation without a raw editing card or any purchase action', async () => {
+    const payload = followUpPayload();
+    await expect(createRouter().handle(payload)).resolves.toEqual({ toast: { type: 'info', content: '已打开异常跟进' } });
+    expect(followUp.handle).toHaveBeenCalledWith(payload);
+    expect(anomaly.renderCardView).not.toHaveBeenCalled();
+    expect(purchaseStore.claimCardAction).not.toHaveBeenCalled();
+    expect(manager.handleManagerCardAction).not.toHaveBeenCalled();
+  });
+
+  it('routes the follow-up submit name before the generic purchase form branch and returns its processing card', async () => {
+    const payload = followUpPayload(true);
+    followUp.handle.mockResolvedValueOnce({ toast: { type: 'info', content: '已受理' }, card: resolvedCard('followup-processing') });
+    await expect(createRouter().handle(payload)).resolves.toEqual({ toast: { type: 'info', content: '已受理' }, card: rawCardUpdate('followup-processing') });
+    expect(followUp.handle).toHaveBeenCalledWith(payload);
+    expect(purchaseStore.claimCardAction).not.toHaveBeenCalled();
+    expect(manager.handleManagerCardAction).not.toHaveBeenCalled();
+    expect(anomaly.acceptTerminalAction).not.toHaveBeenCalled();
+  });
+
+  it('returns a rejected native follow-up action without falling through to other workflows', async () => {
+    followUp.handle.mockRejectedValueOnce(new BadRequestException('异常跟进卡片回调无效'));
+    await expect(createRouter().handle(followUpPayload(true))).resolves.toMatchObject({ toast: { type: 'error' } });
+    expect(followUp.handle).toHaveBeenCalledTimes(1);
+    expect(purchaseStore.claimCardAction).not.toHaveBeenCalled();
+    expect(anomaly.acceptTerminalAction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a disabled native follow-up workflow before invoking its service', async () => {
+    followUp.isEnabled.mockReturnValue(false);
+    await expect(createRouter().handle(followUpPayload())).resolves.toMatchObject({ toast: { type: 'error' } });
+    expect(followUp.handle).not.toHaveBeenCalled();
   });
 
   it('routes inventory outbound approval before generic record-id workflows', async () => {

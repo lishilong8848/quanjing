@@ -29,6 +29,7 @@ import { normalizeAccessDisplayName } from './access-display-name';
 import { verifyPersonnelPassword } from './personnel-password';
 import { effectivePagePaths } from '../../../shared/page-access';
 import { AccessConfigurationService } from './access-configuration.service';
+import { AccessPersonnelSyncService } from './access-personnel-sync.service';
 import { IMPERSONATION_TTL_MS, validImpersonationPayload, type ImpersonationPayload } from './access-impersonation';
 import {
   createHash,
@@ -156,7 +157,10 @@ export interface AccessSessionIdentityStatus extends AccessSessionStatus {
 
 @Injectable()
 export class UnifiedAccessService {
-  constructor(@Optional() private readonly configuration?: AccessConfigurationService) {}
+  constructor(
+    @Optional() private readonly configuration?: AccessConfigurationService,
+    @Optional() private readonly personnelSync?: AccessPersonnelSyncService,
+  ) {}
   pagePermissions(role: AccessRole, accountId?: string, authorizationVersion?: number) { return this.configuration?.pagePermissions(role,accountId,authorizationVersion) ?? { paths: effectivePagePaths(role), revision: 0, configured: false }; }
 
   readonly cookieName = ACCESS_SESSION_COOKIE_NAME;
@@ -235,6 +239,7 @@ export class UnifiedAccessService {
     : UNRESTRICTED_PRINCIPAL_FINGERPRINT;
   private readonly failures = new Map<string, LoginFailureState>();
   private activePasswordVerifications = 0;
+  private activePersonnelLoginRefreshes = 0;
   private readonly dummyEmployeeHash = `scrypt$${randomBytes(16).toString('base64')}$${randomBytes(32).toString('base64')}`;
 
   async login(
@@ -243,7 +248,7 @@ export class UnifiedAccessService {
     now = Date.now(),
   ): Promise<AccessLoginResult> {
     if (request?.employeeName !== undefined && (typeof request.employeeName !== 'string' || normalizeAccessDisplayName(request.employeeName) !== request.employeeName || request.accountType !== undefined || request.purchaseBuilding !== undefined || typeof request.password !== 'string' || !request.password || request.password.length > 256)) throw invalidCredentials();
-    const targets = this.resolveLoginTargets(request);
+    let targets = this.resolveLoginTargets(request);
     if (!this.sessionSecret || targets.length === 0) {
       throw new ServiceUnavailableException('统一访问控制尚未安全配置');
     }
@@ -260,6 +265,22 @@ export class UnifiedAccessService {
       throw tooManyLoginAttempts();
     }
 
+    if (request.employeeName !== undefined && this.configuration && this.personnelSync &&
+      this.configuration.employeeTargets(request.employeeName).length === 0) {
+      if (this.activePersonnelLoginRefreshes >= 2) throw tooManyLoginAttempts();
+      this.activePersonnelLoginRefreshes += 1;
+      try {
+        let refreshFailed = false;
+        await this.personnelSync.refreshForLogin().catch(() => { refreshFailed = true; });
+        if (refreshFailed && this.configuration.employeeTargets(request.employeeName).length === 0) {
+          throw new ServiceUnavailableException('人员登录资料正在同步或暂时不可用，请稍后重试');
+        }
+        targets = this.resolveLoginTargets(request);
+      } finally {
+        this.activePersonnelLoginRefreshes -= 1;
+      }
+    }
+    if (this.activePasswordVerifications >= MAX_CONCURRENT_PASSWORD_VERIFICATIONS) throw tooManyLoginAttempts();
     this.activePasswordVerifications += 1;
     try {
       let matchedTarget: LoginTarget | null = null;

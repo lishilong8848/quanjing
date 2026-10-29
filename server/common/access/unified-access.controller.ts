@@ -290,7 +290,6 @@ export class UnifiedAccessController {
       FEISHU_RETURN_TO_COOKIE_NAME,
     );
     const safeReturnTo = this.feishu.sanitizeReturnTo(returnToCookie.value);
-    clearOAuthCookies(response, request);
 
     const queryState = query?.state;
     if (
@@ -298,14 +297,11 @@ export class UnifiedAccessController {
       !stateCookie.value ||
       !secureStringEquals(queryState, stateCookie.value)
     ) {
-      this.rejectFeishuCallback(
-        'state_invalid',
-        safeReturnTo,
-        request,
-        response,
-      );
+      // An old or repeated callback must not erase a newer authorization or login.
+      response.redirect(302, withFeishuAuthStatus(safeReturnTo, 'state_invalid'));
       return;
     }
+    clearOAuthCookies(response, request);
 
     const providerError = query?.error;
     if (providerError !== undefined) {

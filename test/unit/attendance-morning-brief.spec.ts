@@ -10,8 +10,7 @@ const input = {
   fetchedAt: '2026-09-08 09:30',
   scheduleUrl: 'https://example.test/monthly-schedule',
   dashboardUrl: 'https://example.test/today-operations-panorama',
-  followUpUrl:
-    'https://example.test/attendance-anomaly-follow-up?ticket=signed.ticket',
+  followUpCardId: 'b'.repeat(32),
   archiveRecordCount: 40_000,
   sections: [
     {
@@ -111,7 +110,12 @@ it('groups by building and person, distinguishes directions, dates and capacity 
   ).toBe(true);
   expect(text).toContain('text_tag');
   expect(text).toContain('异常跟进');
-  expect(text).toContain('signed.ticket');
+  const button = findButton(card, '异常跟进');
+  expect(button.behaviors).toEqual([{ type: 'callback', value: {
+    workflowType: 'today_operations_followup', version: 1, batchId: input.followUpCardId, action: 'list', page: 0,
+  } }]);
+  expect(text).not.toContain('attendance-anomaly-follow-up');
+  expect(findButton(card, '查看实际排班')?.behaviors).toEqual([{ type: 'open_url', default_url: input.scheduleUrl }]);
 });
 
 it('does not warn below capacity threshold and never labels uncollected data normal', () => {
@@ -120,7 +124,7 @@ it('does not warn below capacity threshold and never labels uncollected data nor
       ...input,
       archiveRecordCount: 39_999,
       sections: [],
-      followUpUrl: '',
+      followUpCardId: '',
     }),
   );
   expect(text).not.toContain('请备份');
@@ -252,3 +256,9 @@ it('monthly training omits the section when every assessment is complete', () =>
   );
   expect(text).not.toContain('月度培训进展');
 });
+
+function findButton(value: any, label: string): any {
+  if (!value || typeof value !== 'object') return undefined;
+  if (value.tag === 'button' && value.text?.content === label) return value;
+  return Object.values(value).map(child => findButton(child, label)).find(Boolean);
+}

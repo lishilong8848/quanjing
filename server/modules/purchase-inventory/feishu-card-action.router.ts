@@ -29,6 +29,7 @@ import { PurchaseWorkflowService } from './purchase-workflow.service';
 import { PurchaseWorkflowStore } from './purchase-workflow.store';
 import { parseTodayOperationsAnomalyCardAction } from '../bitable-sync/today-operations-anomaly.callback';
 import { TodayOperationsAnomalyService } from '../bitable-sync/today-operations-anomaly.service';
+import { TodayOperationsFollowUpCardService } from '../bitable-sync/today-operations-follow-up-card.service';
 import { InventoryOutboundApprovalService } from '../inventory-outbound-approval/inventory-outbound-approval.service';
 import { ThresholdAdjustmentService } from '../threshold-management/threshold-adjustment.service';
 import { FeishuCardActionExecution, FeishuCardActionDeadlineError, CARD_ACTION_PROCESSING_RESPONSE } from '../../common/feishu-card-action-execution';
@@ -49,6 +50,7 @@ type CardActionKind =
   | 'purchase'
   | 'inventory_outbound'
   | 'threshold_adjustment'
+  | 'today_operations_followup'
   | 'today_operations_anomaly';
 type PurchaseAction = Exclude<
   PurchaseCardCallbackResult,
@@ -72,6 +74,7 @@ export class FeishuCardActionRouter {
     private readonly inventoryOutboundApprovalService: InventoryOutboundApprovalService,
     @Optional() private readonly thresholdAdjustments?: ThresholdAdjustmentService,
     @Inject(AccessConfigurationService) private readonly accessConfiguration?: AccessConfigurationService,
+    @Optional() private readonly followUpCards?: TodayOperationsFollowUpCardService,
   ) {}
 
   isAnyEnabled(): boolean {
@@ -82,7 +85,7 @@ export class FeishuCardActionRouter {
       this.purchaseManagerApprovalService.isEnabled() ||
       this.todayOperationsAnomalyService.isEnabled() ||
       this.inventoryOutboundApprovalService.isEnabled() ||
-      Boolean(this.thresholdAdjustments?.isEnabled())
+      Boolean(this.thresholdAdjustments?.isEnabled()) || Boolean(this.followUpCards?.isEnabled())
     );
   }
 
@@ -100,6 +103,11 @@ export class FeishuCardActionRouter {
   }
 
   private async dispatch(payload: unknown, kind: CardActionKind): Promise<FeishuCardActionResponse> {
+      if (kind === 'today_operations_followup') {
+        if (!this.followUpCards?.isEnabled()) throw new ServiceUnavailableException('异常跟进卡片服务未启用');
+        const result = await this.followUpCards.handle(payload);
+        return { toast: result.toast, ...(result.card ? { card: toFeishuRawCardUpdate(result.card) } : {}) };
+      }
       if (kind === 'threshold_adjustment') {
         if (!this.thresholdAdjustments?.isEnabled()) {
           throw new ServiceUnavailableException('阈值审批服务未启用');
@@ -516,6 +524,7 @@ function classifyCardAction(payload: unknown): CardActionKind {
     throw new Error('飞书卡片回调事件类型无效');
   }
   const action = requireObject(event.action);
+  if (typeof action.name === 'string' && action.name.startsWith('today_followup_submit:')) return 'today_operations_followup';
   if (
     typeof action.name === 'string' &&
     action.name.startsWith('threshold_reject_submit:')
@@ -552,6 +561,7 @@ function classifyCardAction(payload: unknown): CardActionKind {
     return 'purchase';
   }
   const actionValue = requireObject(action.value);
+  if (actionValue.workflowType === 'today_operations_followup') return 'today_operations_followup';
   if (actionValue.workflowType === 'threshold_adjustment') {
     return 'threshold_adjustment';
   }

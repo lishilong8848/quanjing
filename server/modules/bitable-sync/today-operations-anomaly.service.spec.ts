@@ -4,7 +4,7 @@ const TodayOperationsAnomalyService = withSyntheticBusinessIdentity(ActualTodayO
 type TodayOperationsAnomalyService = ActualTodayOperationsAnomalyService;
 
 describe('TodayOperationsAnomalyService card actions', () => {
-  it('provisions patrol and attendance follow-ups before issuing one scoped URL', async () => {
+  it('provisions patrol and attendance records without issuing an unused web ticket', async () => {
     const gateway = {
       ensureFollowUpEvent: jest
         .fn()
@@ -79,11 +79,8 @@ describe('TodayOperationsAnomalyService card actions', () => {
     });
 
     expect(gateway.ensureFollowUpEvent).toHaveBeenCalledTimes(2);
-    expect(tickets.issueUrl).toHaveBeenCalledWith({
-      from: '2026-09-08',
-      through: '2026-09-09',
-    });
-    expect(result.recordIds).toEqual(['recPatrol', 'recAttendance']);
+    expect(tickets.issueUrl).not.toHaveBeenCalled();
+    expect(result).toEqual({ recordIds: ['recPatrol', 'recAttendance'] });
   });
 
   it('does not create empty follow-up records or issue a URL on a normal day', async () => {
@@ -105,12 +102,12 @@ describe('TodayOperationsAnomalyService card actions', () => {
         sections: [],
         detectedAt: '2026-09-09T01:35:00.000Z',
       }),
-    ).resolves.toEqual({ recordIds: [], followUpUrl: '' });
+    ).resolves.toEqual({ recordIds: [] });
     expect(gateway.ensureFollowUpEvent).not.toHaveBeenCalled();
     expect(tickets.issueUrl).not.toHaveBeenCalled();
   });
 
-  it('still issues a follow-up URL for a normal daily patrol card', async () => {
+  it('returns an empty record scope for a normal patrol day without generating a web ticket', async () => {
     const gateway = { ensureFollowUpEvent: jest.fn() };
     const tickets = {
       issueUrl: jest.fn(
@@ -144,16 +141,9 @@ describe('TodayOperationsAnomalyService card actions', () => {
         sections: [],
         detectedAt: patrol.generatedAt,
       }),
-    ).resolves.toEqual({
-      recordIds: [],
-      followUpUrl:
-        'https://sm.example.com/attendance-anomaly-follow-up?ticket=x.y',
-    });
+    ).resolves.toEqual({ recordIds: [] });
     expect(gateway.ensureFollowUpEvent).not.toHaveBeenCalled();
-    expect(tickets.issueUrl).toHaveBeenCalledWith({
-      from: '2026-09-09',
-      through: '2026-09-09',
-    });
+    expect(tickets.issueUrl).not.toHaveBeenCalled();
   });
 
   it('rejects an update when the record date is outside the signed range', async () => {

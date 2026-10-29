@@ -354,7 +354,7 @@ export class AccessConfigurationService implements OnModuleInit {
       }
       reprojectAuthorizationState(current);
       reconcilePersonnelSource(current, directory);
-      const sourceError = current.personnelSource?.error;
+      const sourceError = current.personnelSource?.error || (directory.credentialsComplete === false ? '姓名登录资料同步失败，现有凭据保留，请重试' : undefined);
       current.personnelSync = { ...current.personnelSync, status: sourceError ? 'error' : 'success', lastAttemptAt: new Date().toISOString(),
         ...(sourceError ? { error: sourceError } : { lastSuccessAt: new Date().toISOString(), error: undefined }), changed,
         ...(directory.personnelWarnings?.length ? { warning: directory.personnelWarnings.join(' ') } : { warning: undefined }) };

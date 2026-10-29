@@ -34,6 +34,8 @@ import { MonthlyOperationsAlarmsService } from './monthly-operations-alarms.serv
 import { TodayOperationsOverviewService } from './today-operations-overview.service';
 import { TodayOperationsAnomalyGateway } from './today-operations-anomaly.gateway';
 import { TodayOperationsAnomalyService } from './today-operations-anomaly.service';
+import { TodayOperationsFollowUpCardService } from './today-operations-follow-up-card.service';
+import { TodayOperationsFollowUpCardStore } from './today-operations-follow-up-card.store';
 import { TodayOperationsAnomalyStore } from './today-operations-anomaly.store';
 import { TodayOperationsScheduleConsistencyService } from './today-operations-schedule-consistency.service';
 import { AttendanceDailySummaryStore } from '../duty-schedule/attendance-daily-summary.store';
@@ -88,6 +90,8 @@ const databaseFallbackProviders =
     TodayOperationsAnomalyGateway,
     TodayOperationsAnomalyStore,
     TodayOperationsAnomalyService,
+    TodayOperationsFollowUpCardStore,
+    TodayOperationsFollowUpCardService,
     TodayOperationsFollowUpTicketService,
     NantongAssistantService,
     TodayOperationsScheduleConsistencyService,
@@ -102,6 +106,7 @@ const databaseFallbackProviders =
     TodayOperationsKpiService,
     TodayOperationsOverviewService,
     TodayOperationsAnomalyService,
+    TodayOperationsFollowUpCardService,
     TodayOperationsScheduleConsistencyService,
   ],
 })

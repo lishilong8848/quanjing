@@ -50,7 +50,7 @@ interface AttendanceCardButton {
   type: 'primary_filled' | 'default';
   width: 'fill';
   text: { tag: 'plain_text'; content: string };
-  behaviors: [{ type: 'open_url'; default_url: string }];
+  behaviors: [{ type: 'open_url'; default_url: string } | { type: 'callback'; value: Record<string, unknown> }];
 }
 
 interface AttendanceCardButtonGroup {

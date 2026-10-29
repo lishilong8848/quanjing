@@ -140,11 +140,11 @@ describe('外部员工姓名密码登录', () => {
   });
   it('直接读取限定视图与字段，分页失败不传播 Axios 的凭据响应', async () => {
     const fields = [{ field_name: '姓名', type: 1 }, { field_name: '密码', type: 1 }, { field_name: '离职/异动情况', type: 7 }];
-    const views = [{ view_id: 'vewExternalTest', view_name: '外部账号人员' }];
+    const views = [{ view_id: 'vewrQcypV4', view_name: '在职人员' }, { view_id: 'vewExternalTest', view_name: '外部账号人员' }];
     const post = jest.fn().mockResolvedValue({ data: { code: 0, data: { items: rows(), has_more: false } } });
     const employees = await readExternalEmployeeCredentials({ axiosRef: { post } } as never, process.env.FEISHU_APP_ID!, 'synthetic-base', 'tblSynthetic', 'synthetic-token', fields, views);
     expect(employees).toHaveLength(1);
-    expect(post.mock.calls[0][1]).toEqual({ view_id: 'vewExternalTest', field_names: ['姓名', '密码', '离职/异动情况'] });
+    expect(post.mock.calls.map(call => call[1])).toEqual(views.map(view => ({ view_id: view.view_id, field_names: ['姓名', '密码', '离职/异动情况'] })));
     post.mockRejectedValue({ message: 'synthetic-external-only', response: { data: rows() } });
     await expect(readExternalEmployeeCredentials({ axiosRef: { post } } as never, process.env.FEISHU_APP_ID!, 'synthetic-base', 'tblSynthetic', 'synthetic-token', fields, views)).rejects.toThrow('外部员工资料读取失败');
     post.mockResolvedValue({ data: { code: 0, data: { items: rows(), has_more: true, page_token: 'repeat' } } });

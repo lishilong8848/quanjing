@@ -8,6 +8,7 @@ type ConfigInternals = {
   resolveEmailAppDir: () => string;
   getConfigFileValues: (path: string) => Record<string, string>;
   normalizeRecipient: (value: unknown) => string;
+  getRuntimeConfig: () => { publicBaseUrl: string };
 };
 
 const RECIPIENT_ENV_KEYS = [
@@ -146,5 +147,48 @@ describe('阿里月报默认邮件收件人', () => {
     expect(
       emailAppSource.match(/DEFAULT_RECIPIENT\s*=\s*"([^"]*)"/)?.[1],
     ).not.toContain('mei.bingbing@vnet.com');
+  });
+});
+
+describe('阿里月报站内下载地址', () => {
+  const keys = ['PUBLIC_BASE_URL', 'ALI_MONTHLY_REPORT_PUBLIC_BASE_URL', 'APP_PUBLIC_BASE_URL', 'CLIENT_BASE_PATH'] as const;
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+
+  afterEach(() => {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  });
+
+  it.each([
+    {
+      name: '统一地址补上与飞书回调相同的应用前缀',
+      values: ['https://www.sm.sjhl.online:3001/gateway/', 'https://old.example.test/app', '', '/app/'],
+      expected: 'https://www.sm.sjhl.online:3001/gateway/app',
+    },
+    {
+      name: '统一公网地址优先于遗留专属地址',
+      values: ['https://www.sm.sjhl.online:3001', 'https://sm.sjhl.online:3001', 'https://fallback.example.test'],
+      expected: 'https://www.sm.sjhl.online:3001',
+    },
+    {
+      name: '未配置统一公网地址时保留专属地址后备',
+      values: ['', 'https://www.sm.sjhl.online:3001/app', 'https://fallback.example.test', '/app'],
+      expected: 'https://www.sm.sjhl.online:3001/app',
+    },
+    {
+      name: '前两项缺省时保留应用地址后备',
+      values: ['', '', 'https://www.sm.sjhl.online:3001'],
+      expected: 'https://www.sm.sjhl.online:3001',
+    },
+  ])('$name', ({ values, expected }) => {
+    keys.forEach((key, index) => {
+      if (values[index]) process.env[key] = values[index];
+      else delete process.env[key];
+    });
+    // Reuse the file-read stubs so no local report or email configuration is read.
+    const service = createConfigService() as unknown as ConfigInternals;
+    expect(service.getRuntimeConfig().publicBaseUrl).toBe(expected);
   });
 });

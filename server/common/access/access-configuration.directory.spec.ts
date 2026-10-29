@@ -1,5 +1,6 @@
 import { HttpService } from '@nestjs/axios';
 import { AccessConfigurationDirectory } from './access-configuration.directory';
+import { readExternalEmployeeCredentials } from './external-employee-directory';
 import { fetchBitableRecords, getTenantAccessToken, resolveBitableAppToken } from '../feishu/bitable-direct-read';
 jest.mock('./external-employee-directory', () => ({ readExternalEmployeeCredentials: jest.fn().mockResolvedValue([]) }));
 jest.mock('../feishu/bitable-direct-read', () => ({ ...jest.requireActual('../feishu/bitable-direct-read'), fetchBitableRecords: jest.fn(), getTenantAccessToken: jest.fn(), resolveBitableAppToken: jest.fn() }));
@@ -49,6 +50,16 @@ describe('application personnel directory', () => {
     const directory = new AccessConfigurationDirectory(service);
     await expect(directory.read()).rejects.toThrow('temporary schema failure');
     await expect(directory.read()).resolves.toMatchObject({ people: [] });
+  });
+  it('distinguishes credential failure from a complete empty credential list and recovers on forced read', async () => {
+    (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
+    (readExternalEmployeeCredentials as jest.Mock).mockRejectedValueOnce(new Error('synthetic credential source failure'));
+    const directory = new AccessConfigurationDirectory(http());
+    const failed = await directory.read();
+    expect(failed).toMatchObject({ credentialsComplete: false });
+    expect(failed.externalEmployees).toBeUndefined();
+    expect(failed.personnelWarnings?.join('')).toContain('姓名登录资料');
+    await expect(directory.read(true)).resolves.toMatchObject({ credentialsComplete: true, externalEmployees: [] });
   });
   it('isolates shared Feishu associations while keeping record-based name-account eligibility', async () => {
     const records = [

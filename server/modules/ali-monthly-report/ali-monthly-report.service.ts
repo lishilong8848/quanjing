@@ -28,6 +28,7 @@ import type {
   AliMonthlyReportTypeOption,
 } from '@shared/api.interface';
 import { readEnv } from '@server/common/config/external-services.config';
+import { readPublicApplicationUrl } from '@server/common/config/public-application-url';
 import {
   buildAliMonthlyReportAutomationCard,
   buildAliMonthlyReportFeishuText,
@@ -1867,8 +1868,8 @@ export class AliMonthlyReportService {
       defaultEmailRecipient: this.mergeDefaultEmailRecipients(
         configuredEmailRecipient || fileEmailRecipient,
       ),
-      publicBaseUrl: readEnv('ALI_MONTHLY_REPORT_PUBLIC_BASE_URL', [
-        'PUBLIC_BASE_URL',
+      publicBaseUrl: readPublicApplicationUrl([
+        'ALI_MONTHLY_REPORT_PUBLIC_BASE_URL',
         'APP_PUBLIC_BASE_URL',
       ]),
       downloadSigningRoot:

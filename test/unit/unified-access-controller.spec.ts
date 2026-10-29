@@ -1248,7 +1248,7 @@ describe('UnifiedAccessController', () => {
       'code_invalid',
     ],
   ] as const)(
-    'rejects callback with %s and consumes OAuth cookies',
+    'rejects callback with %s and only consumes cookies for a matching OAuth attempt',
     async (_label, query, cookie, status) => {
       await controller.feishuCallback(
         query as never,
@@ -1258,18 +1258,14 @@ describe('UnifiedAccessController', () => {
 
       expect(feishu.exchangeAuthorizationCode).not.toHaveBeenCalled();
       expect(service.issueTrustedSession).not.toHaveBeenCalled();
-      expect(response.clearCookie).toHaveBeenCalledWith(
-        FEISHU_STATE_COOKIE_NAME,
-        expect.anything(),
-      );
-      expect(response.clearCookie).toHaveBeenCalledWith(
-        FEISHU_RETURN_TO_COOKIE_NAME,
-        expect.anything(),
-      );
-      expect(response.clearCookie).toHaveBeenCalledWith(
-        COOKIE_NAME,
-        expect.anything(),
-      );
+      if (status === 'state_invalid') {
+        expect(response.clearCookie).not.toHaveBeenCalled();
+        expect(response.cookie).not.toHaveBeenCalled();
+      } else {
+        expect(response.clearCookie).toHaveBeenCalledWith(FEISHU_STATE_COOKIE_NAME, expect.anything());
+        expect(response.clearCookie).toHaveBeenCalledWith(FEISHU_RETURN_TO_COOKIE_NAME, expect.anything());
+        expect(response.clearCookie).toHaveBeenCalledWith(COOKIE_NAME, expect.anything());
+      }
       expect(response.redirect).toHaveBeenCalledWith(
         302,
         expect.stringContaining(`feishu_auth=${status}`),

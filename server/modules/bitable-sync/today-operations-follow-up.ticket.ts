@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { readEnv } from '../../common/config/external-services.config';
-import { canonicalizeNantongPublicUrl } from '../../common/config/nantong-public-url';
+import { readPublicApplicationUrl } from '../../common/config/public-application-url';
 
 const TICKET_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
@@ -117,7 +117,7 @@ export function buildTodayOperationsFollowUpUrl(
 ): string {
   let url: URL;
   try {
-    url = new URL(canonicalizeNantongPublicUrl(clean(publicBaseUrlValue)));
+    url = new URL(clean(publicBaseUrlValue));
   } catch {
     throw new BadRequestException('异常跟进公网地址无效');
   }
@@ -169,8 +169,8 @@ function normalize(input: TodayOperationsFollowUpTicketPayload) {
 }
 
 function publicBaseUrl(): string {
-  const value = readEnv('NANTONG_DAILY_PATROL_PUBLIC_BASE_URL', [
-    'PUBLIC_BASE_URL',
+  const value = readPublicApplicationUrl([
+    'NANTONG_DAILY_PATROL_PUBLIC_BASE_URL',
     'FEISHU_PUBLIC_BASE_URL',
     'APP_PUBLIC_URL',
   ]);

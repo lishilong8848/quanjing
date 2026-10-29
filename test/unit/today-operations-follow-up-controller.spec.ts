@@ -18,7 +18,8 @@ describe('TodayOperationsFollowUpController route gate', () => {
       /@GuestReadable\(\)\s+@Get\('api\/duty-schedules\/daily-operations-follow-ups'\)/u,
     );
     expect(source).not.toMatch(/@PublicAccess\(\)\s+@Post\('api\/duty-schedules\/daily-operations-follow-ups'\)/u);
-    expect(source).toContain('this.requireCurrentSession(request)');
+    expect(source).toMatch(/this\.requireCurrentSession\(request,\s*'read'\)/u);
+    expect(source).toMatch(/this\.requireCurrentSession\(request,\s*'update'\)/u);
     expect(source).toContain("@Headers('x-follow-up-ticket')");
     expect(source).toContain('this.tickets.verify(ticket)');
     expect(source).toContain(
