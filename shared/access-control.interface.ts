@@ -78,6 +78,8 @@ export type AccessLoginAccountType =
   | 'construction_admin';
 
 export interface AccessPrincipal {
+  /** Initial personnel credentials authorize only password setup, never business operations. */
+  requiresPasswordChange?: boolean;
   impersonation?: { actorAccountId: string; actorName: string; targetName: string; expiresAt: number };
   role: AccessRole;
   purchaseBuilding: PurchaseAccessBuilding | BuildingAdminBuilding | null;

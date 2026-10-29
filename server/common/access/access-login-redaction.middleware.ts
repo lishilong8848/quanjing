@@ -16,6 +16,16 @@ export const ACCESS_LOGIN_MIDDLEWARE_PATH = 'api/access/login';
 @Injectable()
 export class AccessLoginRedactionMiddleware implements NestMiddleware {
   use(request: RequestWithBody, _response: Response, next: NextFunction): void {
+    const path = String(request.originalUrl || request.url || '').split('?')[0];
+    if (isRecord(request.body) && /\/access\/personal\/password\/(change|reset)$/.test(path)) {
+      const fields = path.endsWith('/reset') ? ['employeeName', 'identityNumber', 'newPassword', 'confirmPassword', 'clientMutationId'] : ['currentPassword', 'newPassword', 'confirmPassword', 'clientMutationId'];
+      const body = request.body, safe = Object.create(null) as Record<string, unknown>;
+      if (Object.keys(body).some(key => !fields.includes(key))) safe.invalidFields = true;
+      for (const field of fields) if (Object.hasOwn(body, field)) Object.defineProperty(safe, field, { value: body[field], enumerable: field === 'clientMutationId', configurable: true, writable: true });
+      request.body = safe;
+      next();
+      return;
+    }
     if (isRecord(request.body)) request.body = redactLoginBody(request.body, String(request.originalUrl || request.url || '').split('?')[0].endsWith('/access/configuration/accounts'));
     next();
   }

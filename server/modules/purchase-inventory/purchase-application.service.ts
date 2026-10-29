@@ -52,6 +52,7 @@ import {
 } from './purchase-application-task-ledger.store';
 import { PurchaseCodeService } from './purchase-code.service';
 import { PurchaseManagerApprovalService } from './purchase-manager-approval.service';
+import { comparisonAttachmentIssue } from '../../../shared/purchase-comparison-attachments';
 
 const CATALOG_CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const DEFAULT_ACTIVE_EMPLOYEE_SOURCE_URL =
@@ -664,23 +665,21 @@ export class PurchaseApplicationService {
       });
     }
     const comparisonFiles = selectComparisonFiles(validation.value, files);
-    if (
-      validation.value.shared.procurementForm === '三方比价' &&
-      validation.value.shared.purchaseChannel === '线下' &&
-      comparisonFiles.length === 0
-    ) {
+    validateAttachments(comparisonFiles);
+    const attachmentIssue = validation.value.shared.procurementForm === '三方比价'
+      ? comparisonAttachmentIssue(comparisonFiles.map(file => ({ type: verifiedComparisonImageType(file) }))) : null;
+    if (attachmentIssue) {
       throw new BadRequestException({
-        message: '线下采购必须上传三方比价单',
+        message: attachmentIssue,
         issues: [
           {
             code: 'REQUIRED_COMPARISON_ATTACHMENT',
             path: 'shared.comparisonAttachment',
-            message: '线下采购必须上传三方比价单',
+            message: attachmentIssue,
           },
         ],
       });
     }
-    validateAttachments(comparisonFiles);
     return validation.value;
   }
 
@@ -1491,6 +1490,14 @@ function validateAttachments(files: PurchaseApplicationUploadFile[]): void {
   if (totalSize > MAX_TOTAL_ATTACHMENT_SIZE) {
     throw new BadRequestException('附件总大小不能超过 50MB');
   }
+}
+
+function verifiedComparisonImageType(file: PurchaseApplicationUploadFile): string {
+  const bytes = file.buffer;
+  if (file.mimetype === 'image/png' && bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return file.mimetype;
+  if (file.mimetype === 'image/jpeg' && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return file.mimetype;
+  if (file.mimetype === 'image/webp' && bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return file.mimetype;
+  return '';
 }
 
 function assertFeishuSuccess(payload: unknown, prefix: string): void {

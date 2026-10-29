@@ -23,11 +23,25 @@ import type { PersonnelBaselineMutation } from '../../../shared/personnel-baseli
 import type { AuthorizationAccountChange, AuthorizationRoleMutation } from '../../../shared/authorization-profile';
 import { withPersonnelDirectoryDeadline } from './personnel-directory-deadline';
 import { createPermissionCatalog } from '../../../shared/permission-catalog';
+import { PersonnelPermissionRequestsService } from './personnel-permission-requests.service';
+import type { ReviewPersonnelPermissionRequest } from '../../../shared/personnel-permission-request.interface';
 
 @Controller('api/access/configuration')
 @AdminOnly()
 export class AccessConfigurationController {
-  constructor(private readonly configuration: AccessConfigurationService, private readonly directory: AccessConfigurationDirectory, private readonly access: UnifiedAccessService, private readonly cards: AccessConfigurationCardDirectory, @Optional() private readonly personnelSync?: AccessPersonnelSyncService, @Optional() private readonly personnelPreview?: PersonnelPreviewService, @Optional() private readonly personnelHandover?: PersonnelHandoverAdminService, @Optional() private readonly personnelSource?: PersonnelSourceService, @Optional() private readonly personnelBaseline?:PersonnelBaselineService) {}
+  constructor(private readonly configuration: AccessConfigurationService, private readonly directory: AccessConfigurationDirectory, private readonly access: UnifiedAccessService, private readonly cards: AccessConfigurationCardDirectory, @Optional() private readonly personnelSync?: AccessPersonnelSyncService, @Optional() private readonly personnelPreview?: PersonnelPreviewService, @Optional() private readonly personnelHandover?: PersonnelHandoverAdminService, @Optional() private readonly personnelSource?: PersonnelSourceService, @Optional() private readonly personnelBaseline?:PersonnelBaselineService, @Optional() private readonly permissionRequests?: PersonnelPermissionRequestsService) {}
+  @Get('permission-requests')
+  @Header('Cache-Control', 'private, no-store')
+  requestedPermissions(@Req() request: Request) {
+    if (!this.permissionRequests) throw new ForbiddenException('权限申请暂不可用');
+    return this.permissionRequests.listAdmin(this.actor(request));
+  }
+  @Post('permission-requests')
+  @Header('Cache-Control', 'private, no-store')
+  reviewRequestedPermissions(@Req() request: Request, @Body() body: ReviewPersonnelPermissionRequest) {
+    if (!this.permissionRequests) throw new ForbiddenException('权限申请暂不可用');
+    return this.permissionRequests.review(this.actor(request, true), body);
+  }
   @Get('permission-catalog')
   @Header('Cache-Control', 'private, no-store')
   permissionCatalog(@Req() request: Request) { this.actor(request); return createPermissionCatalog(); }

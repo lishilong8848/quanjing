@@ -39,6 +39,8 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LoginNameField } from './LoginNameField';
 import { ImpersonationBanner } from './ImpersonationBanner';
+import { PasswordChangeDialog } from './PasswordChangeDialog';
+import { ForgotPasswordDialog } from './ForgotPasswordDialog';
 import { requestImpersonation, reloadImpersonationPage, type ImpersonationFailure } from './impersonation';
 import { useFeishuLogin } from './use-feishu-login';
 import {
@@ -75,10 +77,12 @@ interface AccessContextValue extends AccessSessionResponse {
   isLoading: boolean;
   isConfirmingIdentity: boolean;
   isChangingIdentity: boolean;
+  isLoginDialogOpen: boolean;
   dismissedLoginPath: string | null;
   sessionError: string | null;
   login: (request: AccessLoginRequest) => Promise<boolean>;
   logout: () => Promise<boolean>;
+  passwordChanged: () => void;
   refreshSession: () => Promise<void>;
   retrySession: () => Promise<void>;
   startImpersonation: (accountId: string, clientMutationId: string) => Promise<boolean>;
@@ -90,6 +94,7 @@ interface AccessContextValue extends AccessSessionResponse {
     preferredAccountType?: AccessLoginAccountType,
     preferredPurchaseBuilding?: PurchaseAccessBuilding | BuildingAdminBuilding,
     automatic?: boolean,
+    options?: { method?: 'feishu' | 'employee'; notice?: string },
   ) => void;
 }
 
@@ -101,6 +106,8 @@ interface LoginDialogState {
   requiredPath?: string;
   preferredAccountType?: AccessLoginAccountType;
   preferredPurchaseBuilding?: PurchaseAccessBuilding | BuildingAdminBuilding;
+  preferredMethod?: 'feishu' | 'employee';
+  notice?: string;
 }
 
 const GUEST_SESSION: AccessSessionResponse = normalizeAccessSession({
@@ -140,6 +147,8 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
     automatic: false,
     reason: '请输入访问密码。',
   });
+  const loginDialogRef = React.useRef(dialog);
+  loginDialogRef.current = dialog;
   const activeLoginRequestKey = React.useRef(0);
   const refreshPromise = React.useRef<Promise<void> | null>(null);
   const [sessionCommitCoordinator] = React.useState(
@@ -371,8 +380,9 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       preferredAccountType?: AccessLoginAccountType,
       preferredPurchaseBuilding?: PurchaseAccessBuilding | BuildingAdminBuilding,
       automatic = false,
+      options?: { method?: 'feishu' | 'employee'; notice?: string },
     ) => {
-      if (impersonationPendingRef.current || automatic && sessionRef.current.impersonation) return;
+      if (impersonationPendingRef.current || automatic && (sessionRef.current.impersonation || loginDialogRef.current.open)) return;
       const rememberedLogin = reauthenticationPendingRef.current
         ? lastReauthenticationLoginRef.current
         : getReauthenticationLoginDefaults(GUEST_SESSION);
@@ -386,7 +396,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       const requestKey = activeLoginRequestKey.current + 1;
       activeLoginRequestKey.current = requestKey;
       setLoginError(null);
-      setDialog({
+      const nextDialog: LoginDialogState = {
         requestKey,
         open: true,
         automatic,
@@ -398,7 +408,13 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
         ...(resolvedPurchaseBuilding
           ? { preferredPurchaseBuilding: resolvedPurchaseBuilding }
           : {}),
-      });
+        ...(options?.method ? { preferredMethod: options.method } : {}),
+        ...(options?.notice ? { notice: options.notice } : {}),
+      };
+      // Cover already-queued route effects as well as the next render. An
+      // automatic gate must never replace an explicit login or its draft.
+      loginDialogRef.current = nextDialog;
+      setDialog(nextDialog);
     },
     [],
   );
@@ -604,6 +620,22 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   const startImpersonation = React.useCallback((accountId: string, clientMutationId: string) => changeImpersonation('start', clientMutationId, accountId), [changeImpersonation]);
   const stopImpersonation = React.useCallback((clientMutationId: string) => changeImpersonation('stop', clientMutationId), [changeImpersonation]);
 
+  // The password endpoint confirms the write and expires the cookie. Invalidate all
+  // in-flight identity reads before showing login, so none can restore the old session.
+  const passwordChanged = React.useCallback(() => {
+    const token = sessionCommitCoordinator.beginMutation();
+    sessionCommitCoordinator.commitMutation(token);
+    requiresFeishuIdentityRef.current = false;
+    reauthenticationPendingRef.current = false;
+    setIsConfirmingIdentity(false); setIsLoading(false); setSessionError(null);
+    setSession(GUEST_SESSION);
+    clearBackgroundSessionWarning();
+    toast.success('密码已更新，请使用新密码重新登录');
+    requestLogin('密码已更新，请重新登录。', '/personal-center', undefined, undefined, false,
+      { method: 'employee', notice: '密码已更新，请使用新密码重新登录。' });
+  }, [sessionCommitCoordinator, clearBackgroundSessionWarning, requestLogin]);
+  const mustChangePassword = session.requiresPasswordChange === true && !session.impersonation;
+
   const value = React.useMemo<AccessContextValue>(
     () => ({
       ...normalizeAccessSession(session),
@@ -614,10 +646,12 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       isLoading,
       isConfirmingIdentity: isConfirmingIdentity || callbackPending,
       isChangingIdentity: isLoggingIn || isLoggingOut || isImpersonating,
+      isLoginDialogOpen: dialog.open && !mustChangePassword,
       dismissedLoginPath,
       sessionError,
       login,
       logout,
+      passwordChanged,
       refreshSession,
       retrySession,
       startImpersonation,
@@ -630,10 +664,12 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       isLoggingIn,
       isLoggingOut,
       isImpersonating,
+      dialog.open,
       dismissedLoginPath,
       callbackPending,
       login,
       logout,
+      passwordChanged,
       refreshSession,
       retrySession,
       startImpersonation,
@@ -648,12 +684,15 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   return (
     <AccessContext.Provider value={value}>
       <ImpersonationBanner />
-      {children}
+      {mustChangePassword ? <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6"><p className="text-sm text-muted-foreground">请先设置新的登录密码</p></main> : children}
+      {mustChangePassword && <PasswordChangeDialog key={session.accountId} open required onClose={() => undefined} onSuccess={passwordChanged} onLogout={async () => { if (await logout()) requestLogin('请重新登录。'); }} />}
       <AccessLoginDialog
         key={dialog.requestKey}
-        open={dialog.open}
+        open={dialog.open && !mustChangePassword}
         reason={dialog.reason}
         resetKey={dialog.requestKey}
+        initialMethod={dialog.preferredMethod}
+        notice={dialog.notice}
         error={loginError}
         isSubmitting={isLoggingIn || isLoggingOut}
         onOpenChange={(open) => {
@@ -663,6 +702,7 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
           if (!open) setLoginError(null);
         }}
         onSubmit={login}
+        onPasswordReset={passwordChanged}
       />
       <Dialog open={isImpersonating}>
         <DialogContent showCloseButton={false} onEscapeKeyDown={event => event.preventDefault()} onPointerDownOutside={event => event.preventDefault()}>
@@ -690,23 +730,30 @@ function AccessLoginDialog({
   open,
   reason,
   resetKey,
+  initialMethod = 'feishu',
+  notice,
   error,
   isSubmitting,
   onOpenChange,
   onSubmit,
+  onPasswordReset,
 }: {
   open: boolean;
   reason: string;
   resetKey: number;
+  initialMethod?: 'feishu' | 'employee';
+  notice?: string;
   error: string | null;
   isSubmitting: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (request: AccessLoginRequest) => Promise<boolean>;
+  onPasswordReset: () => void;
 }) {
   const [password, setPassword] = React.useState('');
-  const [method, setMethod] = React.useState<'feishu' | 'shared' | 'employee'>('feishu');
+  const [method, setMethod] = React.useState<'feishu' | 'shared' | 'employee'>(initialMethod);
   const [employeeName, setEmployeeName] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
+  const [forgotPassword, setForgotPassword] = React.useState(false);
   const [submittedMethod, setSubmittedMethod] = React.useState<string>();
   const feishuLogin = useFeishuLogin(undefined, open, isSubmitting);
   const busy = isSubmitting || feishuLogin.isPending;
@@ -716,11 +763,12 @@ function AccessLoginDialog({
   };
 
   React.useEffect(() => {
-    if (!open) return;
-    setPassword(''); setEmployeeName(''); setMethod('feishu'); setShowPassword(false); setSubmittedMethod(undefined);
-  }, [open, resetKey]);
+    setPassword(''); setEmployeeName(''); setMethod(initialMethod); setShowPassword(false); setSubmittedMethod(undefined); setForgotPassword(false);
+  }, [open, resetKey, initialMethod]);
 
   if (!open) return null;
+
+  if (forgotPassword) return <ForgotPasswordDialog open initialName={employeeName} onClose={() => setForgotPassword(false)} onSuccess={() => { setPassword(''); setForgotPassword(false); onPasswordReset(); }} />;
 
   const passwordForm = <form className="space-y-4" onSubmit={(event) => {
     event.preventDefault();
@@ -740,6 +788,7 @@ function AccessLoginDialog({
       </span>
     </label>
     {method === 'employee' && <p className="text-xs leading-5 text-muted-foreground">首次登录，默认密码为本人身份证号后 6 位。</p>}
+    {method === 'employee' && <div className="flex justify-end"><Button type="button" variant="link" size="sm" className="h-auto p-0" disabled={busy} onClick={() => { setPassword(''); setForgotPassword(true); }}>忘记密码？</Button></div>}
     {error && submittedMethod === method ? <p className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert"><AlertCircle className="mt-0.5 size-4 shrink-0" /><span>{error}</span></p> : null}
     <DialogFooter><Button type="submit" className="h-11 w-full" disabled={!canSubmit} aria-busy={isSubmitting}>{isSubmitting && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}{isSubmitting ? '验证中…' : '登录'}</Button></DialogFooter>
   </form>;
@@ -751,6 +800,7 @@ function AccessLoginDialog({
         <DialogTitle>统一登录</DialogTitle>
         <DialogDescription id="access-login-help" className="sr-only">{reason} 选择一种登录方式即可。</DialogDescription>
       </DialogHeader>
+      {notice && <p role="status" className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm leading-6 text-primary">{notice}</p>}
       {method !== 'shared' ? <Tabs value={method} onValueChange={value => changeMethod(value as 'feishu' | 'employee')} className="gap-4">
         <p className="text-sm text-muted-foreground">请选择一种方式登录</p>
         <TabsList className="grid h-12 w-full grid-cols-2 border bg-background p-0" aria-label="登录方式">

@@ -29,12 +29,25 @@ import { PersonnelBaselineDirectory } from './personnel-baseline.directory';
 import { PERSONNEL_BASELINE_READER } from './personnel-baseline.reader';
 
 import { AccessLoginNamesService } from './access-login-names.service';
+import { PersonnelAccountController } from './personnel-account.controller';
+import { PersonnelCredentialsService } from './personnel-credentials.service';
+import { PersonnelCredentialsGateway } from './personnel-credentials.gateway';
+import { PersonnelSecurityStore } from './personnel-security.store';
+import { PersonnelPermissionRequestsService } from './personnel-permission-requests.service';
+import { PersonnelArchiveService } from './personnel-archive.service';
+import { PersonnelArchiveGateway } from './personnel-archive.gateway';
 
 @Global()
 @Module({
   imports: [ConfigModule.forRoot({ ignoreEnvFile: true }), HttpModule],
-  controllers: [UnifiedAccessController, AccessConfigurationController],
+  controllers: [UnifiedAccessController, AccessConfigurationController, PersonnelAccountController],
   providers: [
+    PersonnelArchiveService,
+    PersonnelArchiveGateway,
+    PersonnelCredentialsService,
+    PersonnelCredentialsGateway,
+    PersonnelSecurityStore,
+    PersonnelPermissionRequestsService,
     AccessLoginNamesService,
     AccessConfigurationService,
     AccessConfigurationDirectory,
@@ -61,6 +74,8 @@ export class UnifiedAccessModule implements NestModule {
     consumer.apply(AccessLoginRedactionMiddleware).forRoutes({
       path: ACCESS_LOGIN_MIDDLEWARE_PATH,
       method: RequestMethod.POST,
-    }, { path: 'api/access/configuration/accounts', method: RequestMethod.POST });
+    }, { path: 'api/access/configuration/accounts', method: RequestMethod.POST },
+    { path: 'api/access/personal/password/change', method: RequestMethod.POST },
+    { path: 'api/access/personal/password/reset', method: RequestMethod.POST });
   }
 }

@@ -189,13 +189,17 @@ describe('PurchaseApplicationService durable idempotency', () => {
     const request = offlineRequest();
     const firstFile = uploadFile('comparison.pdf', Buffer.from('first'));
     const changedFile = uploadFile('comparison.pdf', Buffer.from('changed'));
-    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(request, [
-      firstFile,
-    ]);
+    const images = comparisonImages();
+    const firstFiles = [...images, firstFile];
+    const changedFiles = [...images, changedFile];
+    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(
+      request,
+      firstFiles,
+    );
 
     const accepted = service.acceptApplications(
       request,
-      [firstFile],
+      firstFiles,
       '2026-07-10',
       'purchase-mutation-attachment',
       fingerprint,
@@ -216,10 +220,10 @@ describe('PurchaseApplicationService durable idempotency', () => {
     expect(() =>
       service.acceptApplications(
         structuredClone(request),
-        [changedFile],
+        changedFiles,
         '2026-07-10',
         'purchase-mutation-attachment',
-        buildPurchaseApplicationSubmissionFingerprint(request, [changedFile]),
+        buildPurchaseApplicationSubmissionFingerprint(request, changedFiles),
         request,
         principalFingerprint,
       ),
@@ -227,7 +231,7 @@ describe('PurchaseApplicationService durable idempotency', () => {
     expect(() =>
       service.acceptApplications(
         structuredClone(request),
-        [changedFile],
+        changedFiles,
         '2026-07-10',
         'purchase-mutation-attachment',
         fingerprint,
@@ -512,6 +516,7 @@ describe('PurchaseApplicationService durable idempotency', () => {
       }),
       [],
       '2026-07-10',
+      accepted.taskId,
     );
   });
 
@@ -811,9 +816,9 @@ function validRequest(): PurchaseApplicationBatchRequest {
       purchaseChannel: '线上',
       supplier: '南通供应商',
       onlineUrl: 'https://purchase.example.com/item',
-      procurementForm: '三方比价',
-      comparisonSatisfied: '是',
-      singleReason: '',
+      procurementForm: '单一采购',
+      comparisonSatisfied: '否',
+      singleReason: '合成用例的既定单一供应商',
       requirementSummary: '办公物资补充',
       expectedDeliveryDate: '2026-07-20',
       immediateOutbound: false,
@@ -842,6 +847,9 @@ function validRequest(): PurchaseApplicationBatchRequest {
 
 function offlineRequest(): PurchaseApplicationBatchRequest {
   const request = validRequest();
+  request.shared.procurementForm = '三方比价';
+  request.shared.comparisonSatisfied = '是';
+  request.shared.singleReason = '';
   request.shared.purchaseChannel = '线下';
   request.shared.onlineUrl = '';
   request.items = request.items.map((item) => ({
@@ -861,6 +869,16 @@ function uploadFile(
     size: buffer.byteLength,
     buffer,
   };
+}
+
+function comparisonImages(): PurchaseApplicationUploadFile[] {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/q3cAAAAASUVORK5CYII=',
+    'base64',
+  );
+  return [1, 2, 3].map(index => ({
+    originalname: `quote-${index}.png`, mimetype: 'image/png', size: png.byteLength, buffer: Buffer.from(png),
+  }));
 }
 
 function successfulResult() {

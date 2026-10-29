@@ -226,6 +226,39 @@ export class AccessConfigurationService implements OnModuleInit {
     const account = accounts[0];
     return [{ hash: account.passwordHash!, principal: toPrincipal(account) }];
   }
+  /** Internal credential gateway only. Never serialize the returned account in an API. */
+  getPersonnelCredentialAccount(id: string): StoredAccount | null {
+    const account = this.accounts()[id];
+    return account ? structuredClone(account) : null;
+  }
+  personnelCredentialEligible(id: string): boolean {
+    const state = this.store.read(), account = this.accounts(state)[id];
+    return !!account && this.canAuthenticatePersonnel(account, state);
+  }
+  async commitPersonnelPassword(id: string, expectedHash: string, newHash: string, mutationId: string): Promise<AccessPrincipal> {
+    if (!validAccessPasswordHash(newHash) || !/^[A-Za-z0-9_-]{8,128}$/.test(mutationId)) throw new BadRequestException('密码保存请求无效');
+    const before = this.store.read();
+    const fingerprint = createHash('sha256').update(JSON.stringify(['personnel-password', id, newHash])).digest('hex');
+    const mutationKey = `credential-${createHash('sha256').update(JSON.stringify([id, mutationId])).digest('hex')}`;
+    const state = await this.store.mutate(before.revision, mutationKey, fingerprint, current => {
+      const accounts = this.accounts(current), account = accounts[id];
+      if (!account || account.loginMethod !== 'personnel-password' || !this.canAuthenticatePersonnel(account, current)) throw new UnauthorizedException('账号当前不能修改密码');
+      if (account.passwordHash !== expectedHash) throw new ConflictException('密码已变化，请重新核验后重试');
+      const changed = account.passwordHash !== newHash;
+      if (changed) {
+        current.accounts[id] = { ...account, passwordHash: newHash, version: account.version + 1 };
+        const identity = account.personnelIdentity || account.id;
+        for (const linked of Object.values(accounts)) {
+          if (linked.id === id || linked.personnelIdentity !== identity || linked.kind !== 'feishu') continue;
+          current.accounts[linked.id] = { ...linked, version: linked.version + 1 };
+        }
+        this.audit(current, toPrincipal(account), account.name, '更新人员密码', '原凭据', '已更新，旧会话失效');
+      }
+    });
+    const account = this.accounts(state)[id];
+    if (!account || !this.canAuthenticatePersonnel(account, state)) throw new UnauthorizedException('账号当前不可用');
+    return toPrincipal(account);
+  }
   feishuPrincipal(openId: string, appId: string): TrustedAccessPrincipal | null {
     const state=this.store.read(), account=this.accounts(state)[`feishu-${feishuIdentityFingerprint(appId, openId)}`];
     if (!account || account.kind !== 'feishu' || account.appId !== appId || !this.canAuthenticatePersonnel(account,state)) return null;

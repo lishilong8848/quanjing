@@ -1,5 +1,6 @@
 import { accessBuildings, canAccessBuilding, buildingScopeKey } from '@shared/building-access';
 import { businessBuildingsForAction, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
+import { comparisonAttachmentIssue } from '@shared/purchase-comparison-attachments';
 import type {
   PurchaseApplicationBatchRequest,
   PurchaseApplicationItemInput,
@@ -468,7 +469,8 @@ export function groupValidationIssues(
 
 export function validatePurchaseApplicationForUi(
   draft: PurchaseApplicationBatchRequest,
-  fileCount: number,
+  files: readonly { type: string }[],
+  options: { recoveringSubmission?: boolean } = {},
 ): PurchaseApplicationValidationIssue[] {
   const issues: PurchaseApplicationValidationIssue[] = [];
   const requiredShared: Array<[keyof PurchaseApplicationSharedInput, string]> =
@@ -504,15 +506,15 @@ export function validatePurchaseApplicationForUi(
       message: '请填写单一采购原因',
     });
   }
-  if (
-    draft.shared.procurementForm === '三方比价' &&
-    draft.shared.purchaseChannel === '线下' &&
-    fileCount === 0
-  ) {
+  // A locked recovery request must retain its original id and attachment fingerprint.
+  // The server resolves that accepted request before applying new-submission rules.
+  const attachmentIssue = draft.shared.procurementForm === '三方比价' &&
+    !options.recoveringSubmission ? comparisonAttachmentIssue(files) : null;
+  if (attachmentIssue) {
     issues.push({
       code: 'REQUIRED_COMPARISON_ATTACHMENT',
       path: 'shared.comparisonAttachment',
-      message: '线下采购必须上传三方比价单',
+      message: attachmentIssue,
     });
   }
   draft.items.forEach((item) => {

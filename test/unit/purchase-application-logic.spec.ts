@@ -575,7 +575,7 @@ describe('purchase application draft logic', () => {
         ),
       ).toBe(true);
     });
-    expect(() => validatePurchaseApplicationForUi(restored!, 0)).not.toThrow();
+    expect(() => validatePurchaseApplicationForUi(restored!, [])).not.toThrow();
   });
 
   it('switches to single procurement without clearing its reason or changing other fields', () => {
@@ -612,36 +612,59 @@ describe('purchase application draft logic', () => {
     });
   });
 
-  it('requires a comparison attachment for an offline comparison procurement', () => {
-    const issues = validatePurchaseApplicationForUi(
-      makeValidDraft('三方比价', '线下'),
-      0,
-    );
-
-    expect(issues).toContainEqual({
-      code: 'REQUIRED_COMPARISON_ATTACHMENT',
-      path: 'shared.comparisonAttachment',
-      message: '线下采购必须上传三方比价单',
-    });
+  it.each(['线下', '线上'] as const)('requires three comparison images for %s procurement', (channel) => {
+    for (const count of [0, 1, 2]) {
+      const issues = validatePurchaseApplicationForUi(makeValidDraft('三方比价', channel), comparisonImages(count));
+      expect(issues).toContainEqual(expect.objectContaining({
+        code: 'REQUIRED_COMPARISON_ATTACHMENT',
+        path: 'shared.comparisonAttachment',
+        message: expect.stringContaining('3'),
+      }));
+    }
   });
 
-  it('accepts an offline comparison procurement with one attachment', () => {
-    expect(
-      validatePurchaseApplicationForUi(makeValidDraft('三方比价', '线下'), 1),
-    ).toEqual([]);
+  it.each(['线下', '线上'] as const)('accepts three required images with up to two optional attachments for %s procurement', (channel) => {
+    const draft = makeValidDraft('三方比价', channel);
+    for (const optional of [[], [{ type: 'application/pdf' }], [{ type: 'application/pdf' }, { type: 'application/pdf' }]]) {
+      expect(validatePurchaseApplicationForUi(draft, [...comparisonImages(3), ...optional])).toEqual([]);
+    }
+    expect(validatePurchaseApplicationForUi(draft, comparisonImages(4))).toEqual([]);
+    expect(validatePurchaseApplicationForUi(draft, comparisonImages(5))).toEqual([]);
   });
 
-  it('allows an online comparison procurement without an attachment', () => {
-    expect(
-      validatePurchaseApplicationForUi(makeValidDraft('三方比价', '线上'), 0),
-    ).toEqual([]);
+  it('does not count PDFs toward the three images and rejects more than five total attachments', () => {
+    const draft = makeValidDraft();
+    for (const files of [
+      [...comparisonImages(2), ...Array.from({ length: 3 }, () => ({ type: 'application/pdf' }))],
+      comparisonImages(6),
+    ]) {
+      expect(validatePurchaseApplicationForUi(draft, files)).toContainEqual(expect.objectContaining({ path: 'shared.comparisonAttachment' }));
+    }
+  });
+
+  it('requires another image after removing one of the three required images', () => {
+    const draft = makeValidDraft();
+    const files = comparisonImages(3);
+    expect(validatePurchaseApplicationForUi(draft, files)).toEqual([]);
+    expect(validatePurchaseApplicationForUi(draft, files.slice(1))).toContainEqual(expect.objectContaining({ path: 'shared.comparisonAttachment' }));
+    expect(files).toHaveLength(3);
+  });
+
+  it('keeps original attachments recoverable without applying a new policy, while retaining other required fields', () => {
+    const draft = makeValidDraft();
+    const originalFiles = [{ type: 'application/pdf' }];
+    expect(validatePurchaseApplicationForUi(draft, originalFiles)).toContainEqual(expect.objectContaining({ path: 'shared.comparisonAttachment' }));
+    expect(validatePurchaseApplicationForUi(draft, originalFiles, { recoveringSubmission: true })).toEqual([]);
+    draft.shared.supplier = '';
+    expect(validatePurchaseApplicationForUi(draft, originalFiles, { recoveringSubmission: true })).toContainEqual(expect.objectContaining({ path: 'shared.supplier' }));
+    expect(originalFiles).toEqual([{ type: 'application/pdf' }]);
   });
 
   it('requires a reason instead of an attachment for offline single procurement', () => {
     const draft = makeValidDraft('单一采购', '线下');
     draft.shared.singleReason = '   ';
 
-    const issues = validatePurchaseApplicationForUi(draft, 0);
+    const issues = validatePurchaseApplicationForUi(draft, []);
 
     expect(issues).toContainEqual({
       code: 'REQUIRED',
@@ -663,14 +686,14 @@ describe('purchase application draft logic', () => {
     draft.shared.comparisonSatisfied =
       '' as PurchaseApplicationBatchRequest['shared']['comparisonSatisfied'];
 
-    expect(validatePurchaseApplicationForUi(draft, 0)).toEqual([]);
+    expect(validatePurchaseApplicationForUi(draft, [])).toEqual([]);
   });
 
   it('rejects an unknown procurement form', () => {
     const draft = makeValidDraft();
     draft.shared.procurementForm = '未知形式' as ProcurementForm;
 
-    expect(validatePurchaseApplicationForUi(draft, 1)).toContainEqual({
+    expect(validatePurchaseApplicationForUi(draft, comparisonImages(1))).toContainEqual({
       code: 'REQUIRED',
       path: 'shared.procurementForm',
       message: '请选择采购形式',
@@ -1045,4 +1068,9 @@ function makeValidDraft(
       purchaseChannel === '线上' ? ['https://example.com/item'] : [''],
   };
   return draft;
+}
+
+function comparisonImages(count: number) {
+  const types = ['image/jpeg', 'image/png', 'image/webp'];
+  return Array.from({ length: count }, (_, index) => ({ type: types[index % types.length] }));
 }

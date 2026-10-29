@@ -460,7 +460,7 @@ export async function loginAccess(
       });
     }
     return accessSessionFromResponse(response);
-  });
+  }, request.employeeName?.trim() ? 60_000 : ACCESS_REQUEST_TIMEOUT_MS);
 }
 
 async function postAccessLogin(
@@ -492,11 +492,12 @@ async function postAccessLogin(
 
 async function withAccessRequestTimeout<T>(
   operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs = ACCESS_REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(
     () => controller.abort(),
-    ACCESS_REQUEST_TIMEOUT_MS,
+    timeoutMs,
   );
   try {
     return await operation(controller.signal);

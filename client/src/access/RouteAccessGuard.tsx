@@ -38,13 +38,14 @@ export default function RouteAccessGuard() {
   );
   const guestAllowed = canAccessPage('guest', location.pathname);
   const createOnlyAllowed = canAccessCreateOnlyPage(access, location.pathname);
+  const personalCenterAllowed = authenticated && location.pathname.toLowerCase().replace(/\/+$/, '') === '/personal-center';
   const allowed =
-    controlledScreenshotRequest || createOnlyAllowed || canAccessPage(role, location.pathname, pagePaths);
+    personalCenterAllowed || controlledScreenshotRequest || createOnlyAllowed || canAccessPage(role, location.pathname, pagePaths);
   const preferredLanding = getPostLoginPath(role, '/nantong-base', pagePaths);
   const landingPath = !allowed && authenticated
     ? canAccessPage(role, preferredLanding, pagePaths)
       ? preferredLanding
-      : CREATE_ONLY_APPLICATIONS.find(entry => canAccessCreateOnlyPage(access, entry.path))?.path
+      : CREATE_ONLY_APPLICATIONS.find(entry => canAccessCreateOnlyPage(access, entry.path))?.path || '/personal-center'
     : undefined;
   const reason = getRouteAccessReason(role, location.pathname);
   const preferredAccountType = isPurchaseApplicationDirectPath(
@@ -55,7 +56,7 @@ export default function RouteAccessGuard() {
   const automaticLoginRequestKey = `${location.pathname}\n${reason}\n${preferredAccountType || ''}`;
 
   React.useEffect(() => {
-    if (access.impersonation || isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;
+    if (access.impersonation || access.isLoginDialogOpen || isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;
     if (allowed) {
       lastAutomaticLoginRequestRef.current = '';
       return;
@@ -75,6 +76,7 @@ export default function RouteAccessGuard() {
     allowed,
     authenticated,
     access.impersonation,
+    access.isLoginDialogOpen,
     automaticLoginRequestKey,
     isLoading,
     isConfirmingIdentity,

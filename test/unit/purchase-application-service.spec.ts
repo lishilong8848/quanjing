@@ -442,13 +442,13 @@ describe('PurchaseApplicationService catalog reads', () => {
   it('validates every row before uploading files or creating records', async () => {
     const httpService = { axiosRef: { post: jest.fn(), get: jest.fn() } };
     const service = testPurchaseApplicationService(httpService as never);
-    const request = validRequest();
+    const request = comparisonRequest();
     request.items[1].quantity = 0;
 
     await expect(
       service.submitApplications(
         request,
-        [uploadFile('quote.pdf', 'application/pdf', Buffer.from('quote'))],
+        comparisonImages(),
         '2026-07-10',
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -909,7 +909,7 @@ describe('PurchaseApplicationService catalog reads', () => {
             });
           }
           if (url.includes('/drive/v1/medias/upload_all')) {
-            return Promise.reject(new Error('三方比价附件上传失败：quote.pdf'));
+            return Promise.reject(new Error('三方比价附件上传失败：quote-1.png'));
           }
           return Promise.resolve({
             data: {
@@ -935,17 +935,13 @@ describe('PurchaseApplicationService catalog reads', () => {
     request.shared.notes = '附件失败后仍需保留的备注';
     const snapshot = structuredClone(request);
 
-    const quoteFile = uploadFile(
-      'quote.pdf',
-      'application/pdf',
-      Buffer.from('quote'),
-    );
+    const quoteFiles = comparisonImages();
     const accepted = service.acceptApplications(
       request,
-      [quoteFile],
+      quoteFiles,
       '2026-07-10',
       'purchase-upload-fail-001',
-      buildPurchaseApplicationSubmissionFingerprint(request, [quoteFile]),
+      buildPurchaseApplicationSubmissionFingerprint(request, quoteFiles),
       request,
       TEST_PURCHASE_PRINCIPAL_FINGERPRINT,
     );
@@ -1297,26 +1293,22 @@ describe('PurchaseApplicationService catalog reads', () => {
       warnings: [],
       message: '已完成',
     });
-    const request = validRequest();
+    const request = comparisonRequest();
     request.shared.purchaseChannel = '线下';
     request.shared.onlineUrl = '';
     request.items = request.items.map((item) => ({
       ...item,
       onlineUrls: [],
     }));
-    const attachment = uploadFile(
-      'comparison.pdf',
-      'application/pdf',
-      Buffer.from('comparison'),
-    );
+    const attachments = comparisonImages();
     const submissionFingerprint = buildPurchaseApplicationSubmissionFingerprint(
       request,
-      [attachment],
+      attachments,
     );
 
     const first = service.acceptApplications(
       request,
-      [attachment],
+      attachments,
       '2026-07-10',
       'purchase-mutation-001',
       submissionFingerprint,
@@ -1508,6 +1500,7 @@ describe('PurchaseApplicationService catalog reads', () => {
   it('uses one tenant token for attachments and every application record', async () => {
     const events: string[] = [];
     let createIndex = 0;
+    let uploadIndex = 0;
     const httpService = {
       axiosRef: {
         post: jest.fn().mockImplementation((url: string) => {
@@ -1522,8 +1515,9 @@ describe('PurchaseApplicationService catalog reads', () => {
           }
           if (url.includes('/drive/v1/medias/upload_all')) {
             events.push('upload');
+            uploadIndex += 1;
             return Promise.resolve({
-              data: { code: 0, data: { file_token: 'file-token-1' } },
+              data: { code: 0, data: { file_token: `file-token-${uploadIndex}` } },
             });
           }
           events.push(`create-${createIndex + 1}`);
@@ -1553,21 +1547,20 @@ describe('PurchaseApplicationService catalog reads', () => {
       },
     };
     const service = new PurchaseApplicationService(httpService as never);
-    const request = validRequest();
-    request.shared.procurementForm = '三方比价';
+    const request = comparisonRequest();
 
     const result = await service.submitApplications(
       request,
-      [uploadFile('quote.pdf', 'application/pdf', Buffer.from('quote'))],
+      comparisonImages(),
       '2026-07-10',
     );
 
-    expect(events).toEqual(['upload', 'create-1', 'create-2']);
+    expect(events).toEqual(['upload', 'upload', 'upload', 'create-1', 'create-2']);
     expect(
       httpService.axiosRef.post.mock.calls.filter(([url]) =>
         String(url).includes('/drive/v1/medias/upload_all'),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(3);
     const allRecordCreateCalls = httpService.axiosRef.post.mock.calls.filter(
       ([url]) =>
         String(url).includes('/bitable/v1/apps/app-token/tables/') &&
@@ -1587,7 +1580,11 @@ describe('PurchaseApplicationService catalog reads', () => {
       expect(config.headers.Authorization).toBe('Bearer tenant-token');
       expect(body.fields).toEqual(
         expect.objectContaining({
-          '三方比价依据（邮件/报价单）': [{ file_token: 'file-token-1' }],
+          '三方比价依据（邮件/报价单）': [
+            { file_token: 'file-token-1' },
+            { file_token: 'file-token-2' },
+            { file_token: 'file-token-3' },
+          ],
           需求人: [{ id: 'ou_ma' }],
           采购流程: '未开始（待审批）',
         }),
@@ -2203,9 +2200,9 @@ function validRequest(): PurchaseApplicationBatchRequest {
       purchaseChannel: '线上',
       supplier: '南通供应商',
       onlineUrl: 'https://purchase.example.com/item',
-      procurementForm: '三方比价',
-      comparisonSatisfied: '是',
-      singleReason: '',
+      procurementForm: '单一采购',
+      comparisonSatisfied: '否',
+      singleReason: '合成用例的既定单一供应商',
       requirementSummary: '办公物资补充',
       expectedDeliveryDate: '2026-07-20',
       immediateOutbound: false,
@@ -2250,6 +2247,22 @@ function validRequest(): PurchaseApplicationBatchRequest {
 
 function uploadFile(originalname: string, mimetype: string, buffer: Buffer) {
   return { originalname, mimetype, size: buffer.byteLength, buffer };
+}
+
+function comparisonRequest(): PurchaseApplicationBatchRequest {
+  const request = validRequest();
+  request.shared.procurementForm = '三方比价';
+  request.shared.comparisonSatisfied = '是';
+  request.shared.singleReason = '';
+  return request;
+}
+
+function comparisonImages() {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/q3cAAAAASUVORK5CYII=',
+    'base64',
+  );
+  return [1, 2, 3].map(index => uploadFile(`quote-${index}.png`, 'image/png', Buffer.from(png)));
 }
 
 function testSubmissionLedger(): PurchaseApplicationTaskLedgerStore {

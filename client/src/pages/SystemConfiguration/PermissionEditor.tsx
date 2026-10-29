@@ -21,15 +21,16 @@ export interface PermissionEditorProps {
   readOnly?: boolean;
   disabled?: boolean;
   label?: string;
+  catalog?: ReturnType<typeof createPermissionCatalog>;
 }
-const catalog = createPermissionCatalog();
+const defaultCatalog = createPermissionCatalog();
 
-export function PermissionEditor({ value, principal, onChange, template = false, readOnly = false, disabled = false, label = '权限配置' }: PermissionEditorProps) {
+export function PermissionEditor({ value, principal, onChange, template = false, readOnly = false, disabled = false, label = '权限配置', catalog = defaultCatalog }: PermissionEditorProps) {
   const [query, setQuery] = useState(''), [path, setPath] = useState(catalog.pages[0]?.path || '');
   const [error, setError] = useState('');
   const actor = useMemo(() => ({ ...principal, effectiveAuthorization: value }), [principal, value]);
   const pages = useMemo(() => personalPermissionPagePaths(actor, value.baseline.pages), [actor, value.baseline.pages]);
-  const visible = useMemo(() => catalog.pages.filter(page => !query.trim() || `${page.label} ${page.modules.map(module => module.label).join(' ')}`.includes(query.trim())), [query]);
+  const visible = useMemo(() => catalog.pages.filter(page => !query.trim() || `${page.label} ${page.modules.map(module => module.label).join(' ')}`.includes(query.trim())), [query, catalog]);
   const selected = visible.find(page => page.path === path) || visible[0];
   const inherited = !template && value.mode === 'follow';
   const locked = disabled || readOnly || !onChange;

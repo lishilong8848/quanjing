@@ -86,18 +86,18 @@ describe('authenticated page access landing', () => {
     mockEffects.forEach(effect => effect());
     expect(mockAccess.requestLogin).not.toHaveBeenCalled();
   });
-  it('keeps a clear terminal state when no pages or form actions are granted', () => {
+  it('keeps personal self-service reachable when no business pages or actions are granted', () => {
     mockAccess.pagePaths = [];
     const tree = render();
-    expect(redirect(tree)).toBeUndefined();
+    expect(redirect(tree)?.props.to).toBe('/personal-center');
     expect(outlet(tree)).toBeUndefined();
-    expect(text(tree)).toContain('当前账号暂无可访问页面');
-    expect(text(tree)).toContain('切换账号');
+    mockLocation.pathname = '/personal-center';
+    expect(outlet()).toBeDefined(); expect(redirect()).toBeUndefined();
   });
   it('never redirects a non-admin into the protected configuration page', () => {
     mockAccess.pagePaths = ['/system-configuration'];
     const tree = render();
-    expect(redirect(tree)).toBeUndefined();
+    expect(redirect(tree)?.props.to).toBe('/personal-center');
     expect(outlet(tree)).toBeUndefined();
   });
   it('preserves identity confirmation and source failure recovery before redirecting', () => {
@@ -118,10 +118,19 @@ describe('authenticated page access landing', () => {
     expect(text(render())).toContain('当前页面需要登录权限');
     mockLocation.pathname = '/nantong-base';
     expect(outlet()).toBeDefined();
+    mockLocation.pathname = '/personal-center';
+    expect(outlet()).toBeUndefined(); expect(redirect()).toBeUndefined();
   });
   it('does not open automatic login over an expired impersonation recovery context', () => {
     mockAccess.role = 'guest'; mockAccess.expiresAt = null; mockAccess.principalFingerprint = null;
     mockAccess.pagePaths = []; mockAccess.impersonation = { actorAccountId: 'synthetic-admin', actorName: '合成管理员', targetName: '合成人员', expiresAt: Date.now() - 1 };
+    render(); mockEffects.forEach(effect => effect());
+    expect(mockAccess.requestLogin).not.toHaveBeenCalled();
+  });
+  it('does not replace an explicit password-updated login dialog with the route prompt', () => {
+    mockLocation.pathname = '/personal-center';
+    mockAccess.role = 'guest'; mockAccess.expiresAt = null; mockAccess.principalFingerprint = null;
+    mockAccess.pagePaths = []; mockAccess.isLoginDialogOpen = true;
     render(); mockEffects.forEach(effect => effect());
     expect(mockAccess.requestLogin).not.toHaveBeenCalled();
   });

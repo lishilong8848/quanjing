@@ -1,4 +1,9 @@
 import { accessBuildings } from '@shared/building-access';
+import {
+  COMPARISON_IMAGE_MIME_TYPES,
+  MAX_COMPARISON_ATTACHMENT_COUNT,
+  MIN_COMPARISON_IMAGE_COUNT,
+} from '@shared/purchase-comparison-attachments';
 import React, {
   useCallback,
   useEffect,
@@ -128,9 +133,12 @@ export function PurchaseApplicationDialog({
   const authenticated = hasAuthenticatedAccessIdentity(access);
   const applicantIdentity = useMemo(() => resolveSelfServiceApplicant(access, authenticated, '提交采购申请'),
     [role, accountId, displayName, authenticated, principalFingerprint]);
+  const principalIdentityKey = `${purchaseUiPrincipalKey(access)}:${displayName || ''}`;
+  // Session refresh replaces the context object even when its business identity
+  // is unchanged. Only an identity/policy change should reset files and drafts.
   const principal = useMemo(
     () => purchaseUiPrincipal(access),
-    [access],
+    [principalIdentityKey],
   );
   const scope = isProfessionalBusinessPrincipal({...principal,permissionContext:{module:'purchase',action:'create'}})
     ? businessBuildingsForAction(principal,{module:'purchase',action:'create'}) : accessBuildings(principal);
@@ -182,6 +190,7 @@ export function PurchaseApplicationDialog({
   const notesFieldId = React.useId();
   const comparisonAttachmentFieldId = React.useId();
   const comparisonAttachmentErrorId = `${comparisonAttachmentFieldId}-error`;
+  const comparisonAttachmentHintId = `${comparisonAttachmentFieldId}-hint`;
   const searchTimers = useRef<Map<string, number>>(new Map());
   const searchSequence = useRef<Map<string, number>>(new Map());
   const catalogSearchKeyRef = useRef<Map<string, string>>(new Map());
@@ -190,7 +199,6 @@ export function PurchaseApplicationDialog({
   onSubmissionStartedRef.current = onSubmissionStarted;
   onSubmissionSettledRef.current = onSubmissionSettled;
   recoveryJournalRef.current = recoveryJournal;
-  const principalIdentityKey = `${purchaseUiPrincipalKey(principal)}:${displayName || ''}`;
   const [principalRequestGate] = useState(
     () => new PurchasePrincipalRequestGate(principalIdentityKey),
   );
@@ -574,6 +582,9 @@ export function PurchaseApplicationDialog({
   );
   const attachmentControlsLocked =
     formLocked && !recoveryAttachmentSelectionEnabled;
+  const comparisonImageCount = files.filter((file) =>
+    COMPARISON_IMAGE_MIME_TYPES.some((type) => type === file.type),
+  ).length;
 
   function searchApplicant(query: string) {
     setApplicantQuery(query);
@@ -882,13 +893,13 @@ export function PurchaseApplicationDialog({
     const next = recoveryAttachmentSelectionEnabled
       ? Array.from(selected)
       : [...files, ...Array.from(selected)];
-    if (next.length > 5) {
-      toast.warning('三方比价附件最多上传 5 个');
+    if (next.length > MAX_COMPARISON_ATTACHMENT_COUNT) {
+      toast.warning(`三方比价附件最多上传 ${MAX_COMPARISON_ATTACHMENT_COUNT} 个`);
       return;
     }
     const invalid = next.find(
       (file) =>
-        !['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(
+        !['application/pdf', ...COMPARISON_IMAGE_MIME_TYPES].includes(
           file.type,
         ) || file.size > 20 * 1024 * 1024,
     );
@@ -943,7 +954,8 @@ export function PurchaseApplicationDialog({
     }
     const localIssues = validatePurchaseApplicationForUi(
       submissionDraft,
-      selectedFiles.length,
+      selectedFiles,
+      { recoveringSubmission: Boolean(retryState) },
     );
     if (localIssues.length) {
       setErrors(groupValidationIssues(localIssues));
@@ -1760,9 +1772,7 @@ export function PurchaseApplicationDialog({
                   >
                     <Paperclip className="h-4 w-4" />
                     三方比价单
-                    {draft.shared.purchaseChannel === '线下' ? (
-                      <span className="text-rose-600">*</span>
-                    ) : null}
+                    <span className="text-rose-600" aria-hidden="true">*</span>
                     <input
                       id={comparisonAttachmentFieldId}
                       data-purchase-field
@@ -1770,13 +1780,11 @@ export function PurchaseApplicationDialog({
                       className="sr-only"
                       multiple
                       accept=".pdf,.png,.jpg,.jpeg,.webp"
-                      required={draft.shared.purchaseChannel === '线下'}
-                      aria-required={draft.shared.purchaseChannel === '线下'}
+                      required={!recoveryJournal && comparisonImageCount < MIN_COMPARISON_IMAGE_COUNT}
+                      aria-required="true"
                       aria-invalid={Boolean(errors.shared.comparisonAttachment)}
                       aria-describedby={
-                        errors.shared.comparisonAttachment
-                          ? comparisonAttachmentErrorId
-                          : undefined
+                        `${comparisonAttachmentHintId}${errors.shared.comparisonAttachment ? ` ${comparisonAttachmentErrorId}` : ''}`
                       }
                       disabled={attachmentControlsLocked}
                       onChange={(event) => {
@@ -1785,10 +1793,13 @@ export function PurchaseApplicationDialog({
                       }}
                     />
                   </label>
-                  <span className="text-xs text-slate-500">
-                    {draft.shared.purchaseChannel === '线下'
-                      ? '线下采购必传；最多 5 个，单个 20MB'
-                      : '线上采购附件可选；最多 5 个，单个 20MB'}
+                  <span id={comparisonAttachmentHintId} className="text-xs text-slate-500">
+                    {recoveryJournal
+                      ? '恢复原申请，请按原顺序选择全部原附件'
+                      : `必传 ${MIN_COMPARISON_IMAGE_COUNT} 张比价图片，另可选 ${MAX_COMPARISON_ATTACHMENT_COUNT - MIN_COMPARISON_IMAGE_COUNT} 项；单个 20MB，总计 50MB`}
+                  </span>
+                  <span className="text-xs text-slate-500" aria-live="polite">
+                    已选 {comparisonImageCount} 张图片 · 附件 {files.length}/{MAX_COMPARISON_ATTACHMENT_COUNT}
                   </span>
                 </div>
                 <FieldError

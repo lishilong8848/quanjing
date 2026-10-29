@@ -84,6 +84,7 @@ const TodayFocusChecklistPage = React.lazy(
 
 const APP_BROWSER_TITLE = '世纪互联-南通基地';
 const SystemConfigurationPage = React.lazy(() => import('./pages/SystemConfiguration'));
+const PersonalCenterPage = React.lazy(() => import('./pages/PersonalCenter'));
 
 function RouteLoadingFallback() {
   return (
@@ -211,7 +212,7 @@ function useLockedDocumentTitle() {
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
     const browserTitle =
-      getNavigationBrowserTitle(location.pathname) || APP_BROWSER_TITLE;
+      (location.pathname === '/personal-center' ? '个人主页 · 南通基地运营平台' : getNavigationBrowserTitle(location.pathname)) || APP_BROWSER_TITLE;
 
     const applyTitle = () => {
       if (document.title !== browserTitle) {
@@ -291,6 +292,7 @@ const RoutesComponent = () => {
                 {/* 兼容旧路由：/monthly-schedule 也指向月度值班一览 */}
                 <Route path="/monthly-schedule" element={<MonthlySchedule />} />
                 <Route path="/system-configuration" element={<SystemConfigurationPage />} />
+                <Route path="/personal-center" element={<PersonalCenterPage />} />
                 <Route path="/mbti-assessment" element={<MbtiAssessmentFlow />} />
                 <Route
                   path="/monthly-schedule/apply/leave"

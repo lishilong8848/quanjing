@@ -239,6 +239,9 @@ export function GlobalUserControl() {
             {hasIdentity ? <ArrowRightLeft className="size-4" aria-hidden="true" /> : <LogIn className="size-4" aria-hidden="true" />}
             {hasIdentity ? '切换账号' : '登录'}
           </DropdownMenuItem>
+          {hasIdentity && <DropdownMenuItem disabled={busy} onSelect={() => navigate('/personal-center')}>
+            <UserRound className="size-4" aria-hidden="true" />个人主页
+          </DropdownMenuItem>}
           {hasIdentity && role === 'admin' && <DropdownMenuItem disabled={busy} onSelect={() => navigate('/system-configuration')}>
             <Settings className="size-4" aria-hidden="true" />系统配置
           </DropdownMenuItem>}
@@ -260,7 +263,7 @@ export function GlobalUserControl() {
               }, '打开个人主页失败，请重试');
             }}>
               <UserRound className="size-4" aria-hidden="true" />
-              {pendingAction === 'profile' ? '正在打开…' : '个人主页'}
+              {pendingAction === 'profile' ? '正在打开…' : '平台账号资料'}
             </DropdownMenuItem>
             <DropdownMenuItem disabled={busy} onSelect={() => {
               setMenuOpen(false);

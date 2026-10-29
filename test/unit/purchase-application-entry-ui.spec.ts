@@ -248,7 +248,7 @@ describe('purchase application dashboard entry', () => {
     expect(dialog).toContain('请说明采用单一采购的原因');
   });
 
-  it('shows comparison attachments only for comparison procurement and requires them offline', () => {
+  it('shows the three-image requirement for comparison procurement on both channels', () => {
     const attachmentStart = dialog.indexOf(
       "{draft.shared.procurementForm === '三方比价' && (",
     );
@@ -256,23 +256,24 @@ describe('purchase application dashboard entry', () => {
     const attachment = dialog.slice(attachmentStart, attachmentEnd);
     expect(attachmentStart).toBeGreaterThan(-1);
     expect(attachmentEnd).toBeGreaterThan(attachmentStart);
-    expect(attachment).toContain("draft.shared.purchaseChannel === '线下' ? (");
-    expect(attachment).toContain('线下采购必传；最多 5 个，单个 20MB');
-    expect(attachment).toContain('线上采购附件可选；最多 5 个，单个 20MB');
+    expect(attachment).not.toContain('draft.shared.purchaseChannel');
+    expect(attachment).toContain('必传 ${MIN_COMPARISON_IMAGE_COUNT} 张比价图片');
+    expect(attachment).toContain('另可选 ${MAX_COMPARISON_ATTACHMENT_COUNT - MIN_COMPARISON_IMAGE_COUNT} 项');
+    expect(attachment).toContain('已选 {comparisonImageCount} 张图片');
+    expect(attachment).toContain('附件 {files.length}/{MAX_COMPARISON_ATTACHMENT_COUNT}');
+    expect(attachment).toContain('恢复原申请，请按原顺序选择全部原附件');
     expect(attachment).toMatch(
       /<input\s+id=\{comparisonAttachmentFieldId\}\s+data-purchase-field\s+type="file"/,
     );
     expect(attachment).toContain(
       'aria-invalid={Boolean(errors.shared.comparisonAttachment)}',
     );
-    expect(attachment).toMatch(
-      /errors\.shared\.comparisonAttachment\s*\?\s*comparisonAttachmentErrorId\s*:\s*undefined/,
+    expect(attachment).toContain('`${comparisonAttachmentHintId}${errors.shared.comparisonAttachment ? ` ${comparisonAttachmentErrorId}` : \'\'}`');
+    expect(attachment).toContain(
+      'required={!recoveryJournal && comparisonImageCount < MIN_COMPARISON_IMAGE_COUNT}',
     );
     expect(attachment).toContain(
-      "required={draft.shared.purchaseChannel === '线下'}",
-    );
-    expect(attachment).toContain(
-      "aria-required={draft.shared.purchaseChannel === '线下'}",
+      'aria-required="true"',
     );
     expect(attachment).toContain('focus-within:ring-2');
     expect(attachment).not.toContain('tabIndex={-1}');
@@ -334,7 +335,13 @@ describe('purchase application dashboard entry', () => {
       /selectPurchaseComparisonFiles\(\s*submissionDraft\.shared\.procurementForm,\s*files,\s*\)/,
     );
     expect(submitHandler).toMatch(
-      /validatePurchaseApplicationForUi\(\s*submissionDraft,\s*selectedFiles\.length,\s*\)/,
+      /validatePurchaseApplicationForUi\(\s*submissionDraft,\s*selectedFiles,\s*\{ recoveringSubmission: Boolean\(retryState\) \},\s*\)/,
+    );
+    expect(submitHandler.indexOf('matchesPurchaseApplicationAttachmentManifest(')).toBeLessThan(
+      submitHandler.indexOf('validatePurchaseApplicationForUi('),
+    );
+    expect(submitHandler.indexOf('computed.fingerprint !== retryState.fingerprint')).toBeLessThan(
+      submitHandler.indexOf('await submitPurchaseApplications('),
     );
     expect(submitHandler).toMatch(
       /submitPurchaseApplications\(\s*submissionDraft,\s*selectedFiles,\s*mutationId,\s*fingerprint,\s*\)/,

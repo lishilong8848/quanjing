@@ -30,6 +30,7 @@ import { verifyPersonnelPassword } from './personnel-password';
 import { effectivePagePaths } from '../../../shared/page-access';
 import { AccessConfigurationService } from './access-configuration.service';
 import { AccessPersonnelSyncService } from './access-personnel-sync.service';
+import { PersonnelCredentialsService } from './personnel-credentials.service';
 import { IMPERSONATION_TTL_MS, validImpersonationPayload, type ImpersonationPayload } from './access-impersonation';
 import {
   createHash,
@@ -117,6 +118,7 @@ interface AccessSessionPayloadV6 extends Omit<AccessSessionPayloadV3, 'version' 
 type AccessSessionPayload = AccessSessionPayloadV2 | AccessSessionPayloadV3 | AccessSessionPayloadV4 | AccessSessionPayloadV5 | AccessSessionPayloadV6 | AccessSessionPayloadV7 | AccessSessionPayloadV8 | AccessSessionPayloadV9 | AccessSessionPayloadV10;
 
 interface ResolvedAccessSessionPayload {
+  requiresPasswordChange?: boolean;
   impersonationSession?: ImpersonationPayload;
   impersonation?: AccessPrincipal['impersonation'];
   effectiveAuthorization?: import('../../../shared/authorization-profile').EffectiveAuthorization;
@@ -160,6 +162,7 @@ export class UnifiedAccessService {
   constructor(
     @Optional() private readonly configuration?: AccessConfigurationService,
     @Optional() private readonly personnelSync?: AccessPersonnelSyncService,
+    @Optional() private readonly credentials?: PersonnelCredentialsService,
   ) {}
   pagePermissions(role: AccessRole, accountId?: string, authorizationVersion?: number) { return this.configuration?.pagePermissions(role,accountId,authorizationVersion) ?? { paths: effectivePagePaths(role), revision: 0, configured: false }; }
 
@@ -286,6 +289,16 @@ export class UnifiedAccessService {
       let matchedTarget: LoginTarget | null = null;
       let matchCount = 0;
       for (const target of targets) {
+        if (request.employeeName !== undefined && target.principal.accountId && this.credentials) {
+          try {
+            const principal = await this.credentials.authenticateLogin(target.principal, request.password, sourceKey);
+            matchCount += 1;
+            matchedTarget = { ...target, principal };
+          } catch (error) {
+            if (!(error instanceof UnauthorizedException)) throw error;
+          }
+          continue;
+        }
         const matches = await verifyAccessPassword(
           request.password,
           target.hash,
@@ -320,6 +333,7 @@ export class UnifiedAccessService {
     if (!payload) return guestSession();
     return {
       principal: {
+        ...(payload.requiresPasswordChange ? { requiresPasswordChange: true } : {}),
         role: payload.role,
         purchaseBuilding: payload.purchaseBuilding,
         ...(payload.buildings ? { buildings: [...payload.buildings] } : {}),
@@ -342,6 +356,7 @@ export class UnifiedAccessService {
     if (!payload) return { ...guestSession(), principalFingerprint: null };
     return {
       principal: {
+        ...(payload.requiresPasswordChange ? { requiresPasswordChange: true } : {}),
         role: payload.role,
         purchaseBuilding: payload.purchaseBuilding,
         ...(payload.buildings ? { buildings: [...payload.buildings] } : {}),
@@ -623,6 +638,7 @@ export class UnifiedAccessService {
     }
     if (principal.role === 'site_member' && !this.configuration) throw invalidCredentials();
     const sessionPrincipal: AccessPrincipal = {
+      ...(this.credentials?.requiresPasswordChange(principal) ? { requiresPasswordChange: true } : {}),
       role: principal.role,
       purchaseBuilding: principal.purchaseBuilding,
       ...(principal.buildings ? { buildings: [...principal.buildings] } : {}),
@@ -742,6 +758,7 @@ export class UnifiedAccessService {
       if (parsed.version !== 6 && this.configuration && !this.configuration.validateSession(parsed.version === 5 || parsed.version === 7 || parsed.version === 8 || (parsed.version === 9 || parsed.version === 10) ? parsed.accountId : undefined, parsed.version === 5 || parsed.version === 7 || parsed.version === 8 || (parsed.version === 9 || parsed.version === 10) ? parsed.authorizationVersion : undefined, parsed.role, parsed.purchaseBuilding, (parsed.version === 7 || parsed.version === 10) ? parsed.specialties : undefined, (parsed.version === 8 || parsed.version === 10) ? parsed.buildings : undefined)) return null;
       const canonicalPrincipal = this.configuration?.currentPrincipal?.('accountId' in parsed ? parsed.accountId : undefined, 'authorizationVersion' in parsed ? parsed.authorizationVersion : undefined);
       return {
+        ...(canonicalPrincipal && this.credentials?.requiresPasswordChange(canonicalPrincipal) ? { requiresPasswordChange: true } : {}),
         role: parsed.role,
         purchaseBuilding: parsed.purchaseBuilding,
         issuedAt: parsed.issuedAt,

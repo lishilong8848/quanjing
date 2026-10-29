@@ -91,7 +91,7 @@ describe('one account menu uses the real callbacks and identity boundaries', () 
   });
   it.each(['independent', 'follow'] as const)('recognizes signed V2 guest transport identities in %s mode', mode => {
     authenticate({ role: 'guest', effectiveAuthorization: { mode, baseline: { nativeRole: null, pages: [], rules: [] }, overrides: { rules: [], allowPages: [], denyPages: [] } } });
-    const tree = openMenu(); expect(labels(tree)).toEqual(['切换账号', '退出当前账号']);
+    const tree = openMenu(); expect(labels(tree)).toEqual(['切换账号', '个人主页', '退出当前账号']);
     expect(words(tree)).toContain(mode === 'independent' ? '已登录 · 独立授权' : '已登录 · 跟随角色'); expect(words(tree)).not.toContain('尚未登录');
     expect(nodes(tree).filter(node => node.type === UserNameAvatar).every(node => node.props.isGuest === false && node.props.name === '合成人员')).toBe(true);
     expect(labels(tree)).not.toContain('系统配置');
@@ -99,6 +99,11 @@ describe('one account menu uses the real callbacks and identity boundaries', () 
   it('shows system configuration only for the actual administrator', () => {
     authenticate({ role: 'admin' }); item(openMenu(), '系统配置').props.onSelect(); expect(mockNavigate).toHaveBeenCalledWith('/system-configuration');
     mockSession.role = 'professional_admin'; expect(labels(render())).not.toContain('系统配置');
+  });
+  it('opens this account personal home without invoking the external platform profile', () => {
+    authenticate(); item(openMenu(), '个人主页').props.onSelect();
+    expect(mockNavigate).toHaveBeenCalledWith('/personal-center');
+    expect(getDataloom).not.toHaveBeenCalled();
   });
   it.each(['isLoading', 'isConfirmingIdentity', 'isChangingIdentity'])('disables account operations while %s', flag => {
     authenticate({ role: 'admin', [flag]: true, sessionError: '合成确认错误' }); mockPlatformUserId = 'synthetic-platform';
@@ -152,7 +157,7 @@ describe('one account menu uses the real callbacks and identity boundaries', () 
   });
   it('retains the menu when opening the platform profile fails', async () => {
     authenticate(); mockPlatformUserId = 'synthetic-platform'; mockProfile.mockRejectedValueOnce(new Error('synthetic profile failure'));
-    item(openMenu(), '个人主页').props.onSelect(event()); await flush();
+    item(openMenu(), '平台账号资料').props.onSelect(event()); await flush();
     expect(menu(render()).props.open).toBe(true); expect(toast.error).toHaveBeenCalledWith('打开个人主页失败，请重试');
     expect(mockSession.logout).not.toHaveBeenCalled(); expect(mockSignOut).not.toHaveBeenCalled();
   });
@@ -197,9 +202,9 @@ describe('one account menu uses the real callbacks and identity boundaries', () 
   it('keeps the profile menu usable and ignores a late SDK after the same timeout', async () => {
     jest.useFakeTimers(); authenticate(); mockPlatformUserId = 'synthetic-platform'; const sdk = deferred<unknown>();
     (getDataloom as jest.Mock).mockReturnValueOnce(sdk.promise);
-    item(openMenu(), '个人主页').props.onSelect(event()); expect(item(render(), '正在打开…').props.disabled).toBe(true);
+    item(openMenu(), '平台账号资料').props.onSelect(event()); expect(item(render(), '正在打开…').props.disabled).toBe(true);
     await jest.advanceTimersByTimeAsync(15_000);
-    expect(menu(render()).props.open).toBe(true); expect(item(render(), '个人主页').props.disabled).toBe(false);
+    expect(menu(render()).props.open).toBe(true); expect(item(render(), '平台账号资料').props.disabled).toBe(false);
     sdk.resolve({ service: { session: { navigateToUserProfile: mockProfile } } }); await flush();
     expect(mockProfile).not.toHaveBeenCalled(); expect(menu(render()).props.open).toBe(true); expect(mockReload).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith('平台响应超时，操作结果未确认，请刷新页面后检查');

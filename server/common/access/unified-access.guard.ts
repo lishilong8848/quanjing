@@ -3,6 +3,7 @@ import {
   type ExecutionContext,
   HttpException,
   HttpStatus,
+  ForbiddenException,
   Injectable,
 } from '@nestjs/common';
 import { effectivePagePaths, pageApiBinding } from '../../../shared/page-access';
@@ -202,6 +203,14 @@ export class UnifiedAccessGuard implements CanActivate {
 
     if (path === null) return false;
     if (!isApiPath(path)) return true;
+    // Applies before PublicAccess and administrator shortcuts. A first-login
+    // session can finish setup, but cannot exercise existing business grants.
+    const initialSession = this.access.readSessionIdentity?.(
+      readAccessCookie(request.headers?.cookie, this.access, Date.now()).value,
+    );
+    if (initialSession?.principal.requiresPasswordChange && !isPasswordSetupRoute(path, request.method)) {
+      throw new ForbiddenException({ code: 'PASSWORD_CHANGE_REQUIRED', message: '首次登录请先修改初始密码' });
+    }
     if (!this.access.isAccessControlEnabled() && !path.startsWith('/api/access/configuration')) {
       request.accessPrincipal = { role: 'admin', purchaseBuilding: null };
       request.accessPrincipalFingerprint =
@@ -482,6 +491,12 @@ export class UnifiedAccessGuard implements CanActivate {
       release();
     }
   }
+}
+
+function isPasswordSetupRoute(path: string, method: string): boolean {
+  const verb = String(method).toUpperCase();
+  return verb === 'GET' && ['/api/access/session', '/api/access/runtime', '/api/access/login-names', '/api/access/personal/profile'].includes(path) ||
+    verb === 'POST' && ['/api/access/login', '/api/access/logout', '/api/access/personal/password/change', '/api/access/personal/password/reset'].includes(path);
 }
 
 function normalizeGuestSubmissionSource(request: AccessRequest): string {
