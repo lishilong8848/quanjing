@@ -33,6 +33,7 @@ import {
 import { excludesApprovedLeave } from './attendance-approved-leave';
 
 const CACHE_TTL_MS = 15_000;
+const DISPLAY_WAIT_TIMEOUT_MS = 50_000;
 
 interface SnapshotCache {
   date: string;
@@ -48,8 +49,8 @@ export class TodayAttendanceSnapshotService {
   private inFlight: Promise<TodayAttendanceSnapshot> | null = null;
   private inFlightDate = '';
   private inFlightPhase = '';
+  private inFlightForced = false;
   private requestGeneration = 0;
-  private cacheGeneration = 0;
 
   constructor(
     private readonly attendanceArchive: AttendanceAutomationFeishuGateway,
@@ -89,25 +90,23 @@ export class TodayAttendanceSnapshotService {
     const cacheIsFresh =
       this.cache?.date === date &&
       this.cache.phase === phase &&
-      now.getTime() - this.cache.cachedAt < CACHE_TTL_MS;
+      Date.now() - this.cache.cachedAt < CACHE_TTL_MS;
 
     if (!forceRefresh && cacheIsFresh) return this.cache!.snapshot;
-    const requestGeneration = forceRefresh
-      ? ++this.requestGeneration
-      : this.requestGeneration;
     if (
-      !forceRefresh &&
       this.inFlight &&
       this.inFlightDate === date &&
-      this.inFlightPhase === phase
-    )
-      return this.inFlight;
+      this.inFlightPhase === phase &&
+      (!forceRefresh || this.inFlightForced)
+    ) {
+      return this.waitForSnapshot(this.inFlight, date, phase);
+    }
 
+    const requestGeneration = ++this.requestGeneration;
     const request = this.buildSnapshot(date, taskReferenceTime, displayScope)
       .then((snapshot) => {
-        if (requestGeneration >= this.cacheGeneration) {
-          this.cacheGeneration = requestGeneration;
-          this.cache = { date, phase, cachedAt: now.getTime(), snapshot };
+        if (requestGeneration === this.requestGeneration) {
+          this.cache = { date, phase, cachedAt: Date.now(), snapshot };
         }
         return snapshot;
       })
@@ -147,12 +146,40 @@ export class TodayAttendanceSnapshotService {
           this.inFlight = null;
           this.inFlightDate = '';
           this.inFlightPhase = '';
+          this.inFlightForced = false;
         }
       });
     this.inFlight = request;
     this.inFlightDate = date;
     this.inFlightPhase = phase;
-    return request;
+    this.inFlightForced = forceRefresh;
+    return this.waitForSnapshot(request, date, phase);
+  }
+
+  private waitForSnapshot(
+    request: Promise<TodayAttendanceSnapshot>,
+    date: string,
+    phase: string,
+  ): Promise<TodayAttendanceSnapshot> {
+    // Bound this HTTP caller's wait, never the shared source read. A late,
+    // fully verified result can still warm the cache for subsequent callers.
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const cached = this.cache;
+        if (
+          cached?.date === date && cached.phase === phase &&
+          (cached.snapshot.sourceStatus === 'fresh' || cached.snapshot.summary.expected > 0)
+        ) {
+          resolve({ ...cached.snapshot, sourceStatus: 'stale' });
+        } else {
+          reject(new ServiceUnavailableException('考勤来源仍在核验中，请稍后重试；不会重复执行考勤任务'));
+        }
+      }, DISPLAY_WAIT_TIMEOUT_MS);
+      request.then(
+        snapshot => { clearTimeout(timer); resolve(snapshot); },
+        error => { clearTimeout(timer); reject(error); },
+      );
+    });
   }
 
   private async buildSnapshot(
@@ -459,7 +486,7 @@ function buildRunStatus(
     (task === 'archive-yesterday'
       ? `${shiftDateKey(date, 1)} 00:30`
       : `${date} ${task === 'evening-off-duty-check' ? '18:35' : '09:30'}`);
-  if (!persisted) return { state: 'not-run', scheduledAt };
+  if (!persisted) return { state: 'not-run', scheduledAt, task };
   const failureScope =
     persisted.failureScope ||
     (/个人异常接收人读取失败|个人考勤异常卡片发送失败/u.test(
@@ -469,6 +496,8 @@ function buildRunStatus(
       : undefined);
   return {
     state: persisted.state,
+    task,
+    ...(persisted.executionId ? { executionId: persisted.executionId } : {}),
     scheduledAt,
     ...(persisted.firstAttemptAt
       ? { firstAttemptAt: formatShanghaiMinute(persisted.firstAttemptAt) }

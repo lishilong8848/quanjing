@@ -57,6 +57,8 @@ export interface FetchBitableRecordsOptions {
   forceRefresh?: boolean;
   allowStale?: boolean;
   strict?: boolean;
+  requirePersisted?: boolean;
+  onPersisted?: (snapshot: { fetchedAt: number; sourceStartedAt: number; invalidationToken: string | null }) => void;
   validateRecords?: (records: BitableRecordItem[]) => void;
   auth?: FeishuBitableAuthConfig;
 }
@@ -203,6 +205,7 @@ const tenantAccessTokenCache = new Map<string, TenantAccessTokenCacheEntry>();
 interface BitableRecordCacheEntry {
   expiresAt: number;
   fetchedAt?: number;
+  sourceStartedAt?: number;
   records?: BitableRecordItem[];
   promise?: Promise<BitableRecordItem[]>;
 }
@@ -212,6 +215,7 @@ const persistedBitableRecordWriteTails = new Map<string, Promise<void>>();
 
 interface PersistedBitableRecordCache {
   contentFingerprint?: string;
+  sourceStartedAt?: number;
   version: 1;
   appToken?: string;
   invalidationToken?: string;
@@ -486,6 +490,7 @@ export async function fetchBitableRecords(
       records,
       fetchedAt,
       fetchedAt + effectiveCacheTtlMs,
+      cached.sourceStartedAt ?? fetchedAt,
     );
     const current = bitableRecordCache.get(cacheKey);
     if (
@@ -495,6 +500,7 @@ export async function fetchBitableRecords(
       bitableRecordCache.set(cacheKey, {
         expiresAt: fetchedAt + effectiveCacheTtlMs,
         fetchedAt,
+        sourceStartedAt: cached.sourceStartedAt ?? fetchedAt,
         records,
       });
     }
@@ -531,6 +537,7 @@ export async function fetchBitableRecords(
       bitableRecordCache.set(cacheKey, {
         expiresAt: effectiveExpiresAt,
         fetchedAt: persisted.fetchedAt,
+        sourceStartedAt: persisted.sourceStartedAt,
         records: persisted.records,
       });
 
@@ -556,6 +563,7 @@ export async function fetchBitableRecords(
       previousCache = {
         expiresAt: persisted.expiresAt,
         fetchedAt: persisted.fetchedAt,
+        sourceStartedAt: persisted.sourceStartedAt,
         records: persisted.records,
       };
     }
@@ -570,6 +578,7 @@ export async function fetchBitableRecords(
     let pageToken: string | undefined;
     let hasMore = true;
     let pageSize = DEFAULT_PAGE_SIZE;
+    const seenPageTokens = new Set<string>();
 
     while (hasMore) {
       let successfulPageSize = pageSize;
@@ -594,9 +603,14 @@ export async function fetchBitableRecords(
       pageSize = successfulPageSize;
 
       const data = response.data.data || {};
+      if (options.requirePersisted && !Array.isArray(data.items)) throw new Error('同步来源分页记录格式无效');
       records.push(...(data.items || []));
       pageToken = data.page_token;
       hasMore = Boolean(data.has_more);
+      if (options.requirePersisted && hasMore) {
+        if (typeof pageToken !== 'string' || !pageToken || seenPageTokens.has(pageToken)) throw new Error('同步来源分页未完整返回');
+        seenPageTokens.add(pageToken);
+      }
     }
 
     options.validateRecords?.(records);
@@ -608,6 +622,7 @@ export async function fetchBitableRecords(
     fetchedAt: previousCache?.fetchedAt,
     records: previousCache?.records,
     promise: requestPromise,
+    sourceStartedAt: now,
   });
 
   try {
@@ -623,10 +638,12 @@ export async function fetchBitableRecords(
         records,
         fetchedAt,
         fetchedAt + effectiveCacheTtlMs,
+        now,
       );
       bitableRecordCache.set(cacheKey, {
         expiresAt: fetchedAt + effectiveCacheTtlMs,
         fetchedAt,
+        sourceStartedAt: now,
         records,
       });
     } else if (bitableRecordCache.get(cacheKey)?.promise === requestPromise) {
@@ -1144,6 +1161,10 @@ function getPersistedBitableRecordScopeKey(
   return `${appToken}\u001f${tableId}`;
 }
 
+export function readBitableCacheScopeRevision(appToken: string, tableId: string): Promise<string | null> {
+  return readPersistedBitableRecordScopeInvalidationToken(getPersistedBitableRecordScopeKey(appToken, tableId));
+}
+
 function matchesBitableRecordCacheKeyScope(
   cacheKey: string,
   options: { appToken: string; tableId: string },
@@ -1343,6 +1364,7 @@ export interface ReadLatestPersistedBitableRecordsOptions {
 
 export interface PersistedBitableRecordSnapshot {
   contentFingerprint?: string;
+  sourceStartedAt?: number;
   records: BitableRecordItem[];
   fetchedAt: number;
   expiresAt: number;
@@ -1583,6 +1605,7 @@ async function readIndexedPersistedBitableRecordSnapshot(
 
       const snapshot: PersistedBitableRecordSnapshot = {
         records: candidate.records,
+        sourceStartedAt: candidate.sourceStartedAt,
         fetchedAt: candidate.fetchedAt,
         expiresAt: candidate.expiresAt,
       };
@@ -1642,6 +1665,7 @@ export async function readLatestPersistedBitableRecordSnapshot(
       return null;
     return {
       records: candidate.records,
+      sourceStartedAt: candidate.sourceStartedAt,
       fetchedAt: candidate.fetchedAt,
       expiresAt: candidate.expiresAt,
       contentFingerprint: candidate.contentFingerprint,
@@ -1707,6 +1731,7 @@ function parsePersistedBitableRecordCache(
     ...(filter ? { filter } : {}),
     ...(sort.length > 0 ? { sort } : {}),
     fetchedAt: parsed.fetchedAt,
+    ...(typeof parsed.sourceStartedAt === 'number' && Number.isFinite(parsed.sourceStartedAt) ? { sourceStartedAt: parsed.sourceStartedAt } : {}),
     expiresAt: parsed.expiresAt,
     recordCount:
       typeof parsed.recordCount === 'number'
@@ -1761,6 +1786,7 @@ function updateLatestPersistedBitableRecordIndexAfterWrite(
         file,
         snapshot: {
           records: payload.records,
+          sourceStartedAt: payload.sourceStartedAt,
           fetchedAt: payload.fetchedAt,
           expiresAt: payload.expiresAt,
         },
@@ -1775,6 +1801,7 @@ async function writePersistedBitableRecordCache(
   records: BitableRecordItem[],
   fetchedAt: number,
   expiresAt: number,
+  sourceStartedAt = fetchedAt,
 ): Promise<void> {
   let cacheFile = '';
   let writeRequest: Promise<void> | null = null;
@@ -1803,6 +1830,7 @@ async function writePersistedBitableRecordCache(
       ...(filter ? { filter } : {}),
       ...(sort.length > 0 ? { sort } : {}),
       fetchedAt,
+      sourceStartedAt,
       expiresAt,
       recordCount: records.length,
       records,
@@ -1813,12 +1841,15 @@ async function writePersistedBitableRecordCache(
       .then(async () => {
         await mkdir(LOCAL_CACHE_DIR, { recursive: true });
         const tempFile = `${cacheFile}.${process.pid}.tmp`;
-        await writeFile(tempFile, JSON.stringify(payload), 'utf8');
+        const bytes = JSON.stringify(payload);
+        await writeFile(tempFile, bytes, 'utf8');
         await rename(tempFile, cacheFile);
+        if (options.requirePersisted && await readFile(cacheFile, 'utf8') !== bytes) throw new Error('LOCAL_SYNC_SNAPSHOT_NOT_PERSISTED');
         const currentInvalidationToken =
           persistedBitableRecordScopeInvalidationTokens.get(scopeKey) ?? null;
         if (currentInvalidationToken !== invalidationToken) {
           await rm(cacheFile, { force: true });
+          if (options.requirePersisted) throw new Error('LOCAL_SYNC_SNAPSHOT_INVALIDATED');
           return;
         }
         persistedBitableRecordFileInvalidationTokens.set(
@@ -1826,6 +1857,7 @@ async function writePersistedBitableRecordCache(
           invalidationToken,
         );
         updateLatestPersistedBitableRecordIndexAfterWrite(cacheFile, payload);
+        options.onPersisted?.({ fetchedAt, sourceStartedAt, invalidationToken });
       });
     persistedBitableRecordWriteTails.set(cacheFile, writeRequest);
     await writeRequest;
@@ -1834,6 +1866,7 @@ async function writePersistedBitableRecordCache(
     localCacheLogger.warn(
       `Write Feishu local cache failed for ${options.tableName}: ${message}`,
     );
+    if (options.requirePersisted) throw new Error('本地数据缓存保存失败，请稍后重试');
   } finally {
     if (
       cacheFile &&

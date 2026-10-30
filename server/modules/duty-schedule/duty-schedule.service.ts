@@ -1,5 +1,8 @@
 import { businessAuthorizationSnapshot, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import { assertBusinessOperation } from '../../common/access/assert-business-operation';
+import type { DutyLocalSyncResult, DutyLocalSyncTaskResponse } from '../../../shared/duty-local-sync.interface';
+import { DutyLocalSyncTasks, validDutyLocalSyncId } from './duty-local-sync.task';
+import { DutyLocalMonthSnapshots, dutyThreeMonthRange } from './duty-local-sync.snapshot';
 import {
   BadGatewayException,
   BadRequestException,
@@ -64,6 +67,7 @@ import {
   normalizeTeamForFrontend,
   pickField,
   readLatestPersistedBitableRecordSnapshot,
+  readBitableCacheScopeRevision,
   resolveBitableAppToken,
 } from '@server/common/feishu/bitable-direct-read';
 import {
@@ -1534,6 +1538,9 @@ export class DutyScheduleService {
   private isSyncing = false;
   private syncTasks = new Map<string, SyncTask>();
   private currentTaskId: string | null = null; // 同步锁，防止并发同步
+  private readonly localScheduleSyncTasks = new DutyLocalSyncTasks();
+  private readonly localMonthSnapshots = new DutyLocalMonthSnapshots();
+  private threeMonthLocalSyncPromise?: Promise<DutyLocalSyncResult>;
   private sealingSourceSnapshot:
     | {
         records: BitableRecordItem[];
@@ -2065,6 +2072,7 @@ export class DutyScheduleService {
     strict = false,
     verifiedApprovalSnapshot?: LeaveApprovalSnapshot,
     dateRange?: { startDate: string; endDate: string },
+    persistence?: { requirePersisted: boolean; onPersisted?: (snapshot: { fetchedAt: number; sourceStartedAt: number; invalidationToken: string | null }) => void },
   ): Promise<BitableRecordItem[]> {
     const bounds = dateRange && {
       start: Date.parse(`${dateRange.startDate}T00:00:00+08:00`),
@@ -2095,11 +2103,13 @@ export class DutyScheduleService {
         forceRefresh,
         strict,
         ...(strict ? { allowStale: false } : {}),
+        ...(persistence || {}),
       }),
       verifiedApprovalSnapshot ||
         fetchLeaveApprovalSnapshot(this.httpService, {
           forceRefresh,
           strict,
+          ...(persistence ? { requirePersisted: persistence.requirePersisted } : {}),
         }),
     ]);
     return enrichScheduleRecordsWithLeaveApproval(records, approvalSnapshot);
@@ -5921,37 +5931,65 @@ export class DutyScheduleService {
     return localRows.length;
   }
 
-  async syncDutyScheduleToLocalFast(now = new Date()) {
-    const startedAt = Date.now();
-    assertBitableTableConfig(
-      '值班排班',
-      this.scheduleAppToken,
-      this.scheduleTableId,
-    );
-    const records = await this.fetchFeishuScheduleRecords(true, true);
-    const localValues = new Map(
-      this.buildProgramModifiedDutyStaffPlan(
-        records,
-        getDutyProgramModifiedRefreshWindow(now),
-      ).map((item) => [item.recordId, item.finalText]),
-    );
-    const localSynced = await this.replaceLocalScheduleRecords(
-      records,
-      localValues,
-    );
-    const durationMs = Date.now() - startedAt;
+  syncDutyScheduleToLocalFast(now = new Date()): Promise<DutyLocalSyncResult> {
+    return this.syncThreeMonthScheduleSnapshots(() => undefined, now);
+  }
 
-    return {
-      success: true,
-      total: records.length,
-      reset: 0,
-      ruleUpdated: 0,
-      localSynced,
-      failed: 0,
-      failures: [],
-      durationMs,
-      message: `排班本地同步完成：本地 ${localSynced} 条`,
-    };
+  startDutyLocalSyncTask(requestId: string): DutyLocalSyncTaskResponse {
+    if (!validDutyLocalSyncId(requestId)) throw new BadRequestException('同步请求编号无效');
+    try {
+      return this.localScheduleSyncTasks.start(requestId, phase => this.syncThreeMonthScheduleSnapshots(phase).catch(error => {
+        this.logger.warn(`近三个月排班同步未完成：${error instanceof Error ? error.name : 'Error'}`);
+        throw error;
+      }));
+    } catch { throw new ServiceUnavailableException('同步请求较多，请稍后重试'); }
+  }
+
+  getCurrentDutyLocalSyncTask(requestId?: string): DutyLocalSyncTaskResponse {
+    if (requestId !== undefined && !validDutyLocalSyncId(requestId)) throw new BadRequestException('同步请求编号无效');
+    const task = this.localScheduleSyncTasks.current(requestId);
+    if (!task) throw new NotFoundException({ code: 'NOT_FOUND', message: '同步任务不存在或已过期，可使用原请求重新发起' });
+    return task;
+  }
+
+  getDutyLocalSyncTask(taskId: string): DutyLocalSyncTaskResponse {
+    if (!validDutyLocalSyncId(taskId)) throw new BadRequestException('同步任务编号无效');
+    const task = this.localScheduleSyncTasks.get(taskId);
+    if (!task) throw new NotFoundException({ code: 'NOT_FOUND', message: '同步任务不存在或已过期，可使用原请求重新发起' });
+    return task;
+  }
+
+  private syncThreeMonthScheduleSnapshots(phase: (value: string) => void, now = new Date()): Promise<DutyLocalSyncResult> {
+    if (!this.threeMonthLocalSyncPromise) {
+      const operation = this.performThreeMonthScheduleSync(phase, now).finally(() => {
+        if (this.threeMonthLocalSyncPromise === operation) this.threeMonthLocalSyncPromise = undefined;
+      });
+      this.threeMonthLocalSyncPromise = operation;
+    }
+    return this.threeMonthLocalSyncPromise;
+  }
+
+  private async performThreeMonthScheduleSync(phase: (value: string) => void, now: Date): Promise<DutyLocalSyncResult> {
+    const startedAt = Date.now(), range = dutyThreeMonthRange(now);
+    let sourceStartedAt: number | undefined;
+    let invalidationToken: string | null = null;
+    const initialRevision = await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId);
+    phase('fetching_sources');
+    const records = await this.fetchFeishuScheduleRecords(true, true, undefined, range, {
+      requirePersisted: true, onPersisted: snapshot => { sourceStartedAt = snapshot.sourceStartedAt; invalidationToken = snapshot.invalidationToken; },
+    });
+    phase('validating_snapshot');
+    if (sourceStartedAt === undefined || !(await readCachedLeaveApprovalSnapshot()).verified) throw new ServiceUnavailableException('排班及审批快照尚未完整保存');
+    if (initialRevision !== invalidationToken || await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== invalidationToken) throw new ConflictException('排班来源已变化，请重新同步');
+    phase('publishing_snapshot');
+    await this.localMonthSnapshots.publish(this.scheduleAppToken, this.scheduleTableId, range, records, sourceStartedAt, invalidationToken,
+      record => this.extractScheduleDateFromFields(record.fields || {}));
+    const published = await Promise.all(range.months.map(month => this.localMonthSnapshots.readMonth(this.scheduleAppToken, this.scheduleTableId, month)));
+    if (published.some(snapshot => !snapshot || snapshot.sourceStartedAt !== sourceStartedAt) || published.reduce((sum, snapshot) => sum + snapshot!.records.length, 0) !== records.length) throw new ServiceUnavailableException('排班本地快照核对失败');
+    if (await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== invalidationToken) throw new ConflictException('排班来源已变化，请重新同步');
+    return { success: true, total: records.length, reset: 0, ruleUpdated: 0, localSynced: records.length, failed: 0, failures: [],
+      durationMs: Date.now() - startedAt, message: `近三个月排班已同步，共 ${records.length} 条；其它月份缓存已保留`,
+      scope: 'three_months', range: { startDate: range.startDate, endDate: range.endDate }, rangeCount: records.length, storageMode: 'snapshot' };
   }
 
   async updateVacancySubstitutes(
@@ -21353,11 +21391,13 @@ export class DutyScheduleService {
     startDate: string,
     endDate: string,
   ): Promise<MonthlySchedule[]> {
-    const snapshot = await readLatestPersistedBitableRecordSnapshot({
+    const fullSnapshot = await readLatestPersistedBitableRecordSnapshot({
       appToken: this.scheduleAppToken || undefined,
       tableId: this.scheduleTableId,
       tableName: '值班排班',
     });
+    const snapshot = await this.localMonthSnapshots.readPreferredMonth(this.scheduleAppToken, this.scheduleTableId, startDate.slice(0, 7), fullSnapshot,
+      await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId)).catch(() => fullSnapshot);
     if (!snapshot) {
       throw new ServiceUnavailableException(
         '本地排班缓存尚未准备完成，请稍后重试',

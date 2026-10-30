@@ -191,6 +191,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
       duplicate: false,
       inProgress: true,
       clientMutationId: 'attendance-manual-20260912-001',
+      executionId: expect.any(String),
       task: 'morning-off-duty-check',
       date: '2026-09-12',
       state: 'running',

@@ -25,7 +25,7 @@ interface TodayAttendanceAnomalyListProps {
   canManualSync?: boolean;
   canViewCorrectionEvidence?: boolean;
   manualSync?: () => void;
-  manualSyncState?: 'idle' | 'submitting' | 'accepted' | 'success' | 'error';
+  manualSyncState?: 'idle' | 'submitting' | 'accepted' | 'pending' | 'success' | 'error';
   manualSyncError?: string | null;
 }
 
@@ -101,6 +101,7 @@ export function TodayAttendanceAnomalyList({
   const failureReason = runStatus?.failureReason || '考勤数据处理失败';
   const isManualSyncing =
     manualSyncState === 'submitting' || manualSyncState === 'accepted';
+  const isManualPending = manualSyncState === 'pending';
   const showManualSync =
     canManualSync && Boolean(snapshot) && !isPreviousDay && !isPending;
   const isRefreshing = state === 'refreshing' || state === 'loading';
@@ -194,9 +195,9 @@ export function TodayAttendanceAnomalyList({
                 size="icon-xs"
                 className="text-current"
                 onClick={manualSync}
-                disabled={isManualSyncing}
+                disabled={isManualSyncing || isManualPending}
                 aria-label="手动同步今日考勤"
-                title={isManualSyncing ? '今日考勤同步中' : '手动同步今日考勤'}
+                title={isManualPending ? '等待本次手动核验结果' : isManualSyncing ? '今日考勤同步中' : '手动同步今日考勤'}
               >
                 <RefreshCw
                   className={cn('size-3.5', isManualSyncing && 'animate-spin')}
@@ -212,15 +213,17 @@ export function TodayAttendanceAnomalyList({
             className="border-b border-sky-100 bg-sky-50/50 px-4 py-2 text-xs font-medium text-sky-700"
             role="status"
           >
-            正在手动同步今日考勤，完成后页面会自动更新
+            正在核验本次手动同步，完成后页面会自动更新
           </div>
         )}
+        {isManualPending && <div role="status" className="flex items-center justify-between gap-3 border-b border-amber-100 bg-amber-50/50 px-4 py-2 text-xs text-amber-800"><span>本次手动核验结果尚未确认，正在继续读取；已有考勤结果保留。</span><button type="button" className="shrink-0 underline" disabled={isRefreshing} onClick={retry}>刷新结果</button></div>}
         {manualSyncState === 'success' && (
           <div
             className="border-b border-emerald-100 bg-emerald-50/50 px-4 py-2 text-xs font-medium text-emerald-700"
             role="status"
           >
             本次手动同步已完成
+            {(runStatus?.archiveSyncState === 'syncing' || runStatus?.correctionSyncState === 'syncing') && <div className="mt-1 font-normal text-slate-500">归档或补卡资料仍在后台更新，考勤核验已完成。</div>}
           </div>
         )}
         {manualSyncState === 'error' && (
@@ -277,8 +280,8 @@ export function TodayAttendanceAnomalyList({
           </div>
         ) : isRunning ? (
           <div className="space-y-1 px-4 py-4 text-sm text-amber-700">
-            <div className="font-medium">{checkTime} 考勤终检正在补跑</div>
-            {attemptText && <div className="text-xs">当前第 {attemptText}</div>}
+            <div className="font-medium">{isManualSyncing ? '正在核验本次手动同步' : isManualPending ? '本次手动核验结果待确认' : (runStatus?.attemptCount || 0) > 1 ? `${checkTime} 考勤终检正在补跑` : `${checkTime} 考勤终检正在核验`}</div>
+            {!isManualSyncing && !isManualPending && attemptText && <div className="text-xs">当前第 {attemptText}</div>}
           </div>
         ) : isFailed && !hasRetainedAttendanceResult ? (
           <div className="space-y-1 px-4 py-4 text-sm text-rose-700">

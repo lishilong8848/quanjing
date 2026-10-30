@@ -162,6 +162,7 @@ export interface LeaveApprovalSnapshot {
 export interface FetchLeaveApprovalSnapshotOptions {
   forceRefresh?: boolean;
   strict?: boolean;
+  requirePersisted?: boolean;
 }
 
 interface PersistedLeaveApprovalSnapshot {
@@ -279,12 +280,15 @@ export async function readCachedLeaveApprovalSnapshotState(): Promise<CachedLeav
     const nowMs = Date.now();
     const maxAgeMs = getLeaveApprovalLocalMaxAgeMs();
     const shiftDetailFetchedAt = shiftDetailSnapshot?.fetchedAt ?? null;
-    const shiftDetailIsFresh =
+    const detailsFresh =
       !shiftDetailTableId ||
       (shiftDetailSnapshot !== null &&
         Number.isFinite(shiftDetailSnapshot.fetchedAt) &&
         shiftDetailSnapshot.fetchedAt > 0 &&
         nowMs - shiftDetailSnapshot.fetchedAt <= maxAgeMs);
+    // An empty, freshly verified approval set has no detail rows to depend on.
+    const emptyApproval = !detailsFresh ? buildCachedLeaveApprovalSnapshot(snapshot, nowMs, maxAgeMs) : null;
+    const shiftDetailIsFresh = detailsFresh || Boolean(emptyApproval?.verified && emptyApproval.requests.length === 0);
     const sourceKey = `${source.appToken}:${source.tableId}:${shiftDetailTableId}:${localProjection.fingerprint}`;
     if (
       snapshot &&
@@ -381,6 +385,7 @@ export async function fetchLeaveApprovalSnapshot(
       allowStale: false,
       strict: true,
       validateRecords: validateLeaveApprovalRecords,
+      requirePersisted: options.requirePersisted,
     });
     if (!Array.isArray(records)) {
       throw new Error('请休假审批状态返回格式无效');
@@ -399,6 +404,7 @@ export async function fetchLeaveApprovalSnapshot(
       tableId: detailTableId,
       tableName: '请假替班班次明细',
       cacheTtlMs: LEAVE_APPROVAL_CACHE_TTL_MS,
+      requirePersisted: options.requirePersisted,
       forceRefresh: Boolean(options.forceRefresh),
       allowStale: false,
       strict: true,

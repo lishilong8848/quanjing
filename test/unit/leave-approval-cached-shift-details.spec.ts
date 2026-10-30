@@ -7,6 +7,10 @@ jest.mock('../../server/common/feishu/bitable-direct-read', () => {
     readLatestPersistedBitableRecordSnapshot: jest.fn(),
   };
 });
+jest.mock('../../server/common/feishu/leave-local-projection', () => ({
+  ...jest.requireActual('../../server/common/feishu/leave-local-projection'),
+  readLocalLeaveProjection: jest.fn(async () => ({ fingerprint: 'synthetic', applications: new Map(), actions: new Map(), updates: new Map() })),
+}));
 
 import { readLatestPersistedBitableRecordSnapshot } from '../../server/common/feishu/bitable-direct-read';
 import {
@@ -20,6 +24,10 @@ const mockedReadLatestSnapshot = jest.mocked(
 );
 
 describe('cached leave approval shift details', () => {
+  it('accepts a fresh empty approval set even when a configured detail cache does not exist', async () => {
+    mockedReadLatestSnapshot.mockImplementation(async options => options.tableId === 'tbl_leave' ? { fetchedAt: Date.now(), expiresAt: Date.now() + 100000, records: [] } : null);
+    await expect(readCachedLeaveApprovalSnapshot()).resolves.toEqual({ verified: true, requests: [] });
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.FEISHU_LEAVE_SUBSTITUTE_APP_TOKEN = 'app_leave';

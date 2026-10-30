@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getTodayAttendanceSnapshot, retryTodayAttendance } from '@/api';
-import type { TodayAttendanceSnapshot } from '@shared/today-attendance.interface';
+import type { TodayAttendanceSnapshot, TodayAttendanceFinalTask } from '@shared/today-attendance.interface';
 
 export type TodayAttendanceLoadState =
   | 'idle'
@@ -26,7 +26,7 @@ export interface UseTodayAttendanceSnapshotResult {
   state: TodayAttendanceLoadState;
   retry: () => void;
   manualSync: () => void;
-  manualSyncState: 'idle' | 'submitting' | 'accepted' | 'success' | 'error';
+  manualSyncState: 'idle' | 'submitting' | 'accepted' | 'pending' | 'success' | 'error';
   manualSyncError: string | null;
 }
 
@@ -41,6 +41,14 @@ export function isAttendanceCoreSyncComplete(
         snapshot.runStatus?.failureScope === 'personal-delivery' &&
         snapshot.summary.expected > 0)),
   );
+}
+
+export function isCurrentManualAttendanceResult(snapshot: TodayAttendanceSnapshot | null, executionId: string | null, date?: string, task?: TodayAttendanceFinalTask): boolean {
+  if (!snapshot || !executionId || date && snapshot.date !== date) return false;
+  if (task && snapshot.runStatus?.task !== task) return false;
+  // Display timestamps are minute-precision strings. Only the actual execution
+  // identity can distinguish cached results and a joined or fast new run.
+  return snapshot.runStatus?.executionId === executionId;
 }
 
 export function useTodayAttendanceSnapshot(enabled = true): UseTodayAttendanceSnapshotResult {
@@ -59,7 +67,10 @@ export function useTodayAttendanceSnapshot(enabled = true): UseTodayAttendanceSn
   const forceRefreshRequestRef = useRef(false);
   const phaseRefreshRequestRef = useRef(false);
   const manualMutationIdRef = useRef<string | null>(null);
+  const manualExecutionIdRef = useRef<string | null>(null);
   const manualSyncStartedAtRef = useRef(0);
+  const manualSyncDateRef = useRef<string | undefined>(undefined);
+  const manualSyncTaskRef = useRef<TodayAttendanceFinalTask | undefined>(undefined);
   const [manualSyncState, setManualSyncState] =
     useState<UseTodayAttendanceSnapshotResult['manualSyncState']>('idle');
   const [manualSyncError, setManualSyncError] = useState<string | null>(null);
@@ -93,19 +104,29 @@ export function useTodayAttendanceSnapshot(enabled = true): UseTodayAttendanceSn
     if (!enabled || manualMutationIdRef.current) return;
     const clientMutationId = crypto.randomUUID();
     manualMutationIdRef.current = clientMutationId;
+    manualExecutionIdRef.current = null;
     manualSyncStartedAtRef.current = Date.now();
+    manualSyncDateRef.current = snapshotRef.current?.date;
+    manualSyncTaskRef.current = snapshotRef.current?.runStatus?.scheduledAt.slice(-5) === '18:35' ? 'evening-off-duty-check' : 'morning-off-duty-check';
     setManualSyncError(null);
     setManualSyncState('submitting');
     void retryTodayAttendance({ clientMutationId })
       .then((response) => {
         if (manualMutationIdRef.current !== clientMutationId) return;
+        manualSyncDateRef.current = response.date;
+        manualSyncTaskRef.current = response.task;
+        const executionId = typeof response.executionId === 'string' && response.executionId.trim() && response.executionId.length <= 200
+          ? response.executionId : null;
+        manualExecutionIdRef.current = executionId;
         setSnapshot((current) => {
-          if (!current) return current;
+          if (!current || response.state === 'completed') return current;
           return {
             ...current,
             sourceStatus: 'running',
             runStatus: {
               state: 'running',
+              task: response.task,
+              ...(executionId ? { executionId } : {}),
               scheduledAt: `${response.date} ${
                 response.task === 'evening-off-duty-check' ? '18:35' : '09:30'
               }`,
@@ -116,24 +137,22 @@ export function useTodayAttendanceSnapshot(enabled = true): UseTodayAttendanceSn
             },
           };
         });
-        setManualSyncState(
-          response.state === 'completed' ? 'success' : 'accepted',
-        );
-        if (response.state === 'completed') {
-          manualMutationIdRef.current = null;
-        }
+        // A response can join an older active execution. Wait for a snapshot
+        // carrying its returned identity, never compare browser/server clocks.
+        setManualSyncState(executionId ? 'accepted' : 'pending');
         triggerRefresh(true);
       })
       .catch((error) => {
         if (manualMutationIdRef.current !== clientMutationId) return;
         manualMutationIdRef.current = null;
+        manualExecutionIdRef.current = null;
         setManualSyncError(manualAttendanceSyncErrorMessage(error));
         setManualSyncState('error');
       });
   }, [enabled, triggerRefresh]);
 
   useEffect(() => {
-    if (!enabled) { setSnapshot(null); setState('idle'); manualMutationIdRef.current = null; setManualSyncState('idle'); setManualSyncError(null); return; }
+    if (!enabled) { setSnapshot(null); setState('idle'); manualMutationIdRef.current = null; manualExecutionIdRef.current = null; setManualSyncState('idle'); setManualSyncError(null); return; }
     const requestId = ++requestIdRef.current;
     requestActiveRef.current = true;
     lastRequestAtRef.current = Date.now();
@@ -219,7 +238,7 @@ export function useTodayAttendanceSnapshot(enabled = true): UseTodayAttendanceSn
     if (
       state === 'loading' ||
       state === 'refreshing' ||
-      manualSyncState === 'accepted'
+      manualSyncState === 'accepted' || manualSyncState === 'pending'
     ) {
       return;
     }
@@ -244,14 +263,16 @@ export function useTodayAttendanceSnapshot(enabled = true): UseTodayAttendanceSn
   }, [enabled, snapshot, state, refreshFailures, manualSyncState, triggerRefresh]);
 
   useEffect(() => {
-    if (!enabled || manualSyncState !== 'accepted') return;
-    if (isAttendanceCoreSyncComplete(snapshot)) {
+    if (!enabled || !['accepted', 'pending'].includes(manualSyncState)) return;
+    const belongsToManualRun = isCurrentManualAttendanceResult(snapshot, manualExecutionIdRef.current, manualSyncDateRef.current, manualSyncTaskRef.current);
+    if (belongsToManualRun && isAttendanceCoreSyncComplete(snapshot)) {
       manualMutationIdRef.current = null;
+      setManualSyncError(null);
       setManualSyncState('success');
       return;
     }
     if (
-      snapshot?.sourceStatus === 'failed' &&
+      belongsToManualRun && snapshot?.sourceStatus === 'failed' &&
       snapshot.runStatus?.state === 'failed' &&
       snapshot.runStatus.failureScope !== 'personal-delivery'
     ) {
@@ -262,18 +283,23 @@ export function useTodayAttendanceSnapshot(enabled = true): UseTodayAttendanceSn
       setManualSyncState('error');
       return;
     }
-    if (Date.now() - manualSyncStartedAtRef.current >= MANUAL_SYNC_TIMEOUT_MS) {
-      manualMutationIdRef.current = null;
-      setManualSyncError('同步仍在后台执行，请稍后再刷新查看');
-      setManualSyncState('error');
-      return;
-    }
     const timer = window.setTimeout(
-      () => triggerRefresh(true),
-      MANUAL_SYNC_POLL_INTERVAL_MS,
+      () => triggerRefresh(manualSyncState === 'accepted'),
+      manualSyncState === 'pending' ? RECOVERY_REFRESH_INTERVAL_MS : MANUAL_SYNC_POLL_INTERVAL_MS,
     );
     return () => window.clearTimeout(timer);
   }, [enabled, manualSyncState, snapshot, state, refreshFailures, triggerRefresh]);
+
+  useEffect(() => {
+    if (!enabled || manualSyncState !== 'accepted') return;
+    const timer = window.setTimeout(() => {
+      // The waiting budget is independent of a slow GET. Keep the original
+      // mutation locked and continue observing; this is not a failed sync.
+      setManualSyncError(null);
+      setManualSyncState('pending');
+    }, Math.max(0, MANUAL_SYNC_TIMEOUT_MS - (Date.now() - manualSyncStartedAtRef.current)));
+    return () => window.clearTimeout(timer);
+  }, [enabled, manualSyncState]);
 
   return {
     snapshot: enabled ? snapshot : null,

@@ -4,6 +4,7 @@ import { dispatchAccessInvalidated } from '../access/access-events';
 import { constructionFetch } from './construction-fetch';
 import { applyCurrentCsrfToken, getCurrentCsrfToken } from './csrf-token';
 import { retryPurchaseReceiptAcceptance } from './purchase-receipt-retry';
+import type { DutyLocalSyncTaskResponse } from '@shared/duty-local-sync.interface';
 import type {
   NantongAssistantChatRequest,
   NantongAssistantChatResponse,
@@ -408,7 +409,8 @@ export async function getTodayAttendanceSnapshot(
     url: '/api/attendance/today',
     method: 'GET',
     params: forceRefresh ? { refresh: '1' } : undefined,
-    timeout: 15_000,
+    // Leave time for the server's 50-second display budget and its explicit fallback.
+    timeout: 60_000,
   });
   return response.data as TodayAttendanceSnapshot;
 }
@@ -2921,28 +2923,19 @@ export async function syncAllFromFeishu(): Promise<{
   }
 }
 
-export async function syncDutyScheduleToLocalFast(): Promise<{
-  success: boolean;
-  total: number;
-  reset: number;
-  ruleUpdated: number;
-  localSynced: number;
-  failed: number;
-  failures?: Array<{ recordId: string; error: string }>;
-  durationMs: number;
-  message: string;
-}> {
-  try {
-    const response = await axiosForBackend({
-      url: '/api/duty-schedules/sync-local-fast',
-      method: 'POST',
-      timeout: 180000,
-    });
-    return response.data;
-  } catch (error) {
-    logger.error('同步排班数据到本地库失败', error);
-    throw error;
-  }
+export async function startDutyLocalSyncTask(requestId: string, signal?: AbortSignal): Promise<DutyLocalSyncTaskResponse> {
+  const response = await axiosForBackend({ url: '/api/duty-schedules/local-sync-tasks', method: 'POST', data: { requestId }, timeout: 15_000, signal });
+  return response.data;
+}
+
+export async function getCurrentDutyLocalSyncTask(requestId?: string, signal?: AbortSignal): Promise<DutyLocalSyncTaskResponse> {
+  const response = await axiosForBackend({ url: '/api/duty-schedules/local-sync-tasks/current', method: 'GET', params: requestId ? { requestId } : undefined, timeout: 15_000, signal });
+  return response.data;
+}
+
+export async function getDutyLocalSyncTask(taskId: string, signal?: AbortSignal): Promise<DutyLocalSyncTaskResponse> {
+  const response = await axiosForBackend({ url: `/api/duty-schedules/local-sync-tasks/${encodeURIComponent(taskId)}`, method: 'GET', timeout: 15_000, signal });
+  return response.data;
 }
 
 /**

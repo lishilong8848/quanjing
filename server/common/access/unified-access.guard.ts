@@ -73,6 +73,8 @@ const DUTY_EDITOR_EXACT_REQUESTS = new Set([
   'GET /api/bitable/today-leave-staff',
   'POST /api/sync-all-from-feishu',
   'POST /api/duty-schedules/sync-local-fast',
+  'POST /api/duty-schedules/local-sync-tasks',
+  'GET /api/duty-schedules/local-sync-tasks/current',
   'POST /api/duty-overview-screenshot/send',
   'GET /api/typhoon-path-screenshot/preview',
   'POST /api/typhoon-path-screenshot/send-group',
@@ -890,6 +892,7 @@ function canDutyEditorAccess(request: Request, path: string): boolean {
   if (
     normalizedMethod === 'GET' &&
     (DUTY_EDITOR_MONTHLY_SCHEDULE_PATH.test(path) ||
+      /^\/api\/duty-schedules\/local-sync-tasks\/[0-9a-f-]{36}$/i.test(path) ||
       DUTY_EDITOR_EMPLOYEE_PHOTO_PATH.test(path) ||
       DUTY_EDITOR_PERSON_CHAT_PATH.test(path) ||
       DUTY_EDITOR_YEAR_PATH.test(path) ||

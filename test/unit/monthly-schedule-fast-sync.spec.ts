@@ -2,14 +2,18 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('monthly schedule fast sync', () => {
-  it('uses the schedule-only API', () => {
+  it('uses bounded task acceptance and status APIs for the schedule sync', () => {
     const apiSource = readFileSync(
       join(process.cwd(), 'client/src/api/index.ts'),
       'utf8',
     );
 
-    expect(apiSource).toContain('export async function syncDutyScheduleToLocalFast');
-    expect(apiSource).toContain("url: '/api/duty-schedules/sync-local-fast'");
+    const taskApis = apiSource.slice(apiSource.indexOf('export async function startDutyLocalSyncTask'), apiSource.indexOf('export async function sendDutyOverviewScreenshot'));
+    expect(taskApis).toContain("url: '/api/duty-schedules/local-sync-tasks'");
+    expect(taskApis).toContain("url: '/api/duty-schedules/local-sync-tasks/current'");
+    expect(taskApis).toContain('data: { requestId }');
+    expect(taskApis.match(/timeout: 15_000/g)).toHaveLength(3);
+    expect(taskApis).not.toContain('180000');
   });
 
   it('reloads schedule and sealing data after manual sync', () => {
@@ -17,14 +21,15 @@ describe('monthly schedule fast sync', () => {
       join(process.cwd(), 'client/src/pages/MonthlySchedule/index.tsx'),
       'utf8',
     );
-    const start = pageSource.indexOf('const handleManualSync');
+    const start = pageSource.indexOf('const refreshAfterLocalSync');
     const end = pageSource.indexOf('const handleManualScreenshot', start);
     const handlerSource = pageSource.slice(start, end);
 
-    expect(handlerSource).toContain('await syncDutyScheduleToLocalFast()');
+    expect(handlerSource).toContain('useLocalScheduleSync(');
     expect(handlerSource).toContain('longWhiteScheduleCache.clear()');
     expect(handlerSource).toContain('yearlySealingCache.clear()');
-    expect(handlerSource).toContain('loadSchedules()');
+    expect(handlerSource).toContain('preserveExistingOnError: true');
+    expect(handlerSource).toContain('schedules: scheduleLoaded, sealings: sealingInfoLoaded');
     expect(handlerSource).toContain('loadSealingInfo(true)');
     expect(handlerSource).not.toContain('syncAllFromFeishu');
     expect(handlerSource).not.toContain('loadChangeInfo');
@@ -58,7 +63,7 @@ describe('monthly schedule fast sync', () => {
     expect(helperSource).toContain('isBackendStatus(error, 403)');
     expect(helperSource).toContain('登录已过期，请重新登录后再试');
     expect(helperSource).toContain('页面安全状态已过期，请刷新页面后重试');
-    expect(syncSource).toContain('getProtectedActionErrorMessage(');
+    expect(syncSource).toContain('localSync.trigger()');
     expect(screenshotSource).toContain('getProtectedActionErrorMessage(');
     expect(syncSource).not.toContain("toast.error('同步失败，请稍后重试'");
     expect(screenshotSource).not.toContain(

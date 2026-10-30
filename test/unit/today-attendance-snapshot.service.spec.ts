@@ -2,6 +2,8 @@ import { TodayAttendanceSnapshotService } from '../../server/modules/duty-schedu
 
 describe('TodayAttendanceSnapshotService', () => {
   const now = new Date('2026-09-05T02:00:00.000Z');
+  beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(now); });
+  afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks(); });
 
   it('preserves same-phase verified results when the leave refresh fails', async () => {
     const archive = {
@@ -15,6 +17,7 @@ describe('TodayAttendanceSnapshotService', () => {
     };
     const service = new TodayAttendanceSnapshotService(archive as any);
     const first = await service.getSnapshot(now);
+    await jest.advanceTimersByTimeAsync(16_000);
     const second = await service.getSnapshot(new Date(now.getTime() + 16_000));
     expect(second).toMatchObject({ sourceStatus: 'stale', summary: first.summary, entries: first.entries });
     expect(archive.readApprovedAttendanceLeaveForDisplay).toHaveBeenCalledTimes(2);
@@ -878,5 +881,134 @@ describe('TodayAttendanceSnapshotService', () => {
       fetchedAt: '2026-09-05 09:30',
       summary: { expected: 1, normal: 1, anomaly: 0 },
     });
+  });
+
+  const archivedResult = (normal = 2, businessDate = '2026-09-05') => ({
+    businessDate, fetchedAt: `${businessDate} 09:30`, checkedTasks: ['morning-off-duty-check'],
+    normalByBuilding: { H楼: normal }, anomalies: [],
+  });
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(yes => { resolve = yes; });
+    return { promise, resolve };
+  };
+
+  it.each([20_000, 45_000])('waits for a verified %ims approval read and gives the finished result a full cache TTL', async delay => {
+    const approval = deferred<any[]>();
+    const archive = {
+      readArchivedAttendanceSummary: jest.fn().mockResolvedValue({ ...archivedResult(1), anomalies: [{
+        key: 'leave-overlap', name: '测试甲', building: 'H楼', shiftLabel: '白班',
+        direction: 'OnDuty', expectedAt: '2026-09-05 09:00:00', status: 'on_duty', reason: '未打卡',
+      }] }),
+      readApprovedAttendanceLeaveForDisplay: jest.fn().mockReturnValueOnce(approval.promise).mockResolvedValue([]),
+    };
+    const service = new TodayAttendanceSnapshotService(archive as any);
+    let settled = false;
+    const pending = service.getSnapshot(now).then(value => { settled = true; return value; });
+    await jest.advanceTimersByTimeAsync(delay);
+    expect(settled).toBe(false);
+    approval.resolve([{ recordId: 'verified-leave', building: 'H楼', leaveStaff: ['测试甲'], substituteStaff: [], startAt: '2026-09-05 08:00:00', endAt: '2026-09-05 18:00:00' }]);
+    const result = await pending;
+    expect(result).toMatchObject({ sourceStatus: 'fresh', entries: [], summary: { expected: 1, anomaly: 0, excluded: 1 } });
+    await jest.advanceTimersByTimeAsync(14_999);
+    await expect(service.getSnapshot(new Date())).resolves.toBe(result);
+    expect(archive.readApprovedAttendanceLeaveForDisplay).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    await service.getSnapshot(new Date());
+    expect(archive.readApprovedAttendanceLeaveForDisplay).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('expires only the first waiter at 50 seconds while a later waiter shares the same source and receives its late result', async () => {
+    const source = deferred<any>();
+    const archive = { readArchivedAttendanceSummary: jest.fn().mockReturnValue(source.promise) };
+    const service = new TodayAttendanceSnapshotService(archive as any);
+    const first = service.getSnapshot(now).then(value => ({ value }), error => ({ error }));
+    await jest.advanceTimersByTimeAsync(20_000);
+    let secondSettled = false;
+    const second = service.getSnapshot(new Date()).then(value => { secondSettled = true; return value; });
+    await jest.advanceTimersByTimeAsync(30_000);
+    const firstResult = await first;
+    expect('error' in firstResult && firstResult.error.getStatus()).toBe(503);
+    expect(secondSettled).toBe(false);
+    expect(archive.readArchivedAttendanceSummary).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(5_000);
+    source.resolve(archivedResult());
+    const late = await second;
+    expect(late.sourceStatus).toBe('fresh');
+    await expect(service.getSnapshot(new Date())).resolves.toBe(late);
+    expect(archive.readArchivedAttendanceSummary).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('returns only an explicitly stale same-phase verified cache at the wait limit without caching that fallback', async () => {
+    const source = deferred<any>();
+    const archive = { readArchivedAttendanceSummary: jest.fn().mockResolvedValueOnce(archivedResult(2)).mockReturnValueOnce(source.promise) };
+    const service = new TodayAttendanceSnapshotService(archive as any);
+    const seed = await service.getSnapshot(now);
+    const cachedAt = (service as any).cache.cachedAt;
+    await jest.advanceTimersByTimeAsync(16_000);
+    const refresh = service.getSnapshot(new Date(), true);
+    await jest.advanceTimersByTimeAsync(50_000);
+    await expect(refresh).resolves.toMatchObject({ sourceStatus: 'stale', summary: seed.summary, fetchedAt: seed.fetchedAt });
+    expect((service as any).cache.cachedAt).toBe(cachedAt);
+    expect((service as any).cache.snapshot).toBe(seed);
+    const observing = service.getSnapshot(new Date());
+    expect(archive.readArchivedAttendanceSummary).toHaveBeenCalledTimes(2);
+    source.resolve(archivedResult(3));
+    const latest = await observing;
+    expect(latest).toMatchObject({ sourceStatus: 'fresh', summary: { normal: 3 } });
+    await expect(service.getSnapshot(new Date())).resolves.toBe(latest);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('does not treat an unavailable empty cache as a verified timeout fallback', async () => {
+    const source = deferred<any>();
+    const archive = { readArchivedAttendanceSummary: jest.fn().mockResolvedValueOnce(archivedResult(0)).mockReturnValueOnce(source.promise) };
+    const service = new TodayAttendanceSnapshotService(archive as any);
+    expect((await service.getSnapshot(now)).sourceStatus).toBe('not-run');
+    const pending = service.getSnapshot(now, true).catch(error => error);
+    await jest.advanceTimersByTimeAsync(50_000);
+    expect((await pending).getStatus()).toBe(503);
+    source.resolve(archivedResult(1));
+    await jest.advanceTimersByTimeAsync(0);
+    await expect(service.getSnapshot(new Date())).resolves.toMatchObject({ sourceStatus: 'fresh' });
+  });
+
+  it('lets force bypass an ordinary read but joins the latest forced generation without launching a third source read', async () => {
+    const old = deferred<any>(), newer = deferred<any>();
+    const archive = { readArchivedAttendanceSummary: jest.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(newer.promise) };
+    const service = new TodayAttendanceSnapshotService(archive as any);
+    const ordinary = service.getSnapshot(now), forced = service.getSnapshot(now, true), joined = service.getSnapshot(now, true);
+    expect(archive.readArchivedAttendanceSummary).toHaveBeenCalledTimes(2);
+    newer.resolve(archivedResult(3));
+    const result = await forced;
+    await expect(joined).resolves.toBe(result);
+    old.resolve(archivedResult(1)); await ordinary;
+    await expect(service.getSnapshot(now)).resolves.toBe(result);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('does not let an older phase finish late and replace the newer phase cache', async () => {
+    const old = deferred<any>(), newer = deferred<any>();
+    const archive = { readArchivedAttendanceSummary: jest.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(newer.promise) };
+    const service = new TodayAttendanceSnapshotService(archive as any);
+    const previousDay = service.getSnapshot(new Date('2026-09-05T01:29:59Z'));
+    const currentDay = service.getSnapshot(new Date('2026-09-05T01:30:00Z'));
+    newer.resolve(archivedResult(3)); const result = await currentDay;
+    old.resolve(archivedResult(1, '2026-09-04')); await previousDay;
+    await expect(service.getSnapshot(new Date('2026-09-05T01:30:01Z'))).resolves.toBe(result);
+    expect(archive.readArchivedAttendanceSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a timeout rather than reusing verified data from the previous phase', async () => {
+    const source = deferred<any>();
+    const archive = { readArchivedAttendanceSummary: jest.fn().mockResolvedValueOnce(archivedResult(2, '2026-09-04')).mockReturnValueOnce(source.promise) };
+    const service = new TodayAttendanceSnapshotService(archive as any);
+    await service.getSnapshot(new Date('2026-09-05T01:29:59Z'));
+    const pending = service.getSnapshot(new Date('2026-09-05T01:30:00Z')).catch(error => error);
+    await jest.advanceTimersByTimeAsync(50_000);
+    expect((await pending).getStatus()).toBe(503);
+    source.resolve(archivedResult(2)); await jest.advanceTimersByTimeAsync(0);
   });
 });

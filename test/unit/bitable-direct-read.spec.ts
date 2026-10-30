@@ -101,6 +101,48 @@ function createRecordSearchHttpService(
 }
 
 describe('exact persistent snapshot lookup', () => {
+  it.each(['malformed', 'repeated-token'])('does not publish incomplete %s source pages as a successful refresh', async mode => {
+    const options = { appToken: 'strict-incomplete-' + mode, tableId: 'table', tableName: 'synthetic incomplete', forceRefresh: true, strict: true, requirePersisted: true };
+    const http = createRecordSearchHttpService(() => [{ record_id: 'old', fields: {} }]);
+    await fetchBitableRecords(http as never, options);
+    const file = getProjectedCachePath(`${options.appToken}:${options.tableId}:`), previous = readFileSync(file);
+    http.axiosRef.post.mockImplementation(async () => ({ data: { code: 0, data: mode === 'malformed' ? {} : { items: [], has_more: true, page_token: 'same' } } }));
+    await expect(fetchBitableRecords(http as never, options)).rejects.toThrow('同步来源分页');
+    expect(readFileSync(file)).toEqual(previous);
+  });
+  it('requires confirmed disk persistence for explicit synchronization while preserving the previous file after failure', async () => {
+    const options = { appToken: 'strict-persist-base', tableId: 'strict-persist-table', tableName: 'synthetic strict persist', forceRefresh: true, strict: true, requirePersisted: true };
+    let items = [{ record_id: 'old', fields: {} }];
+    const http = createRecordSearchHttpService(() => items);
+    await fetchBitableRecords(http as never, options);
+    const file = getProjectedCachePath(`${options.appToken}:${options.tableId}:`), original = readFileSync(file);
+    items = [{ record_id: 'new', fields: {} }];
+    const promises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const rename = jest.spyOn(promises, 'rename').mockRejectedValueOnce(Object.assign(Error('synthetic permission denied'), { code: 'EACCES' }));
+    try { await expect(fetchBitableRecords(http as never, options)).rejects.toThrow('本地数据缓存保存失败'); }
+    finally { rename.mockRestore(); }
+    expect(readFileSync(file)).toEqual(original);
+  });
+
+  it('binds source start time to the read instead of its late completion time', async () => {
+    let now = 100, release!: () => void;
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const http = createRecordSearchHttpService();
+    const original = http.axiosRef.post.getMockImplementation()!;
+    http.axiosRef.post.mockImplementation(async (...args) => {
+      if (String(args[0]).endsWith('/records/search')) await new Promise<void>(resolve => { release = resolve; });
+      return original(...args);
+    });
+    const options = { appToken: 'source-start-base', tableId: 'source-start-table', tableName: 'synthetic source start', forceRefresh: true, strict: true, requirePersisted: true };
+    const persisted = jest.fn();
+    try {
+      const operation = fetchBitableRecords(http as never, { ...options, onPersisted: persisted });
+      for (let i = 0; i < 50 && !release; i++) await new Promise(resolve => setTimeout(resolve, 1));
+      expect(release).toBeDefined(); now = 200; release(); await operation;
+      expect(persisted).toHaveBeenCalledWith(expect.objectContaining({ sourceStartedAt: 100, fetchedAt: 200 }));
+      expect(await readLatestPersistedBitableRecordSnapshot({ ...options, directOnly: true })).toMatchObject({ sourceStartedAt: 100, fetchedAt: 200 });
+    } finally { clock.mockRestore(); }
+  });
   it('reads only the normalized projected file without scanning unrelated snapshots', async () => {
     const options = {
       appToken: 'direct-projected-base',
@@ -2196,6 +2238,7 @@ describe('fetchBitableRecords local cache', () => {
         }),
       ).resolves.toEqual({
         records: [{ record_id: 'rec-ExactDate(2026-07-13)', fields: {} }],
+        sourceStartedAt: expect.any(Number),
         fetchedAt: expect.any(Number),
         expiresAt: expect.any(Number),
       });
@@ -2239,6 +2282,7 @@ describe('fetchBitableRecords local cache', () => {
         records: [],
         fetchedAt: expect.any(Number),
         expiresAt: expect.any(Number),
+        sourceStartedAt: expect.any(Number),
       });
 
       await rm(cachePath, { force: true });
@@ -2248,6 +2292,7 @@ describe('fetchBitableRecords local cache', () => {
         records: [],
         fetchedAt: expect.any(Number),
         expiresAt: expect.any(Number),
+        sourceStartedAt: expect.any(Number),
       });
     } finally {
       invalidateBitableRecordCache({ appToken, tableId });

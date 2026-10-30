@@ -67,6 +67,18 @@ import {
 } from '../../server/modules/duty-schedule/duty-schedule.controller';
 
 describe('DutyScheduleController routes', () => {
+  it('requires monthly schedule refresh permission for every local-sync task operation', () => {
+    const start = jest.fn(() => ({ taskId: 'synthetic', status: 'running' })), current = jest.fn(), get = jest.fn();
+    const controller = new DutyScheduleController({ startDutyLocalSyncTask: start, getCurrentDutyLocalSyncTask: current, getDutyLocalSyncTask: get } as never, {} as never, {} as never, { start: jest.fn() } as never);
+    const viewer = { accessPrincipal: { role: 'guest', purchaseBuilding: null } } as never;
+    expect(() => controller.startDutyLocalSyncTask({ requestId: 'synthetic' }, viewer)).toThrow('无权同步');
+    expect(() => controller.getCurrentDutyLocalSyncTask(undefined, viewer)).toThrow('无权同步');
+    expect(() => controller.getDutyLocalSyncTask('synthetic', viewer)).toThrow('无权同步');
+    const administrator = { accessPrincipal: { role: 'admin', purchaseBuilding: null } } as never;
+    expect(controller.startDutyLocalSyncTask({ requestId: 'synthetic' }, administrator)).toMatchObject({ status: 'running' });
+    expect(() => controller.startDutyLocalSyncTask({ requestId: 'synthetic', extra: 'unexpected' } as never, administrator)).toThrow('格式无效');
+    expect(start).toHaveBeenCalledTimes(1);
+  });
   function createController() {
     const updateChangeScheduleAdjustment = jest.fn(async () => ({
       success: true,
@@ -463,6 +475,7 @@ describe('DutyScheduleController routes', () => {
     const accessRequest = {
       accessRole: 'admin',
       accessPrincipalFingerprint: 'A'.repeat(43),
+      accessPrincipal: { role: 'admin', purchaseBuilding: null },
     };
 
     await controller.createChangeSummaryReport(
@@ -478,16 +491,16 @@ describe('DutyScheduleController routes', () => {
       accessRequest as never,
     );
 
-    expect(createChangeSummaryReport).toHaveBeenCalledWith({}, 'A'.repeat(43));
+    expect(createChangeSummaryReport).toHaveBeenCalledWith({ submitterName: '' }, 'A'.repeat(43), accessRequest.accessPrincipal);
     expect(getChangeSummaryReportSyncStatus).toHaveBeenCalledWith(
       'change-summary-report-123e4567-e89b-42d3-a456-426614174000',
       'A'.repeat(43),
     );
-    expect(abandonChangeSummaryReport).toHaveBeenCalledWith({}, 'A'.repeat(43));
+    expect(abandonChangeSummaryReport).toHaveBeenCalledWith({ submitterName: '' }, 'A'.repeat(43));
     await expect(
       controller.createChangeSummaryReport(
         {} as never,
-        { accessRole: 'admin' } as never,
+        { accessRole: 'admin', accessPrincipal: accessRequest.accessPrincipal } as never,
       ),
     ).rejects.toThrow('提交会话无法验证');
     await expect(

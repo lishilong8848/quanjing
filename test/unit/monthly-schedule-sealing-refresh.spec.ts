@@ -50,7 +50,7 @@ describe('MonthlySchedule sealing refresh', () => {
       sealingLoaderEnd,
     );
     const manualSyncStart = pageSource.indexOf(
-      'const handleManualSync = useCallback',
+      'const refreshAfterLocalSync = useCallback',
     );
     const manualSyncEnd = pageSource.indexOf(
       'const handleManualScreenshot = useCallback',

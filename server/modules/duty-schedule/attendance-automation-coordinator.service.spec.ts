@@ -505,8 +505,7 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
       }),
       prepareMorningFollowUps: jest.fn().mockResolvedValue({
         recordIds: ['recAttendance'],
-        followUpUrl:
-          'https://sm.example.com/attendance-anomaly-follow-up?ticket=signed.ticket',
+        followUpCardId: '0123456789abcdef0123456789abcdef',
       }),
       sendMorningBriefCard: jest.fn().mockResolvedValue('om_group'),
     };
@@ -600,6 +599,10 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
     expect(JSON.stringify(card)).toContain('110站');
     expect(JSON.stringify(card)).toContain('邱少剑');
     expect(JSON.stringify(card)).toContain('异常跟进');
+    expect(JSON.stringify(card)).not.toContain('ticket=signed.ticket');
+    expect(patrolService.sendMorningBriefCard).toHaveBeenCalledWith(
+      card, businessDate, 'unified-full-v4', '0123456789abcdef0123456789abcdef',
+    );
     expect(alarmService.getDashboard).toHaveBeenCalledWith({ date: '2026-09-07', metric: 'tagAnomaly', pageSize: '1' });
     if (mode === 'positive') {
       expect(JSON.stringify(card)).toContain('昨日告警异常打标 2 项，需要跟踪处理');
@@ -715,8 +718,7 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
         }),
         prepareMorningFollowUps: jest.fn().mockResolvedValue({
           recordIds: ['follow-up-chen'],
-          followUpUrl:
-            'https://sm.example.com/attendance-anomaly-follow-up?ticket=signed.ticket',
+          followUpCardId: '0123456789abcdef0123456789abcdef',
         }),
         sendMorningBriefCard: jest.fn().mockResolvedValue('om_group'),
       };
@@ -777,6 +779,7 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
           expect.any(Object),
           run.date,
           'unified-full-v4',
+          '0123456789abcdef0123456789abcdef',
         );
         if (totalPersonalAttempts === 2) {
           expect(attendanceGateway.sendCard.mock.calls[0][2]).toBe(

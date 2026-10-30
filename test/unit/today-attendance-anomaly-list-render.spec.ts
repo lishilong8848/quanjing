@@ -43,6 +43,28 @@ jest.mock(
 import { TodayAttendanceAnomalyList } from '../../client/src/components/attendance/TodayAttendanceAnomalyList';
 
 describe('TodayAttendanceAnomalyList rendering', () => {
+  const runningSnapshot = (attemptCount = 1, maxAttempts = 1): TodayAttendanceSnapshot => ({ date: '2026-10-30', displayScope: 'today', fetchedAt: '2026-10-30 10:15', sourceStatus: 'running',
+    runStatus: { state: 'running', scheduledAt: '2026-10-30 09:30', attemptCount, maxAttempts }, checkedTasks: ['morning-off-duty-check'],
+    summary: { expected: 62, normal: 58, anomaly: 4, excluded: 0 }, entries: [] });
+  it.each(['submitting', 'accepted'] as const)('labels the current manual %s check without showing a misleading 1/1 retry', manualSyncState => {
+    const html = renderToStaticMarkup(React.createElement(TodayAttendanceAnomalyList, { snapshot: runningSnapshot(), state: 'ready', retry: () => undefined, manualSyncState }));
+    expect(html).toContain('正在核验本次手动同步'); expect(html).not.toContain('正在补跑'); expect(html).not.toContain('当前第');
+  });
+  it('distinguishes a first scheduled check from a genuine retry', () => {
+    const render = (attempt: number) => renderToStaticMarkup(React.createElement(TodayAttendanceAnomalyList, { snapshot: runningSnapshot(attempt, 6), state: 'ready', retry: () => undefined }));
+    expect(render(1)).toContain('考勤终检正在核验'); expect(render(1)).not.toContain('正在补跑'); expect(render(2)).toContain('考勤终检正在补跑');
+  });
+  it('shows a completed manual check separately from pending external archive and correction updates', () => {
+    const running = runningSnapshot();
+    const snapshot: TodayAttendanceSnapshot = { ...running, sourceStatus: 'fresh', runStatus: { ...running.runStatus!, state: 'completed', archiveSyncState: 'syncing', correctionSyncState: 'syncing' } };
+    const html = renderToStaticMarkup(React.createElement(TodayAttendanceAnomalyList, { snapshot, state: 'ready', retry: () => undefined, manualSyncState: 'success' }));
+    expect(html).toContain('本次手动同步已完成'); expect(html).toContain('归档或补卡资料仍在后台更新'); expect(html).not.toContain('正在核验本次手动同步'); expect(html).not.toContain('当前第');
+  });
+  it('pending observation offers only a read refresh and keeps manual resubmission disabled', () => {
+    const html = renderToStaticMarkup(React.createElement(TodayAttendanceAnomalyList, { snapshot: runningSnapshot(), state: 'ready', retry: () => undefined, canManualSync: true, manualSync: () => undefined, manualSyncState: 'pending' }));
+    expect(html).toContain('本次手动核验结果尚未确认'); expect(html).toContain('刷新结果'); expect(html).not.toContain('当前第');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="手动同步今日考勤"/);
+  });
   it.each(['idle', 'loading', 'error'] as const)(
     'does not show a successful attendance header without a snapshot (%s)',
     (state) => {

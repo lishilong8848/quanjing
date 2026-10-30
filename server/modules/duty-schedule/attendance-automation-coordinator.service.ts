@@ -76,6 +76,7 @@ export type AttendanceAutomationRunState = 'running' | 'failed' | 'completed';
 
 export interface AttendanceAutomationRunStatus {
   state: AttendanceAutomationRunState;
+  executionId?: string;
   task: AttendanceAutomationTask;
   date: string;
   scheduledAt: string;
@@ -105,6 +106,8 @@ interface AttendanceAutomationTaskState {
 
 interface AttendanceManualRetryLedgerEntry {
   taskKey: string;
+  executionId?: string;
+  state?: AttendanceAutomationRunState;
   task: Extract<
     AttendanceAutomationTask,
     'morning-off-duty-check' | 'evening-off-duty-check'
@@ -334,10 +337,13 @@ export class AttendanceAutomationCoordinatorService {
         this.releaseClaim(taskKey, claimId);
         return this.manualRetryResponse(run, clientMutationId, true, false);
       }
+      const executionId = randomUUID();
       state.manualRetries = {
         ...(state.manualRetries || {}),
         [clientMutationId]: {
           taskKey,
+          executionId,
+          state: 'running',
           task: run.task,
           date: run.date,
           requestedAt: new Date().toISOString(),
@@ -349,6 +355,7 @@ export class AttendanceAutomationCoordinatorService {
       delete state.completed[taskKey];
       state.runs[taskKey] = {
         state: 'running',
+        executionId,
         task: run.task,
         date: run.date,
         scheduledAt: run.scheduledAt.toISOString(),
@@ -415,7 +422,23 @@ export class AttendanceAutomationCoordinatorService {
     const state = this.readState();
     const status = state.runs[taskKey];
     if (status) {
-      const result = { ...status };
+      const result = { ...status, executionId: attendanceExecutionId(status) };
+      // A saved "running" flag is not proof that a worker survived a restart.
+      // Project the interruption for readers without rewriting the shared ledger
+      // or starting another business run from a read-only status request.
+      const interruption = status.state === 'running' && this.hasAbandonedRun(taskKey, status);
+      if (interruption) {
+        const now = Date.now();
+        const policy = attendanceRetryPolicy(task);
+        const cutoff = Date.parse(status.retryCutoffAt || '');
+        const exhausted = (status.attemptCount || 1) >= (status.maxAttempts || policy.maxAttempts);
+        result.state = 'failed';
+        result.failureReason = interruption === 'missing-owner' ? '无法确认上次核验结果，请刷新核对后重新同步' : '上次考勤核验已因服务中断停止，请重新同步';
+        result.failureScope = 'core';
+        result.finalFailure = interruption === 'missing-owner' || exhausted || !Number.isFinite(cutoff) || now >= cutoff;
+        delete result.nextRetryAt;
+        if (!result.finalFailure) result.nextRetryAt = new Date(now).toISOString();
+      }
       const archiveJob = this.readAttendanceArchiveJob(task, date);
       if (archiveJob?.stage === 'completed') {
         delete result.archiveSyncState;
@@ -454,6 +477,7 @@ export class AttendanceAutomationCoordinatorService {
     if (!completed) return null;
     return {
       state: 'completed',
+      executionId: attendanceExecutionId({ task, date, scheduledAt: '', lastAttemptAt: completed.completedAt }),
       task,
       date,
       scheduledAt: '',
@@ -475,17 +499,30 @@ export class AttendanceAutomationCoordinatorService {
     forceInProgress = false,
   ): TodayAttendanceManualSyncResponse {
     const status = this.getRunStatus(run.task, run.date);
-    const state = forceInProgress
-      ? 'running'
-      : status?.state === 'completed' || status?.state === 'failed'
-        ? status.state
-        : 'running';
+    const taskKey = this.taskKey(run.task, run.date);
+    const ledger = this.readState();
+    let entry = ledger.manualRetries?.[clientMutationId];
+    if (entry && (entry.taskKey !== taskKey || entry.date !== run.date || entry.task !== run.task)) {
+      throw new Error('相同手动同步请求标识不能用于不同任务');
+    }
+    // Persist joined request aliases too: a timeout/retry must not start a new
+    // execution after the original shared run has already completed.
+    const canBindStatus = status && (status.state === 'running' || this.activeTasks.has(taskKey)) ? status : undefined;
+    if (!entry && !accepted && !duplicate && forceInProgress && canBindStatus?.executionId) {
+      entry = { taskKey, task: run.task, date: run.date, requestedAt: new Date().toISOString(), executionId: canBindStatus.executionId, state: canBindStatus.state };
+      ledger.manualRetries = pruneAttendanceManualRetries({ ...(ledger.manualRetries || {}), [clientMutationId]: entry });
+      this.writeState(ledger);
+    }
+    const executionId = entry?.executionId || (!duplicate && (accepted || canBindStatus) ? status?.executionId : undefined);
+    const matchingStatus = executionId && status?.executionId === executionId ? status : undefined;
+    const state = matchingStatus?.state || entry?.state || 'running';
     return {
       success: true,
       accepted,
       duplicate,
-      inProgress: forceInProgress || state === 'running',
+      inProgress: state === 'running',
       clientMutationId,
+      ...(executionId ? { executionId } : {}),
       task: run.task,
       date: run.date,
       state,
@@ -2068,6 +2105,26 @@ export class AttendanceAutomationCoordinatorService {
     }
   }
 
+  private hasAbandonedRun(taskKey: string, status: AttendanceAutomationRunStatus): false | 'dead-owner' | 'missing-owner' {
+    if (this.activeTasks.has(taskKey)) return false;
+    try {
+      const owner = JSON.parse(readFileSync(this.claimPath(taskKey), 'utf8')) as { pid?: unknown };
+      const pid = owner.pid;
+      if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) return false;
+      if (pid === process.pid) return false;
+      try { process.kill(pid, 0); return false; }
+      catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead-owner' : false; }
+    } catch (error) {
+      // Missing ownership after a grace period is interrupted; unreadable or
+      // malformed ownership is uncertain and must not unlock a competing run.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+      const attemptedAt = Date.parse(status.lastAttemptAt || '');
+      // An absent marker is not proof of a dead process. Surface the problem,
+      // but never advertise it as safe for automatic recovery.
+      return Number.isFinite(attemptedAt) && Date.now() - attemptedAt >= 60_000 ? 'missing-owner' : false;
+    }
+  }
+
   private releaseClaim(taskKey: string, claimId: string): void {
     const claimPath = this.claimPath(taskKey);
     try {
@@ -2155,6 +2212,7 @@ export class AttendanceAutomationCoordinatorService {
     const policy = attendanceRetryPolicy(run.task);
     state.runs[taskKey] = {
       state: 'running',
+      executionId: randomUUID(),
       task: run.task,
       date: run.date,
       scheduledAt: run.scheduledAt.toISOString(),
@@ -2196,6 +2254,7 @@ export class AttendanceAutomationCoordinatorService {
       Date.parse(nextRetryAt) > Date.parse(retryCutoffAt);
     state.runs[taskKey] = {
       state: 'failed',
+      executionId: previous ? attendanceExecutionId(previous) : randomUUID(),
       task: run.task,
       date: run.date,
       scheduledAt: run.scheduledAt.toISOString(),
@@ -2210,6 +2269,7 @@ export class AttendanceAutomationCoordinatorService {
       ...(finalFailure ? {} : { nextRetryAt }),
       finalFailure,
     };
+    this.finishManualRetryEntries(state, taskKey, state.runs[taskKey]);
     this.writeState(state);
   }
 
@@ -2233,6 +2293,7 @@ export class AttendanceAutomationCoordinatorService {
       const previous = state.runs[taskKey];
       state.runs[taskKey] = {
         state: 'completed',
+        executionId: previous ? attendanceExecutionId(previous) : randomUUID(),
         task: run.task,
         date: run.date,
         scheduledAt: run.scheduledAt.toISOString(),
@@ -2259,8 +2320,15 @@ export class AttendanceAutomationCoordinatorService {
             }
           : {}),
       };
+      this.finishManualRetryEntries(state, taskKey, state.runs[taskKey]);
     }
     this.writeState(state);
+  }
+
+  private finishManualRetryEntries(state: AttendanceAutomationTaskState, taskKey: string, result: AttendanceAutomationRunStatus): void {
+    for (const entry of Object.values(state.manualRetries || {})) {
+      if (entry.taskKey === taskKey && entry.executionId && entry.executionId === result.executionId) entry.state = result.state;
+    }
   }
 
   private writeState(state: AttendanceAutomationTaskState): void {
@@ -2287,6 +2355,14 @@ export class AttendanceAutomationCoordinatorService {
 }
 
 const ATTENDANCE_MANUAL_RETRY_LEDGER_LIMIT = 100;
+
+function attendanceExecutionId(status: Pick<AttendanceAutomationRunStatus, 'task' | 'date' | 'scheduledAt' | 'lastAttemptAt' | 'executionId'>): string | undefined {
+  if (typeof status.executionId === 'string' && status.executionId.trim() && status.executionId.length <= 200) return status.executionId;
+  // Read-only identity for pre-upgrade runs; it stays stable across completion
+  // because lastAttemptAt is preserved. It never starts or rewrites a run.
+  if (!status.lastAttemptAt) return undefined;
+  return 'legacy-' + createHash('sha256').update(JSON.stringify([status.task, status.date, status.scheduledAt, status.lastAttemptAt])).digest('hex');
+}
 
 function isValidAttendanceManualMutationId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{11,127}$/u.test(value);

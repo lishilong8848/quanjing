@@ -7,7 +7,7 @@ import { hasBusinessPermissionSomewhere, personalPermissionPagePaths } from '../
 import { TodayOperationsAnomalyGateway } from './today-operations-anomaly.gateway';
 import { TodayOperationsFollowUpCardStore } from './today-operations-follow-up-card.store';
 import { parseFollowUpCardAction } from './today-operations-follow-up-card.callback';
-import { buildFollowUpEditCard, buildFollowUpListCard, buildFollowUpProcessingCard, buildFollowUpResultCard } from './today-operations-follow-up-card';
+import { buildFollowUpEditCard, buildFollowUpListCard, buildFollowUpProcessingCard, buildFollowUpResultCard, buildFollowUpNavigationErrorCard } from './today-operations-follow-up-card';
 import type { FollowUpCardCommand, FollowUpCardSnapshot } from './today-operations-follow-up-card.types';
 
 @Injectable()
@@ -79,7 +79,24 @@ export class TodayOperationsFollowUpCardService implements OnModuleInit, OnModul
           const current = await this.store.getSnapshot(action.batchId, action.messageId);
           this.assertApp(current);
           await this.gateway.patchInteractiveCard(action.messageId, this.render(current, this.canUpdate(action.actorOpenId)));
-        }).catch(error => this.logger.warn(`异常跟进卡片打开失败，可从原按钮重试：${safeError(error)}`))
+        }).catch(async error => {
+          this.logger.warn(`异常跟进卡片打开失败，可从原按钮重试：${safeError(error)}`);
+          if (action.action !== 'edit') return;
+          const index = action.index;
+          await this.enqueueMessage(action.messageId, async () => {
+            if (this.navigation.get(action.messageId) !== marker) return;
+            this.actor(action.actorOpenId, 'read');
+            const current = await this.store.getSnapshot(action.batchId, action.messageId);
+            this.assertApp(current);
+            if (current.message?.view.kind !== 'edit' || current.message.view.index !== index) return;
+            const row = current.records[index];
+            if (!row) return;
+            const fallback = row.pendingCommandId || row.record.completed
+              ? this.render(current, this.canUpdate(action.actorOpenId))
+              : buildFollowUpNavigationErrorCard(action.batchId, row, index);
+            await this.gateway.patchInteractiveCard(action.messageId, fallback);
+          }).catch(fallbackError => this.logger.warn(`异常跟进打开失败提示未更新，可从原按钮重试：${safeError(fallbackError)}`));
+        })
           .finally(() => { if (this.navigation.get(action.messageId) === marker) this.navigation.delete(action.messageId); });
       });
       return { toast: { type: 'info', content: action.action === 'edit' ? '正在打开填写卡片' : '正在更新卡片' } };
@@ -225,5 +242,13 @@ export class TodayOperationsFollowUpCardService implements OnModuleInit, OnModul
 }
 
 function safeError(error: unknown): string {
-  return (error instanceof Error ? error.message : '同步失败').replace(/[\r\n\t]/gu, ' ').slice(0, 240);
+  const value = error && typeof error === 'object' ? error as { message?: unknown; response?: { status?: unknown; data?: { code?: unknown; msg?: unknown } } } : {};
+  const status = value.response?.status, code = value.response?.data?.code;
+  const message = typeof value.response?.data?.msg === 'string' ? value.response.data.msg : typeof value.message === 'string' ? value.message : '同步失败';
+  const details = message.slice(0, 2000).split(/(?:ErrorValue|request[_ ]?body|payload)\s*[:=]/iu)[0]
+    .replace(/Bearer\s+[^\s,;"'}]+/giu, 'Bearer [已隐藏]')
+    .replace(/((?:app[_-]?secret|access[_-]?token|tenant[_-]?access[_-]?token|verification[_-]?token|token|ticket|password|authorization)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}&]+)/giu, '$1[已隐藏]')
+    .replace(/(?:https?:\/\/|feishu:\/\/|lark:\/\/)[^\s<>]+/giu, '[链接已隐藏]')
+    .replace(/[\r\n\t]/gu, ' ').trim();
+  return [Number.isInteger(status) ? `HTTP ${status}` : '', /^\d{1,9}$/u.test(String(code ?? '')) ? `Feishu ${code}` : '', details].filter(Boolean).join(' · ').slice(0, 500);
 }

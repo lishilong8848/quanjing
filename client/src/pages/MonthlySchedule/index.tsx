@@ -26,6 +26,8 @@ import { CalendarDayDialogHost, createCalendarDayDialogController, restoreCalend
 import { projectCalendarChangeFollowUp } from './calendar-change-follow-up';
 import { createCalendarDaySummaryCache, reuseSameDateValue } from './calendar-change-summary-cache';
 import { calendarFollowUpRange, useCalendarFollowUps } from './use-calendar-follow-ups';
+import { useLocalScheduleSync } from './use-local-schedule-sync';
+import { LocalScheduleSyncStatus } from './LocalScheduleSyncStatus';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -105,7 +107,6 @@ import {
   getTodayLeaveStaff,
   getPersonProfiles,
   getPersonProfileDetails,
-  syncDutyScheduleToLocalFast,
   sendDutyOverviewScreenshot,
   updateVacancySubstitutes,
   updateDutyStaffAdjustment,
@@ -4062,7 +4063,6 @@ function MonthlySchedulePageContent() {
   const [personProfileDetails, setPersonProfileDetails] = useState<
     PersonProfileDetail[]
   >([]);
-  const [manualSyncing, setManualSyncing] = useState(false);
   const [manualScreenshotSending, setManualScreenshotSending] = useState(false);
   const [vacancyDialogOpen, setVacancyDialogOpen] = useState(false);
   const [staffAdjustmentMode, setStaffAdjustmentMode] =
@@ -6518,52 +6518,26 @@ function MonthlySchedulePageContent() {
     setSelectedDate(new Date());
   };
 
-  const handleManualSync = useCallback(async () => {
-    if (!canRefreshMonthlySchedule) {
-      toast.info('当前为只读模式，不能同步或写入数据');
-      return;
-    }
-    if (manualSyncing) {
-      return;
-    }
-
-    const toastId = toast.loading('正在同步飞书数据到本地库...');
-    setManualSyncing(true);
-
-    try {
-      const result = await syncDutyScheduleToLocalFast();
+  const refreshAfterLocalSync = useCallback(async (invalidate: boolean, signal: AbortSignal) => {
+    if (signal.aborted || activeScheduleReadScopeRef.current !== scheduleReadScope) return { schedules: false, sealings: false, cancelled: true };
+    if (invalidate) {
       monthlyScheduleCache.clear();
       longWhiteScheduleCache.clear();
       yearlySealingCache.clear();
       setDataRefreshToken((token) => token + 1);
-      const [, sealingInfoLoaded] = await Promise.all([
-        loadSchedules(),
-        loadSealingInfo(true),
-      ]);
-
-      if (result.success && sealingInfoLoaded) {
-        toast.success('本地库已同步，页面数据已刷新', { id: toastId });
-      } else if (result.success) {
-        toast.warning('本地库已同步，封网信息暂未刷新，将自动重试', {
-          id: toastId,
-        });
-      } else {
-        toast.warning(result.message || '部分数据同步失败，页面已刷新', {
-          id: toastId,
-        });
-      }
-    } catch (error) {
-      logger.error('手动同步飞书数据失败', error);
-      toast.error(
-        getProtectedActionErrorMessage(error, '同步失败，请稍后重试'),
-        {
-          id: toastId,
-        },
-      );
-    } finally {
-      setManualSyncing(false);
     }
-  }, [canRefreshMonthlySchedule, loadSchedules, loadSealingInfo, manualSyncing]);
+    const [scheduleLoaded, sealingInfoLoaded] = await Promise.all([
+      loadSchedules({ preserveExistingOnError: true, silent: true, signal }),
+      loadSealingInfo(true),
+    ]);
+    return { schedules: scheduleLoaded, sealings: sealingInfoLoaded };
+  }, [scheduleReadScope, monthlyScheduleCache, loadSchedules, loadSealingInfo]);
+  const localSync = useLocalScheduleSync(principalFingerprint, canRefreshMonthlySchedule && !access.isLoading, refreshAfterLocalSync);
+  const manualSyncing = localSync.state.busy;
+  const handleManualSync = useCallback(() => {
+    if (!canRefreshMonthlySchedule) { toast.info('当前为只读模式，不能同步或写入数据'); return; }
+    return localSync.trigger();
+  }, [canRefreshMonthlySchedule, localSync.trigger]);
 
   const handleManualScreenshot = useCallback(async () => {
     if (!canSendMonthlySchedule) {
@@ -10824,17 +10798,18 @@ function MonthlySchedulePageContent() {
                       <DropdownMenuSubContent className="min-w-48 rounded-lg border-blue-100 bg-white p-1 shadow-lg">
                         {canRefreshMonthlySchedule && (<DropdownMenuItem
                           disabled={manualSyncing}
+                          title="同步上月、本月和下月的排班，历史排班保留"
                           onSelect={() => {
                             void handleManualSync();
                           }}
                           className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-blue-700 focus:bg-blue-50 focus:text-blue-700"
                         >
-                          {manualSyncing ? (
+                          {manualSyncing || localSync.state.phase === 'running' ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
                             <RefreshCw className="h-3.5 w-3.5" />
                           )}
-                          {manualSyncing ? '同步中...' : '同步本地库'}
+                          {manualSyncing ? '正在查询…' : localSync.state.phase === 'running' || localSync.state.phase === 'unknown' ? '查看同步进度' : '同步近三个月'}
                         </DropdownMenuItem>)}
                         {canSendMonthlySchedule && (<DropdownMenuItem
                           disabled={manualScreenshotSending}
@@ -10862,6 +10837,7 @@ function MonthlySchedulePageContent() {
           )}
         </div>
       </div>
+      {canRefreshMonthlySchedule && <LocalScheduleSyncStatus state={localSync.state} onCheck={() => void localSync.check()} onRetry={() => void handleManualSync()} onReload={() => void localSync.refreshView()} />}
       <div className="grid duty-calendar-weather-grid items-stretch gap-3">
         <div className="duty-calendar-panel h-full w-full min-w-0 rounded-xl border border-slate-100 bg-slate-50/40 p-2">
           {calendarFollowUps.error && <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md border border-red-100 bg-red-50 px-2 py-1 text-xs text-red-700"><span>{calendarFollowUps.error}</span><button type="button" className="shrink-0 underline" onClick={()=>void calendarFollowUps.reload()}>重新读取</button></div>}

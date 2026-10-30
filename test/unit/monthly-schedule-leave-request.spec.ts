@@ -327,7 +327,7 @@ describe('Monthly schedule leave request tool', () => {
     expect(commonTools).toContain('人员异动');
     expect(commonTools).toContain('封网登记');
     expect(commonTools).toContain('阿里月报生成');
-    expect(commonTools).toContain('同步本地库');
+    expect(commonTools).toContain('同步近三个月');
     expect(commonTools).toContain('发送今日截图');
 
     const changeApplicationIndex = commonTools.indexOf('变更申请');

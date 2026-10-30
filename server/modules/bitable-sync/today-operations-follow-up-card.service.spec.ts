@@ -169,6 +169,46 @@ describe('TodayOperationsFollowUpCardService', () => {
     expect(await store.pendingCommands()).toEqual([]);
   });
 
+  it('shows a retry card after an editor PATCH rejection and logs safe Feishu diagnostics without credentials', async () => {
+    const id = await prepare(), before = structuredClone(db.get('recA'));
+    gateway.patchInteractiveCard.mockRejectedValueOnce(Object.assign(new Error('Request failed with status code 400'), {
+      response: { status: 400, data: { code: 230099, msg: "unknown property 'label'; token=synthetic-secret; ErrorValue: private-card-body" } },
+      config: { headers: { Authorization: 'Bearer synthetic-authorization' }, data: 'private-request-body' },
+    }));
+    const result = await service.handle(view(id)); expect(result.card).toBeUndefined();
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2));
+    const fallback = JSON.stringify(gateway.patchInteractiveCard.mock.calls[1][1]);
+    expect(fallback).toContain('重试打开'); expect(fallback).toContain('尚未提交任何修改');
+    expect(fallback).not.toContain('"tag":"form"'); expect(fallback).not.toContain('form_action_type');
+    const log = jest.mocked(Logger.prototype.warn).mock.calls.flat().join(' ');
+    expect(log).toContain('HTTP 400'); expect(log).toContain('Feishu 230099'); expect(log).toContain("unknown property 'label'");
+    expect(log).not.toMatch(/synthetic-secret|synthetic-authorization|private-card-body|private-request-body/);
+    await service.handle(view(id));
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(3));
+    expect(JSON.stringify(gateway.patchInteractiveCard.mock.calls[2][1])).toContain('"tag":"form"');
+    expect(db.get('recA')).toEqual(before); expect(gateway.updateFollowUp).not.toHaveBeenCalled(); expect(await store.pendingCommands()).toEqual([]);
+  });
+
+  it('does not replace a later summary navigation with an old editor failure notice', async () => {
+    const id = await prepare(); let rejectPatch!: (error: Error) => void;
+    gateway.patchInteractiveCard.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectPatch = reject; }));
+    await service.handle(view(id));
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1));
+    await service.handle(view(id, 'summary')); rejectPatch(new Error('synthetic editor rejection'));
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2));
+    await immediate();
+    expect(gateway.patchInteractiveCard).toHaveBeenLastCalledWith(messageA, summary);
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2); expect(await store.pendingCommands()).toEqual([]);
+  });
+
+  it('does not create a business command or retry forever when even the failure notice cannot be patched', async () => {
+    const id = await prepare(); gateway.patchInteractiveCard.mockRejectedValue(new Error('synthetic network unavailable'));
+    await service.handle(view(id));
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2)); await immediate();
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2); expect(gateway.updateFollowUp).not.toHaveBeenCalled();
+    expect(await store.pendingCommands()).toEqual([]);
+  });
+
   it.each(['reader', 'completed'] as const)('shows %s details without an editable form', async mode => {
     if (mode === 'completed') db.set('recA', record('recA', { completed: true, acknowledged: true, treatmentMeasure: '原先已完成' }));
     const id = await prepare();

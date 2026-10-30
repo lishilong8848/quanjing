@@ -1,6 +1,7 @@
 import {
   buildFollowUpEntryButton, buildFollowUpListCard, buildFollowUpEditCard,
   buildFollowUpProcessingCard, buildFollowUpResultCard,
+  buildFollowUpNavigationErrorCard,
 } from './today-operations-follow-up-card';
 import { parseFollowUpCardAction } from './today-operations-follow-up-card.callback';
 import type { FollowUpCardRecord } from './today-operations-follow-up-card.types';
@@ -62,6 +63,24 @@ describe('daily follow-up card presentation', () => {
     expect(parseButton(submit, { follow_up_status: 'completed', follow_up_measure: '完成检查' }))
       .toMatchObject({ kind: 'submit', batchId: batch, index: 7, revision: 3, acknowledged: true, completed: true, treatmentMeasure: '完成检查' });
     expect(callbacks(card)).toContainEqual(expect.objectContaining({ action: 'list', page: 1 }));
+  });
+
+  it('uses visible form headings and selector placeholder instead of the rejected label property', () => {
+    const card = buildFollowUpEditCard(batch, row(), 0), all = nodes(card);
+    const select = all.find(value => value.tag === 'select_static')!;
+    expect(select).not.toHaveProperty('label');
+    expect(select.placeholder).toEqual({ tag: 'plain_text', content: '请选择跟进状态' });
+    expect(all.find(value => value.tag === 'input')).not.toHaveProperty('label');
+    expect(all.filter(value => value.tag === 'markdown').map(value => value.content)).toEqual(expect.arrayContaining(['**跟进状态**', '**处理措施**']));
+  });
+
+  it('provides a safe retry view when opening an editor fails without adding a submission action', () => {
+    const card = buildFollowUpNavigationErrorCard(batch, row(), 7), all = nodes(card);
+    expect(JSON.stringify(card)).toContain('尚未提交任何修改');
+    expect(all.some(value => value.tag === 'form' || value.form_action_type)).toBe(false);
+    expect(callbacks(card)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'edit', index: 7 }), expect.objectContaining({ action: 'list', page: 1 }), expect.objectContaining({ action: 'summary' }),
+    ]));
   });
 
   it('keeps a rejected submission draft and an actionable error without marking it successful', () => {

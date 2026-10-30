@@ -12,6 +12,7 @@ import {
   type ExecutionContext,
   ForbiddenException,
   Get,
+  HttpCode,
   Logger,
   type NestInterceptor,
   Optional,
@@ -1727,6 +1728,33 @@ export class DutyScheduleController {
   @Post('duty-schedules/sync-local-fast')
   async syncDutyScheduleToLocalFast() {
     return this.dutyScheduleService.syncDutyScheduleToLocalFast();
+  }
+
+  @ProfessionalScoped()
+  @Post('duty-schedules/local-sync-tasks')
+  @HttpCode(202)
+  startDutyLocalSyncTask(@Body() body: { requestId?: string }, @Req() request: DutyScheduleAccessRequest) {
+    this.assertDutyLocalSyncAccess(request);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'requestId') || typeof body.requestId !== 'string') throw new BadRequestException('同步请求格式无效');
+    return this.dutyScheduleService.startDutyLocalSyncTask(body.requestId);
+  }
+
+  @ProfessionalScoped()
+  @Get('duty-schedules/local-sync-tasks/current')
+  getCurrentDutyLocalSyncTask(@Query('requestId') requestId: string | undefined, @Req() request: DutyScheduleAccessRequest) {
+    this.assertDutyLocalSyncAccess(request);
+    return this.dutyScheduleService.getCurrentDutyLocalSyncTask(requestId);
+  }
+
+  @ProfessionalScoped()
+  @Get('duty-schedules/local-sync-tasks/:taskId')
+  getDutyLocalSyncTask(@Param('taskId') taskId: string, @Req() request: DutyScheduleAccessRequest) {
+    this.assertDutyLocalSyncAccess(request);
+    return this.dutyScheduleService.getDutyLocalSyncTask(taskId);
+  }
+
+  private assertDutyLocalSyncAccess(request: DutyScheduleAccessRequest): void {
+    if (!request?.accessPrincipal || !hasBusinessPermissionSomewhere(request.accessPrincipal, { module: 'monthly_schedule', action: 'refresh' })) throw new ForbiddenException('当前账号无权同步排班数据');
   }
 
   @Post('duty-overview-screenshot/send')

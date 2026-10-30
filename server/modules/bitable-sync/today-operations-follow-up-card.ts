@@ -51,13 +51,14 @@ export function buildFollowUpEditCard(
   elements.push({
     tag: 'form', name: 'today_followup_form', direction: 'vertical', vertical_spacing: '8px',
     elements: [
+      markdown('**跟进状态**'),
       { tag: 'select_static', name: 'follow_up_status', required: true, width: 'fill', initial_option: selected,
-        label: { tag: 'plain_text', content: '跟进状态' },
+        placeholder: { tag: 'plain_text', content: '请选择跟进状态' },
         options: [['pending', '待跟进'], ['acknowledged', '已知悉'], ['completed', '已处理完成']].map(([value, content]) => ({ value, text: { tag: 'plain_text', content } })),
       },
+      markdown('**处理措施**'),
       { tag: 'input', name: 'follow_up_measure', input_type: 'multiline_text', rows: 3, max_length: 500, width: 'fill',
         default_value: clip(values.treatmentMeasure || '', 500),
-        label: { tag: 'plain_text', content: '处理措施' },
         placeholder: { tag: 'plain_text', content: '标记完成时必填，2–500 字' },
       },
       { tag: 'button', name: `today_followup_submit:${batchId}:${index}:${row.revision}`, type: 'primary_filled', width: 'fill',
@@ -66,6 +67,16 @@ export function buildFollowUpEditCard(
     ],
   }, buttonRow([navigation('返回列表', batchId, 'list', Math.floor(index / PAGE_SIZE)), navigation('返回巡视摘要', batchId, 'summary')]));
   return card('填写异常跟进', elements, 'orange');
+}
+
+export function buildFollowUpNavigationErrorCard(batchId: string, row: FollowUpCardRecord, index: number): Card {
+  validateRow(batchId, row, index);
+  return card('填写页面暂未打开', [
+    ...recordDetails(row.record, 220),
+    markdown('填写页面暂未打开，尚未提交任何修改。请重试打开，或返回列表。'),
+    navigation('重试打开', batchId, 'edit', index, 'primary_filled'),
+    buttonRow([navigation('返回列表', batchId, 'list', Math.floor(index / PAGE_SIZE)), navigation('返回巡视摘要', batchId, 'summary')]),
+  ], 'orange');
 }
 
 export function buildFollowUpProcessingCard(record: TodayOperationsFollowUpRecord, update: Update): Card {
