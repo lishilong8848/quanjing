@@ -1,3 +1,4 @@
+import { observedCardPost, observedCardPatch } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import {
   BadGatewayException,
@@ -144,8 +145,7 @@ export class LeaveWorkflowGateway {
   ): Promise<string> {
     const recipient = requireOpenId(recipientOpenId);
     const token = await this.getTenantAccessToken();
-    const response = await this.httpService.axiosRef
-      .post(
+    const response = await observedCardPost(this.httpService.axiosRef, 'leave',
         'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
         {
           receive_id: recipient,
@@ -174,8 +174,7 @@ export class LeaveWorkflowGateway {
   ): Promise<void> {
     const normalizedMessageId = requireMessageId(messageId);
     const token = await this.getTenantAccessToken();
-    const response = await this.httpService.axiosRef
-      .patch(
+    const response = await observedCardPatch(this.httpService.axiosRef, 'leave',
         `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(normalizedMessageId)}`,
         { content: serializeCard(card) },
         requestConfig(token),

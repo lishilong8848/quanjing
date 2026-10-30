@@ -232,7 +232,7 @@ describe('personnel permission requests use actual permissions without assigning
   it('fails closed on malformed/version-mismatched ledger and refuses a live writer lock', async () => {
     await service.create(applicant, input());
     const good = readFileSync(ledger.filePath, 'utf8');
-    writeFileSync(ledger.filePath, good.replace('"schemaVersion":1', '"schemaVersion":2'));
+    writeFileSync(ledger.filePath, good.replace('"schemaVersion":2', '"schemaVersion":3'));
     expect(() => ledger.read()).toThrow('台账无效');
     writeFileSync(ledger.filePath, good);
     writeFileSync(`${ledger.filePath}.lock`, JSON.stringify(createProcessLockOwner(randomUUID())));
@@ -243,5 +243,120 @@ describe('personnel permission requests use actual permissions without assigning
     await service.create(applicant, input());
     rmSync(ledger.filePath);
     expect(() => service.listAdmin(admin)).toThrow('台账无效');
+  });
+
+  it('edits only the owner pending reason with version, original retry identity and audit', async () => {
+    const row = await service.create(applicant, input());
+    const edit = { requestId: row.id, expectedRequestVersion: 1, clientMutationId: randomUUID(), reason: '补充工作说明' };
+    const updated = await service.update(applicant, edit);
+    expect(updated).toMatchObject({ id: row.id, version: 2, reason: edit.reason, status: 'pending' });
+    expect(await service.update(applicant, edit)).toEqual(updated);
+    expect(ledger.read().audit.map(item => item.action)).toEqual(['create','update']);
+    await expect(service.update(applicant, {...edit, reason:'不同内容'})).rejects.toThrow('重复提交内容不一致');
+    await expect(service.update(config.currentPrincipal(ids[1],1)!, {...edit,clientMutationId:randomUUID()})).rejects.toThrow('本人的');
+    await expect(service.review(admin,reviewInput(row.id,{decision:'reject',comment:'old version'}))).rejects.toThrow('已被处理');
+  });
+
+  it('cancels the owner pending request once, refuses stale review and permits a new application', async () => {
+    const row = await service.create(applicant,input());
+    const body = {requestId:row.id,expectedRequestVersion:1,clientMutationId:randomUUID()};
+    const cancelled = await service.cancel(applicant,body);
+    expect(cancelled).toMatchObject({status:'cancelled',version:2});
+    expect(await service.cancel(applicant,body)).toEqual(cancelled);
+    await expect(service.review(admin,reviewInput(row.id,{decision:'reject',comment:'late'}))).rejects.toThrow('已被处理');
+    expect((await service.create(applicant,input())).id).not.toBe(row.id);
+    expect(service.summaryOwn(applicant)).toMatchObject({total:2,pending:1,cancelled:1,capacity:{level:'normal'}});
+    expect(service.summaryOwn(config.currentPrincipal(ids[1],1)!)).toMatchObject({total:0,pending:0});
+  });
+
+  it('allows just one winner when cancellation races administrator review', async () => {
+    const row = await service.create(applicant,input());
+    const results = await Promise.allSettled([service.cancel(applicant,{requestId:row.id,expectedRequestVersion:1,clientMutationId:randomUUID()}),
+      service.review(admin,reviewInput(row.id,{decision:'reject',comment:'no longer needed'}))]);
+    expect(results.filter(item=>item.status==='fulfilled')).toHaveLength(1);
+    expect(ledger.read().audit).toHaveLength(2);
+  });
+
+  it('reports current/partial/none without rewriting grants or historical approval', async () => {
+    const row = await service.create(applicant,input({permissions:[{...permission() as Extract<RequestedPermission,{kind:'action'}>,buildings:['A楼','B楼']}]}));
+    await grant([grantRule({buildings:['A楼','B楼']})]);
+    expect((await service.review(admin,reviewInput(row.id))).currentEffect).toBe('current');
+    await grant([grantRule()]);
+    expect(service.listOwn(applicant)[0]).toMatchObject({status:'approved',currentEffect:'partial',currentEffectRevision:configStore.read().revision});
+    await grant([]);
+    const before = readFileSync(configStore.filePath,'utf8');
+    expect(service.listOwn(applicant)[0]).toMatchObject({status:'approved',currentEffect:'none'});
+    expect(readFileSync(configStore.filePath,'utf8')).toBe(before);
+    expect(ledger.read().requests[row.id]).not.toHaveProperty('currentEffect');
+  });
+
+  it('fails closed as unavailable when an approved record no longer has the same identity', async () => {
+    const row=await service.create(applicant,input());await grant([grantRule()]);await service.review(admin,reviewInput(row.id));
+    const snapshot=config.snapshot.bind(config);
+    jest.spyOn(config,'snapshot').mockImplementation(()=>{const value=snapshot();value.accounts.find(item=>item.id===ids[0])!.personnelIdentity='local-external-'+ 'd'.repeat(64);return value;});
+    expect(service.listAdmin(admin)[0]).toMatchObject({currentEffect:'unavailable',currentEffectRevision:null});
+  });
+
+  it('migrates v1 once under the writer lock and retains the original bytes', async () => {
+    const row=await service.create(applicant,input());
+    const legacy=JSON.stringify({...ledger.read(),schemaVersion:1},null,2);writeFileSync(ledger.filePath,legacy);
+    const migrated=new PersonnelPermissionRequestsStore(ledger.filePath), next=new PersonnelPermissionRequestsService(config,migrated);
+    expect(migrated.read().schemaVersion).toBe(2);
+    expect(readFileSync(ledger.filePath,'utf8')).toBe(legacy);
+    await next.update(applicant,{requestId:row.id,expectedRequestVersion:1,reason:'迁移后的补充',clientMutationId:randomUUID()});
+    expect(readFileSync(ledger.filePath+'.v1.bak','utf8')).toBe(legacy);
+    expect(JSON.parse(readFileSync(ledger.filePath,'utf8')).schemaVersion).toBe(2);
+  });
+
+  it('accepts non-enumerable redacted reasons while rejecting injected identity fields', async () => {
+    const body=input();Object.defineProperty(body,'reason',{value:body.reason,enumerable:false});
+    const row=await service.create(applicant,body);
+    const edit={requestId:row.id,expectedRequestVersion:1,clientMutationId:randomUUID()} as any;
+    Object.defineProperty(edit,'reason',{value:'非枚举补充',enumerable:false});
+    expect((await service.update(applicant,edit)).reason).toBe('非枚举补充');
+    Object.defineProperty(edit,'accountId',{value:ids[1],enumerable:false});
+    await expect(service.update(applicant,edit)).rejects.toThrow('内容无效');
+  });
+
+  it('warns about capacity without pruning receipts or audit and never expires pending requests automatically', async () => {
+    const row=await service.create(applicant,input());
+    const state=ledger.read();
+    for(let i=0;i<24000;i++) state.mutations[i.toString(16).padStart(64,'0')]={fingerprint:'a'.repeat(64),requestId:row.id};
+    expect(ledger.capacity(state).level).toBe('warning');
+    expect(Object.keys(state.mutations)).toHaveLength(24001);
+    jest.spyOn(Date,'now').mockReturnValue(Date.now()+400*24*60*60*1000);
+    expect(service.listOwn(applicant)[0].status).toBe('pending');
+  });
+
+  it('does not let impersonated/first-password owners edit or cancel, or cancel an already reviewed request',async()=>{
+    const row=await service.create(applicant,input()),body={requestId:row.id,expectedRequestVersion:1,clientMutationId:randomUUID()};
+    await expect(service.cancel({...applicant,requiresPasswordChange:true},body)).rejects.toThrow('初始密码');
+    await expect(service.update({...applicant,impersonation:{actorAccountId:admin.accountId!,actorName:'合成管理员',targetName:'合成人员',expiresAt:Date.now()+1000}},{...body,reason:'changed'})).rejects.toThrow('代登录');
+    await service.review(admin,reviewInput(row.id,{decision:'reject',comment:'已结束'}));
+    await expect(service.cancel(applicant,{...body,expectedRequestVersion:2})).rejects.toThrow('已变化或已处理');
+  });
+
+  it('reports an explicitly disabled approved account as currently ineffective',async()=>{
+    const row=await service.create(applicant,input());await grant([grantRule()]);await service.review(admin,reviewInput(row.id));
+    const account=config.snapshot().accounts.find(item=>item.id===ids[0])!;
+    await config.saveAccount({clientMutationId:randomUUID(),expectedRevision:configStore.read().revision,id:account.id,kind:account.kind,name:account.name,role:account.role,building:account.building,enabled:false},admin);
+    expect(service.listAdmin(admin)[0]).toMatchObject({status:'approved',currentEffect:'none',currentEffectRevision:configStore.read().revision});
+    expect(ledger.read().audit).toHaveLength(2);
+  });
+
+  it('does not overwrite a different legacy backup or commit a partially migrated ledger',async()=>{
+    const row=await service.create(applicant,input());const original=JSON.stringify({...ledger.read(),schemaVersion:1});writeFileSync(ledger.filePath,original);writeFileSync(ledger.filePath+'.v1.bak','different original bytes');
+    await expect(service.cancel(applicant,{requestId:row.id,expectedRequestVersion:1,clientMutationId:randomUUID()})).rejects.toThrow('旧版备份');
+    expect(readFileSync(ledger.filePath,'utf8')).toBe(original);expect(readFileSync(ledger.filePath+'.v1.bak','utf8')).toBe('different original bytes');
+  });
+  it('builds each account permission reader once per listing and never reuses it across requests',async()=>{
+    const row=await service.create(applicant,input());await grant([grantRule()]);await service.review(admin,reviewInput(row.id));
+    const state=ledger.read(),original=state.requests[row.id];
+    for(let i=0;i<50;i++){const id=randomUUID();state.requests[id]={...original,id};}
+    writeFileSync(ledger.filePath,JSON.stringify(state));
+    const pages=jest.spyOn(config,'pagePermissions');
+    expect(service.listAdmin(admin)).toHaveLength(51);expect(pages).toHaveBeenCalledTimes(1);
+    await grant([]);pages.mockClear();
+    expect(service.listAdmin(admin).every(item=>item.currentEffect==='none')).toBe(true);expect(pages).toHaveBeenCalledTimes(1);
   });
 });

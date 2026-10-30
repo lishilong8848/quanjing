@@ -1,3 +1,4 @@
+import { observedCardPost, observedCardPatch } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import {
   BadGatewayException,
@@ -63,7 +64,7 @@ export class DailyOperationsPatrolGateway {
     if (!MESSAGE_ID_PATTERN.test(messageId)) {
       throw new BadRequestException('南通每日运维巡视消息 ID 无效');
     }
-    const response = await this.httpService.axiosRef.patch(
+    const response = await observedCardPatch(this.httpService.axiosRef, 'daily-patrol',
       `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(messageId)}`,
       { content: serializeCard(card) },
       requestConfig(await this.getTenantAccessToken()),
@@ -90,7 +91,7 @@ export class DailyOperationsPatrolGateway {
     failureMessage: string,
   ): Promise<string> {
     const chatId = this.chatId();
-    const response = await this.httpService.axiosRef.post(
+    const response = await observedCardPost(this.httpService.axiosRef, 'daily-patrol',
       'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
       {
         receive_id: chatId,

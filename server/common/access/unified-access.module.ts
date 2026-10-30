@@ -36,6 +36,7 @@ import { PersonnelSecurityStore } from './personnel-security.store';
 import { PersonnelPermissionRequestsService } from './personnel-permission-requests.service';
 import { PersonnelArchiveService } from './personnel-archive.service';
 import { PersonnelArchiveGateway } from './personnel-archive.gateway';
+import { PersonnelArchiveCorrectionsService } from './personnel-archive-corrections.service';
 
 @Global()
 @Module({
@@ -48,6 +49,7 @@ import { PersonnelArchiveGateway } from './personnel-archive.gateway';
     PersonnelCredentialsGateway,
     PersonnelSecurityStore,
     PersonnelPermissionRequestsService,
+    PersonnelArchiveCorrectionsService,
     AccessLoginNamesService,
     AccessConfigurationService,
     AccessConfigurationDirectory,
@@ -76,6 +78,14 @@ export class UnifiedAccessModule implements NestModule {
       method: RequestMethod.POST,
     }, { path: 'api/access/configuration/accounts', method: RequestMethod.POST },
     { path: 'api/access/personal/password/change', method: RequestMethod.POST },
-    { path: 'api/access/personal/password/reset', method: RequestMethod.POST });
+    { path: 'api/access/personal/password/reset', method: RequestMethod.POST },
+    { path: 'api/access/personal/permission-requests', method: RequestMethod.POST },
+    { path: 'api/access/personal/permission-requests/update', method: RequestMethod.POST },
+    { path: 'api/access/personal/permission-requests/cancel', method: RequestMethod.POST },
+    { path: 'api/access/configuration/permission-requests', method: RequestMethod.POST },
+    { path: 'api/access/personal/archive-corrections', method: RequestMethod.POST },
+    { path: 'api/access/personal/archive-corrections/cancel', method: RequestMethod.POST },
+    { path: 'api/access/configuration/archive-corrections', method: RequestMethod.POST },
+    { path: 'api/ali-monthly-report/email-settings', method: RequestMethod.POST });
   }
 }

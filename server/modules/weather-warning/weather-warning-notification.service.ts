@@ -1,3 +1,4 @@
+import { observedCardPost } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import {
   BadGatewayException,
@@ -465,7 +466,7 @@ export class WeatherWarningNotificationService {
   ): Promise<string> {
     let response: { data?: unknown };
     try {
-      response = await this.httpService.axiosRef.post(
+      response = await observedCardPost(this.httpService.axiosRef, 'weather',
         receiveIdType === 'chat_id' ? CHAT_MESSAGE_ENDPOINT : MESSAGE_ENDPOINT,
         {
           receive_id: recipientOpenId,

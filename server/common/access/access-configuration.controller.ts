@@ -25,11 +25,41 @@ import { withPersonnelDirectoryDeadline } from './personnel-directory-deadline';
 import { createPermissionCatalog } from '../../../shared/permission-catalog';
 import { PersonnelPermissionRequestsService } from './personnel-permission-requests.service';
 import type { ReviewPersonnelPermissionRequest } from '../../../shared/personnel-permission-request.interface';
+import { PersonnelArchiveCorrectionsService } from './personnel-archive-corrections.service';
+import type { ReviewPersonnelArchiveCorrection } from '../../../shared/personnel-archive-correction.interface';
 
 @Controller('api/access/configuration')
 @AdminOnly()
 export class AccessConfigurationController {
-  constructor(private readonly configuration: AccessConfigurationService, private readonly directory: AccessConfigurationDirectory, private readonly access: UnifiedAccessService, private readonly cards: AccessConfigurationCardDirectory, @Optional() private readonly personnelSync?: AccessPersonnelSyncService, @Optional() private readonly personnelPreview?: PersonnelPreviewService, @Optional() private readonly personnelHandover?: PersonnelHandoverAdminService, @Optional() private readonly personnelSource?: PersonnelSourceService, @Optional() private readonly personnelBaseline?:PersonnelBaselineService, @Optional() private readonly permissionRequests?: PersonnelPermissionRequestsService) {}
+  constructor(private readonly configuration: AccessConfigurationService, private readonly directory: AccessConfigurationDirectory, private readonly access: UnifiedAccessService, private readonly cards: AccessConfigurationCardDirectory, @Optional() private readonly personnelSync?: AccessPersonnelSyncService, @Optional() private readonly personnelPreview?: PersonnelPreviewService, @Optional() private readonly personnelHandover?: PersonnelHandoverAdminService, @Optional() private readonly personnelSource?: PersonnelSourceService, @Optional() private readonly personnelBaseline?:PersonnelBaselineService, @Optional() private readonly permissionRequests?: PersonnelPermissionRequestsService, @Optional() private readonly archiveCorrections?: PersonnelArchiveCorrectionsService) {}
+  @Get('permission-requests/summary')
+  @Header('Cache-Control', 'private, no-store')
+  requestedPermissionsSummary(@Req() request: Request) {
+    const actor = this.actor(request);
+    if (!this.permissionRequests) throw new ForbiddenException('权限申请暂不可用');
+    return this.permissionRequests.summaryAdmin(actor);
+  }
+  @Get('archive-corrections')
+  @Header('Cache-Control', 'private, no-store')
+  requestedArchiveCorrections(@Req() request: Request) {
+    const actor = this.actor(request);
+    if (!this.archiveCorrections) throw new ForbiddenException('资料纠错暂不可用');
+    return this.archiveCorrections.listAdmin(actor);
+  }
+  @Get('archive-corrections/summary')
+  @Header('Cache-Control', 'private, no-store')
+  requestedArchiveCorrectionsSummary(@Req() request: Request) {
+    const actor = this.actor(request);
+    if (!this.archiveCorrections) throw new ForbiddenException('资料纠错暂不可用');
+    return this.archiveCorrections.summaryAdmin(actor);
+  }
+  @Post('archive-corrections')
+  @Header('Cache-Control', 'private, no-store')
+  reviewRequestedArchiveCorrections(@Req() request: Request, @Body() body: ReviewPersonnelArchiveCorrection) {
+    const actor = this.actor(request, true);
+    if (!this.archiveCorrections) throw new ForbiddenException('资料纠错暂不可用');
+    return this.archiveCorrections.review(actor, body);
+  }
   @Get('permission-requests')
   @Header('Cache-Control', 'private, no-store')
   requestedPermissions(@Req() request: Request) {

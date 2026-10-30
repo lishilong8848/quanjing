@@ -1,3 +1,4 @@
+import { observedCardPost, observedCardPatch, observedCardTokenUpdate } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import {
   BadGatewayException,
@@ -34,6 +35,9 @@ import { readConfiguredCardMembers } from '../../common/access/access-configurat
 import { purchaseAuthorityTarget } from './purchase-authority-target';
 import type { PurchaseExecutorHandover } from './purchase-executor-handover';
 import { resolvePurchaseStage, normalizeMethod } from './purchase-workflow.rules';
+import { PurchaseComparisonCardAssetsStore } from './purchase-comparison-card-assets.store';
+import { preparePurchaseComparisonCardEvidence } from './purchase-comparison-card-media';
+import type { PurchaseComparisonCardEvidence } from './purchase-comparison-card-evidence';
 import {
   PURCHASE_MANAGER_APPROVAL_FIELD_DEFINITIONS,
   PURCHASE_MANAGER_APPROVAL_FIELDS,
@@ -117,6 +121,7 @@ export interface PurchaseWorkflowUploadFile {
 @Injectable()
 export class PurchaseWorkflowGateway {
   private readonly logger = new Logger(PurchaseWorkflowGateway.name);
+  private readonly comparisonCardAssets = new PurchaseComparisonCardAssetsStore();
   private tenantToken: TenantTokenState | null = null;
   private tenantTokenPromise: Promise<string> | null = null;
   private managerApprovalFieldsReady = false;
@@ -180,6 +185,48 @@ export class PurchaseWorkflowGateway {
   async getExecutionRecordAsApp(
     recordId: string,
   ): Promise<PurchaseWorkflowRecord> {
+    return mapExecutionRecord(await this.readExecutionRecordAsApp(recordId));
+  }
+
+  async prepareManagerComparisonEvidence(expected: PurchaseWorkflowRecord): Promise<PurchaseComparisonCardEvidence> {
+    if (expected.procurementForm !== '三方比价') throw new BadRequestException('非三方比价采购不读取比价附件');
+    const config = this.config();
+    const rawRecord = await this.readExecutionRecordAsApp(expected.recordId);
+    return preparePurchaseComparisonCardEvidence({
+      source: { appId: readEnv('FEISHU_APP_ID'), appToken: config.appToken, tableId: config.executionTableId, sourceUrl: readEnv('FEISHU_PURCHASE_INVENTORY_SOURCE_URL') },
+      expected, actual: mapExecutionRecord(rawRecord), rawRecord, token: await this.getTenantAccessToken(),
+      http: this.httpService, cache: this.comparisonCardAssets,
+    });
+  }
+
+  async prepareManagerComparisonBatchEvidence(expected: PurchaseWorkflowRecord[]): Promise<PurchaseComparisonCardEvidence[]> {
+    if (!expected.length || expected.length > 20 || expected.some(record => record.procurementForm !== '三方比价') || new Set(expected.map(record => record.recordId)).size !== expected.length) {
+      throw new BadRequestException('采购比价附件批次范围无效');
+    }
+    const config = this.config(), token = await this.getTenantAccessToken();
+    const response = await this.httpService.axiosRef.post(`${recordsUrl(config.appToken, config.executionTableId)}/batch_get`,
+      { record_ids: expected.map(record => record.recordId) }, { ...requestConfig(token, 10_000), maxRedirects: 0 });
+    assertFeishuSuccess(response.data, '读取当前采购批次比价附件失败');
+    const data = response.data?.data;
+    if (!Array.isArray(data?.records) || data.records.length !== expected.length || data.absent_record_ids?.length || data.forbidden_record_ids?.length) throw new BadGatewayException('当前采购批次比价附件记录不完整');
+    const actual = new Map<string, BitableRecordItem>();
+    for (const raw of data.records) {
+      const recordId = isPlainObject(raw) ? getRecordId(raw as BitableRecordItem) : '';
+      if (!recordId || !expected.some(record => record.recordId === recordId) || actual.has(recordId) || !raw.fields) throw new BadGatewayException('当前采购批次比价附件记录不一致');
+      actual.set(recordId, raw as BitableRecordItem);
+    }
+    const previewBudget = new Set<string>(), evidence: PurchaseComparisonCardEvidence[] = [];
+    for (const record of expected) {
+      const rawRecord = actual.get(record.recordId)!;
+      evidence.push(await preparePurchaseComparisonCardEvidence({
+        source: { appId: readEnv('FEISHU_APP_ID'), appToken: config.appToken, tableId: config.executionTableId, sourceUrl: readEnv('FEISHU_PURCHASE_INVENTORY_SOURCE_URL') },
+        expected: record, actual: mapExecutionRecord(rawRecord), rawRecord, token, http: this.httpService, cache: this.comparisonCardAssets, previewBudget,
+      }));
+    }
+    return evidence;
+  }
+
+  private async readExecutionRecordAsApp(recordId: string): Promise<BitableRecordItem> {
     const config = this.config();
     const token = await this.getTenantAccessToken();
     const response = await retryTransientExecutionRecordRead(
@@ -213,7 +260,7 @@ export class PurchaseWorkflowGateway {
         '读取采购执行记录失败：响应缺少唯一目标记录',
       );
     }
-    return mapExecutionRecord(matching[0]);
+    return matching[0];
   }
 
   async listExecutionRecords(
@@ -1165,8 +1212,7 @@ export class PurchaseWorkflowGateway {
     }
     const content = serializeInteractiveCard(card);
     const token = await this.getTenantAccessToken();
-    const response = await this.httpService.axiosRef
-      .post(
+    const response = await observedCardPost(this.httpService.axiosRef, 'purchase',
         'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
         {
           receive_id: recipientOpenId,
@@ -1202,8 +1248,7 @@ export class PurchaseWorkflowGateway {
     }
     const content = serializeInteractiveCard(card);
     const token = await this.getTenantAccessToken();
-    const response = await this.httpService.axiosRef
-      .patch(
+    const response = await observedCardPatch(this.httpService.axiosRef, 'purchase',
         `https://open.feishu.cn/open-apis/im/v1/messages/${messageId}`,
         { content },
         requestConfig(token),
@@ -1217,6 +1262,7 @@ export class PurchaseWorkflowGateway {
   async updateInteractiveCardAfterCallback(
     updateToken: string,
     card: Record<string, unknown>,
+    sourceMessageId?: string,
   ): Promise<void> {
     if (!/^c-[A-Za-z0-9_-]{1,512}$/.test(updateToken)) {
       throw new BadRequestException('飞书卡片更新票据无效');
@@ -1230,11 +1276,11 @@ export class PurchaseWorkflowGateway {
     }
     serializeInteractiveCard(card);
     const token = await this.getTenantAccessToken();
-    const response = await this.httpService.axiosRef
-      .post(
+    const response = await observedCardTokenUpdate(this.httpService.axiosRef, 'purchase',
         'https://open.feishu.cn/open-apis/interactive/v1/card/update',
         { token: updateToken, card },
         requestConfig(token),
+        sourceMessageId,
       )
       .catch((error: unknown) =>
         rethrowFeishuResponseError(error, '延时更新采购互动卡失败'),
@@ -2398,7 +2444,7 @@ function requireOrganizationTableId(config: PurchaseWorkflowConfig): string {
   return config.organizationTableId;
 }
 
-function serializeInteractiveCard(card: Record<string, unknown>): string {
+export function serializeInteractiveCard(card: Record<string, unknown>): string {
   if (!isPlainObject(card)) {
     throw new BadRequestException('飞书互动卡内容必须是纯对象');
   }

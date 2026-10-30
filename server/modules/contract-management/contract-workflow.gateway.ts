@@ -1,3 +1,4 @@
+import { observedCardPost } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -128,14 +129,11 @@ export class ContractWorkflowGateway {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        return await this.httpService.axiosRef.post(
-          'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
-          payload,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            timeout: 30_000,
-          },
-        );
+        const url = 'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id';
+        const options = { headers: { Authorization: `Bearer ${token}` }, timeout: 30_000 };
+        return payload.msg_type === 'interactive'
+          ? await observedCardPost(this.httpService.axiosRef, 'contract', url, payload, options)
+          : await this.httpService.axiosRef.post(url, payload, options);
       } catch (error) {
         lastError = error;
         if (!isRetryableFeishuMessageError(error) || attempt === 2) throw error;

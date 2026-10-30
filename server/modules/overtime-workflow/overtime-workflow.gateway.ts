@@ -1,3 +1,4 @@
+import { observedCardPost, observedCardPatch } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import {
   BadGatewayException,
@@ -150,7 +151,7 @@ export class OvertimeWorkflowGateway {
     const recipient = requireOpenId(recipientOpenId);
     const content = serializeCard(card);
     const token = await this.getTenantAccessToken();
-    const response = await this.httpService.axiosRef.post(
+    const response = await observedCardPost(this.httpService.axiosRef, 'overtime',
       'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
       {
         receive_id: recipient,
@@ -179,7 +180,7 @@ export class OvertimeWorkflowGateway {
       throw new BadRequestException('飞书互动卡消息标识无效');
     }
     const token = await this.getTenantAccessToken();
-    const response = await this.httpService.axiosRef.patch(
+    const response = await observedCardPatch(this.httpService.axiosRef, 'overtime',
       `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(normalizedMessageId)}`,
       { content: serializeCard(card) },
       requestConfig(token),

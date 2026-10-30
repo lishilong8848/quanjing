@@ -4,6 +4,7 @@ import { AliMonthlyReportController } from './ali-monthly-report.controller';
 import { AliMonthlyReportScheduler } from './ali-monthly-report.scheduler';
 import { AliMonthlyReportService } from './ali-monthly-report.service';
 import { AliMonthlyReportTaskCoordinatorService } from './ali-monthly-report-task-coordinator.service';
+import { AliMonthlyReportEmailSettingsStore } from './ali-monthly-report-email-settings.store';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AliMonthlyReportTaskCoordinatorService } from './ali-monthly-report-tas
   ],
   controllers: [AliMonthlyReportController],
   providers: [
+    { provide: AliMonthlyReportEmailSettingsStore, useFactory: () => new AliMonthlyReportEmailSettingsStore() },
     AliMonthlyReportService,
     AliMonthlyReportTaskCoordinatorService,
     AliMonthlyReportScheduler,

@@ -2,19 +2,19 @@ import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
-import { validRequestedPermissions, type PersonnelPermissionRequest } from '../../../shared/personnel-permission-request.interface';
+import { validRequestedPermissions, type PersonnelPermissionRequest, type PersonnelRequestCapacity } from '../../../shared/personnel-permission-request.interface';
 import { createProcessLockOwner, normalizeProcessLockOwner, processLockOwnerMayBeAlive } from '../process-lock-owner';
 
 export interface StoredPermissionRequest extends PersonnelPermissionRequest { applicantIdentity: string; }
-export interface PermissionRequestAudit { requestId: string; actorId: string; action: 'create' | 'approve' | 'reject'; at: string; version: number; }
+export interface PermissionRequestAudit { requestId: string; actorId: string; action: 'create' | 'approve' | 'reject' | 'update' | 'cancel'; at: string; version: number; }
 export interface PermissionRequestsState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   revision: number;
   requests: Record<string, StoredPermissionRequest>;
   mutations: Record<string, { fingerprint: string; requestId: string }>;
   audit: PermissionRequestAudit[];
 }
-const EMPTY = (): PermissionRequestsState => ({ schemaVersion: 1, revision: 0, requests: {}, mutations: {}, audit: [] });
+const EMPTY = (): PermissionRequestsState => ({ schemaVersion: 2, revision: 0, requests: {}, mutations: {}, audit: [] });
 const stores = new Map<string, PersonnelPermissionRequestsStore>();
 export function getPersonnelPermissionRequestsStore(): PersonnelPermissionRequestsStore {
   const configured = process.env.ACCESS_CONFIGURATION_FILE || join(process.cwd(), '.runtime', 'access-configuration.json');
@@ -40,9 +40,19 @@ export class PersonnelPermissionRequestsStore {
       const stats = lstatSync(this.filePath);
       if (!stats.isFile() || stats.size > 8 * 1024 * 1024) throw new Error('size');
       const state: unknown = JSON.parse(readFileSync(this.filePath, 'utf8'));
+      if (validLegacyState(state)) return { ...state, schemaVersion: 2 };
       if (!validState(state)) throw new Error('schema');
       return state;
     } catch { throw new ServiceUnavailableException('权限申请台账无效，已保留原文件，请联系管理员'); }
+  }
+
+  capacity(state = this.read()): PersonnelRequestCapacity {
+    const value = { level: 'normal' as PersonnelRequestCapacity['level'], bytes: Buffer.byteLength(JSON.stringify(state)), maxBytes: 8 * 1024 * 1024,
+      requests: Object.keys(state.requests).length, maxRequests: 10000, mutations: Object.keys(state.mutations).length, maxMutations: 30000,
+      auditEntries: state.audit.length, maxAuditEntries: 20000 };
+    const ratio = Math.max(value.bytes / value.maxBytes, value.requests / value.maxRequests, value.mutations / value.maxMutations, value.auditEntries / value.maxAuditEntries);
+    value.level = ratio >= 1 ? 'full' : ratio >= 0.8 ? 'warning' : 'normal';
+    return value;
   }
 
   async mutate(change: (state: PermissionRequestsState) => StoredPermissionRequest): Promise<StoredPermissionRequest> {
@@ -57,6 +67,7 @@ export class PersonnelPermissionRequestsStore {
       try {
         writeFileSync(lock, JSON.stringify(owner));
         const state = this.read();
+        const original = existsSync(this.filePath) ? readFileSync(this.filePath) : undefined;
         const before = JSON.stringify(state);
         const result = change(state);
         if (JSON.stringify(state) === before) return structuredClone(result);
@@ -64,6 +75,16 @@ export class PersonnelPermissionRequestsStore {
         if (!validState(state)) throw new ServiceUnavailableException('权限申请校验失败，未保存');
         const bytes = Buffer.from(JSON.stringify(state));
         if (bytes.length > 8 * 1024 * 1024) throw new ServiceUnavailableException('权限申请台账容量已满，请联系管理员');
+        if (original && JSON.parse(original.toString('utf8')).schemaVersion === 1) {
+          const backup = `${this.filePath}.v1.bak`;
+          assertOrdinaryPath(backup);
+          if (existsSync(backup)) {
+            if (!readFileSync(backup).equals(original)) throw new ConflictException('权限申请旧版备份与当前文件不一致，请联系管理员核对');
+          } else {
+            const handle = openSync(backup, 'wx', 0o600);
+            try { writeFileSync(handle, original); fsyncSync(handle); } finally { closeSync(handle); }
+          }
+        }
         assertOrdinaryPath(this.filePath);
         const fd = openSync(temp, 'wx', 0o600);
         try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
@@ -120,13 +141,14 @@ function validRequest(value: unknown): value is StoredPermissionRequest {
   if (!record(value) || !keys(value, ['id','version','accountId','applicantIdentity','applicantName','permissions','reason','status','createdAt','updatedAt','reviewerAccountId','reviewerName','comment','verifiedConfigurationRevision']) ||
     !text(value.id, 128) || !text(value.accountId) || !text(value.applicantIdentity, 512) || !text(value.applicantName, 100) ||
     !prose(value.reason) || !validRequestedPermissions(value.permissions) || !timestamp(value.createdAt) || !timestamp(value.updatedAt)) return false;
-  if (value.status === 'pending') return value.version === 1 && value.reviewerAccountId === undefined && value.reviewerName === undefined && value.comment === undefined && value.verifiedConfigurationRevision === undefined;
-  if (!['approved','rejected'].includes(String(value.status)) || value.version !== 2 || !text(value.reviewerAccountId) || !text(value.reviewerName, 100) ||
+  if (!Number.isSafeInteger(value.version) || Number(value.version) < 1) return false;
+  if (value.status === 'pending' || value.status === 'cancelled') return (value.status !== 'cancelled' || Number(value.version) >= 2) && value.reviewerAccountId === undefined && value.reviewerName === undefined && value.comment === undefined && value.verifiedConfigurationRevision === undefined;
+  if (!['approved','rejected'].includes(String(value.status)) || Number(value.version) < 2 || !text(value.reviewerAccountId) || !text(value.reviewerName, 100) ||
     (value.comment !== undefined && !prose(value.comment))) return false;
   return value.status === 'approved' ? Number.isSafeInteger(value.verifiedConfigurationRevision) && Number(value.verifiedConfigurationRevision) >= 0 : value.verifiedConfigurationRevision === undefined && prose(value.comment);
 }
 function validState(value: unknown): value is PermissionRequestsState {
-  if (!record(value) || Object.keys(value).sort().join(',') !== 'audit,mutations,requests,revision,schemaVersion' || value.schemaVersion !== 1 ||
+  if (!record(value) || Object.keys(value).sort().join(',') !== 'audit,mutations,requests,revision,schemaVersion' || value.schemaVersion !== 2 ||
     !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !record(value.requests) || !record(value.mutations) || !Array.isArray(value.audit) ||
     Object.keys(value.requests).length > 10000 || Object.keys(value.mutations).length > 30000 || value.audit.length > 20000) return false;
   const requests = value.requests;
@@ -134,5 +156,12 @@ function validState(value: unknown): value is PermissionRequestsState {
     Object.entries(value.mutations).every(([id, item]) => /^[a-f0-9]{64}$/u.test(id) && record(item) && Object.keys(item).sort().join(',') === 'fingerprint,requestId' &&
       typeof item.fingerprint === 'string' && /^[a-f0-9]{64}$/u.test(item.fingerprint) && typeof item.requestId === 'string' && Object.hasOwn(requests, item.requestId)) &&
     value.audit.every(item => record(item) && Object.keys(item).sort().join(',') === 'action,actorId,at,requestId,version' && text(item.actorId) && timestamp(item.at) &&
-      typeof item.requestId === 'string' && Object.hasOwn(requests, item.requestId) && ['create','approve','reject'].includes(String(item.action)) && (item.version === 1 || item.version === 2));
+      typeof item.requestId === 'string' && Object.hasOwn(requests, item.requestId) && ['create','approve','reject','update','cancel'].includes(String(item.action)) && Number.isSafeInteger(item.version) && Number(item.version) >= 1);
+}
+
+function validLegacyState(value: unknown): value is Omit<PermissionRequestsState, 'schemaVersion'> & { schemaVersion: 1 } {
+  if (!record(value) || value.schemaVersion !== 1 || !validState({ ...value, schemaVersion: 2 })) return false;
+  const state = value as unknown as PermissionRequestsState;
+  return Object.values(state.requests).every(row => row.status === 'pending' ? row.version === 1 : ['approved', 'rejected'].includes(row.status) && row.version === 2) &&
+    state.audit.every(row => ['create', 'approve', 'reject'].includes(row.action) && [1, 2].includes(row.version));
 }

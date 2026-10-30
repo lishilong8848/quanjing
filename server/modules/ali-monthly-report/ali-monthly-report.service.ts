@@ -1,5 +1,6 @@
+import { observedCardPost } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import FormData = require('form-data');
 import { createHash } from 'node:crypto';
 import { spawn } from 'child_process';
@@ -38,6 +39,8 @@ import {
   verifyAliMonthlyReportDownload,
 } from './ali-monthly-report-feishu';
 import type { AliMonthlyReportAutomationSummary } from './ali-monthly-report-task-state';
+import type { AliMonthlyReportEmailSettings, SaveAliMonthlyReportEmailSettings, SaveAliMonthlyReportEmailSettingsResponse } from '@shared/ali-monthly-report-email-settings';
+import { AliMonthlyReportEmailSettingsStore } from './ali-monthly-report-email-settings.store';
 
 const TOOL_DIR = join(process.cwd(), 'tools', 'ali-monthly-report');
 const RUNNER_PATH = join(TOOL_DIR, 'monthly_report_runner.py');
@@ -346,6 +349,8 @@ type RunnerResult = {
 };
 
 type RuntimeConfig = {
+  emailSettings?: AliMonthlyReportEmailSettings;
+  emailConfigurationIssue?: string;
   configPath: string;
   downloadFolder: string;
   outputDir: string;
@@ -404,7 +409,21 @@ export class AliMonthlyReportService {
     Promise<AliMonthlyReportGenerateResponse>
   >();
 
-  constructor(private readonly httpService: HttpService) {}
+  private readonly emailSettingsStore: AliMonthlyReportEmailSettingsStore;
+
+  constructor(private readonly httpService: HttpService, @Optional() emailSettingsStore?: AliMonthlyReportEmailSettingsStore) {
+    this.emailSettingsStore = emailSettingsStore || new AliMonthlyReportEmailSettingsStore();
+  }
+
+  getEmailSettings(): AliMonthlyReportEmailSettings {
+    return this.getRuntimeConfig().emailSettings!;
+  }
+
+  async saveEmailSettings(payload: SaveAliMonthlyReportEmailSettings): Promise<SaveAliMonthlyReportEmailSettingsResponse> {
+    const fallback = this.getServerRuntimeConfig();
+    const settings = await this.emailSettingsStore.save(payload, { senderEmail: fallback.values.QQ_EMAIL || '', authCode: fallback.values.AUTH_CODE || '' });
+    return { success: true, settings, config: await this.getConfig() };
+  }
 
   async getConfig(): Promise<AliMonthlyReportConfigResponse> {
     const runtime = this.getRuntimeConfig();
@@ -427,6 +446,7 @@ export class AliMonthlyReportService {
       missingConfigKeys: this.getMissingConfigKeys(runtime),
       missingAttachmentConfigKeys: this.getMissingAttachmentConfigKeys(runtime),
       missingEmailConfigKeys: this.getMissingEmailConfigKeys(runtime),
+      ...(runtime.emailConfigurationIssue ? { emailConfigurationIssue: runtime.emailConfigurationIssue } : {}),
     };
   }
 
@@ -641,57 +661,63 @@ export class AliMonthlyReportService {
     const runtime = this.getRuntimeConfig();
     const emailAppDir = this.resolveEmailAppDir();
 
-    if (!existsSync(join(emailAppDir, 'app.py'))) {
-      throw new Error(
-        `阿里月报邮件发送逻辑不存在: ${this.getPathLabel(emailAppDir)}`,
+    if (runtime.emailConfigurationIssue) throw new Error(runtime.emailConfigurationIssue);
+
+    try {
+      if (!existsSync(join(emailAppDir, 'app.py'))) {
+        throw new Error(
+          `阿里月报邮件发送逻辑不存在: ${this.getPathLabel(emailAppDir)}`,
+        );
+      }
+
+      await this.ensurePythonDependencies(runtime, 'legacy');
+      const { stdout, stderr } = await this.runPython(
+        [
+          '-c',
+          EMAIL_BRIDGE_SCRIPT,
+          recipient,
+          String(year),
+          String(month),
+          subject,
+        ],
+        runtime.values,
+        {
+          cwd: emailAppDir,
+          timeoutMs: EMAIL_TIMEOUT_MS,
+          timeoutMessage: '阿里月报邮件发送超时',
+        },
       );
+      const result = this.parseRunnerResult(stdout) as RunnerResult & {
+        success?: boolean;
+        error?: string;
+        subject?: string;
+        recipient?: string;
+        logs?: string[];
+      };
+
+      if (result.success === false) {
+        throw new Error(result.error || '阿里月报邮件发送失败');
+      }
+
+      const logs = [
+        ...(Array.isArray(result.logs) ? result.logs.map(value => this.maskSecrets(String(value), runtime.values)) : []),
+        this.maskSecrets(stderr, runtime.values).trim(),
+      ].filter(Boolean);
+
+      return {
+        success: true,
+        year,
+        month,
+        subject: this.maskSecrets(String(result.subject || subject), runtime.values),
+        recipient: this.maskSecrets(String(result.recipient || recipient), runtime.values),
+        message: result.message
+          ? this.maskSecrets(String(result.message), runtime.values)
+          : this.maskSecrets(`${year}年${month}月超功耗邮件已发送到：${recipient}`, runtime.values),
+        logs: logs.length ? logs : ['阿里月报邮件发送完成'],
+      };
+    } catch (error) {
+      throw new Error(this.maskSecrets(error instanceof Error ? error.message : String(error), runtime.values));
     }
-
-    await this.ensurePythonDependencies(runtime, 'legacy');
-    const { stdout, stderr } = await this.runPython(
-      [
-        '-c',
-        EMAIL_BRIDGE_SCRIPT,
-        recipient,
-        String(year),
-        String(month),
-        subject,
-      ],
-      runtime.values,
-      {
-        cwd: emailAppDir,
-        timeoutMs: EMAIL_TIMEOUT_MS,
-        timeoutMessage: '阿里月报邮件发送超时',
-      },
-    );
-    const result = this.parseRunnerResult(stdout) as RunnerResult & {
-      success?: boolean;
-      error?: string;
-      subject?: string;
-      recipient?: string;
-      logs?: string[];
-    };
-
-    if (result.success === false) {
-      throw new Error(result.error || '阿里月报邮件发送失败');
-    }
-
-    const logs = [
-      ...(Array.isArray(result.logs) ? result.logs.map(String) : []),
-      stderr.trim(),
-    ].filter(Boolean);
-
-    return {
-      success: true,
-      year,
-      month,
-      subject: String(result.subject || subject),
-      recipient: String(result.recipient || recipient),
-      message: result.message
-        ? String(result.message)
-        : `${year}年${month}月超功耗邮件已发送到：${recipient}`,
-      logs: logs.length ? logs : ['阿里月报邮件发送完成'],
-    };
   }
 
   async readGeneratedFile(
@@ -1680,7 +1706,7 @@ export class AliMonthlyReportService {
     uuid?: string,
     receiveIdType: FeishuReceiveIdType = 'chat_id',
   ): Promise<string> {
-    const response = await this.httpService.axiosRef.post(
+    const response = await observedCardPost(this.httpService.axiosRef, 'ali-monthly-report',
       `${FEISHU_MESSAGE_URL}?receive_id_type=${receiveIdType}`,
       {
         receive_id: receiveId,
@@ -1777,6 +1803,16 @@ export class AliMonthlyReportService {
   }
 
   private getRuntimeConfig(): RuntimeConfig {
+    const runtime = this.getServerRuntimeConfig();
+    const email = this.emailSettingsStore.resolve({ senderEmail: runtime.values.QQ_EMAIL || '', authCode: runtime.values.AUTH_CODE || '' });
+    runtime.values.QQ_EMAIL = email.senderEmail;
+    runtime.values.AUTH_CODE = email.authCode;
+    runtime.emailSettings = email.settings;
+    runtime.emailConfigurationIssue = email.blockingIssue;
+    return runtime;
+  }
+
+  private getServerRuntimeConfig(): RuntimeConfig {
     const configPath = this.resolveConfigPath();
     const fileConfig = this.getConfigFileValues(configPath);
     const emailAppDir = this.resolveEmailAppDir();

@@ -98,6 +98,19 @@ describe('runtime environment defaults', () => {
     expect(process.env.PURCHASE_MANAGER_APPROVAL_CARD_ENABLED).toBe('true');
   });
 
+  it('preserves explicit disabled card-copy process settings over dotenv', () => {
+    process.env.FEISHU_CARD_READONLY_COPY_ENABLED = 'false';
+    jest.doMock('dotenv', () => ({ config: jest.fn(() => { process.env.FEISHU_CARD_READONLY_COPY_ENABLED = 'true'; }) }));
+    jest.isolateModules(() => { require('../../server/runtime-env'); });
+    expect(process.env.FEISHU_CARD_READONLY_COPY_ENABLED).toBe('false');
+  });
+
+  it('explicitly disables card copies in a production smoke startup', () => {
+    process.env.NODE_ENV = 'production'; process.env.NANTONG_HOTFIX_SMOKE_MODE = 'true'; process.env.FEISHU_CARD_READONLY_COPY_ENABLED = 'true';
+    jest.isolateModules(() => { require('../../server/runtime-env'); });
+    expect(process.env.FEISHU_CARD_READONLY_COPY_ENABLED).toBe('false');
+  });
+
   it('keeps explicit process startup values above real dotenv files while preserving local FEISHU overrides', () => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'nantong-runtime-env-'));
     try {

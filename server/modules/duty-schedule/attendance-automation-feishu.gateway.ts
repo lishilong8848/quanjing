@@ -1,3 +1,4 @@
+import { observedCardPost } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -969,7 +970,7 @@ export class AttendanceAutomationFeishuGateway {
       throw new Error('考勤异常卡片幂等键必须为 1-50 个字符');
     }
     const token = await getTenantAccessToken(this.httpService);
-    const response = await this.httpService.axiosRef.post(
+    const response = await observedCardPost(this.httpService.axiosRef, 'attendance',
       `${FEISHU_BASE_URL}/im/v1/messages?receive_id_type=open_id`,
       {
         receive_id: openId,

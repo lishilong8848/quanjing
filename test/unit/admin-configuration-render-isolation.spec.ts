@@ -10,7 +10,7 @@ jest.mock('react', () => {
     ...actual,
     useState: (initial: unknown) => {
       const slot = mockCursor++;
-      if (!mockSlots[slot]) mockSlots[slot] = { value: initial };
+      if (!mockSlots[slot]) mockSlots[slot] = { value: typeof initial === 'function' ? initial() : initial };
       return [mockSlots[slot].value, (next: unknown) => {
         mockSlots[slot].value = typeof next === 'function' ? next(mockSlots[slot].value) : next;
       }];
@@ -51,6 +51,7 @@ jest.mock('../../client/src/pages/SystemConfiguration/model', () => ({
 jest.mock('../../client/src/access/AccessProvider', () => ({ useAccess: () => ({ accountId: mockAccountId, displayName: '合成管理员', refreshSession: mockRefreshSession }) }));
 jest.mock('@lark-apaas/client-toolkit/utils/getAxiosForBackend', () => ({ axiosForBackend: jest.fn() }));
 jest.mock('../../client/src/pages/SystemConfiguration/configuration.css', () => ({}));
+jest.mock('../../client/src/pages/SystemConfiguration/permission-matrix.css', () => ({}));
 jest.mock('../../client/src/assets/feishu-logo.svg', () => 'fixture-static-feishu-logo');
 jest.mock('sonner', () => ({ toast: { success: jest.fn() } }));
 

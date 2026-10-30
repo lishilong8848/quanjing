@@ -79,7 +79,7 @@ import {
 import { resolvePurchaseStage } from './purchase-workflow.rules';
 import type { PurchaseCardCallbackResult } from './purchase-workflow-callback';
 import { PurchaseApplicationTaskLedgerStore } from './purchase-application-task-ledger.store';
-import { PurchaseWorkflowGateway } from './purchase-workflow.gateway';
+import { PurchaseWorkflowGateway, serializeInteractiveCard } from './purchase-workflow.gateway';
 import { PurchaseWorkflowService } from './purchase-workflow.service';
 import {
   PurchaseWorkflowStore,
@@ -95,6 +95,7 @@ import {
 
 const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
 const TASK_MAX_ATTEMPTS = 5;
+const MANAGER_NOTIFICATION_PREPARATION_LEASE_MS = 5 * 60_000;
 const TASK_BATCH_MAX = 100;
 const RECEIPT_RECOVERY_BATCH_MAX = 1;
 const MANAGER_APPROVAL_BATCH_MAX_RECORDS = 20;
@@ -143,6 +144,7 @@ export class PurchaseManagerApprovalService {
   private acceptedTaskRunTail: Promise<void> = Promise.resolve();
   private receiptRecoveryCursor = 0;
   private nextBaseReceiptReconcileAt = 0;
+  private readonly notificationClocks = new Map<string, { claimToken: string; logical: number; started: number }>();
 
   constructor(
     private readonly gateway: PurchaseWorkflowGateway,
@@ -171,6 +173,7 @@ export class PurchaseManagerApprovalService {
         await this.gateway.updateInteractiveCardAfterCallback(
           updateToken,
           card,
+          messageId,
         );
         return;
       } catch (error) {
@@ -738,6 +741,7 @@ export class PurchaseManagerApprovalService {
     result: PurchaseManagerApprovalTaskRunResult,
   ): Promise<number> {
     let handled = 0;
+    const notificationClockStarted = Date.now();
     for (; handled < limit; handled += 1) {
       // 已受理的批次决议优先写入，避免卡片展示更新积压阻塞审批。
       const batchAction =
@@ -748,20 +752,20 @@ export class PurchaseManagerApprovalService {
         }
         continue;
       }
-      const notification =
-        await this.store.takeNextManagerApprovalNotification(timestamp);
+      const notificationNow = new Date(timestamp.getTime() + Date.now() - notificationClockStarted);
+      const notification = await this.store.takeNextManagerApprovalNotification(notificationNow, MANAGER_NOTIFICATION_PREPARATION_LEASE_MS);
       if (notification) {
         if (isManualManagerDeliveryTransition(notification)) {
           await this.markManualManagerDeliveryBestEffort(
             notification,
-            timestamp,
+            notificationNow,
             result,
           );
           result.manualReconciliation += 1;
           result.alerts.push('经理审批卡投递结果需要人工核对');
           continue;
         }
-        if (await this.processNotification(notification, timestamp, result)) {
+        if (await this.processNotification(notification, notificationNow, result)) {
           result.processed += 1;
         }
         continue;
@@ -1779,6 +1783,22 @@ export class PurchaseManagerApprovalService {
     now: Date,
     result: PurchaseManagerApprovalTaskRunResult,
   ): Promise<boolean> {
+    const clock = { claimToken: notification.claimToken, logical: now.getTime(), started: Date.now() };
+    this.notificationClocks.set(notification.key, clock);
+    try { return await this.dispatchNotification(notification, now, result); }
+    finally { if (this.notificationClocks.get(notification.key) === clock) this.notificationClocks.delete(notification.key); }
+  }
+
+  private currentNotificationTime(notification: PurchaseWorkflowNotificationEntry, fallback: Date): Date {
+    const clock = this.notificationClocks.get(notification.key);
+    return clock?.claimToken === notification.claimToken ? new Date(clock.logical + Date.now() - clock.started) : fallback;
+  }
+
+  private async dispatchNotification(
+    notification: PurchaseWorkflowNotificationEntry,
+    now: Date,
+    result: PurchaseManagerApprovalTaskRunResult,
+  ): Promise<boolean> {
     if (notification.kind === 'manager_batch_executor_transferred') {
       try {
         const context = parsePurchaseManagerBatchApprovalCardContext(notification.cardContext);
@@ -1924,6 +1944,7 @@ export class PurchaseManagerApprovalService {
     now: Date,
     result: PurchaseManagerApprovalTaskRunResult,
   ): Promise<boolean> {
+    const preparationStarted = Date.now();
     let outboundAnchored = false;
     let routedBatch: PurchaseManagerApprovalBatchEntry | null = null;
     let records: PurchaseWorkflowRecord[] = [];
@@ -1962,12 +1983,22 @@ export class PurchaseManagerApprovalService {
       const input = savedContext
         ? parsePurchaseManagerBatchApprovalCardContext(savedContext)
         : toManagerBatchApprovalCardInput(batch, records, applicationCreatedAt);
+      if (!savedContext) {
+        const comparisonRecords = records.filter(record => record.procurementForm === '三方比价');
+        if (comparisonRecords.length) {
+          input.comparisonEvidence = await this.gateway.prepareManagerComparisonBatchEvidence(comparisonRecords);
+        }
+      }
       const context = serializePurchaseManagerBatchApprovalCardContext(input);
+      const preparedCard = batch.state === 'awaiting_delivery'
+        ? buildPurchaseManagerBatchApprovalCard(parsePurchaseManagerBatchApprovalCardContext(context))
+        : renderManagerApprovalBatch({ ...batch, cardContext: context });
+      serializeInteractiveCard(preparedCard);
       const anchored = await this.store.markManagerApprovalBatchSendStarted(
         notification.key,
         notification.claimToken,
         context,
-        now,
+        this.currentNotificationTime(notification, new Date(now.getTime() + Date.now() - preparationStarted)),
       );
       if (!anchored) {
         throw new ConflictException('采购批次审批发卡任务不存在');
@@ -1975,7 +2006,7 @@ export class PurchaseManagerApprovalService {
       outboundAnchored = true;
       const messageId = await this.gateway.sendInteractiveCard(
         notification.recipientOpenId,
-        batch.state === 'awaiting_delivery' ? buildPurchaseManagerBatchApprovalCard(input) : renderManagerApprovalBatch({ ...batch, cardContext: context }),
+        preparedCard,
         anchored.deliveryUuid,
       );
       const completed =
@@ -2194,7 +2225,7 @@ export class PurchaseManagerApprovalService {
           notification.key,
           notification.claimToken,
           batch.cardContext,
-          now,
+          this.currentNotificationTime(notification, now),
         );
         if (!anchored) {
           throw new ConflictException('采购批次审批结果通知不存在');
@@ -2499,7 +2530,7 @@ export class PurchaseManagerApprovalService {
         notification.key,
         notification.claimToken,
         batch.cardContext,
-        now,
+        this.currentNotificationTime(notification, now),
       );
       if (!anchored) {
         throw new ConflictException('采购签收完成通知任务不存在');
@@ -2620,7 +2651,7 @@ export class PurchaseManagerApprovalService {
           notification.key,
           notification.claimToken,
           batch.cardContext,
-          now,
+          this.currentNotificationTime(notification, now),
         );
         if (!anchored) throw new ConflictException('采购履约发卡任务不存在');
         outboundAnchored = true;
@@ -3005,6 +3036,7 @@ export class PurchaseManagerApprovalService {
     now: Date,
     result: PurchaseManagerApprovalTaskRunResult,
   ): Promise<boolean> {
+    const preparationStarted = Date.now();
     let outboundAnchored = false;
     try {
       const decided = await this.store.getManagerApprovalRecordState(notification.recordId);
@@ -3014,15 +3046,23 @@ export class PurchaseManagerApprovalService {
       if (!decided && latest.status !== DECISION_PRE_STATE) {
         throw new ConflictException('采购申请已离开待审批状态');
       }
-      const input = decided ? parsePurchaseManagerApprovalCardContext(decided.cardContext) : toManagerApprovalCardInput(latest);
+      const savedComparisonContext = !decided && notification.cardContext
+        ? parsePurchaseManagerApprovalCardContext(notification.cardContext) : null;
+      const input = decided ? parsePurchaseManagerApprovalCardContext(decided.cardContext)
+        : savedComparisonContext?.comparisonEvidence ? savedComparisonContext : toManagerApprovalCardInput(latest);
+      if (!decided && !input.comparisonEvidence && input.procurementForm === '三方比价') {
+        input.comparisonEvidence = await this.gateway.prepareManagerComparisonEvidence(latest);
+      }
       if(notification.businessEventId.startsWith('single-manager-handover:')&&parsePurchaseManagerApprovalCardContext(notification.cardContext).building!==input.building)throw new ConflictException('采购单条交接楼栋已变化，请核对原记录');
       this.assertCurrentManagerActor(notification.recipientOpenId,input.building);
       const context = serializePurchaseManagerApprovalCardContext(input);
+      const preparedCard = decided ? renderManagerApprovalCard(decided) : buildPurchaseManagerApprovalCard(parsePurchaseManagerApprovalCardContext(context));
+      serializeInteractiveCard(preparedCard);
       const anchored = await this.store.markManagerApprovalSendStarted(
         notification.key,
         notification.claimToken,
         context,
-        now,
+        this.currentNotificationTime(notification, new Date(now.getTime() + Date.now() - preparationStarted)),
       );
       if (!anchored) {
         throw new ConflictException('经理审批发卡任务不存在');
@@ -3030,7 +3070,7 @@ export class PurchaseManagerApprovalService {
       outboundAnchored = true;
       const messageId = await this.gateway.sendInteractiveCard(
         notification.recipientOpenId,
-        decided ? renderManagerApprovalCard(decided) : buildPurchaseManagerApprovalCard(input),
+        preparedCard,
         anchored.deliveryUuid,
       );
       await this.store.completeManagerApprovalRequestAndRegisterCard(
@@ -3156,7 +3196,7 @@ export class PurchaseManagerApprovalService {
         notification.key,
         notification.claimToken,
         notification.cardContext,
-        now,
+        this.currentNotificationTime(notification, now),
       );
       if (!anchored) {
         throw new ConflictException('经理审批替代卡任务不存在');

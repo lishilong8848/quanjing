@@ -1,4 +1,5 @@
 import { AccessConfigurationService, useConfiguredCardAuthorizationSnapshots } from '../../common/access/access-configuration.service';
+import { isReadonlyCopyCallback, observeCardCallbackResult } from '../../common/feishu-card-copy/transport';
 import { currentHotfixActivation } from '../../common/hotfix-runtime-activation';
 import { assertFeishuBusinessIdentity } from '../../common/access/feishu-business-identity';
 import {
@@ -94,8 +95,17 @@ export class FeishuCardActionRouter {
       return { toast: { type: 'error', content: '系统更新中，本次操作未受理，请稍后重试' } };
     }
     try {
+      if (isReadonlyCopyCallback(payload)) {
+        return { toast: { type: 'error', content: '此卡片为只读同步副本，请在原卡片办理' } };
+      }
       const kind = classifyCardAction(payload);
-      return await this.execution.run(requireObject(payload), () => this.dispatch(payload, kind));
+      return await this.execution.run(requireObject(payload), async () => {
+        const result = await this.dispatch(payload, kind);
+        const source = kind === 'inventory_outbound' || kind === 'threshold_adjustment' ? 'inventory-outbound'
+          : kind === 'today_operations_followup' || kind === 'today_operations_anomaly' ? 'today-operations' : kind;
+        await observeCardCallbackResult(source, payload, result);
+        return result;
+      });
     } catch (error) {
       this.logger.warn(`Feishu card action rejected: ${safeErrorMessage(error)}`);
       return cardActionErrorResponse(error);

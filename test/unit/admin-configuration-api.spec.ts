@@ -5,15 +5,20 @@ import type { AccountMutation } from '../../shared/access-configuration.interfac
 
 describe('configuration request recovery', () => {
   const request = axiosForBackend as jest.Mock;
+  const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+  const privateFetch = jest.fn();
   const mutation: AccountMutation = { clientMutationId: 'api-retry-mutation-001', expectedRevision: 2, kind: 'feishu', name: '合成人员', openId: 'ou_synthetic', role: 'editor', building: null, enabled: true };
-  beforeEach(() => request.mockReset());
+  beforeEach(() => { request.mockReset(); privateFetch.mockReset(); Object.defineProperty(globalThis, 'fetch', { configurable: true, value: privateFetch }); });
+  afterEach(() => { if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch); else Reflect.deleteProperty(globalThis, 'fetch'); });
   it('keeps an ambiguous timeout visible and retries with the same mutation identity', async () => {
-    request.mockRejectedValueOnce({ code: 'ECONNABORTED' });
+    privateFetch.mockRejectedValueOnce(new Error('Network Error'));
     await expect(saveAccount(mutation)).rejects.toThrow('保存结果未确认');
-    request.mockResolvedValueOnce({ status: 200, data: { revision: 3 } });
-    await expect(saveAccount(mutation)).resolves.toEqual({ revision: 3 });
-    expect(request.mock.calls[0][0]).toEqual(request.mock.calls[1][0]);
-    expect(request.mock.calls[0][0]).toMatchObject({ method: 'POST', timeout: 15000, data: mutation });
+    const data = { revision: 3, appId: 'synthetic', accounts: [], cardRules: [], audit: [] };
+    privateFetch.mockResolvedValueOnce(new Response(JSON.stringify(data)));
+    await expect(saveAccount(mutation)).resolves.toEqual(data);
+    expect(privateFetch.mock.calls[0][1].body).toEqual(privateFetch.mock.calls[1][1].body);
+    expect(privateFetch.mock.calls[0][1]).toMatchObject({ method: 'POST', credentials: 'same-origin', body: JSON.stringify(mutation) });
+    expect(request).not.toHaveBeenCalled();
   });
   it('does not turn an offline read into an empty successful configuration', async () => {
     request.mockRejectedValueOnce(new Error('Network Error'));
@@ -21,10 +26,10 @@ describe('configuration request recovery', () => {
   });
   it.each([
     [400, '请求包含服务端不支持的字段，请确认页面与服务端版本一致后重试'],
-    [409, '配置已更新，请刷新当前记录后重试，草稿已保留'],
+    [409, '配置已被更新，请保留草稿并刷新核对差异后重试。'],
   ])('preserves HTTP %i status/message and the caller draft for retry', async (status, message) => {
     const before = JSON.stringify(mutation);
-    request.mockRejectedValueOnce({ response: { status, data: { message } } });
+    privateFetch.mockResolvedValueOnce(new Response(JSON.stringify({ message }), { status }));
     await expect(saveAccount(mutation)).rejects.toMatchObject({ message, status });
     expect(JSON.stringify(mutation)).toBe(before);
     expect(mutation.expectedRevision).toBe(2);

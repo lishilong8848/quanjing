@@ -2150,6 +2150,7 @@ export interface AliMonthlyReportConfigResponse {
   missingConfigKeys: string[];
   missingAttachmentConfigKeys?: string[];
   missingEmailConfigKeys?: string[];
+  emailConfigurationIssue?: string;
 }
 
 export interface AliMonthlyReportGenerateRequest {

@@ -55,9 +55,8 @@ describe('purchase completion module wiring', () => {
     expect(purchaseModuleSource).toMatch(
       /providers:\s*\[[\s\S]*PurchaseWorkflowScheduler[\s\S]*PurchaseManagerApprovalService[\s\S]*PurchaseManagerApprovalScheduler[\s\S]*\]/,
     );
-    expect(legacySchedulerSource).toContain(
-      'if (!this.service.isEnabled()) return;',
-    );
+    // Reminder enablement and continued consumption of accepted durable tasks
+    // are verified behaviorally in purchase-workflow-scheduler.spec.ts.
     expect(legacySchedulerSource).not.toContain(
       'PurchaseManagerApprovalScheduler',
     );

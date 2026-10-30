@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import type { AccessPrincipal } from '@shared/access-control.interface';
 import { BUILDING_ADMIN_BUILDINGS } from '@shared/access-control.interface';
 import { PROFESSIONAL_SPECIALTIES } from '@shared/professional-access';
-import { BUSINESS_ACTION_LABELS, personalPermissionPagePaths, type BusinessAction, type BusinessModule } from '@shared/business-permissions';
+import { BUSINESS_ACTION_LABELS, businessModuleDefinition, personalPermissionPagePaths, type BusinessAction, type BusinessModule } from '@shared/business-permissions';
+import type { RequestedPermission } from '@shared/personnel-permission-request.interface';
 import type { EffectiveAuthorization } from '@shared/authorization-profile';
 import { createPermissionCatalog } from '@shared/permission-catalog';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { authorizationModuleState, authorizationPageMode, editAuthorizationAction, editAuthorizationPage, editAuthorizationScope } from './authorization-editing';
 import { personalPermissionMode, type PersonalPermissionMode } from './personal-permission-editing';
+import { RequestedPermissionSummary } from './RequestedPermissionSummary';
 
 type CatalogModule = { id: BusinessModule; label: string; scoped: boolean; actions: readonly BusinessAction[]; conditions?: readonly string[] };
 export interface PermissionEditorProps {
@@ -22,11 +24,20 @@ export interface PermissionEditorProps {
   disabled?: boolean;
   label?: string;
   catalog?: ReturnType<typeof createPermissionCatalog>;
+  initialPage?: string;
+  initialModule?: BusinessModule;
+  requestedPermissions?: RequestedPermission[];
 }
 const defaultCatalog = createPermissionCatalog();
 
-export function PermissionEditor({ value, principal, onChange, template = false, readOnly = false, disabled = false, label = '权限配置', catalog = defaultCatalog }: PermissionEditorProps) {
-  const [query, setQuery] = useState(''), [path, setPath] = useState(catalog.pages[0]?.path || '');
+export function PermissionEditor({ value, principal, onChange, template = false, readOnly = false, disabled = false, label = '权限配置', catalog = defaultCatalog, initialPage, initialModule, requestedPermissions }: PermissionEditorProps) {
+  const firstRequest = requestedPermissions?.[0];
+  const requestedModule = initialModule || (firstRequest?.kind === 'action' ? firstRequest.module : undefined);
+  const requestedPath = initialPage || (initialModule ? businessModuleDefinition(initialModule).page : firstRequest ? firstRequest.kind === 'page' ? firstRequest.path : businessModuleDefinition(firstRequest.module).page : '');
+  const [query, setQuery] = useState(''), [path, setPath] = useState(requestedPath || catalog.pages[0]?.path || '');
+  const [focusedModule, setFocusedModule] = useState<BusinessModule | undefined>(requestedModule);
+  const container = useRef<HTMLElement>(null);
+  useEffect(() => { if (requestedPath) { setPath(requestedPath); setQuery(''); } setFocusedModule(requestedModule); }, [requestedPath, requestedModule]);
   const [error, setError] = useState('');
   const actor = useMemo(() => ({ ...principal, effectiveAuthorization: value }), [principal, value]);
   const pages = useMemo(() => personalPermissionPagePaths(actor, value.baseline.pages), [actor, value.baseline.pages]);
@@ -35,15 +46,20 @@ export function PermissionEditor({ value, principal, onChange, template = false,
   const inherited = !template && value.mode === 'follow';
   const locked = disabled || readOnly || !onChange;
   const change = (next: EffectiveAuthorization) => { setError(''); onChange?.(next); };
-  return <section className="min-w-0 space-y-4" aria-label={label}>
+  const conditions = [...new Set(selected?.modules.flatMap(module => module.conditions || []) || [])];
+  function locate(permission: RequestedPermission) { setQuery(''); setPath(permission.kind === 'page' ? permission.path : businessModuleDefinition(permission.module).page); setFocusedModule(permission.kind === 'action' ? permission.module : undefined); }
+  useEffect(() => { if (focusedModule) container.current?.querySelector(`[data-permission-module="${focusedModule}"]`)?.scrollIntoView({ block: 'nearest' }); }, [focusedModule, selected?.path]);
+  return <section ref={container} className="min-w-0 space-y-4" aria-label={label}>
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-medium"><ShieldCheck className="size-4 text-primary" />{label}</h3><Badge variant="outline">可查看 {pages.length} 页</Badge></div>
+    {!!requestedPermissions?.length && <RequestedPermissionSummary permissions={requestedPermissions} principal={actor} onLocate={locate} />}
     <Input aria-label={`${label}搜索`} placeholder="搜索页面或功能" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} />
     {selected ? <>
       <label className="block space-y-2 text-sm"><span>页面 / 功能</span><select className="config-select w-full" aria-label={`${label}页面`} value={selected.path} onChange={event => setPath(event.target.value)}>{visible.map(page => <option key={page.path} value={page.path}>{page.label}</option>)}</select></label>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-3 text-sm"><span>{selected.label} · 页面入口</span><Badge variant={pages.includes(selected.path) ? 'secondary' : 'outline'}>{pages.includes(selected.path) ? '可见' : '不可见'}</Badge></div>
       {selected.kind === 'business' && value.overrides.denyPages.includes(selected.path) && <div className="rounded-lg border border-destructive/30 p-3 text-sm"><p>此页面存在整页限制，功能允许不会解除该限制。</p>{!readOnly && <Button type="button" variant="link" disabled={locked} onClick={() => change({ ...value, overrides: { ...value.overrides, denyPages: value.overrides.denyPages.filter(item => item !== selected.path) } })}>改为按功能配置</Button>}</div>}
       {selected.kind === 'business' && value.overrides.allowPages.includes(selected.path) && <p className="text-xs text-muted-foreground">此页面保留原有读取增补，当前可在下面逐项调整查看权限。</p>}
-      {selected.kind === 'business' && selected.modules.length ? selected.modules.map(module => <ModulePermissions key={`${selected.path}:${module.id}`} module={module} value={value} principal={actor} template={template} inherited={inherited} locked={locked} readOnly={readOnly} onChange={change} onError={setError} />) : <div className="space-y-2 rounded-lg border p-3">
+      {!!conditions.length && <div className="space-y-1 rounded-lg bg-muted/40 p-3 text-xs leading-5 text-muted-foreground" aria-label="办理条件">{conditions.map(condition => <p key={condition}>{condition}</p>)}</div>}
+      {selected.kind === 'business' && selected.modules.length ? selected.modules.map(module => <ModulePermissions key={`${selected.path}:${module.id}`} module={module} focused={module.id === focusedModule} value={value} principal={actor} template={template} inherited={inherited} locked={locked} readOnly={readOnly} onChange={change} onError={setError} />) : <div className="space-y-2 rounded-lg border p-3">
         <p className="text-sm font-medium">页面读取</p>
         {readOnly ? <p className="text-sm text-muted-foreground">{pages.includes(selected.path) ? '允许' : '限制'}</p> : <ModeSelect label={`${selected.label}读取权限`} inherited={inherited} disabled={locked} value={inherited ? authorizationPageMode(value, selected.path) : pages.includes(selected.path) ? 'allow' : 'deny'} onChange={mode => change(editAuthorizationPage(value, template, selected.path, mode))} />}
       </div>}
@@ -57,8 +73,9 @@ function ModeSelect({ label, value, onChange, disabled, inherited }: { label: st
   return <select aria-label={label} className="config-select min-w-0 w-full" value={value} disabled={disabled} onChange={event => onChange(event.target.value as PersonalPermissionMode)}>{inherited && <option value="inherit">继承角色</option>}<option value="allow">允许</option><option value="deny">限制</option><option value="mixed" disabled>所选范围配置不同</option></select>;
 }
 
-function ModulePermissions({ module, value, principal, template, inherited, locked, readOnly, onChange, onError }: {
+function ModulePermissions({ module, focused = false, value, principal, template, inherited, locked, readOnly, onChange, onError }: {
   module: CatalogModule; value: EffectiveAuthorization; principal: AccessPrincipal; template: boolean; inherited: boolean; locked: boolean; readOnly: boolean;
+  focused?: boolean;
   onChange: (value: EffectiveAuthorization) => void; onError: (message: string) => void;
 }) {
   const state = useMemo(() => authorizationModuleState(value, principal, module.id, template), [value, principal, module.id, template]);
@@ -81,19 +98,20 @@ function ModulePermissions({ module, value, principal, template, inherited, lock
     const ranges = [...groups.values()].map(group => `${group.buildings.length === BUILDING_ADMIN_BUILDINGS.length ? '全部楼栋' : group.buildings.join('、')} · ${group.specialties.length === PROFESSIONAL_SPECIALTIES.length ? '全部专业' : group.specialties.join('、')}`);
     return { action, state, sources, ranges };
   }), [state.actions, module.scoped, buildings, specialties, readOnly]);
+  const commonRanges = actions.length > 1 && actions.every(action => JSON.stringify(action.ranges) === JSON.stringify(actions[0].ranges)) ? actions[0].ranges : undefined;
   function changeScope(next: typeof scope) {
     try { onChange(editAuthorizationScope(value, template, next)); }
     catch (failure) { onError((failure as Error).message); }
   }
-  return <fieldset className="min-w-0 space-y-3 rounded-lg border bg-card p-3">
+  return <fieldset data-permission-module={module.id} className={`min-w-0 space-y-3 rounded-lg border bg-card p-3${focused ? ' border-primary ring-1 ring-primary/20' : ''}`}>
     <legend className="px-1 text-sm font-medium">{module.label}</legend>
-    {module.conditions?.map(condition => <p key={condition} className="text-xs text-muted-foreground">{condition}</p>)}
     {module.scoped && !readOnly && <div className="grid gap-3 sm:grid-cols-2"><Scope label={`${module.label}楼栋范围`} options={BUILDING_ADMIN_BUILDINGS} selected={buildings} onChange={buildings => changeScope({ ...scope, buildings })} disabled={locked} /><Scope label={`${module.label}专业范围`} options={PROFESSIONAL_SPECIALTIES} selected={specialties} onChange={specialties => changeScope({ ...scope, specialties })} disabled={locked} /></div>}
     {module.scoped && !readOnly && <p className="text-xs text-muted-foreground">所选范围是此功能所有操作的上限，保存后生效；“全部”不代表全部已授权，各操作的实际范围如下。</p>}
     {module.scoped && template && <p className="text-xs text-muted-foreground">系统角色按所选任职范围预览，具体人员仍受其任职范围约束。</p>}
+    {module.scoped && commonRanges && <div className="space-y-1 text-xs text-muted-foreground" aria-label={`${module.label}共同生效范围`}><p className="font-medium">以下操作共同生效范围</p>{commonRanges.length ? commonRanges.map(range => <p key={range}>{range}</p>) : <p>无可用楼栋及专业</p>}</div>}
     {actions.map(({ action, state, sources, ranges }) => <div key={action} className={`grid min-w-0 gap-2 border-t pt-3${readOnly ? '' : ' sm:grid-cols-[minmax(0,1fr)_11rem]'}`}>
       <div className="min-w-0 space-y-1 text-sm"><p className="font-medium">{BUSINESS_ACTION_LABELS[action]} <span className="font-normal text-muted-foreground">· {!validScope && !readOnly ? '请选择范围' : state === 'allow' ? '允许' : state === 'mixed' ? '部分允许' : '限制'}</span></p><p className="break-words text-xs text-muted-foreground">{sources}</p>
-        {module.scoped && <div className="space-y-1 text-xs text-muted-foreground" aria-label={`${module.label}${BUSINESS_ACTION_LABELS[action]}生效范围`}>{ranges.length ? ranges.map(range => <p key={range} className="break-words">{range}</p>) : <p>无可用楼栋及专业</p>}</div>}
+        {module.scoped && !commonRanges && <div className="space-y-1 text-xs text-muted-foreground" aria-label={`${module.label}${BUSINESS_ACTION_LABELS[action]}生效范围`}>{ranges.length ? ranges.map(range => <p key={range} className="break-words">{range}</p>) : <p>无可用楼栋及专业</p>}</div>}
       </div>
       {!readOnly && <ModeSelect label={`${module.label}${BUSINESS_ACTION_LABELS[action]}权限`} inherited={inherited} disabled={locked || !validScope} value={inherited ? personalPermissionMode(value.overrides.rules, scope, action) : state === 'none' ? 'deny' : state} onChange={mode => { try { onChange(editAuthorizationAction(value, template, scope, action, mode, () => crypto.randomUUID())); } catch (failure) { onError((failure as Error).message); } }} />}
     </div>)}

@@ -1559,7 +1559,7 @@ describe('PurchaseWorkflowStore', () => {
     });
   });
 
-  it('requeues a recent success task that only updated the earlier inbound reminder', async () => {
+  it('does not reopen a successful completion even when its message ID matches the old reminder', async () => {
     const store = createV2Store(ledgerPath);
     const at = (second: number) =>
       new Date(`2026-09-24T04:00:${String(second).padStart(2, '0')}.000Z`);
@@ -1588,6 +1588,15 @@ describe('PurchaseWorkflowStore', () => {
       },
       at(3),
     );
+    // Synthetic accepted resolution proves the original recipient before a send can start.
+    const resolver = await store.enqueueNotification({
+      businessEventId: 'inventory-inbound-completed-resolution:rec-legacy-card',
+      recordId: 'rec-legacy-card', recipientOpenId: 'system', kind: 'inventory_inbound_completed_resolution',
+    }, at(3));
+    const resolverClaim = await store.takeNextNotification(at(3), undefined, ['inventory_inbound_completed_resolution']);
+    await store.completeInboundCompletedResolutionAndEnqueueNotifications(resolver.entry.key, resolverClaim!.claimToken, [{
+      businessEventId: 'inventory-inbound-completed:rec-legacy-card', recordId: 'rec-legacy-card', recipientOpenId: 'ou_manager', kind: 'inventory_inbound_completed',
+    }], at(3));
     const oldCompletion = await store.takeNextNotification(at(4));
     await store.completeNotification(
       oldCompletion!.key,
@@ -1596,22 +1605,10 @@ describe('PurchaseWorkflowStore', () => {
       at(5),
     );
 
-    const retry = await store.takeNextNotification(at(6));
-    expect(retry).toMatchObject({
-      key: queued.entry.key,
-      kind: 'inventory_inbound_completed',
-      status: 'processing',
-      messageId: '',
-      sendOutcome: 'unattempted',
-      deliveryUuid: queued.entry.deliveryUuid,
+    await expect(store.takeNextNotification(at(6))).resolves.toBeNull();
+    expect(await store.getNotification(queued.entry.key)).toMatchObject({
+      status: 'completed', messageId: 'om_original_reminder', deliveryUuid: queued.entry.deliveryUuid,
     });
-    await store.completeNotification(
-      retry!.key,
-      retry!.claimToken,
-      { messageId: 'om_new_success' },
-      at(7),
-    );
-    await expect(store.takeNextNotification(at(8))).resolves.toBeNull();
   });
 
   it('anchors inbound-completed delivery only when the Feishu send starts and stops blind retries after one hour', async () => {
@@ -1627,6 +1624,15 @@ describe('PurchaseWorkflowStore', () => {
       new Date('2026-08-24T01:00:00.000Z'),
     );
 
+    // Synthetic accepted resolution proves the original recipient before a send can start.
+    const resolver = await store.enqueueNotification({
+      businessEventId: 'inventory-inbound-completed-resolution:rec-unknown-delivery',
+      recordId: 'rec-unknown-delivery', recipientOpenId: 'system', kind: 'inventory_inbound_completed_resolution',
+    }, new Date('2026-08-24T01:00:00.000Z'));
+    const resolverClaim = await store.takeNextNotification(new Date('2026-08-24T01:00:00.000Z'), undefined, ['inventory_inbound_completed_resolution']);
+    await store.completeInboundCompletedResolutionAndEnqueueNotifications(resolver.entry.key, resolverClaim!.claimToken, [{
+      businessEventId: 'inventory-inbound-completed:rec-unknown-delivery', recordId: 'rec-unknown-delivery', recipientOpenId: 'ou_inbound_responsible', kind: 'inventory_inbound_completed',
+    }], new Date('2026-08-24T01:00:00.000Z'));
     const first = await store.takeNextNotification(firstClaimAt, 1_000);
 
     expect(first).toMatchObject({
@@ -1695,7 +1701,7 @@ describe('PurchaseWorkflowStore', () => {
     ).resolves.toBeNull();
   });
 
-  it('bounds inbound-completed manual reconciliation history without trimming manager reconciliation', async () => {
+  it('retains all inbound-completed manual reconciliation evidence without trimming manager reconciliation', async () => {
     const timestamp = '2026-08-24T02:00:01.000Z';
     const inboundManualEntries = Array.from({ length: 500 }, (_, index) => {
       const deliveryUuid = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
@@ -1813,16 +1819,16 @@ describe('PurchaseWorkflowStore', () => {
         (entry.kind === 'inventory_inbound_completed' ||
           entry.kind === 'manual_inventory_inbound_completed'),
     );
-    expect(retainedInbound).toHaveLength(500);
+    expect(retainedInbound).toHaveLength(501);
     expect(
       retainedInbound.some(
         (entry) => entry.recordId === 'rec_inbound_manual_0',
       ),
-    ).toBe(false);
-    expect(retainedInbound.at(-1)).toMatchObject({
+    ).toBe(true);
+    expect(retainedInbound.find(entry => entry.recordId === 'rec_inbound_manual_500')).toMatchObject({
       recordId: 'rec_inbound_manual_500',
       deliveryUuid: '00000000-0000-4000-8000-000000000500',
-      lastError: expect.stringContaining('停止自动重发'),
+      lastError: expect.stringContaining('已停止自动推送'),
       cardContext: expiringInboundEntry.cardContext,
       deliveryAudit: [
         expect.objectContaining({
@@ -1959,8 +1965,8 @@ describe('PurchaseWorkflowStore', () => {
     });
   });
 
-  it('sanitizes and bounds persisted notification history', async () => {
-    const notifications = Array.from({ length: 520 }, (_, index) => ({
+  it('sanitizes notification history and bounds ordinary history while retaining legacy completion receipts', async () => {
+    const notifications = Array.from({ length: 1040 }, (_, index) => ({
       key: `untrusted:${index}`,
       businessEventId: `completed:rec_${index}`,
       recordId: `rec_${index}`,
@@ -1992,7 +1998,9 @@ describe('PurchaseWorkflowStore', () => {
     );
     const store = createV2Store(ledgerPath);
 
-    expect(await store.listNotifications()).toHaveLength(500);
+    expect(await store.listNotifications()).toHaveLength(1020);
+    expect(await store.listNotifications({ kind: 'purchase_completed' })).toHaveLength(520);
+    expect(await store.listNotifications({ kind: 'warehouse_inbound' })).toHaveLength(500);
     await expect(
       store.listNotifications({
         recordId: 'rec_518',
@@ -2084,7 +2092,7 @@ describe('PurchaseWorkflowStore', () => {
     });
   });
 
-  it('bounds completed inbound-resolution marker history while preserving the newest markers', async () => {
+  it('retains completed inbound-resolution markers permanently beyond five thousand events', async () => {
     const completedAt = '2026-08-25T02:10:00.000Z';
     const markers = Array.from({ length: 5_001 }, (_, index) => ({
       key: `inventory-inbound-completed-resolution:rec-resolution-${index}:rec-resolution-${index}:system`,
@@ -2134,7 +2142,7 @@ describe('PurchaseWorkflowStore', () => {
 
     await expect(
       restarted.listNotifications({ recordId: 'rec-resolution-0' }),
-    ).resolves.toHaveLength(0);
+    ).resolves.toHaveLength(1);
     await expect(
       restarted.listNotifications({ recordId: 'rec-resolution-5000' }),
     ).resolves.toHaveLength(1);
@@ -4466,7 +4474,7 @@ describe('PurchaseWorkflowStore', () => {
       secondGeneration?.key || '',
       secondGeneration?.claimToken || '',
       secondGeneration?.cardContext || '',
-      new Date('2026-08-01T03:01:01.000Z'),
+      new Date('2026-08-01T03:01:00.500Z'),
     );
 
     await expect(

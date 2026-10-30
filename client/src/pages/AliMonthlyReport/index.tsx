@@ -45,6 +45,8 @@ import type {
 } from '@shared/api.interface';
 
 import { scrollGeneratedFilesIntoView } from './result-navigation';
+import { EmailSettingsDialog } from './EmailSettingsDialog';
+import { canManageMonthlyEmailSettings, monthlyEmailSettingsIdentity, monthlyReportEmailReady } from './email-settings.logic';
 
 type TaskState = 'idle' | 'running' | 'done' | 'warning';
 
@@ -227,9 +229,15 @@ export default function AliMonthlyReportPage() {
   const canCreate = canUsePageAction(access, 'monthly_reports', 'create', true);
   const canNotify = canUsePageAction(access, 'monthly_reports', 'notify', true);
   const canExport = canUsePageAction(access, 'monthly_reports', 'export', true);
+  const canManageEmail = canManageMonthlyEmailSettings(access);
+  const emailIdentity = monthlyEmailSettingsIdentity(access);
+  const emailIdentityRef = useRef(emailIdentity);
+  emailIdentityRef.current = emailIdentity;
+  const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
   const [config, setConfig] =
     useState<AliMonthlyReportConfigResponse>(fallbackConfig);
   const [configLoading, setConfigLoading] = useState(true);
+  const configRequestRef = useRef(0);
   const [reportType, setReportType] =
     useState<AliMonthlyReportType>('alarm_analysis');
   const [year, setYear] = useState(currentYear);
@@ -314,11 +322,12 @@ export default function AliMonthlyReportPage() {
   const feishuPresentation = result?.feishuMessage
     ? getFeishuNotificationPresentation(result.feishuMessage)
     : null;
+  const emailReady = monthlyReportEmailReady(config);
   const emailState: TaskState = sendingEmail
     ? 'running'
     : emailResult
       ? 'done'
-      : config.emailReady === false
+      : !emailReady
         ? 'warning'
         : 'idle';
   const attachmentMissingConfigKeys = config.missingAttachmentConfigKeys || [];
@@ -332,28 +341,31 @@ export default function AliMonthlyReportPage() {
       ? result.logs
       : ['系统就绪'];
 
-  const loadConfig = async () => {
+  const loadConfig = async (initial = false) => {
+    const request = ++configRequestRef.current;
     setConfigLoading(true);
     try {
       const data = await getAliMonthlyReportConfig();
+      if (request !== configRequestRef.current) return;
       setConfig(data);
-      setYear(data.defaultYear);
-      setMonth(data.defaultMonth);
-      setEmailRecipient(data.defaultEmailRecipient || '');
-      if (data.reportTypes[0]) {
-        setReportType(data.reportTypes[0].key);
+      if (initial) {
+        setYear(data.defaultYear);
+        setMonth(data.defaultMonth);
+        setEmailRecipient(current => current || data.defaultEmailRecipient || '');
+        if (data.reportTypes[0]) setReportType(data.reportTypes[0].key);
       }
     } catch (err) {
+      if (request !== configRequestRef.current) return;
       logger.error('加载阿里月报配置失败', err);
       setError('阿里月报配置加载失败');
     } finally {
-      setConfigLoading(false);
+      if (request === configRequestRef.current) setConfigLoading(false);
     }
   };
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadConfig();
+      void loadConfig(true);
     }, 200);
     return () => window.clearTimeout(timer);
   }, []);
@@ -517,7 +529,7 @@ export default function AliMonthlyReportPage() {
             'linear-gradient(135deg, hsl(217, 91%, 50%) 0%, hsl(204, 86%, 56%) 100%)',
         }}
       >
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-6 lg:px-6">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-6 lg:px-6">
           <div>
             <h1 className="text-2xl font-semibold tracking-normal md:text-3xl">
               阿里月度报告生成
@@ -530,15 +542,15 @@ export default function AliMonthlyReportPage() {
             type="button"
             variant="outline"
             className="border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white"
-            onClick={() => void loadConfig()}
-            disabled={configLoading}
+            onClick={() => canManageEmail ? setEmailSettingsOpen(true) : void loadConfig()}
+            disabled={!canManageEmail && configLoading}
           >
-            {configLoading ? (
+            {!canManageEmail && configLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Settings className="h-4 w-4" />
+              canManageEmail ? <Settings className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />
             )}
-            配置
+            {canManageEmail ? '邮箱配置' : '刷新状态'}
           </Button>
         </div>
       </div>
@@ -899,16 +911,20 @@ export default function AliMonthlyReportPage() {
                 </span>
                 文件与邮件
               </CardTitle>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {canManageEmail && <Button type="button" variant="outline" className="min-h-11" onClick={() => setEmailSettingsOpen(true)}><Settings className="h-4 w-4" />邮箱配置</Button>}
+                <Button type="button" variant="ghost" className="min-h-11" onClick={() => void loadConfig()} disabled={configLoading}>
+                  {configLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}刷新状态
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-5">
-              {config.emailReady === false ? (
+              {!emailReady ? (
                 <Alert className="border-amber-200 bg-amber-50 text-amber-900">
                   <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>邮件发送逻辑未就绪</AlertTitle>
+                  <AlertTitle>邮件暂未就绪</AlertTitle>
                   <AlertDescription>
-                    未找到{' '}
-                    {config.emailAppDirLabel ||
-                      'tools/ali-monthly-report-email'}
+                    {canManageEmail ? <div className="space-y-2"><p>请先核对发件邮箱及授权码；配置完成后仍未就绪时，请检查邮件服务状态。</p><Button type="button" variant="outline" className="min-h-11" onClick={() => setEmailSettingsOpen(true)}>配置邮箱</Button></div> : '邮件配置未完成，请联系管理员。'}
                   </AlertDescription>
                 </Alert>
               ) : null}
@@ -960,7 +976,7 @@ export default function AliMonthlyReportPage() {
                   type="button"
                   className="h-12 min-w-48 bg-blue-600 text-base font-semibold text-white hover:bg-blue-700"
                   disabled={
-                    !canNotify || busy || !config.emailReady || !emailRecipient.trim()
+                    !canNotify || busy || !emailReady || !emailRecipient.trim()
                   }
                   onClick={handleSendEmail}
                 >
@@ -1000,6 +1016,8 @@ export default function AliMonthlyReportPage() {
           </Card>
         </div>
       </div>
+      {canManageEmail && <EmailSettingsDialog key={emailIdentity} open={emailSettingsOpen} identity={emailIdentity} onOpenChange={setEmailSettingsOpen}
+        onSaved={nextConfig => { if (emailIdentityRef.current !== emailIdentity) return; configRequestRef.current++; setConfigLoading(false); setConfig(nextConfig); toast.success('邮箱配置已保存'); }} />}
     </div>
   );
 }

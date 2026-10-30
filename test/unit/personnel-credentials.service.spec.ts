@@ -115,6 +115,22 @@ describe('personnel credential lifecycle with isolated source/configuration', ()
     expect(service.requiresPasswordChange(principal())).toBe(true);
   });
 
+  it('requires first change when the shared source already hashes the verified initial identity suffix', async () => {
+    record.password = hash('31002X');
+    const result = await service.authenticateLogin(principal(), '31002X');
+    expect(service.requiresPasswordChange(result)).toBe(true);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    expect(account.passwordHash).toBe(record.password);
+  });
+
+  it('keeps a previously changed formal hash unrestricted and does not rewrite it', async () => {
+    record.password = formalHash;
+    const result = await service.authenticateLogin(principal(), FORMAL_PASSWORD);
+    expect(service.requiresPasswordChange(result)).toBe(false);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    expect(record.password).toBe(formalHash);
+  });
+
   it('rejects disabled, deleted, inactive, reactivation-pending and impersonated principals before source writes', async () => {
     for (const flag of ['deleted', 'reactivationRequired', 'personnelSuspended']) {
       (account as any)[flag] = true;

@@ -55,8 +55,6 @@ const MAX_COMMANDS = 500;
 const MAX_REMINDERS = 500;
 const MAX_CARD_ACTIONS = 500;
 const MAX_NOTIFICATIONS = 500;
-const MAX_INBOUND_COMPLETED_MANUAL_RECONCILIATIONS = 500;
-const MAX_INBOUND_RESOLUTION_MARKERS = 5_000;
 const MAX_MANAGER_APPROVAL_ACTIONS = 500;
 const MAX_MANAGER_APPROVAL_BATCHES = 500;
 const MAX_MANAGER_APPROVAL_BATCH_ACTIONS = 500;
@@ -76,7 +74,6 @@ const MAX_CARD_CONTEXT_LENGTH = 8_000;
 const MAX_DELIVERY_AUDIT_ENTRIES = 1_000;
 const MANAGER_DELIVERY_UNKNOWN_WINDOW_MS = 60 * 60 * 1000;
 const MANAGER_CARD_RESOLVED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-const LEGACY_REUSED_INBOUND_CARD_REQUEUE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const RECEIPT_UPLOAD_INTENT_TTL_MS = 10 * 60 * 1000;
 const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
 const BATCH_ID_PATTERN = /^[A-Za-z0-9_-]{8,160}$/;
@@ -2054,7 +2051,9 @@ export class PurchaseWorkflowStore {
     now: Date | number = new Date(),
   ): Promise<PurchaseWorkflowNotificationEntry | null> {
     const canonicalContext = canonicalManagerBatchCardContext(cardContext);
+    const claimCheckStarted = Date.now(), claimCheckNow = resolveNow(now).getTime();
     return this.updateNotification(key, claimToken, (entry) => {
+      if (!Number.isFinite(Date.parse(entry.leaseUntil)) || Date.parse(entry.leaseUntil) <= claimCheckNow + Date.now() - claimCheckStarted) throw new ConflictException('采购批次审批发卡租约已过期，请重试原通知任务');
       if (
         entry.kind !== 'manager_batch_approval_requested' &&
         entry.kind !== 'manager_batch_approval_result' &&
@@ -3667,58 +3666,19 @@ export class PurchaseWorkflowStore {
       const timestamp = resolveNow(now);
       const ledger = await this.read();
       const allowedKindSet = allowedKinds ? new Set(allowedKinds) : null;
-      const reminderMessages = new Set(
-        ledger.notifications
-          .filter(
-            (entry) =>
-              entry.kind === 'warehouse_inbound' &&
-              entry.status === 'completed' &&
-              entry.messageId,
-          )
-          .map(
-            (entry) =>
-              `${entry.recordId}\u0000${entry.recipientOpenId}\u0000${entry.messageId}`,
-          ),
-      );
-      const legacyIndex = ledger.notifications.findIndex((entry) => {
-        if (
-          entry.kind !== 'inventory_inbound_completed' ||
-          entry.status !== 'completed' ||
-          !entry.messageId ||
-          entry.firstSendAttemptAt ||
-          (allowedKindSet && !allowedKindSet.has(entry.kind))
-        ) {
-          return false;
+      const snapshots = new Map<string, InboundCompletionSnapshot>();
+      // Never turn an already completed success card back into a send task.
+      // Legacy late-added recipients lack the sealed cohort proof and require review.
+      let quarantined = false;
+      ledger.notifications = ledger.notifications.map(entry => {
+        if ((!allowedKindSet || allowedKindSet.has(entry.kind)) && isInboundCompletedDeliveryKind(entry.kind) &&
+          isAvailable(entry, timestamp) && inboundDeliveryGate(entry, ledger.notifications, snapshots) === 'unproven') {
+          quarantined = true;
+          return quarantineUnprovenInbound(entry, timestamp.toISOString());
         }
-        const age = timestamp.getTime() - Date.parse(entry.completedAt);
-        return (
-          age >= 0 &&
-          age <= LEGACY_REUSED_INBOUND_CARD_REQUEUE_WINDOW_MS &&
-          reminderMessages.has(
-            `${entry.recordId}\u0000${entry.recipientOpenId}\u0000${entry.messageId}`,
-          )
-        );
+        return entry;
       });
-      if (legacyIndex >= 0) {
-        const legacy = ledger.notifications[legacyIndex];
-        if (legacy) {
-          ledger.notifications[legacyIndex] = {
-            ...legacy,
-            status: 'pending',
-            attempts: 0,
-            updatedAt: timestamp.toISOString(),
-            nextAttemptAt: timestamp.toISOString(),
-            leaseUntil: '',
-            claimToken: '',
-            completedAt: '',
-            lastError: '',
-            deliveryId: '',
-            messageId: '',
-            sendOutcome: 'unattempted',
-          };
-          await this.write(ledger);
-        }
-      }
+      if (quarantined) await this.write(ledger);
       const expiredIndex = ledger.notifications.findIndex(
         (entry) =>
           (!allowedKindSet || allowedKindSet.has(entry.kind)) &&
@@ -3760,7 +3720,8 @@ export class PurchaseWorkflowStore {
           !isManagerNotificationKind(entry.kind) &&
           (entry.kind !== 'web_receipt_command' || allowedKindSet?.has(entry.kind)) &&
           !ledger.warehouseInboundHandovers.some(job => job.notificationKey === entry.key && job.status !== 'completed') &&
-          isAvailable(entry, timestamp),
+          isAvailable(entry, timestamp) &&
+          inboundDeliveryGate(entry, ledger.notifications, snapshots) !== 'waiting',
       );
       if (index < 0) return null;
 
@@ -3901,7 +3862,9 @@ export class PurchaseWorkflowStore {
     now: Date | number = new Date(),
   ): Promise<PurchaseWorkflowNotificationEntry | null> {
     const canonicalContext = canonicalManagerCardContext(cardContext);
+    const claimCheckStarted = Date.now(), claimCheckNow = resolveNow(now).getTime();
     return this.updateNotification(key, claimToken, (entry) => {
+      if (!Number.isFinite(Date.parse(entry.leaseUntil)) || Date.parse(entry.leaseUntil) <= claimCheckNow + Date.now() - claimCheckStarted) throw new ConflictException('采购审批发卡租约已过期，请重试原通知任务');
       if (
         entry.kind !== 'manager_approval_requested' &&
         entry.kind !== 'manager_approval_reopened'
@@ -3954,6 +3917,9 @@ export class PurchaseWorkflowStore {
       if (entry.sendOutcome === 'manual_reconciliation') {
         throw new ConflictException('入库完成卡发送结果需人工核对');
       }
+      const proof = inboundDeliveryGate(entry, ledger.notifications);
+      if (proof === 'waiting') throw new ConflictException('入库通知收件人快照尚未完成，请等待原解析任务');
+      if (proof === 'unproven') return quarantineUnprovenInbound(entry, resolveNow(now).toISOString());
       if (entry.kind === 'warehouse_inbound' && ledger.warehouseInboundHandovers.some(job => job.notificationKey === entry.key)) {
         if (!isCurrentlyAuthorized || isCurrentlyAuthorized() !== true) throw new ForbiddenException('接任者当前不可接收业务提醒');
       }
@@ -5035,7 +5001,7 @@ export class PurchaseWorkflowStore {
     return this.enqueue(async () => {
       const normalizedKey = clean(key);
       const timestamp = resolveNow(now).toISOString();
-      const normalizedInputs = inputs.map(normalizeNotificationInput);
+      let normalizedInputs = inputs.map(normalizeNotificationInput);
       const ledger = await this.read();
       const resolutionIndex = ledger.notifications.findIndex(
         (entry) => entry.key === normalizedKey,
@@ -5062,6 +5028,16 @@ export class PurchaseWorkflowStore {
         ) {
           throw new ConflictException('通知解析结果与入库记录不匹配');
         }
+      }
+
+      const snapshot = inboundCompletionSnapshot(ledger.notifications, current.recordId,
+        current.kind === 'manual_inventory_inbound_completed_resolution' ? 'manual_inventory_inbound_completed' : 'inventory_inbound_completed');
+      if (snapshot.sealed) {
+        // A retried/reintroduced resolution cannot expand an already accepted event.
+        normalizedInputs = snapshot.notifications.map(entry => ({
+          businessEventId: entry.businessEventId, recordId: entry.recordId, recipientOpenId: entry.recipientOpenId,
+          kind: entry.kind, ...(entry.cardContext ? { cardContext: entry.cardContext } : {}),
+        }));
       }
 
       const existingByKey = new Map(
@@ -7847,6 +7823,66 @@ function isInboundCompletedDeliveryKind(
   );
 }
 
+type InboundDeliveryKind = 'inventory_inbound_completed' | 'manual_inventory_inbound_completed';
+export interface InboundCompletionSnapshot {
+  sealed: boolean;
+  waiting: boolean;
+  sealedAt: string;
+  notifications: PurchaseWorkflowNotificationEntry[];
+}
+
+/** Existing resolution + atomically-created children are the persisted recipient snapshot.
+ * No current personnel configuration is consulted when recovering an accepted event.
+ */
+export function inboundCompletionSnapshot(
+  entries: readonly PurchaseWorkflowNotificationEntry[],
+  recordId: string,
+  kind: InboundDeliveryKind,
+): InboundCompletionSnapshot {
+  const resolutionKind = kind === 'inventory_inbound_completed'
+    ? 'inventory_inbound_completed_resolution' : 'manual_inventory_inbound_completed_resolution';
+  const children = entries.filter(entry => entry.recordId === recordId && entry.kind === kind);
+  const resolutions = entries.filter(entry => entry.recordId === recordId && entry.kind === resolutionKind);
+  const receipts = entries.filter(entry => entry.recordId === recordId && entry.status === 'completed' &&
+    (entry.kind === kind || kind === 'inventory_inbound_completed' && entry.kind === 'purchase_completed'));
+  const receiptTimes = receipts.map(entry => Date.parse(entry.firstSendAttemptAt || entry.completedAt || entry.createdAt)).filter(Number.isFinite);
+  const firstReceiptAt = receiptTimes.length ? Math.min(...receiptTimes) : Infinity;
+  const originalResolutions = resolutions.filter(entry => entry.status === 'completed' &&
+    Number.isFinite(Date.parse(entry.completedAt)) && Number.isFinite(Date.parse(entry.createdAt)) && Date.parse(entry.createdAt) <= firstReceiptAt);
+  const sealedTimes = originalResolutions.map(entry => Date.parse(entry.completedAt));
+  // A late resolver retry must not move the boundary past an earlier successful send.
+  const sealedAt = Math.min(firstReceiptAt, ...sealedTimes);
+  const sealed = Number.isFinite(sealedAt);
+  return {
+    sealed,
+    waiting: !sealed && resolutions.some(entry => isActiveStatus(entry.status)),
+    sealedAt: sealed ? new Date(sealedAt).toISOString() : '',
+    notifications: sealed ? children.filter(entry => Number.isFinite(Date.parse(entry.createdAt)) && Date.parse(entry.createdAt) <= sealedAt) : [],
+  };
+}
+
+function inboundDeliveryGate(
+  entry: PurchaseWorkflowNotificationEntry,
+  entries: PurchaseWorkflowNotificationEntry[],
+  snapshots?: Map<string, InboundCompletionSnapshot>,
+): 'allowed' | 'waiting' | 'unproven' {
+  if (!isInboundCompletedDeliveryKind(entry.kind)) return 'allowed';
+  const key = `${entry.kind}:${entry.recordId}`;
+  let snapshot = snapshots?.get(key);
+  if (!snapshot) {
+    snapshot = inboundCompletionSnapshot(entries, entry.recordId, entry.kind as InboundDeliveryKind);
+    snapshots?.set(key, snapshot);
+  }
+  if (snapshot.waiting) return 'waiting';
+  return snapshot.sealed && snapshot.notifications.some(row => row.key === entry.key) ? 'allowed' : 'unproven';
+}
+
+function quarantineUnprovenInbound(entry: PurchaseWorkflowNotificationEntry, timestamp: string): PurchaseWorkflowNotificationEntry {
+  return { ...entry, status: 'manual_reconciliation', sendOutcome: 'manual_reconciliation', updatedAt: timestamp,
+    completedAt: timestamp, claimToken: '', leaseUntil: '',
+    lastError: '历史入库通知缺少原事件收件人证据或晚于已完成事件，已停止自动推送，请核对原通知；业务入库结果未变更' };
+}
+
 function isIdempotentInventoryNotificationKind(value: PurchaseWorkflowNotificationKind): boolean {
   return value === 'warehouse_inbound' || isInboundCompletedDeliveryKind(value);
 }
@@ -7917,32 +7953,16 @@ function trimNotificationHistory(
 ): PurchaseWorkflowNotificationEntry[] {
   const actionableReceiptBatches = actionableReceiptBatchIds(entries);
   const retainedReceiptBatches = receiptRequestedBatchIds(entries);
-  const inboundManualReconciliationsToKeep = new Set(
-    entries
-      .filter(
-        (entry) =>
-          isInboundCompletedDeliveryKind(entry.kind) &&
-          entry.status === 'manual_reconciliation',
-      )
-      .slice(-MAX_INBOUND_COMPLETED_MANUAL_RECONCILIATIONS),
-  );
-  const inboundResolutionMarkersToKeep = new Set(
-    entries
-      .filter(
-        (entry) =>
-          isInboundCompletedResolutionKind(entry.kind) &&
-          !isActiveStatus(entry.status),
-      )
-      .slice(-MAX_INBOUND_RESOLUTION_MARKERS),
-  );
   const protectedEntries = new Set(
     entries.filter(
       (entry) =>
         isActiveStatus(entry.status) ||
-        (entry.status === 'manual_reconciliation' &&
-          (!isInboundCompletedDeliveryKind(entry.kind) ||
-            inboundManualReconciliationsToKeep.has(entry))) ||
-        inboundResolutionMarkersToKeep.has(entry) ||
+        entry.status === 'manual_reconciliation' ||
+        // These existing-format entries are durable event/recipient tombstones,
+        // not disposable UI history. Losing them permits historical re-delivery.
+        isInboundCompletedResolutionKind(entry.kind) ||
+        isInboundCompletedDeliveryKind(entry.kind) ||
+        (entry.kind === 'purchase_completed' && entry.status === 'completed') ||
         entry.kind === 'manager_approval_attention_required' ||
         !!entry.approvalHandover ||
         Boolean(entry.webReceipt && !entry.webReceipt.filesRemoved) ||

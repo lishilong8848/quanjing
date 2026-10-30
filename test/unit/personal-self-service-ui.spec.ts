@@ -6,6 +6,7 @@ jest.mock('react', () => ({ ...jest.requireActual('react'),
   useState: (initial: unknown) => { const slot = mockCursor++; if (!(slot in mockSlots)) mockSlots[slot] = typeof initial === 'function' ? initial() : initial; return [mockSlots[slot], (next: any) => { mockSlots[slot] = typeof next === 'function' ? next(mockSlots[slot]) : next; }]; },
   useRef: (initial: unknown) => { const slot = mockCursor++; if (!(slot in mockSlots)) mockSlots[slot] = { current: initial }; return mockSlots[slot]; },
   useCallback: (callback: unknown) => callback,
+  useMemo: (factory: () => unknown) => factory(),
   useEffect: (effect: () => any, dependencies: unknown[]) => { const slot = mockCursor++, previous = mockSlots[slot]; if (!previous || dependencies.some((value, at) => !Object.is(value, previous.dependencies[at]))) { const next = { dependencies, cleanup: previous?.cleanup }; mockSlots[slot] = next; mockEffects.push(() => { next.cleanup?.(); next.cleanup = effect(); }); } },
 }));
 jest.mock('../../client/src/api/personal-access', () => ({ changePersonalPassword: jest.fn(), resetPersonalPassword: jest.fn(), createPermissionRequest: jest.fn(), listPermissionRequests: jest.fn(), reviewPermissionRequest: jest.fn() }));
@@ -97,7 +98,7 @@ describe('personal self-service real callbacks and safe retries', () => {
     (listPermissionRequests as jest.Mock).mockResolvedValue([row]);
     const props = { revision: 1, onEditAccount: jest.fn().mockReturnValue(true) }, show = () => render(() => PermissionRequestsPanel(props));
     show(); await flush(); const list = () => nodes(show()).find(node => node.type === PermissionRequestList)!;
-    let actions = list().props.actions(row); button(actions, '配置权限').props.onClick(); expect(props.onEditAccount).toHaveBeenCalledWith('synthetic-person'); expect(reviewPermissionRequest).not.toHaveBeenCalled();
+    let actions = list().props.actions(row); button(actions, '配置权限').props.onClick(); expect(props.onEditAccount).toHaveBeenCalledWith('synthetic-person', row); expect(reviewPermissionRequest).not.toHaveBeenCalled();
     nodes(actions).find(node => node.type === 'textarea')!.props.onChange(event('审核说明'));
     (reviewPermissionRequest as jest.Mock).mockRejectedValueOnce(new Error('申请权限尚未生效')).mockResolvedValueOnce({ ...row, version: 2, status: 'approved' });
     actions = list().props.actions(row); button(actions, '确认授权').props.onClick(); await flush(); expect(words(show())).toContain('申请权限尚未生效');

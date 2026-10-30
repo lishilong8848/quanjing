@@ -1,3 +1,4 @@
+import { observedCardPost } from '../../common/feishu-card-copy/transport';
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import FormData from 'form-data';
@@ -769,7 +770,7 @@ export class DutyScreenshotService {
     receiveIdType: FeishuReceiveIdType = 'chat_id',
     uuid?: string,
   ): Promise<string | undefined> {
-    const response = await this.httpService.axiosRef.post(
+    const response = await observedCardPost(this.httpService.axiosRef, 'duty-screenshot',
       `https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${receiveIdType}`,
       {
         receive_id: receiveId,

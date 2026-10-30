@@ -1,4 +1,5 @@
 import { axiosForBackend } from '@lark-apaas/client-toolkit/utils/getAxiosForBackend';
+import { saveConfigurationAccount } from '@/api/configuration-account-request';
 import type { AccessConfigurationResponse, AccountMutation, CardRoleMutation, ConfigurationPerson, ManagedAccount } from '@shared/access-configuration.interface';
 import type { PersonnelOverview, PersonnelPreviewRequest, PersonnelReadOnlyPreview } from '@shared/personnel-preview.interface';
 import type { AuthorizationAccountChange, AuthorizationAccountPreview, AuthorizationRoleList, AuthorizationRoleMutation, AuthorizationRolePreview } from '@shared/authorization-profile';
@@ -30,7 +31,7 @@ export const cancelHandover=(id:string,version:number)=>request<import('@shared/
 export const loadRecoveryTasks = () => request<import('@shared/personnel-task-recovery.interface').PersonnelRecoveryTask[]>('/personnel-handover/recovery');
 export const loadRecoveryPreview = (input: import('@shared/personnel-task-recovery.interface').PersonnelRecoveryRequest) => request<import('@shared/personnel-task-recovery.interface').PersonnelRecoveryPreview>('/personnel-handover/recovery/preview', input);
 export const recoverOriginalTask = (input: import('@shared/personnel-task-recovery.interface').PersonnelRecoveryRequest) => request<import('@shared/personnel-task-recovery.interface').PersonnelRecoveryResult>('/personnel-handover/recovery', input);
-export const saveAccount = (data: AccountMutation) => request<AccessConfigurationResponse>('/accounts', data);
+export const saveAccount = (data: AccountMutation) => saveConfigurationAccount(data);
 export const synchronizePersonnel = () => request<AccessConfigurationResponse>('/personnel-sync', {});
 export const previewPersonnelSource = () => request<import('@shared/personnel-source.interface').PersonnelSourcePreview>('/personnel-source/preview', {}, PERSONNEL_SOURCE_TIMEOUT_MS);
 export const previewPersonnelBaseline = () => request<import('@shared/personnel-baseline.interface').PersonnelBaselinePreview>('/personnel-baseline/preview', {}, PERSONNEL_SOURCE_TIMEOUT_MS);

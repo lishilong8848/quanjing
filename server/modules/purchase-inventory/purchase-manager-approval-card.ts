@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { normalizePurchaseComparisonCardEvidence, withPurchaseComparisonCardEvidence, type PurchaseComparisonCardEvidence } from './purchase-comparison-card-evidence';
 import {
   isBuildingSelfPurchaseAllowed,
   procurementMethodOptionsLabel,
@@ -60,6 +61,7 @@ export interface PurchaseManagerApprovalCardInput {
   expectedDeliveryAt?: string | number | Date | null;
   requestCode?: string | null;
   createdAt?: string | number | Date | null;
+  comparisonEvidence?: PurchaseComparisonCardEvidence;
 }
 
 export type PurchaseManagerApprovalChoice =
@@ -88,6 +90,7 @@ interface PurchaseManagerApprovalCardContext {
   expectedDeliveryAt: string | null;
   requestCode: string | null;
   createdAt: string | null;
+  comparisonEvidence?: PurchaseComparisonCardEvidence;
 }
 
 export function buildPurchaseManagerApprovalCard(
@@ -97,7 +100,7 @@ export function buildPurchaseManagerApprovalCard(
   const executionRecordId = assertExecutionRecordId(input.executionRecordId);
   const allowsBuildingSelf = isBuildingSelfPurchaseAllowed(input.building);
 
-  return {
+  return withPurchaseComparisonCardEvidence({
     schema: '2.0',
     config: {
       update_multi: true,
@@ -146,7 +149,7 @@ export function buildPurchaseManagerApprovalCard(
         },
       ],
     },
-  };
+  }, comparisonEvidence(input));
 }
 
 export function buildPurchaseManagerRejectEditorCard(
@@ -157,7 +160,7 @@ export function buildPurchaseManagerRejectEditorCard(
   const defaultValue = normalizeRejectionDraft(options.rejectionReason);
   const allowsBuildingSelf = isBuildingSelfPurchaseAllowed(input.building);
 
-  return {
+  return withPurchaseComparisonCardEvidence({
     schema: '2.0',
     config: {
       update_multi: true,
@@ -237,7 +240,7 @@ export function buildPurchaseManagerRejectEditorCard(
         },
       ],
     },
-  };
+  }, comparisonEvidence(input));
 }
 
 export function buildPurchaseManagerPendingCard(
@@ -247,7 +250,7 @@ export function buildPurchaseManagerPendingCard(
   assertExecutionRecordId(input.executionRecordId);
   assertChoice(choice);
 
-  return {
+  return withPurchaseComparisonCardEvidence({
     schema: '2.0',
     config: {
       update_multi: true,
@@ -273,7 +276,7 @@ export function buildPurchaseManagerPendingCard(
         lockedChoicesBlock(choice, input.building),
       ],
     },
-  };
+  }, comparisonEvidence(input));
 }
 
 export function buildResolvedPurchaseManagerApprovalCard(
@@ -284,7 +287,7 @@ export function buildResolvedPurchaseManagerApprovalCard(
   assertChoice(resolution.choice);
   const rejected = resolution.choice === 'reject';
 
-  return {
+  return withPurchaseComparisonCardEvidence({
     schema: '2.0',
     config: {
       update_multi: true,
@@ -322,7 +325,7 @@ export function buildResolvedPurchaseManagerApprovalCard(
         lockedChoicesBlock(resolution.choice, input.building),
       ],
     },
-  };
+  }, comparisonEvidence(input));
 }
 
 export function buildPurchaseManagerManualReconciliationCard(
@@ -335,7 +338,7 @@ export function buildPurchaseManagerManualReconciliationCard(
   assertExecutionRecordId(input.executionRecordId);
   if (options.choice !== undefined) assertChoice(options.choice);
 
-  return {
+  return withPurchaseComparisonCardEvidence({
     schema: '2.0',
     config: {
       update_multi: true,
@@ -369,13 +372,13 @@ export function buildPurchaseManagerManualReconciliationCard(
         lockedChoicesBlock(options.choice, input.building),
       ],
     },
-  };
+  }, comparisonEvidence(input));
 }
 
 export function buildPurchaseManagerTransferredCard(input:PurchaseManagerApprovalCardInput):Record<string,unknown>{
   assertExecutionRecordId(input.executionRecordId);
-  return{schema:'2.0',config:{update_multi:true,enable_forward:false},header:{template:'orange',title:{tag:'plain_text',content:'采购审批已转交'},text_tag_list:[{tag:'text_tag',text:{tag:'plain_text',content:'已转交'},color:'orange'}]},
-    body:{direction:'vertical',padding:'12px 12px 20px 12px',elements:[detailBlock(input),resultBlock([['办理状态','未办结事项已转交，本卡不再办理',BUSINESS_TEXT_LIMIT]]),lockedChoicesBlock(undefined,input.building)]}};
+  return withPurchaseComparisonCardEvidence({schema:'2.0',config:{update_multi:true,enable_forward:false},header:{template:'orange',title:{tag:'plain_text',content:'采购审批已转交'},text_tag_list:[{tag:'text_tag',text:{tag:'plain_text',content:'已转交'},color:'orange'}]},
+    body:{direction:'vertical',padding:'12px 12px 20px 12px',elements:[detailBlock(input),resultBlock([['办理状态','未办结事项已转交，本卡不再办理',BUSINESS_TEXT_LIMIT]]),lockedChoicesBlock(undefined,input.building)]}}, comparisonEvidence(input));
 }
 
 export function serializePurchaseManagerApprovalCardContext(
@@ -405,6 +408,7 @@ export function serializePurchaseManagerApprovalCardContext(
     ),
     requestCode: normalizeNullableText(input.requestCode, BUSINESS_TEXT_LIMIT),
     createdAt: normalizeNullableText(input.createdAt, BUSINESS_TEXT_LIMIT),
+    ...(input.comparisonEvidence !== undefined ? { comparisonEvidence: comparisonEvidence(input)[0] } : {}),
   };
   const serialized = JSON.stringify(context);
   if (Buffer.byteLength(serialized, 'utf8') > CONTEXT_MAX_BYTES) {
@@ -436,7 +440,7 @@ export function parsePurchaseManagerApprovalCardContext(
   const context = parsed as Record<string, unknown>;
   if (
     JSON.stringify(Object.keys(context).sort()) !==
-    JSON.stringify([...CONTEXT_KEYS].sort())
+    JSON.stringify([...CONTEXT_KEYS, ...(Object.hasOwn(context, 'comparisonEvidence') ? ['comparisonEvidence'] : [])].sort())
   ) {
     throw invalidContext();
   }
@@ -469,6 +473,10 @@ export function parsePurchaseManagerApprovalCardContext(
   if (procurementForm !== '单一采购' && singleReason !== null) {
     throw invalidContext();
   }
+  if (Object.hasOwn(context, 'comparisonEvidence') && procurementForm !== '三方比价') throw invalidContext();
+  const parsedEvidence = Object.hasOwn(context, 'comparisonEvidence')
+    ? normalizePurchaseComparisonCardEvidence(context.comparisonEvidence, executionRecordId) : undefined;
+  if (parsedEvidence && JSON.stringify(parsedEvidence) !== JSON.stringify(context.comparisonEvidence)) throw invalidContext();
 
   return {
     executionRecordId,
@@ -495,7 +503,14 @@ export function parsePurchaseManagerApprovalCardContext(
       BUSINESS_TEXT_LIMIT,
       true,
     ),
+    ...(parsedEvidence ? { comparisonEvidence: parsedEvidence } : {}),
   };
+}
+
+function comparisonEvidence(input: PurchaseManagerApprovalCardInput): PurchaseComparisonCardEvidence[] {
+  if (input.comparisonEvidence === undefined) return [];
+  if (input.procurementForm !== '三方比价') throw invalidContext();
+  return [normalizePurchaseComparisonCardEvidence(input.comparisonEvidence, assertExecutionRecordId(input.executionRecordId))];
 }
 
 function detailBlock(

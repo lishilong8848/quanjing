@@ -1,3 +1,4 @@
+import { observedCardPost, observedCardPatch } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import { createHash } from 'node:crypto';
 import {
@@ -115,7 +116,7 @@ export class InventoryOutboundApprovalGateway {
     const token = await this.getTenantAccessToken();
     let response: { data?: unknown };
     try {
-      response = await this.httpService.axiosRef.post(
+      response = await observedCardPost(this.httpService.axiosRef, 'inventory-outbound',
         'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
         {
           receive_id: recipient,
@@ -150,7 +151,7 @@ export class InventoryOutboundApprovalGateway {
     const token = await this.getTenantAccessToken();
     let response: { data?: unknown };
     try {
-      response = await this.httpService.axiosRef.patch(
+      response = await observedCardPatch(this.httpService.axiosRef, 'inventory-outbound',
         `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(normalizedMessageId)}`,
         { content },
         requestConfig(token),

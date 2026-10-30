@@ -10,8 +10,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 jest.mock('@nestjs/common', () => {
+  const actual = jest.requireActual('@nestjs/common');
   const decorator = () => () => undefined;
   return {
+    ...actual,
     BadRequestException: class BadRequestException extends Error {},
     Body: decorator,
     Controller: decorator,

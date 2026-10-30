@@ -1,4 +1,5 @@
 import { AccessConfigurationService, useConfiguredCardAuthorizationSnapshots } from '../../common/access/access-configuration.service';
+import { isReadonlyCopyCallback, observeCardCallbackResult } from '../../common/feishu-card-copy/transport';
 import { assertFeishuBusinessIdentity } from '../../common/access/feishu-business-identity';
 import {
   BadRequestException,
@@ -69,6 +70,13 @@ export class PurchaseWorkflowCallbackController {
     if (!rawBody?.length) {
       throw new BadRequestException('回调原始请求体不能为空');
     }
+    // A registered copied-message identity is a deny-only shortcut. All original
+    // callbacks still pass their existing signature, actor and business checks.
+    let rawPayload: unknown;
+    try { rawPayload = JSON.parse(rawBody.toString('utf8')); } catch { /* Existing parser reports malformed input. */ }
+    if (isReadonlyCopyCallback(rawPayload)) {
+      throw new ForbiddenException('此卡片为只读同步副本，请在原卡片办理');
+    }
 
     if (this.overtimeWorkflowService?.isEnabled()) {
       const overtimeResult = parseOvertimeCardCallback(
@@ -124,8 +132,13 @@ export class PurchaseWorkflowCallbackController {
   }
 
   private async execute(identity: object, operation: () => Promise<CallbackResponse>): Promise<CallbackResponse> {
+    if (isReadonlyCopyCallback(identity)) throw new ForbiddenException('此卡片为只读同步副本，请在原卡片办理');
     try {
-      return await this.execution.run(identity, operation);
+      return await this.execution.run(identity, async () => {
+        const result = await operation();
+        await observeCardCallbackResult((identity as { kind?: string }).kind === 'overtime_action' ? 'overtime' : 'purchase', identity, result);
+        return result;
+      });
     } catch (error) {
       if (error instanceof FeishuCardActionDeadlineError) return CARD_ACTION_PROCESSING_RESPONSE;
       throw error;

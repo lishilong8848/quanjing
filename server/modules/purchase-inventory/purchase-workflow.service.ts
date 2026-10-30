@@ -62,6 +62,7 @@ import {
 import { mergeReceiptAttachmentTokens } from './purchase-receipt-material-policy';
 import {
   PurchaseWorkflowStore,
+  inboundCompletionSnapshot,
   type PurchaseWorkflowCardActionEntry,
   type PurchaseWorkflowCommandEntry,
   type PurchaseWorkflowNotificationEntry,
@@ -116,7 +117,6 @@ const DETAIL_CACHE_MAX = 200;
 const COMMAND_CLAIM_LEASE_MS = 60_000;
 const ORDER_NOTICE_RECOVERY_BATCH_MAX = 5;
 const WAREHOUSE_INBOUND_RECOVERY_SCAN_INTERVAL_MS = 60_000;
-const COMPLETION_RECOVERY_SCAN_INTERVAL_MS = 60_000;
 // Keep the first confirmed production activation as a stable replay boundary.
 // Moving this on every restart would suppress legitimate pending work.
 const DEFAULT_REMINDER_CUTOVER_AT_MS = Date.parse(
@@ -161,7 +161,6 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
   private orderNoticeRecoveryCursor = '';
   private stopping = false;
   private nextWarehouseInboundRecoveryScanAt = 0;
-  private nextCompletionRecoveryScanAt = 0;
   private readonly detailCache = new Map<
     string,
     { expiresAt: number; detail: PurchaseWorkflowDetail }
@@ -563,26 +562,9 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
         ...(cardContext ? { cardContext } : {}),
       },
     ]);
-    let enqueued = results.filter((result) => result.enqueued).length;
-    if (movement) {
-      const recipients =
-        await this.gateway.getCachedInboundCompletionRecipients(
-          movement.building,
-        );
-      if (recipients?.length) {
-        const cards = await this.store.enqueueNotifications(
-          recipients.map((recipientOpenId) => ({
-            businessEventId: `inventory-inbound-completed:${normalizedRecordId}`,
-            recordId: normalizedRecordId,
-            recipientOpenId,
-            kind: 'inventory_inbound_completed' as const,
-            cardContext,
-          })),
-        );
-        enqueued += cards.filter((result) => result.enqueued).length;
-      }
-    }
-    return enqueued;
+    // Resolve the complete cohort once, then persist it with the resolution.
+    // An early cached subset must not send before that snapshot is sealed.
+    return results.filter((result) => result.enqueued).length;
   }
 
   async refreshWarehouseRecipientCacheIfDue(): Promise<void> {
@@ -666,36 +648,10 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
             result.errors.push(`入库通知补偿扫描失败: ${errorMessage(error)}`);
           }
         }
-        try {
-          result.recoveredCompletionNotifications =
-            await this.recoverMissingCompletionNotifications(
-              remainingRecoveryCapacity,
-              result,
-              now,
-              true,
-            );
-        } catch (error) {
-          result.failed += 1;
-          result.errors.push(
-            `采购完成通知补偿扫描失败: ${errorMessage(error)}`,
-          );
-        }
-      } else {
-        try {
-          result.recoveredCompletionNotifications =
-            await this.recoverMissingCompletionNotifications(
-              remainingRecoveryCapacity,
-              result,
-              now,
-              false,
-            );
-        } catch (error) {
-          result.failed += 1;
-          result.errors.push(
-            `采购完成通知补偿扫描失败: ${errorMessage(error)}`,
-          );
-        }
       }
+
+      // Completed purchases are not a source of new notification events.
+      // Only the persisted inbound outbox and its frozen children are retried.
 
       await this.processAvailableTasks(
         batchLimit - handledBeforeRecovery,
@@ -1132,102 +1088,6 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     return recovered;
   }
 
-  private async recoverMissingCompletionNotifications(
-    limit: number,
-    result: PurchaseWorkflowTaskRunResult,
-    now: Date,
-    includePurchaseRecipients: boolean,
-  ): Promise<number> {
-    if (limit <= 0) return 0;
-    if (now.getTime() < this.nextCompletionRecoveryScanAt) return 0;
-    this.nextCompletionRecoveryScanAt =
-      now.getTime() + COMPLETION_RECOVERY_SCAN_INTERVAL_MS;
-    const candidates = (await this.gateway.listExecutionRecordsAsApp()).filter(
-      (record) =>
-        !isHealthcheckRecord(record.requestCode) &&
-        resolvePurchaseStage(record.status) === 'completed',
-    );
-    let recovered = 0;
-    for (const record of candidates) {
-      if (recovered >= limit) break;
-      try {
-        const warehouseNotifications = await this.store.listNotifications({
-          recordId: record.recordId,
-          kind: 'warehouse_inbound',
-        });
-        const receiveCommand = warehouseNotifications.length
-          ? null
-          : await this.store.findCommand(`receive:${record.recordId}`);
-        if (!warehouseNotifications.length && !receiveCommand) continue;
-
-        const completionRecipientsRead = includePurchaseRecipients
-          ? this.resolveCompletionRecipients(record.requesterOpenId,record).catch(
-              (error) => {
-                this.logger.warn(
-                  `采购完成补偿收件人解析失败：${errorMessage(error)}`,
-                );
-                return [] as string[];
-              },
-            )
-          : Promise.resolve([] as string[]);
-        const [
-          inboundRecipients,
-          completionRecipients,
-          existingInbound,
-          existingPurchase,
-        ] = await Promise.all([
-          this.resolveInboundCompletionRecipients(record.building),
-          completionRecipientsRead,
-          this.store.listNotifications({
-            recordId: record.recordId,
-            kind: 'inventory_inbound_completed',
-          }),
-          this.store.listNotifications({
-            recordId: record.recordId,
-            kind: 'purchase_completed',
-          }),
-        ]);
-        const knownInboundRecipients = new Set(
-          existingInbound.map((notification) => notification.recipientOpenId),
-        );
-        const legacyPurchaseRecipients = new Set(
-          existingPurchase.map((notification) => notification.recipientOpenId),
-        );
-        const inputs: PurchaseWorkflowNotificationInput[] = [
-          ...new Set([
-            ...inboundRecipients.recipientOpenIds,
-            ...completionRecipients.filter(
-              (recipientOpenId) =>
-                !legacyPurchaseRecipients.has(recipientOpenId),
-            ),
-          ]),
-        ]
-          .filter(
-            (recipientOpenId) => !knownInboundRecipients.has(recipientOpenId),
-          )
-          .slice(0, limit - recovered)
-          .map((recipientOpenId) => ({
-            businessEventId: `inventory-inbound-completed:${record.recordId}`,
-            recordId: record.recordId,
-            recipientOpenId,
-            kind: 'inventory_inbound_completed',
-          }));
-
-        if (!inputs.length) continue;
-        const results = await this.store.enqueueNotifications(inputs);
-        recovered += results.filter(
-          (enqueueResult) => enqueueResult.enqueued,
-        ).length;
-      } catch (error) {
-        result.failed += 1;
-        result.errors.push(
-          `${record.recordId}: 采购完成通知补偿失败: ${errorMessage(error)}`,
-        );
-      }
-    }
-    return recovered;
-  }
-
   private async resolveCompletionRecipients(
     requesterOpenId: string,
     scope?:Pick<PurchaseWorkflowRecord,'building'|'specialty'>,
@@ -1520,15 +1380,17 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       throw new ConflictException('采购记录尚未完成入库');
     }
 
+    const snapshot = inboundCompletionSnapshot(await this.store.listNotifications({ recordId: notification.recordId }),
+      notification.recordId, 'inventory_inbound_completed');
+    if (snapshot.sealed) {
+      await this.store.completeInboundCompletedResolutionAndEnqueueNotifications(notification.key, notification.claimToken,
+        snapshot.notifications.map(entry => ({ businessEventId: entry.businessEventId, recordId: entry.recordId,
+          recipientOpenId: entry.recipientOpenId, kind: entry.kind, ...(entry.cardContext ? { cardContext: entry.cardContext } : {}) })), now);
+      return;
+    }
+
     const completionRecipientsRead = this.isEnabled()
-      ? this.resolveCompletionRecipients(record.requesterOpenId,record).catch(
-          (error) => {
-            this.logger.warn(
-              `采购完成通知收件人解析失败：${errorMessage(error)}`,
-            );
-            return [] as string[];
-          },
-        )
+      ? this.resolveCompletionRecipients(record.requesterOpenId,record)
       : Promise.resolve([] as string[]);
     const [inboundRecipients, completionRecipients] = await Promise.all([
       this.resolveInboundCompletionRecipients(record.building),
@@ -1578,6 +1440,14 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     );
     if (context.movement.recordId !== notification.recordId) {
       throw new ConflictException('手工入库通知快照与入库记录不匹配');
+    }
+    const snapshot = inboundCompletionSnapshot(await this.store.listNotifications({ recordId: notification.recordId }),
+      notification.recordId, 'manual_inventory_inbound_completed');
+    if (snapshot.sealed) {
+      await this.store.completeInboundCompletedResolutionAndEnqueueNotifications(notification.key, notification.claimToken,
+        snapshot.notifications.map(entry => ({ businessEventId: entry.businessEventId, recordId: entry.recordId,
+          recipientOpenId: entry.recipientOpenId, kind: entry.kind, cardContext: entry.cardContext })), now);
+      return;
     }
     const inboundRecipients = await this.resolveInboundCompletionRecipients(
       context.movement.building,
@@ -1639,6 +1509,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
         throw new ConflictException('手工入库完成通知任务不存在');
       }
       onNotificationUpdated?.(sending);
+      if (sending.status === 'manual_reconciliation') throw new ConflictException(sending.lastError);
       const messageId = await this.gateway.sendInteractiveCard(
         notification.recipientOpenId,
         buildManualInventoryInboundCompletedCard(context.movement),
@@ -1698,6 +1569,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
         : await this.store.markInboundCompletedSendStarted(notification.key, notification.claimToken, now);
       if (!sending) throw new ConflictException('待入库提醒投递任务不存在');
       onNotificationUpdated?.(sending);
+      if (sending.status === 'manual_reconciliation') throw new ConflictException(sending.lastError);
       const messageId = await this.gateway.sendInteractiveCard(
         notification.recipientOpenId,
         card,
@@ -1774,6 +1646,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
         throw new ConflictException('入库完成通知任务不存在');
       }
       onNotificationUpdated?.(sending);
+      if (sending.status === 'manual_reconciliation') throw new ConflictException(sending.lastError);
       const messageId = context?.batchId
         ? await this.requireBatchCardService().upsert('inbound', context.batchId, notification.recipientOpenId, {
             id: record.recordId,
@@ -1829,6 +1702,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     error: unknown,
     now: Date,
   ): Promise<void> {
+    if (notification.status === 'manual_reconciliation' || notification.sendOutcome === 'manual_reconciliation') return;
     if (notification.kind === 'warehouse_inbound' && notification.sendOutcome === 'unattempted' && error instanceof ForbiddenException) {
       await this.store.failNotification(notification.key, notification.claimToken, error, now);
       return;

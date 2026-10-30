@@ -276,6 +276,8 @@ describe('PurchaseManagerApprovalService', () => {
     process.env = originalEnv;
   });
 
+  afterEach(() => jest.restoreAllMocks());
+
   it('returns a receipt navigation card without patching before the callback is acknowledged', async () => {
     const { service, gateway, store } = harness();
     const card = { schema: '2.0', body: { elements: [] } };
@@ -420,10 +422,12 @@ describe('PurchaseManagerApprovalService', () => {
   });
 
   it('anchors the initial send before I/O and atomically registers the returned message', async () => {
+    let elapsedClock = 1_000;
+    jest.spyOn(Date, 'now').mockImplementation(() => elapsedClock);
     const { service, gateway, store } = harness();
     const task = notification();
     store.takeNextManagerApprovalNotification.mockResolvedValueOnce(task);
-    gateway.getExecutionRecordAsApp.mockResolvedValue(record());
+    gateway.getExecutionRecordAsApp.mockImplementation(async () => { elapsedClock += 20; return record(); });
     store.markManagerApprovalSendStarted.mockImplementation(
       async (_key, _token, context) => ({
         ...task,
@@ -444,7 +448,7 @@ describe('PurchaseManagerApprovalService', () => {
       task.key,
       task.claimToken,
       expect.any(String),
-      new Date('2026-07-31T02:00:02.000Z'),
+      new Date('2026-07-31T02:00:02.020Z'),
     );
     const context = store.markManagerApprovalSendStarted.mock.calls[0]?.[2];
     expect(parsePurchaseManagerApprovalCardContext(context)).toMatchObject({
@@ -1198,6 +1202,7 @@ describe('PurchaseManagerApprovalService', () => {
   });
 
   it('sends a stable-UUID replacement after a confirmed permanent reopened-card error and atomically rebinds it', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-31T05:20:01.000Z'));
     const { service, gateway, store } = harness();
     const task = notification({
       businessEventId: 'manager_approval_reopened:manager-event-1',

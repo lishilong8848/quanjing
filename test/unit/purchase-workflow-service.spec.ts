@@ -1923,10 +1923,10 @@ describe('PurchaseWorkflowService', () => {
     await service.runPendingTasks(20, now);
     await service.runPendingTasks(20, new Date(now.getTime() + 5_000));
 
-    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(2);
+    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(1);
 
     await service.runPendingTasks(20, new Date(now.getTime() + 60_000));
-    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(4);
+    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(2);
   });
 
   it('scans past complete records to recover a missing approval request beyond the first twenty', async () => {
@@ -3000,7 +3000,7 @@ describe('PurchaseWorkflowService', () => {
     expect(gateway.resolveInboundResponsibleUsersAsApp).not.toHaveBeenCalled();
   });
 
-  it('queues one enriched success card per cached warehouse recipient immediately', async () => {
+  it('queues one enriched durable resolution before resolving the complete recipient snapshot', async () => {
     const gateway = {
       getCachedInboundCompletionRecipients: jest
         .fn()
@@ -3024,24 +3024,21 @@ describe('PurchaseWorkflowService', () => {
         'rec_execution_1',
         manualMovementResult().movement,
       ),
-    ).resolves.toBe(3);
-    expect(gateway.getCachedInboundCompletionRecipients).toHaveBeenCalledWith(
-      'H楼',
-    );
-    expect(store.enqueueNotifications).toHaveBeenNthCalledWith(
-      2,
-      ['ou_responsible', 'ou_manager'].map((recipientOpenId) => ({
-        businessEventId: 'inventory-inbound-completed:rec_execution_1',
+    ).resolves.toBe(1);
+    expect(gateway.getCachedInboundCompletionRecipients).not.toHaveBeenCalled();
+    expect(store.enqueueNotifications).toHaveBeenCalledTimes(1);
+    expect(store.enqueueNotifications).toHaveBeenCalledWith([
+      expect.objectContaining({
         recordId: 'rec_execution_1',
-        recipientOpenId,
-        kind: 'inventory_inbound_completed',
+        recipientOpenId: 'system',
+        kind: 'inventory_inbound_completed_resolution',
         cardContext: expect.stringContaining('H-2F-226储存间01-0F'),
-      })),
-    );
+      }),
+    ]);
     expect(gateway.getExecutionRecordAsApp).not.toHaveBeenCalled();
   });
 
-  it('does not duplicate cached success cards when completion is enqueued again', async () => {
+  it('does not duplicate the durable recipient resolution when completion is enqueued again', async () => {
     const ledgerPath = join(
       tmpdir(),
       `purchase-completion-cache-${randomUUID()}.json`,
@@ -3067,10 +3064,9 @@ describe('PurchaseWorkflowService', () => {
         recordId: 'rec_execution_1',
         kind: 'inventory_inbound_completed',
       });
-      expect(cards.map((entry) => entry.recipientOpenId).sort()).toEqual([
-        'ou_manager',
-        'ou_responsible',
-      ]);
+      expect(cards).toEqual([]);
+      expect(await store.listNotifications({ kind: 'inventory_inbound_completed_resolution' })).toHaveLength(1);
+      expect(gateway.getCachedInboundCompletionRecipients).not.toHaveBeenCalled();
     } finally {
       await store.onModuleDestroy();
       rmSync(ledgerPath, { force: true });
@@ -3250,6 +3246,7 @@ describe('PurchaseWorkflowService', () => {
       notifications: [],
     });
     const store = {
+      listNotifications: jest.fn().mockResolvedValue([]),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(resolution),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3330,6 +3327,7 @@ describe('PurchaseWorkflowService', () => {
     };
     const completeResolution = jest.fn();
     const store = {
+      listNotifications: jest.fn().mockResolvedValue([]),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(resolution),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3382,6 +3380,7 @@ describe('PurchaseWorkflowService', () => {
     };
     const completeResolution = jest.fn();
     const store = {
+      listNotifications: jest.fn().mockResolvedValue([]),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(resolution),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3434,6 +3433,7 @@ describe('PurchaseWorkflowService', () => {
     };
     const completeResolution = jest.fn();
     const store = {
+      listNotifications: jest.fn().mockResolvedValue([]),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(resolution),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3542,7 +3542,7 @@ describe('PurchaseWorkflowService', () => {
     expect(store.failNotification).not.toHaveBeenCalled();
   });
 
-  it('uses only the batch capacity left after mandatory work for completion recovery while disabled', async () => {
+  it('processes accepted mandatory work without scanning historical completions while disabled', async () => {
     process.env.PURCHASE_WORKFLOW_PROGRAM_ENABLED = 'false';
     const now = new Date('2026-08-25T01:00:00.000Z');
     const mandatoryKinds = [
@@ -3631,7 +3631,7 @@ describe('PurchaseWorkflowService', () => {
     await expect(service.runPendingTasks(2, now)).resolves.toMatchObject({
       processed: 1,
       failed: 0,
-      recoveredCompletionNotifications: 1,
+      recoveredCompletionNotifications: 0,
     });
     await expect(
       service.runPendingTasks(2, new Date(now.getTime() + 5_000)),
@@ -3646,22 +3646,14 @@ describe('PurchaseWorkflowService', () => {
       mandatoryKinds,
     );
     expect(store.takeNextCardAction).not.toHaveBeenCalled();
-    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(1);
+    expect(gateway.listExecutionRecordsAsApp).not.toHaveBeenCalled();
     expect(gateway.resolvePurchaseAdminAsApp).not.toHaveBeenCalled();
     expect(gateway.resolveConfiguredApproversAsApp).not.toHaveBeenCalled();
-    expect(store.enqueueNotifications).toHaveBeenCalledTimes(1);
-    expect(store.enqueueNotifications).toHaveBeenCalledWith([
-      {
-        businessEventId:
-          'inventory-inbound-completed:rec_completed_missing_responsibility_card',
-        recordId: 'rec_completed_missing_responsibility_card',
-        recipientOpenId: 'ou_inbound_responsible_1',
-        kind: 'inventory_inbound_completed',
-      },
-    ]);
+    expect(gateway.resolveInboundResponsibleUsersAsApp).not.toHaveBeenCalled();
+    expect(store.enqueueNotifications).not.toHaveBeenCalled();
   });
 
-  it('recovers purchase and inbound responsibility notifications through one throttled batch while enabled', async () => {
+  it('does not create current-recipient completion notifications from historical completed rows', async () => {
     const now = new Date('2026-08-25T01:00:00.000Z');
     const completedRecord = record({
       recordId: 'rec_completed_enabled_recovery',
@@ -3722,41 +3714,14 @@ describe('PurchaseWorkflowService', () => {
       store as never,
     );
 
-    await expect(service.runPendingTasks(3, now)).resolves.toMatchObject({
-      recoveredCompletionNotifications: 3,
-      failed: 0,
-    });
-    await expect(
-      service.runPendingTasks(3, new Date(now.getTime() + 5_000)),
-    ).resolves.toMatchObject({
+    await expect(service.runPendingTasks(20)).resolves.toMatchObject({
       recoveredCompletionNotifications: 0,
       failed: 0,
     });
-    expect(store.enqueueNotifications).toHaveBeenCalledTimes(1);
-    expect(store.enqueueNotifications).toHaveBeenCalledWith([
-      {
-        businessEventId:
-          'inventory-inbound-completed:rec_completed_enabled_recovery',
-        recordId: 'rec_completed_enabled_recovery',
-        recipientOpenId: 'ou_inbound_responsible',
-        kind: 'inventory_inbound_completed',
-      },
-      {
-        businessEventId:
-          'inventory-inbound-completed:rec_completed_enabled_recovery',
-        recordId: 'rec_completed_enabled_recovery',
-        recipientOpenId: 'ou_requester',
-        kind: 'inventory_inbound_completed',
-      },
-      {
-        businessEventId:
-          'inventory-inbound-completed:rec_completed_enabled_recovery',
-        recordId: 'rec_completed_enabled_recovery',
-        recipientOpenId: 'ou_purchase_admin',
-        kind: 'inventory_inbound_completed',
-      },
-    ]);
-    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(4);
+    expect(store.enqueueNotifications).not.toHaveBeenCalled();
+    expect(gateway.resolveInboundResponsibleUsersAsApp).not.toHaveBeenCalled();
+    expect(gateway.resolveInboundManagerNotificationUsersAsApp).not.toHaveBeenCalled();
+    expect(gateway.resolvePurchaseAdminAsApp).not.toHaveBeenCalled();
   });
 
   it('resolves completion recipients in the worker and atomically derives one notification per openId', async () => {
@@ -3916,7 +3881,7 @@ describe('PurchaseWorkflowService', () => {
     ['workflow disabled', 'false', false],
     ['purchase recipient config unavailable', 'true', true],
   ] as const)(
-    'still resolves inbound responsibility notifications when %s',
+    'freezes only a complete enabled recipient set when %s',
     async (_scenario, workflowEnabled, shouldResolvePurchaseRecipients) => {
       process.env.PURCHASE_WORKFLOW_PROGRAM_ENABLED = workflowEnabled;
       const resolution = {
@@ -3983,6 +3948,14 @@ describe('PurchaseWorkflowService', () => {
         store as never,
       );
 
+      if (shouldResolvePurchaseRecipients) {
+        await expect(service.runPendingTasks(1)).resolves.toMatchObject({ processed: 0, failed: 1 });
+        expect(completeResolution).not.toHaveBeenCalled();
+        expect(store.rescheduleNotification).toHaveBeenCalledWith(resolution.key, resolution.claimToken,
+          expect.any(ServiceUnavailableException), expect.any(Date), expect.any(Date));
+        expect(store.failNotification).not.toHaveBeenCalled();
+        return;
+      }
       await expect(service.runPendingTasks(1)).resolves.toMatchObject({
         processed: 1,
         failed: 0,
@@ -4480,7 +4453,7 @@ describe('PurchaseWorkflowService', () => {
     },
   );
 
-  it('recovers only one notification from proven completed records at the batch limit', async () => {
+  it('does not backfill new completion recipients merely because a historic receive command or warehouse notice exists', async () => {
     const records = [
       record({
         recordId: 'rec_complete_recipients',
@@ -4578,26 +4551,17 @@ describe('PurchaseWorkflowService', () => {
       store as never,
     );
 
-    await expect(service.runPendingTasks(1)).resolves.toMatchObject({
-      recoveredCompletionNotifications: 1,
+    await expect(service.runPendingTasks(20)).resolves.toMatchObject({
+      recoveredCompletionNotifications: 0,
       failed: 0,
     });
-    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(3);
-    expect(gateway.resolvePurchaseAdminAsApp).toHaveBeenCalled();
-    expect(gateway.resolveInboundResponsibleUsersAsApp).toHaveBeenCalledWith(
-      'H楼',
-    );
-    expect(store.enqueueNotifications).toHaveBeenCalledWith([
-      {
-        businessEventId: 'inventory-inbound-completed:rec_missing_completion',
-        recordId: 'rec_missing_completion',
-        recipientOpenId: 'ou_requester',
-        kind: 'inventory_inbound_completed',
-      },
-    ]);
+    expect(store.enqueueNotifications).not.toHaveBeenCalled();
+    expect(gateway.resolveInboundResponsibleUsersAsApp).not.toHaveBeenCalled();
+    expect(gateway.resolveInboundManagerNotificationUsersAsApp).not.toHaveBeenCalled();
+    expect(gateway.resolvePurchaseAdminAsApp).not.toHaveBeenCalled();
   });
 
-  it('recovers missing historical responsibility and manager completion cards without duplicates', async () => {
+  it('does not expand historical completion recipients to current warehouse responsibility and manager assignments', async () => {
     const completedRecord = record({
       recordId: 'rec_missing_inbound_responsible_card',
       status: '物品签收已入库',
@@ -4702,42 +4666,16 @@ describe('PurchaseWorkflowService', () => {
     );
 
     await expect(service.runPendingTasks(20)).resolves.toMatchObject({
-      recoveredCompletionNotifications: 3,
+      recoveredCompletionNotifications: 0,
       failed: 0,
     });
-    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(3);
-    expect(gateway.resolveInboundResponsibleUsersAsApp).toHaveBeenCalledWith(
-      'H楼',
-    );
-    expect(
-      gateway.resolveInboundManagerNotificationUsersAsApp,
-    ).toHaveBeenCalledWith('H楼');
-    expect(store.enqueueNotifications).toHaveBeenCalledWith([
-      {
-        businessEventId:
-          'inventory-inbound-completed:rec_missing_inbound_responsible_card',
-        recordId: 'rec_missing_inbound_responsible_card',
-        recipientOpenId: 'ou_inbound_responsible_2',
-        kind: 'inventory_inbound_completed',
-      },
-      {
-        businessEventId:
-          'inventory-inbound-completed:rec_missing_inbound_responsible_card',
-        recordId: 'rec_missing_inbound_responsible_card',
-        recipientOpenId: 'ou_inbound_manager',
-        kind: 'inventory_inbound_completed',
-      },
-      {
-        businessEventId:
-          'inventory-inbound-completed:rec_missing_inbound_responsible_card',
-        recordId: 'rec_missing_inbound_responsible_card',
-        recipientOpenId: 'ou_requester',
-        kind: 'inventory_inbound_completed',
-      },
-    ]);
+    expect(store.enqueueNotifications).not.toHaveBeenCalled();
+    expect(gateway.resolveInboundResponsibleUsersAsApp).not.toHaveBeenCalled();
+    expect(gateway.resolveInboundManagerNotificationUsersAsApp).not.toHaveBeenCalled();
+    expect(gateway.resolvePurchaseAdminAsApp).not.toHaveBeenCalled();
   });
 
-  it('continues responsibility recovery when purchase recipient config fails for one completed record', async () => {
+  it('does not resolve current completion recipients for historical completed rows even after configuration changes', async () => {
     const records = [
       record({
         recordId: 'rec_completion_bad',
@@ -4797,42 +4735,13 @@ describe('PurchaseWorkflowService', () => {
     );
 
     await expect(service.runPendingTasks(20)).resolves.toMatchObject({
-      recoveredCompletionNotifications: 4,
+      recoveredCompletionNotifications: 0,
       failed: 0,
-      errors: [],
     });
-    expect(gateway.listExecutionRecordsAsApp).toHaveBeenCalledTimes(3);
-    expect(gateway.resolveInboundResponsibleUsersAsApp).toHaveBeenCalledTimes(
-      2,
-    );
-    expect(store.enqueueNotifications).toHaveBeenNthCalledWith(1, [
-      {
-        businessEventId: 'inventory-inbound-completed:rec_completion_bad',
-        recordId: 'rec_completion_bad',
-        recipientOpenId: 'ou_inbound_responsible',
-        kind: 'inventory_inbound_completed',
-      },
-    ]);
-    expect(store.enqueueNotifications).toHaveBeenNthCalledWith(2, [
-      {
-        businessEventId: 'inventory-inbound-completed:rec_completion_good',
-        recordId: 'rec_completion_good',
-        recipientOpenId: 'ou_inbound_responsible',
-        kind: 'inventory_inbound_completed',
-      },
-      {
-        businessEventId: 'inventory-inbound-completed:rec_completion_good',
-        recordId: 'rec_completion_good',
-        recipientOpenId: 'ou_requester',
-        kind: 'inventory_inbound_completed',
-      },
-      {
-        businessEventId: 'inventory-inbound-completed:rec_completion_good',
-        recordId: 'rec_completion_good',
-        recipientOpenId: 'ou_purchase_admin',
-        kind: 'inventory_inbound_completed',
-      },
-    ]);
+    expect(store.enqueueNotifications).not.toHaveBeenCalled();
+    expect(gateway.resolveInboundResponsibleUsersAsApp).not.toHaveBeenCalled();
+    expect(gateway.resolveInboundManagerNotificationUsersAsApp).not.toHaveBeenCalled();
+    expect(gateway.resolvePurchaseAdminAsApp).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -32,10 +32,11 @@ describe('personal password and permission transport boundaries', () => {
   it('preserves backend validation errors, and personal reads never accept someone else account id', async () => {
     privateFetch.mockResolvedValueOnce(response({ message: '两次密码不一致' }, 400));
     await expect(changePersonalPassword({ currentPassword: 'synthetic', newPassword: 'synthetic', confirmPassword: 'synthetic', clientMutationId: 'synthetic-id' })).rejects.toThrow('两次密码不一致');
-    (axiosForBackend as jest.Mock).mockResolvedValue({ status: 200, data: [] });
+    privateFetch.mockResolvedValueOnce(response([])).mockResolvedValueOnce(response({ displayName: '合成人员' }));
     await listOwnPermissionRequests(); await getPersonalProfile();
-    expect(axiosForBackend).toHaveBeenNthCalledWith(1, { url: '/api/access/personal/permission-requests', method: 'GET', timeout: 15_000 });
-    expect(axiosForBackend).toHaveBeenNthCalledWith(2, { url: '/api/access/personal/profile', method: 'GET', timeout: 15_000 });
+    expect(privateFetch).toHaveBeenNthCalledWith(2, '/api/access/personal/permission-requests', expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }));
+    expect(privateFetch).toHaveBeenNthCalledWith(3, '/api/access/personal/profile', expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }));
+    expect(axiosForBackend).not.toHaveBeenCalled();
   });
   it('keeps password timeouts uncertain at 60 seconds without automatic retries or SDK logs', async () => {
     jest.useFakeTimers();
@@ -54,10 +55,11 @@ describe('personal password and permission transport boundaries', () => {
     expect(axiosForBackend).not.toHaveBeenCalled();
   });
   it('passes the specific request version to administrator review, never an authorization grant', async () => {
-    (axiosForBackend as jest.Mock).mockResolvedValue({ status: 200, data: {} });
+    privateFetch.mockResolvedValueOnce(response({ id: 'synthetic-request', version: 5 }));
     const body = { clientMutationId: 'synthetic-id', requestId: 'synthetic-request', expectedRequestVersion: 4, decision: 'approve' as const };
     await reviewPermissionRequest(body);
-    expect(axiosForBackend).toHaveBeenCalledWith({ url: '/api/access/configuration/permission-requests', method: 'POST', data: body, timeout: 15_000 });
+    expect(privateFetch).toHaveBeenCalledWith('/api/access/configuration/permission-requests', expect.objectContaining({ method: 'POST', body: JSON.stringify(body), credentials: 'same-origin' }));
+    expect(axiosForBackend).not.toHaveBeenCalled();
   });
   it('allows a fresh named-person login 60 seconds without retrying automatically', async () => {
     jest.useFakeTimers();

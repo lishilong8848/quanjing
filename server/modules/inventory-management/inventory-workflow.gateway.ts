@@ -1,3 +1,4 @@
+import { observedCardPost } from '../../common/feishu-card-copy/transport';
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import { getFeishuAuthPayload } from '@server/common/config/external-services.config';
@@ -771,7 +772,7 @@ export class InventoryWorkflowGateway {
       throw new Error('发送飞书卡片失败：接收人 OpenID 无效');
     }
     const token = await this.getTenantAccessToken();
-    const response = await this.httpService.axiosRef.post(
+    const response = await observedCardPost(this.httpService.axiosRef, 'inventory',
       'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
       {
         receive_id: receiverOpenId,

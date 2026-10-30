@@ -62,7 +62,7 @@ function words(node: ReactNode): string {
 }
 const button = (tree: ReactNode, label: string) => nodes(tree).find(node => typeof node.props.onClick === 'function' && words(node.props.children) === label)!;
 const field = (tree: ReactNode, label: string) => nodes(tree).find(node => node.props['aria-label'] === label)!;
-const editor = (tree: ReactNode) => nodes(tree).find(node => node.type === PermissionEditor)!;
+const editor = (tree: ReactNode) => nodes(tree).find(node => node.type === PermissionEditor && node.props.label === undefined)!;
 const render = <T,>(factory: () => T): T => { mockCursor = 0; return factory(); };
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 function enableMatrixEffects() {

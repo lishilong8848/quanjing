@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { normalizePurchaseComparisonBatchEvidence, normalizePurchaseComparisonCardEvidence, withPurchaseComparisonCardEvidence, type PurchaseComparisonCardEvidence } from './purchase-comparison-card-evidence';
 import { isBuildingSelfPurchaseAllowed } from './purchase-procurement-method-policy';
 
 const BATCH_ID_PATTERN = /^[A-Za-z0-9_-]{8,160}$/u;
@@ -108,6 +109,7 @@ export interface PurchaseManagerBatchApprovalCardInput {
   expectedDeliveryAt: string | null;
   createdAt: string | null;
   items: PurchaseManagerBatchApprovalItemInput[];
+  comparisonEvidence?: PurchaseComparisonCardEvidence[];
 }
 
 export interface PurchaseManagerBatchApprovalResolution {
@@ -123,7 +125,7 @@ export function buildPurchaseManagerBatchApprovalCard(
   inputValue: PurchaseManagerBatchApprovalCardInput,
   options: { errorMessage?: string } = {},
 ): Record<string, unknown> {
-  const input = canonicalizeInput(inputValue);
+  const input = canonicalizeCardInput(inputValue);
   const pendingCount = input.items.filter(
     (item) => item.status === 'pending',
   ).length;
@@ -156,6 +158,7 @@ export function buildPurchaseManagerBatchApprovalCard(
       ),
       hintBlock('批量按钮只处理仍待审批的物品，已驳回项不会被覆盖。'),
     ],
+    input,
   );
 }
 
@@ -164,7 +167,7 @@ export function buildPurchaseManagerBatchRejectEditorCard(
   selectedRecordIdValue: string,
   options: { rejectionReason?: string; errorMessage?: string } = {},
 ): Record<string, unknown> {
-  const input = canonicalizeInput(inputValue);
+  const input = canonicalizeCardInput(inputValue);
   const selectedRecordId = assertRecordId(selectedRecordIdValue);
   const selectedIndex = input.items.findIndex(
     (item) => item.executionRecordId === selectedRecordId,
@@ -227,13 +230,13 @@ export function buildPurchaseManagerBatchRejectEditorCard(
         },
       ],
     },
-  ]);
+  ], input);
 }
 
 export function buildPurchaseManagerBatchPendingCard(
   inputValue: PurchaseManagerBatchApprovalCardInput,
 ): Record<string, unknown> {
-  const input = canonicalizeInput(inputValue);
+  const input = canonicalizeCardInput(inputValue);
   return cardShell('yellow', '采购审批同步中', '同步中', 'yellow', [
     summaryBlock(input),
     statusSummary(batchStatusText(input.items)),
@@ -241,22 +244,22 @@ export function buildPurchaseManagerBatchPendingCard(
       itemBlock(input, item, index, 'readonly'),
     ),
     lockedApprovalActions(input.building),
-  ]);
+  ], input);
 }
 
 export function buildPurchaseManagerBatchHandoverCard(inputValue: PurchaseManagerBatchApprovalCardInput): Record<string, unknown> {
-  const input = canonicalizeInput(inputValue);
+  const input = canonicalizeCardInput(inputValue);
   return cardShell('orange', '采购审批已转交', '已转交', 'orange', [
     summaryBlock(input), statusSummary('未办结事项已转交，本卡不再办理'),
     ...input.items.map((item, index) => itemBlock(input, item, index, 'readonly')), lockedApprovalActions(input.building),
-  ]);
+  ], input);
 }
 
 export function buildResolvedPurchaseManagerBatchApprovalCard(
   inputValue: PurchaseManagerBatchApprovalCardInput,
   resolution: PurchaseManagerBatchApprovalResolution,
 ): Record<string, unknown> {
-  const input = canonicalizeInput(inputValue);
+  const input = canonicalizeCardInput(inputValue);
   const approved = input.items.filter(
     (item) => item.status === 'approved',
   ).length;
@@ -301,7 +304,7 @@ export function buildResolvedPurchaseManagerBatchApprovalCard(
       ],
     ]),
     lockedApprovalActions(input.building),
-  ]);
+  ], input);
 }
 
 export function formatPurchaseBatchCardDate(
@@ -372,7 +375,7 @@ export function buildPurchaseManagerBatchManualReconciliationCard(
   inputValue: PurchaseManagerBatchApprovalCardInput,
   message = '部分物品状态无法自动确认，请联系管理员核对。',
 ): Record<string, unknown> {
-  const input = canonicalizeInput(inputValue);
+  const input = canonicalizeCardInput(inputValue);
   return cardShell('orange', '采购审批需人工核对', '需核对', 'orange', [
     summaryBlock(input),
     statusSummary(normalizeBusinessText(message)),
@@ -380,17 +383,32 @@ export function buildPurchaseManagerBatchManualReconciliationCard(
       itemBlock(input, item, index, 'terminal'),
     ),
     lockedApprovalActions(input.building),
-  ]);
+  ], input);
 }
 
 export function serializePurchaseManagerBatchApprovalCardContext(
   input: PurchaseManagerBatchApprovalCardInput,
 ): string {
-  const serialized = JSON.stringify(canonicalizeInput(input));
-  if (Buffer.byteLength(serialized, 'utf8') > CONTEXT_MAX_BYTES) {
-    throw invalidContext();
+  const canonical = canonicalizeInput(input);
+  const snapshot = (evidence = canonical.comparisonEvidence) => JSON.stringify({ ...canonical, ...(evidence !== undefined
+    ? { comparisonEvidence: compactComparisonEvidence(evidence) } : {}) });
+  const complete = snapshot();
+  if (Buffer.byteLength(complete, 'utf8') <= CONTEXT_MAX_BYTES) return complete;
+  if (canonical.comparisonEvidence) {
+    // Preserve complete names whenever they fit. Only the display names shrink;
+    // each actual record link, attachment position and verified image key stays.
+    for (const limit of [120, 80, 48, 24, 12, 8]) {
+      const shortened = canonical.comparisonEvidence.map(entry => ({ ...entry,
+        attachments: entry.attachments.map(attachment => {
+          const characters = Array.from(attachment.name);
+          return { ...attachment, name: characters.length > limit ? `${characters.slice(0, limit - 1).join('')}…` : attachment.name };
+        }),
+      }));
+      const serialized = snapshot(shortened);
+      if (Buffer.byteLength(serialized, 'utf8') <= CONTEXT_MAX_BYTES) return serialized;
+    }
   }
-  return serialized;
+  throw invalidContext();
 }
 
 export function parsePurchaseManagerBatchApprovalCardContext(
@@ -409,7 +427,7 @@ export function parsePurchaseManagerBatchApprovalCardContext(
     throw invalidContext();
   }
   if (!isPlainObject(parsed)) throw invalidContext();
-  if (!hasExactKeys(parsed, CONTEXT_KEYS)) throw invalidContext();
+  if (!hasExactKeys(parsed, [...CONTEXT_KEYS, ...(Object.hasOwn(parsed, 'comparisonEvidence') ? ['comparisonEvidence'] : [])])) throw invalidContext();
   if (!Array.isArray(parsed.items)) throw invalidContext();
   for (const item of parsed.items) {
     if (
@@ -426,14 +444,51 @@ export function parsePurchaseManagerBatchApprovalCardContext(
     }
   }
   try {
+    const expanded = Object.hasOwn(parsed, 'comparisonEvidence')
+      ? { ...parsed, comparisonEvidence: expandComparisonEvidence(parsed.comparisonEvidence) } : parsed;
     const canonical = canonicalizeInput(
-      parsed as unknown as PurchaseManagerBatchApprovalCardInput,
+      expanded as unknown as PurchaseManagerBatchApprovalCardInput,
     );
-    if (JSON.stringify(canonical) !== value) throw invalidContext();
+    if (serializePurchaseManagerBatchApprovalCardContext(canonical) !== value) throw invalidContext();
     return canonical;
   } catch {
     throw invalidContext();
   }
+}
+
+function compactComparisonEvidence(entries: PurchaseComparisonCardEvidence[]): unknown[] {
+  const firstByAttachments = new Map<string, string>();
+  return entries.map(entry => {
+    const fingerprint = JSON.stringify(entry.attachments), earlier = firstByAttachments.get(fingerprint);
+    if (earlier) return { recordId: entry.recordId, recordUrl: entry.recordUrl, sameAttachmentsAs: earlier };
+    firstByAttachments.set(fingerprint, entry.recordId);
+    return entry;
+  });
+}
+
+function expandComparisonEvidence(value: unknown): PurchaseComparisonCardEvidence[] {
+  if (!Array.isArray(value) || value.length > MAX_BATCH_ITEMS) throw invalidContext();
+  const earlier = new Map<string, PurchaseComparisonCardEvidence>();
+  return value.map(raw => {
+    if (!isPlainObject(raw)) throw invalidContext();
+    let expanded: unknown = raw;
+    if (Object.hasOwn(raw, 'sameAttachmentsAs')) {
+      if (!hasExactKeys(raw, ['recordId', 'recordUrl', 'sameAttachmentsAs']) || typeof raw.sameAttachmentsAs !== 'string') throw invalidContext();
+      const source = earlier.get(raw.sameAttachmentsAs);
+      if (!source || raw.recordId === raw.sameAttachmentsAs) throw invalidContext();
+      expanded = { recordId: raw.recordId, recordUrl: raw.recordUrl, attachments: source.attachments };
+    }
+    const entry = normalizePurchaseComparisonCardEvidence(expanded);
+    if (earlier.has(entry.recordId)) throw invalidContext();
+    earlier.set(entry.recordId, entry);
+    return entry;
+  });
+}
+
+function canonicalizeCardInput(value: PurchaseManagerBatchApprovalCardInput): PurchaseManagerBatchApprovalCardInput {
+  return value?.comparisonEvidence !== undefined
+    ? parsePurchaseManagerBatchApprovalCardContext(serializePurchaseManagerBatchApprovalCardContext(value))
+    : canonicalizeInput(value);
 }
 
 function canonicalizeInput(
@@ -525,6 +580,10 @@ function canonicalizeInput(
         ? null
         : normalizeRequiredText(value.createdAt, BUSINESS_TEXT_LIMIT),
     items,
+    ...(value.comparisonEvidence !== undefined ? {
+      comparisonEvidence: normalizePurchaseComparisonBatchEvidence(value.comparisonEvidence,
+        items.filter(item => item.procurementForm === '三方比价').map(item => item.executionRecordId)),
+    } : {}),
   };
 }
 
@@ -534,8 +593,9 @@ function cardShell(
   tagText: string,
   tagColor: 'yellow' | 'red' | 'green' | 'orange',
   elements: Record<string, unknown>[],
+  input?: PurchaseManagerBatchApprovalCardInput,
 ): Record<string, unknown> {
-  return {
+  return withPurchaseComparisonCardEvidence({
     schema: '2.0',
     config: { update_multi: true, enable_forward: false },
     header: {
@@ -554,7 +614,7 @@ function cardShell(
       padding: '12px 12px 20px 12px',
       elements,
     },
-  };
+  }, input?.comparisonEvidence || [], Object.fromEntries((input?.items || []).map((item, index) => [item.executionRecordId, `第 ${index + 1} 项`])));
 }
 
 function summaryBlock(

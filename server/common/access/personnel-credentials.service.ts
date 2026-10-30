@@ -51,7 +51,10 @@ export class PersonnelCredentialsService {
         if (!await this.matchesSource(password, record)) {
           this.rate(sourceKey, 40); this.rate(accountKey, 10); throw invalidLogin();
         }
-        const initial = isInitial(record);
+        // A shared personnel source may already hash its initial six-character
+        // password. Detect the verified credential, not just the storage format.
+        const initial = isInitial(record) || (isValidIdentityNumber(record.identityNumber) &&
+          safeEqual(password.trim().toUpperCase(), record.identityNumber.slice(-6)));
         let result = principal;
         let newHash = record.password;
         const pending = Object.entries(this.security.read().intents).find(([, item]) => item.accountId === current.id &&

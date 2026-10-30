@@ -21,6 +21,25 @@ export interface ReviewPersonnelPermissionRequest {
   comment?: string;
 }
 
+export interface UpdatePersonnelPermissionRequest {
+  clientMutationId: string;
+  requestId: string;
+  expectedRequestVersion: number;
+  reason: string;
+}
+export type CancelPersonnelPermissionRequest = Omit<UpdatePersonnelPermissionRequest, 'reason'>;
+export interface PersonnelRequestCapacity {
+  level: 'normal' | 'warning' | 'full';
+  bytes: number; maxBytes: number;
+  requests: number; maxRequests: number;
+  mutations: number; maxMutations: number;
+  auditEntries: number; maxAuditEntries: number;
+}
+export interface PersonnelPermissionRequestSummary {
+  total: number; pending: number; approved: number; rejected: number; cancelled: number;
+  capacity: PersonnelRequestCapacity;
+}
+
 export interface PersonnelPermissionRequest {
   id: string;
   version: number;
@@ -28,13 +47,16 @@ export interface PersonnelPermissionRequest {
   applicantName: string;
   permissions: RequestedPermission[];
   reason: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   createdAt: string;
   updatedAt: string;
   reviewerAccountId?: string;
   reviewerName?: string;
   comment?: string;
   verifiedConfigurationRevision?: number;
+  /** Read-only current permission check; does not imply approval duties or document-state eligibility. */
+  currentEffect?: 'current' | 'partial' | 'none' | 'unavailable';
+  currentEffectRevision?: number | null;
 }
 
 const localPages = new Set(createPermissionCatalog().pages.filter(page => page.kind !== 'external').map(page => page.path));

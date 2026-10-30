@@ -46,4 +46,26 @@ describe('personnel self-service HTTP boundaries', () => {
     expect(request.body.identityNumber).toBe('synthetic-identity');
     expect(request.body.invalidFields).toBe(true);
   });
+
+  it('returns only explicit suggested scopes and the current template display name',async()=>{
+    const effective={mode:'follow',templateId:'synthetic-template',templateVersion:2,baseline:{nativeRole:'guest',pages:[],rules:[]},overrides:{rules:[],allowPages:[],denyPages:[]}};
+    const scoped={...principal,buildings:['A楼'],specialties:['电气'],effectiveAuthorization:effective};
+    access.readSessionIdentity.mockReturnValue({principal:scoped,expiresAt:Date.now()+10000,principalFingerprint:'synthetic'});config.currentPrincipal.mockReturnValue(scoped);
+    config.authorizationRoles=jest.fn(()=>({roles:[{id:'synthetic-template',name:'合成角色'}]}));
+    expect(await controller.profile(req())).toMatchObject({authorizationSummary:{mode:'follow',templateName:'合成角色',nativeRole:'guest',scopeSource:'account'},suggestedScopes:{buildings:['A楼'],specialties:['电气']}});
+    access.readSessionIdentity.mockReturnValue({principal,expiresAt:Date.now()+10000,principalFingerprint:'synthetic'});config.currentPrincipal.mockReturnValue(principal);
+    expect((await controller.profile(req())).suggestedScopes).toEqual({buildings:[],specialties:[]});
+  });
+
+  it('rechecks the same session after password-capability loading before revealing the profile',async()=>{
+    credentials.profile.mockImplementationOnce(async()=>{config.currentPrincipal.mockReturnValue(undefined);return {canChangePassword:true,requiresPasswordChange:false};});
+    await expect(controller.profile(req())).rejects.toThrow('请先登录');
+  });
+  it('uses only the rechecked principal for identity, authorization and scope output',async()=>{
+    const effective={mode:'independent',baseline:{nativeRole:null,pages:[],rules:[]},overrides:{rules:[],allowPages:[],denyPages:[]}};
+    const updated={...principal,displayName:'更新后的合成名称',effectiveAuthorization:effective,buildings:['B楼']};
+    access.readSessionIdentity.mockReturnValueOnce({principal,expiresAt:Date.now()+10000,principalFingerprint:'old'}).mockReturnValueOnce({principal:updated,expiresAt:Date.now()+10000,principalFingerprint:'new'});
+    config.currentPrincipal.mockReturnValue(updated);
+    expect(await controller.profile(req())).toMatchObject({displayName:updated.displayName,effectiveAuthorization:effective,authorizationSummary:{mode:'independent',nativeRole:null},suggestedScopes:{buildings:['B楼']}});
+  });
 });

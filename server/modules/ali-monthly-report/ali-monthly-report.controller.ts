@@ -3,12 +3,16 @@ import {
   Body,
   Controller,
   Get,
+  Header,
+  ForbiddenException,
+  Optional,
   Param,
   Post,
   Query,
   Res,
+  Req,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import type {
   AliMonthlyReportBundleRequest,
   AliMonthlyReportConfigResponse,
@@ -23,6 +27,9 @@ import {
   PublicAccess,
 } from '../../common/access/unified-access.decorators';
 import { AliMonthlyReportService } from './ali-monthly-report.service';
+import type { SaveAliMonthlyReportEmailSettings } from '@shared/ali-monthly-report-email-settings';
+import { UnifiedAccessService } from '../../common/access/unified-access.service';
+import { readAccessCookie } from '../../common/access/unified-access.guard';
 
 type GeneratedFileDownload = {
   buffer: Buffer;
@@ -32,7 +39,39 @@ type GeneratedFileDownload = {
 
 @Controller('api/ali-monthly-report')
 export class AliMonthlyReportController {
-  constructor(private readonly service: AliMonthlyReportService) {}
+  constructor(private readonly service: AliMonthlyReportService, @Optional() private readonly access?: UnifiedAccessService) {}
+
+  @AdminOnly()
+  @Get('email-settings')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Vary', 'Cookie')
+  getEmailSettings(@Req() request: Request) {
+    this.assertEmailSettingsAdministrator(request);
+    return this.service.getEmailSettings();
+  }
+
+  @AdminOnly()
+  @Post('email-settings')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Vary', 'Cookie')
+  saveEmailSettings(@Req() request: Request, @Body() body: SaveAliMonthlyReportEmailSettings) {
+    this.assertEmailSettingsAdministrator(request, true);
+    return this.service.saveEmailSettings(body);
+  }
+
+  private assertEmailSettingsAdministrator(request: Request, write = false): void {
+    if (!this.access) throw new ForbiddenException('请使用管理员账号维护发件配置');
+    const principal = this.access.readSession(readAccessCookie(request.headers.cookie, this.access).value).principal;
+    if (principal.role !== 'admin' || principal.impersonation) throw new ForbiddenException('请返回管理员身份后维护发件配置');
+    if (write) {
+      let expected: string;
+      try { expected = process.env.PUBLIC_BASE_URL?.trim() ? new URL(process.env.PUBLIC_BASE_URL.trim()).origin : `${request.protocol}://${request.get('host')}`; }
+      catch { throw new ForbiddenException('发件配置必须由本站页面提交'); }
+      if (typeof request.headers.origin !== 'string' || request.headers.origin !== expected || request.headers['sec-fetch-site'] === 'cross-site') {
+        throw new ForbiddenException('发件配置必须由本站页面提交');
+      }
+    }
+  }
 
   @Get('config')
   async getConfig(): Promise<AliMonthlyReportConfigResponse> {

@@ -23,6 +23,8 @@ export interface PermissionRouteDefinition {
 
 /** Reviewed literal controller routes. No runtime prefix inference or implicit write permission. */
 export const PERMISSION_ROUTE_CLASSIFICATIONS: readonly PermissionRouteDefinition[] = [
+  {method:'GET',path:'/api/ali-monthly-report/email-settings',kind:'admin',protection:'native-administrator-email-settings-no-secret-response',source:'server/modules/ali-monthly-report/ali-monthly-report.controller.ts#getEmailSettings'},
+  {method:'POST',path:'/api/ali-monthly-report/email-settings',kind:'admin',protection:'native-administrator-same-origin-versioned-email-settings',source:'server/modules/ali-monthly-report/ali-monthly-report.controller.ts#saveEmailSettings'},
   {method:'GET',path:'/api/access/personal/archive',kind:'protocol',protection:'authenticated-self-stable-personnel-identity-only',source:'server/common/access/personnel-account.controller.ts#archive'},
   {method:'GET',path:'/api/access/personal/archive/photo',kind:'protocol',protection:'authenticated-self-stable-personnel-photo-only',source:'server/common/access/personnel-account.controller.ts#archivePhoto'},
   {method:'GET',path:'/api/access/personal/profile',kind:'protocol',protection:'authenticated-self-only',source:'server/common/access/personnel-account.controller.ts#profile'},
@@ -30,6 +32,17 @@ export const PERMISSION_ROUTE_CLASSIFICATIONS: readonly PermissionRouteDefinitio
   {method:'POST',path:'/api/access/personal/password/reset',kind:'protocol',protection:'fresh-personnel-identity-rate-limited-same-origin',source:'server/common/access/personnel-account.controller.ts#resetPassword'},
   {method:'GET',path:'/api/access/personal/permission-requests',kind:'protocol',protection:'authenticated-self-only',source:'server/common/access/personnel-account.controller.ts#list'},
   {method:'POST',path:'/api/access/personal/permission-requests',kind:'protocol',protection:'authenticated-self-request-no-grant',source:'server/common/access/personnel-account.controller.ts#create'},
+  {method:'GET',path:'/api/access/personal/permission-requests/summary',kind:'protocol',protection:'authenticated-self-only',source:'server/common/access/personnel-account.controller.ts#permissionSummary'},
+  {method:'POST',path:'/api/access/personal/permission-requests/update',kind:'protocol',protection:'authenticated-self-pending-versioned-same-origin',source:'server/common/access/personnel-account.controller.ts#updatePermissionRequest'},
+  {method:'POST',path:'/api/access/personal/permission-requests/cancel',kind:'protocol',protection:'authenticated-self-pending-versioned-same-origin',source:'server/common/access/personnel-account.controller.ts#cancelPermissionRequest'},
+  {method:'GET',path:'/api/access/personal/archive-corrections',kind:'protocol',protection:'authenticated-self-only',source:'server/common/access/personnel-account.controller.ts#archiveCorrections'},
+  {method:'GET',path:'/api/access/personal/archive-corrections/summary',kind:'protocol',protection:'authenticated-self-only',source:'server/common/access/personnel-account.controller.ts#archiveCorrectionSummary'},
+  {method:'POST',path:'/api/access/personal/archive-corrections',kind:'protocol',protection:'authenticated-self-feedback-no-source-write',source:'server/common/access/personnel-account.controller.ts#createArchiveCorrection'},
+  {method:'POST',path:'/api/access/personal/archive-corrections/cancel',kind:'protocol',protection:'authenticated-self-pending-versioned-same-origin',source:'server/common/access/personnel-account.controller.ts#cancelArchiveCorrection'},
+  {method:'GET',path:'/api/access/configuration/permission-requests/summary',kind:'admin',protection:'configuration-administrator',source:'server/common/access/access-configuration.controller.ts#requestedPermissionsSummary'},
+  {method:'GET',path:'/api/access/configuration/archive-corrections',kind:'admin',protection:'configuration-administrator',source:'server/common/access/access-configuration.controller.ts#requestedArchiveCorrections'},
+  {method:'GET',path:'/api/access/configuration/archive-corrections/summary',kind:'admin',protection:'configuration-administrator',source:'server/common/access/access-configuration.controller.ts#requestedArchiveCorrectionsSummary'},
+  {method:'POST',path:'/api/access/configuration/archive-corrections',kind:'admin',protection:'configuration-administrator-no-self-review-same-origin-no-source-write',source:'server/common/access/access-configuration.controller.ts#reviewRequestedArchiveCorrections'},
   {method:'GET',path:'/api/access/configuration/permission-requests',kind:'admin',protection:'configuration-administrator',source:'server/common/access/access-configuration.controller.ts#requestedPermissions'},
   {method:'POST',path:'/api/access/configuration/permission-requests',kind:'admin',protection:'configuration-administrator-no-self-review',source:'server/common/access/access-configuration.controller.ts#reviewRequestedPermissions'},
   {"method":"GET","path":"/api/self-service-schedules/:year/:month","kind":"auxiliary","dependencies":[{"module":"leave_requests","action":"create"},{"module":"overtime_requests","action":"create"}],"protection":"canonical-current-person-only-schedule","source":"server/modules/duty-schedule/self-service-schedule.controller.ts#read"},

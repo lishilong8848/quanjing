@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Loader2, Plus, RefreshCw } from 'lucide-react';
+import { Copy, Loader2, Plus, RefreshCw } from 'lucide-react';
 import type { AccessConfigurationResponse, ManagedAccount } from '@shared/access-configuration.interface';
 import type { AuthorizationRoleList, AuthorizationRoleMutation, AuthorizationRolePreview, EffectiveAuthorization } from '@shared/authorization-profile';
 import { Button } from '@/components/ui/button';
@@ -16,22 +16,24 @@ export function RolesPanel({ roles, accounts, revision, loading, error, onRefres
   roles?: AuthorizationRoleList; accounts: ManagedAccount[]; revision: number; loading: boolean; error: string;
   onRefresh: () => void; onSaved: (value: AccessConfigurationResponse) => void;
 }) {
-  const [query, setQuery] = useState(''), [editing, setEditing] = useState<{ role?: RoleRow }>();
+  const [query, setQuery] = useState(''), [editing, setEditing] = useState<{ role?: RoleRow; copy?: RoleRow }>();
   const visible = useMemo(() => roles?.roles.filter(role => !query.trim() || `${role.name} ${role.description}`.includes(query.trim())) || [], [roles, query]);
   return <section className="space-y-4" aria-label="角色模板">
     <div className="flex flex-wrap items-center gap-3"><Input className="min-w-40 flex-1" placeholder="搜索角色" aria-label="搜索角色" value={query} onChange={event => setQuery(event.target.value)} /><Button variant="outline" disabled={loading} onClick={onRefresh}>{loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}刷新角色</Button><Button disabled={!roles} onClick={() => setEditing({})}><Plus className="size-4" />新增角色</Button></div>
     {error && <p role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">{error}，已有角色保留。</p>}
-    <div className="divide-y rounded-lg border bg-card">{visible.map(role => <article key={role.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div className="min-w-0 space-y-1"><p className="break-words font-medium">{role.name} <Badge variant="outline">{role.builtin ? '系统角色' : '自定义角色'}</Badge></p>{role.description && <p className="break-words text-sm text-muted-foreground">{role.description}</p>}<p className="text-xs text-muted-foreground">{role.followerCount} 人跟随 · 版本 {role.version}{!role.enabled ? ' · 已停止新增分配，现有人员继续生效' : ''}</p></div><Button variant="outline" onClick={() => setEditing({ role })}>{role.policy.nativeRole === 'admin' ? '查看' : '编辑'}</Button></article>)}{!visible.length && <p role="status" className="p-8 text-center text-sm text-muted-foreground">{loading && !roles ? '正在读取角色…' : query ? '没有匹配角色' : '暂无角色'}</p>}</div>
-    {editing && roles && <RoleEditor key={editing.role?.id || 'new'} original={editing.role} current={editing.role ? roles.roles.find(role => role.id === editing.role!.id) : undefined} accounts={accounts} revision={revision} directoryRevision={roles.revision} onClose={() => setEditing(undefined)} onRefresh={onRefresh} onSaved={value => { onSaved(value); setEditing(undefined); }} />}
+    <p className="text-xs text-muted-foreground">自定义角色可复制为新模板；系统角色保留固定业务身份和任职限制，请通过新建自定义角色逐项配置。</p>
+    <div className="divide-y rounded-lg border bg-card">{visible.map(role => <article key={role.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div className="min-w-0 space-y-1"><p className="break-words font-medium">{role.name} <Badge variant="outline">{role.builtin ? '系统角色' : '自定义角色'}</Badge></p>{role.description && <p className="break-words text-sm text-muted-foreground">{role.description}</p>}<p className="text-xs text-muted-foreground">{role.followerCount} 人跟随 · 版本 {role.version}{!role.enabled ? ' · 已停止新增分配，现有人员继续生效' : ''}</p></div><div className="flex flex-wrap gap-2">{!role.builtin && <Button variant="outline" onClick={() => setEditing({ copy: role })}><Copy className="size-4" />复制</Button>}<Button variant="outline" onClick={() => setEditing({ role })}>{role.policy.nativeRole === 'admin' ? '查看' : '编辑'}</Button></div></article>)}{!visible.length && <p role="status" className="p-8 text-center text-sm text-muted-foreground">{loading && !roles ? '正在读取角色…' : query ? '没有匹配角色' : '暂无角色'}</p>}</div>
+    {editing && roles && <RoleEditor key={editing.role?.id || (editing.copy ? `copy:${editing.copy.id}` : 'new')} original={editing.role} copy={editing.copy} current={editing.role ? roles.roles.find(role => role.id === editing.role!.id) : undefined} accounts={accounts} revision={revision} directoryRevision={roles.revision} onClose={() => setEditing(undefined)} onRefresh={onRefresh} onSaved={value => { onSaved(value); setEditing(undefined); }} />}
   </section>;
 }
 
-function RoleEditor({ original, current, accounts, revision, directoryRevision, onClose, onRefresh, onSaved }: {
-  original?: RoleRow; current?: RoleRow; accounts: ManagedAccount[]; revision: number; directoryRevision: number; onClose: () => void; onRefresh: () => void; onSaved: (value: AccessConfigurationResponse) => void;
+function RoleEditor({ original, copy, current, accounts, revision, directoryRevision, onClose, onRefresh, onSaved }: {
+  original?: RoleRow; copy?: RoleRow; current?: RoleRow; accounts: ManagedAccount[]; revision: number; directoryRevision: number; onClose: () => void; onRefresh: () => void; onSaved: (value: AccessConfigurationResponse) => void;
 }) {
-  const [name, setName] = useState(original?.name || ''), [description, setDescription] = useState(original?.description || '');
+  const [name, setName] = useState(original?.name || (copy ? `${copy.name.slice(0, 74)}（副本）` : '')), [description, setDescription] = useState(original?.description || copy?.description || '');
+  const [baseline, setBaseline] = useState(original), [baselineRevision, setBaselineRevision] = useState(revision);
   const [enabled, setEnabled] = useState(original?.enabled ?? true);
-  const [authorization, setAuthorization] = useState<EffectiveAuthorization>(() => ({ mode: 'independent', baseline: structuredClone(original?.policy || { nativeRole: null, pages: [], rules: [] }), overrides: emptyAuthorizationOverrides() }));
+  const [authorization, setAuthorization] = useState<EffectiveAuthorization>(() => ({ mode: 'independent', baseline: structuredClone(original?.policy || copy?.policy || { nativeRole: null, pages: [], rules: [] }), overrides: emptyAuthorizationOverrides() }));
   const [status, setStatus] = useState<'ready' | 'previewing' | 'saving' | 'error'>('ready'), [error, setError] = useState('');
   const [preview, setPreview] = useState<{ value: AuthorizationRolePreview; input: AuthorizationRoleMutation; fingerprint: string }>(), [acknowledged, setAcknowledged] = useState(false);
   const pending = useRef(false), request = useRef<{ fingerprint: string; id: string } | undefined>(undefined);
@@ -40,8 +42,8 @@ function RoleEditor({ original, current, accounts, revision, directoryRevision, 
   const [followerLimit, setFollowerLimit] = useState(20);
   const followers = useMemo(() => original ? accounts.filter(account => account.authorizationBinding?.mode === 'follow' && account.authorizationBinding.templateId === original.id) : [], [accounts, original]);
   const fixed = original?.policy.nativeRole === 'admin', busy = status === 'previewing' || status === 'saving';
-  const conflict = directoryRevision !== revision || !!original && (!current || current.version !== original.version);
-  const draft = useMemo(() => ({ expectedRevision: revision, ...(original ? { id: original.id } : {}), name: name.trim(), description: description.trim(), enabled, policy: authorization.baseline }), [revision, original, name, description, enabled, authorization.baseline]);
+  const conflict = directoryRevision !== revision || baselineRevision !== revision || !!original && (!current || current.version !== baseline?.version);
+  const draft = useMemo(() => ({ expectedRevision: baselineRevision, ...(original ? { id: original.id } : {}), name: name.trim(), description: description.trim(), enabled, policy: authorization.baseline }), [baselineRevision, original, name, description, enabled, authorization.baseline]);
   const fingerprint = useMemo(() => JSON.stringify(draft), [draft]);
   const verified = preview?.fingerprint === fingerprint && preview.value.revision === revision && !conflict;
   async function check(deleted = false) {
@@ -64,9 +66,15 @@ function RoleEditor({ original, current, accounts, revision, directoryRevision, 
     finally { pending.current = false; }
   }
   const actor = useMemo(() => ({ role: authorization.baseline.nativeRole || 'guest' as const, purchaseBuilding: null }), [authorization.baseline.nativeRole]);
+  function adoptBaseline(keepDraft: boolean) {
+    if (busy || directoryRevision !== revision || original && !current) return;
+    if (!keepDraft && current) { setName(current.name); setDescription(current.description); setEnabled(current.enabled); setAuthorization({ mode: 'independent', baseline: structuredClone(current.policy), overrides: emptyAuthorizationOverrides() }); }
+    setBaseline(current); setBaselineRevision(revision); setPreview(undefined); setAcknowledged(false); request.current = undefined; setError('');
+  }
   return <Sheet open onOpenChange={open => { if (!open && !pending.current) onClose(); }}><SheetContent className="configuration-editor w-full gap-0 p-0 sm:max-w-3xl"><SheetHeader className="border-b p-5"><SheetTitle>{original ? `${fixed ? '查看' : '编辑'}角色 · ${original.name}` : '新增角色'}</SheetTitle><SheetDescription className="sr-only">角色权限与跟随人员影响，核对后保存。</SheetDescription></SheetHeader>
     <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
-      {conflict && <p role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">角色或配置版本已更新，草稿保留。<Button variant="link" disabled={busy} onClick={onRefresh}>重新读取角色</Button>如角色本身已改变，请关闭后重新打开核对。</p>}
+      {copy && <p className="rounded-lg border p-3 text-sm text-muted-foreground">复制自“{copy.name}”。保存为新模板，不改变原角色及其跟随人员。</p>}
+      {conflict && <section role="alert" className="space-y-3 rounded-lg border border-destructive/30 p-3 text-sm"><p className="text-destructive">角色或配置版本已更新，当前草稿保留。先核对差异，再明确选择恢复方式。</p><Button variant="outline" disabled={busy} onClick={onRefresh}>读取最新配置</Button>{baseline && <details><summary className="cursor-pointer font-medium">编辑开始时的基线 · 版本 {baseline.version}</summary><div className="mt-3 space-y-2"><p>{baseline.name} · {baseline.description || '无说明'} · {baseline.enabled ? '允许新增分配' : '停止新增分配'}</p><PermissionEditor label="原版本角色权限" value={{ mode: 'independent', baseline: baseline.policy, overrides: emptyAuthorizationOverrides() }} principal={actor} template readOnly /></div></details>}{current && <details><summary className="cursor-pointer font-medium">查看最新配置与草稿差异</summary><div className="mt-3 space-y-3"><p>名称：{current.name} → {name}</p><p>说明：{current.description || '无'} → {description || '无'}</p><p>新增分配：{current.enabled ? '允许' : '停止'} → {enabled ? '允许' : '停止'}</p><PermissionEditor label="最新角色权限" value={{ mode: 'independent', baseline: current.policy, overrides: emptyAuthorizationOverrides() }} principal={actor} template readOnly /><PermissionEditor label="保留的角色草稿" value={authorization} principal={actor} template readOnly /></div></details>}<p className="text-xs text-muted-foreground">保留草稿会按草稿整套内容覆盖最新角色，仍须重新核对受影响人员并确认后才能保存。</p><div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || directoryRevision !== revision || !!original && !current} onClick={() => adoptBaseline(true)}>保留草稿，按最新版本重新核对</Button>{current && <Button variant="outline" disabled={busy || directoryRevision !== revision} onClick={() => adoptBaseline(false)}>放弃草稿并使用最新配置</Button>}</div>{original && !current && <p>原角色已删除，请关闭后将需要的权限另建角色。</p>}</section>}
       <div className="space-y-2"><Label htmlFor="authorization-role-name">角色名称</Label><Input id="authorization-role-name" value={name} disabled={busy || fixed || conflict} maxLength={80} onChange={event => setName(event.target.value)} /></div>
       <div className="space-y-2"><Label htmlFor="authorization-role-description">说明</Label><Input id="authorization-role-description" value={description} disabled={busy || fixed || conflict} maxLength={500} onChange={event => setDescription(event.target.value)} /></div>
       {!fixed && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={!enabled} disabled={busy || conflict} onChange={event => setEnabled(!event.target.checked)} /><span>停止新增分配<span className="block text-xs text-muted-foreground">现有跟随者继续使用此角色权限。</span></span></label>}

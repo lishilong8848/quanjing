@@ -1,8 +1,10 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Header, Optional, Post, Req, Res, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { AccessPrincipal } from '../../../shared/access-control.interface';
+import { BUILDING_ADMIN_BUILDINGS, type AccessPrincipal } from '../../../shared/access-control.interface';
 import { createPermissionCatalog } from '../../../shared/permission-catalog';
-import type { CreatePersonnelPermissionRequest } from '../../../shared/personnel-permission-request.interface';
+import type { CreatePersonnelPermissionRequest, UpdatePersonnelPermissionRequest, CancelPersonnelPermissionRequest } from '../../../shared/personnel-permission-request.interface';
+import type { CreatePersonnelArchiveCorrection, CancelPersonnelArchiveCorrection } from '../../../shared/personnel-archive-correction.interface';
+import { PROFESSIONAL_SPECIALTIES } from '../../../shared/professional-access';
 import { AccessConfigurationService } from './access-configuration.service';
 import { PersonnelCredentialsService } from './personnel-credentials.service';
 import { PersonnelPermissionRequestsService } from './personnel-permission-requests.service';
@@ -10,6 +12,7 @@ import { UnifiedAccessService } from './unified-access.service';
 import { clearAccessCookie, readAccessCookie } from './unified-access.guard';
 import { PublicAccess } from './unified-access.decorators';
 import { PersonnelArchiveService } from './personnel-archive.service';
+import { PersonnelArchiveCorrectionsService } from './personnel-archive-corrections.service';
 
 @Controller('api/access/personal')
 @PublicAccess()
@@ -18,7 +21,8 @@ export class PersonnelAccountController {
     private readonly configuration: AccessConfigurationService,
     private readonly credentials: PersonnelCredentialsService,
     private readonly requests: PersonnelPermissionRequestsService,
-    @Optional() private readonly archiveService?: PersonnelArchiveService) {}
+    @Optional() private readonly archiveService?: PersonnelArchiveService,
+    @Optional() private readonly corrections?: PersonnelArchiveCorrectionsService) {}
 
   @Get('archive')
   @Header('Cache-Control', 'private, no-store')
@@ -53,9 +57,15 @@ export class PersonnelAccountController {
   async profile(@Req() request: Request) {
     const principal = this.self(request);
     const credential = await this.credentials.profile(principal);
-    return { displayName: principal.displayName || '当前账号', accountId: principal.accountId,
-      ...credential, canChangePassword: credential.canChangePassword && !principal.impersonation,
-      effectiveAuthorization: principal.effectiveAuthorization || null,
+    const current = this.self(request);
+    const effective = current.effectiveAuthorization;
+    const template = effective?.templateId ? this.configuration.authorizationRoles().roles.find(row => row.id === effective.templateId) : undefined;
+    return { displayName: current.displayName || '当前账号', accountId: current.accountId, authorizationVersion: current.authorizationVersion,
+      ...credential, canChangePassword: credential.canChangePassword && !current.impersonation,
+      effectiveAuthorization: current.effectiveAuthorization || null,
+      authorizationSummary: { mode: effective?.mode || 'legacy', templateName: template?.name || null, nativeRole: effective ? effective.baseline.nativeRole : current.role, scopeSource: 'account' },
+      suggestedScopes: { buildings: BUILDING_ADMIN_BUILDINGS.filter(building => current.buildings?.includes(building) || current.purchaseBuilding === building),
+        specialties: PROFESSIONAL_SPECIALTIES.filter(specialty => current.specialties?.includes(specialty)) },
       catalog: createPermissionCatalog() };
   }
 
@@ -94,6 +104,47 @@ export class PersonnelAccountController {
   create(@Req() request: Request, @Body() body: CreatePersonnelPermissionRequest) {
     this.sameOrigin(request);
     return this.requests.create(this.self(request, true), body);
+  }
+
+  @Get('permission-requests/summary')
+  @Header('Cache-Control', 'private, no-store')
+  permissionSummary(@Req() request: Request) { return this.requests.summaryOwn(this.self(request, true)); }
+
+  @Post('permission-requests/update')
+  @Header('Cache-Control', 'private, no-store')
+  updatePermissionRequest(@Req() request: Request, @Body() body: UpdatePersonnelPermissionRequest) {
+    this.sameOrigin(request); return this.requests.update(this.self(request, true), body);
+  }
+
+  @Post('permission-requests/cancel')
+  @Header('Cache-Control', 'private, no-store')
+  cancelPermissionRequest(@Req() request: Request, @Body() body: CancelPersonnelPermissionRequest) {
+    this.sameOrigin(request); return this.requests.cancel(this.self(request, true), body);
+  }
+
+  @Get('archive-corrections')
+  @Header('Cache-Control', 'private, no-store')
+  archiveCorrections(@Req() request: Request) { return this.correctionService().listOwn(this.self(request, true)); }
+
+  @Get('archive-corrections/summary')
+  @Header('Cache-Control', 'private, no-store')
+  archiveCorrectionSummary(@Req() request: Request) { return this.correctionService().summaryOwn(this.self(request, true)); }
+
+  @Post('archive-corrections')
+  @Header('Cache-Control', 'private, no-store')
+  createArchiveCorrection(@Req() request: Request, @Body() body: CreatePersonnelArchiveCorrection) {
+    this.sameOrigin(request); return this.correctionService().create(this.self(request, true), body);
+  }
+
+  @Post('archive-corrections/cancel')
+  @Header('Cache-Control', 'private, no-store')
+  cancelArchiveCorrection(@Req() request: Request, @Body() body: CancelPersonnelArchiveCorrection) {
+    this.sameOrigin(request); return this.correctionService().cancel(this.self(request, true), body);
+  }
+
+  private correctionService(): PersonnelArchiveCorrectionsService {
+    if (!this.corrections) throw new ServiceUnavailableException('资料纠错暂不可用，请稍后重试');
+    return this.corrections;
   }
 
   private self(request: Request, setupComplete = false): AccessPrincipal {

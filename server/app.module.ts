@@ -18,6 +18,7 @@ import { WeatherWarningModule } from './modules/weather-warning/weather-warning.
 import { SystemMonthlyReportModule } from './modules/system-monthly-report/system-monthly-report.module';
 import { ViewModule } from './modules/view/view.module';
 import { UnifiedAccessModule } from './common/access/unified-access.module';
+import { FeishuCardCopyModule } from './common/feishu-card-copy/card-copy.module';
 import { DashboardDataSyncScheduler } from './modules/dashboard-data-sync/dashboard-data-sync.scheduler';
 import { PersonnelTimeInsightsModule } from './modules/personnel-time-insights/personnel-time-insights.module';
 import { ThresholdModule } from './modules/threshold-management/threshold.module';
@@ -26,6 +27,7 @@ import { MeetingManagementModule } from './modules/meeting-management/meeting.mo
 @Module({
   imports: [
     UnifiedAccessModule,
+    FeishuCardCopyModule,
     // 平台 Module，提供平台能力
     PlatformModule.forRoot({
       enableCsrf: process.env.NODE_ENV === 'production',
