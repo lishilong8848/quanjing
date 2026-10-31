@@ -34,6 +34,7 @@ import { PersonnelCredentialsService } from './personnel-credentials.service';
 import { PersonnelCredentialsGateway } from './personnel-credentials.gateway';
 import { PersonnelSecurityStore } from './personnel-security.store';
 import { PersonnelPermissionRequestsService } from './personnel-permission-requests.service';
+import { PersonnelPermissionNotificationsService } from './personnel-permission-notifications.service';
 import { PersonnelArchiveService } from './personnel-archive.service';
 import { PersonnelArchiveGateway } from './personnel-archive.gateway';
 import { PersonnelArchiveCorrectionsService } from './personnel-archive-corrections.service';
@@ -49,6 +50,7 @@ import { PersonnelArchiveCorrectionsService } from './personnel-archive-correcti
     PersonnelCredentialsGateway,
     PersonnelSecurityStore,
     PersonnelPermissionRequestsService,
+    PersonnelPermissionNotificationsService,
     PersonnelArchiveCorrectionsService,
     AccessLoginNamesService,
     AccessConfigurationService,

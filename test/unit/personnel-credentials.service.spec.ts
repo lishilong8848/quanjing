@@ -249,12 +249,173 @@ describe('personnel credential lifecycle with isolated source/configuration', ()
     expect(await service.profile({ ...result, authorizationVersion: feishu.version })).toEqual({ canChangePassword: false, requiresPasswordChange: false });
   });
 
-  it('keeps an unresolved intent, blocks a different mutation, and permits the original retry', async () => {
+  it('supersedes an unwritten intent only after verifying the current password and rejects its later replay', async () => {
     gateway.writePassword.mockRejectedValueOnce(new Error('timeout'));
     await expect(service.changePassword(principal(), change())).rejects.toThrow('尚未确认');
-    await expect(service.changePassword(principal(), change({ clientMutationId: 'another_mutation_123' }))).rejects.toThrow('原请求');
-    await service.changePassword(principal(), change());
+    const oldKey = personnelFingerprint(`${ACCOUNT_ID}\0${change().clientMutationId}`);
+    await service.changePassword(principal(), change({ clientMutationId: 'another_mutation_123' }));
+    expect(store.read().intents[oldKey].status).toBe('conflict');
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('来源已变化');
     expect(configuration.commitPersonnelPassword).toHaveBeenCalledTimes(1);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers first-login prepared state after a failed source read before any PUT using a new browser request', async () => {
+    await service.authenticateLogin(principal(), '31002X');
+    expect(service.requiresPasswordChange(principal())).toBe(true);
+    gateway.fresh.mockRejectedValueOnce(new Error('source read unavailable before PUT'));
+    const original = change();
+    await expect(service.changePassword(principal(), original)).rejects.toThrow('before PUT');
+    const key = personnelFingerprint(`${ACCOUNT_ID}\0${original.clientMutationId}`);
+    expect(store.read().intents[key].status).toBe('prepared');
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    await service.changePassword(principal(), change({ clientMutationId: 'reopened_dialog_123' }));
+    expect(store.read().intents[key].status).toBe('conflict');
+    expect(service.requiresPasswordChange(principal())).toBe(false);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+    expect(await verifyPersonnelPassword(original.newPassword, record.password)).toBe(true);
+  });
+
+  it('recovers a seven-day prepared operation after restart and initial-password relogin without removing its history', async () => {
+    await service.authenticateLogin(principal(), '31002X');
+    gateway.fresh.mockRejectedValueOnce(new Error('source timeout'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('source timeout');
+    const key = personnelFingerprint(`${ACCOUNT_ID}\0${change().clientMutationId}`);
+    store.update(state => { state.intents[key].createdAt = Date.now() - 7 * 24 * 60 * 60 * 1000; });
+    const previous = store.read().intents[key];
+    const restarted = new PersonnelCredentialsService({} as any, configuration, new PersonnelSecurityStore(store.filePath), gateway);
+    const signedIn = await restarted.authenticateLogin(principal(), '31002X');
+    expect(restarted.requiresPasswordChange(signedIn)).toBe(true);
+    await restarted.changePassword(signedIn, change({ clientMutationId: 'after_restart_123' }));
+    expect(store.read().intents[key]).toEqual({ ...previous, status: 'conflict' });
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['prepared', 'written'] as const)('finishes a remotely saved %s request after losing its ID using the same complete payload without another PUT', async status => {
+    if (status === 'prepared') {
+      gateway.fresh.mockImplementationOnce(async () => ({ ...record }));
+      gateway.fresh.mockRejectedValueOnce(new Error('readback timeout'));
+      await expect(service.changePassword(principal(), change())).rejects.toThrow('readback timeout');
+    } else {
+      configuration.commitPersonnelPassword.mockRejectedValueOnce(new Error('local commit interrupted'));
+      await expect(service.changePassword(principal(), change())).rejects.toThrow('local commit interrupted');
+    }
+    const key = personnelFingerprint(`${ACCOUNT_ID}\0${change().clientMutationId}`), written = record.password;
+    expect(store.read().intents[key].status).toBe(status);
+    const result = await service.changePassword(principal(), change({ clientMutationId: 'same_payload_new_id_123' }));
+    expect(result.authorizationVersion).toBe(5);
+    expect(store.read().intents[key].status).toBe('completed');
+    expect(Object.values(store.read().intents)).toHaveLength(2);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+    expect(record.password).toBe(written);
+    expect(configuration.commitPersonnelPassword.mock.calls.at(-1)[3]).toBe(change().clientMutationId);
+    expect(service.requiresPasswordChange(result)).toBe(false);
+  });
+
+  it('replays the recovered new request after a lost success response and rejects reusing its ID for different contents', async () => {
+    configuration.commitPersonnelPassword.mockRejectedValueOnce(new Error('local commit interrupted'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('local commit interrupted');
+    const recoveredRequest = change({ clientMutationId: 'lost_success_alias_123' });
+    await service.changePassword(principal(), recoveredRequest);
+    const committedCalls = configuration.commitPersonnelPassword.mock.calls.length, before = readFileSync(store.filePath, 'utf8');
+    await service.changePassword(principal(), recoveredRequest);
+    expect(configuration.commitPersonnelPassword).toHaveBeenCalledTimes(committedCalls);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+    expect(readFileSync(store.filePath, 'utf8')).toBe(before);
+    await expect(service.changePassword(principal(), { ...recoveredRequest, newPassword: 'tampered password', confirmPassword: 'tampered password' })).rejects.toThrow('不同内容');
+    expect(readFileSync(store.filePath, 'utf8')).toBe(before);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not change a remotely saved operation when another new payload still supplies the old password', async () => {
+    configuration.commitPersonnelPassword.mockRejectedValueOnce(new Error('local commit interrupted'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('local commit interrupted');
+    const before = readFileSync(store.filePath, 'utf8'), written = record.password;
+    await expect(service.changePassword(principal(), change({ clientMutationId: 'different_payload_123',
+      newPassword: 'another replacement', confirmPassword: 'another replacement' }))).rejects.toThrow('上次密码已更新，请使用上次设置的新密码重新登录后再修改');
+    expect(readFileSync(store.filePath, 'utf8')).toBe(before);
+    expect(record.password).toBe(written);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+    expect(configuration.commitPersonnelPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes a confirmed old write with the current valid password but requires relogin before a different next password', async () => {
+    configuration.commitPersonnelPassword.mockRejectedValueOnce(new Error('local commit interrupted'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('local commit interrupted');
+    const old = principal(), written = record.password;
+    await expect(service.changePassword(old, change({ clientMutationId: 'next_password_123', currentPassword: change().newPassword,
+      newPassword: 'another replacement', confirmPassword: 'another replacement' }))).rejects.toThrow('上次密码已更新，请使用上次设置的新密码重新登录后再修改');
+    expect(account.version).toBe(5);
+    expect(Object.values(store.read().intents)).toHaveLength(1);
+    expect(Object.values(store.read().intents)[0].status).toBe('completed');
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+    expect(record.password).toBe(written);
+    expect(configuration.commitPersonnelPassword.mock.calls.at(-1)[3]).toBe(change().clientMutationId);
+    await expect(service.changePassword(old, change({ clientMutationId: 'after_expired_session' }))).rejects.toThrow('不可修改');
+  });
+
+  it('keeps the pending ledger byte-for-byte unchanged on incorrect current password or failed fresh verification', async () => {
+    gateway.fresh.mockRejectedValueOnce(new Error('first fresh failed'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('first fresh failed');
+    const before = readFileSync(store.filePath, 'utf8');
+    await expect(service.changePassword(principal(), change({ clientMutationId: 'wrong_password_123', currentPassword: 'incorrect' }))).rejects.toThrow('当前密码不正确');
+    gateway.fresh.mockRejectedValueOnce(new Error('still unavailable'));
+    await expect(service.changePassword(principal(), change({ clientMutationId: 'fresh_failure_123' }))).rejects.toThrow('still unavailable');
+    expect(readFileSync(store.filePath, 'utf8')).toBe(before);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    expect(configuration.commitPersonnelPassword).not.toHaveBeenCalled();
+  });
+
+  it.each(['inactive', 'disabled', 'version', 'local-password'] as const)('rechecks %s after fresh-source waits without retiring the old operation', async changeDuringRead => {
+    gateway.fresh.mockRejectedValueOnce(new Error('first fresh failed'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('first fresh failed');
+    const before = readFileSync(store.filePath, 'utf8'), currentPrincipal = principal();
+    gateway.fresh.mockImplementationOnce(async () => {
+      if (changeDuringRead === 'inactive') account.personnelActive = false;
+      if (changeDuringRead === 'disabled') account.enabled = false;
+      if (changeDuringRead === 'version') account.version++;
+      if (changeDuringRead === 'local-password') account.passwordHash = formalHash;
+      return { ...record };
+    });
+    await expect(service.changePassword(currentPrincipal, change({ clientMutationId: 'recheck_recovery_123' }))).rejects.toThrow();
+    expect(readFileSync(store.filePath, 'utf8')).toBe(before);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    expect(configuration.commitPersonnelPassword).not.toHaveBeenCalled();
+  });
+
+  it('does not retire or overwrite a prepared operation after another project changes the source password', async () => {
+    gateway.fresh.mockRejectedValueOnce(new Error('first fresh failed'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('first fresh failed');
+    const before = readFileSync(store.filePath, 'utf8');
+    record.password = formalHash;
+    await expect(service.changePassword(principal(), change({ clientMutationId: 'external_changed_123', currentPassword: FORMAL_PASSWORD }))).rejects.toThrow('来源已变化');
+    expect(readFileSync(store.filePath, 'utf8')).toBe(before);
+    expect(record.password).toBe(formalHash);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('来源已变化');
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a written receipt with the previous source restored as an unwritten operation', async () => {
+    configuration.commitPersonnelPassword.mockRejectedValueOnce(new Error('local commit interrupted'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('local commit interrupted');
+    const before = readFileSync(store.filePath, 'utf8');
+    record.password = '';
+    await expect(service.changePassword(principal(), change({ clientMutationId: 'written_but_reverted' }))).rejects.toThrow('来源已变化');
+    expect(readFileSync(store.filePath, 'utf8')).toBe(before);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+    expect(configuration.commitPersonnelPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retire a pending operation for an impersonated, mismatched or expired principal', async () => {
+    gateway.fresh.mockRejectedValueOnce(new Error('first fresh failed'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('first fresh failed');
+    const before = readFileSync(store.filePath, 'utf8'), request = change({ clientMutationId: 'forged_recovery_123' });
+    await expect(service.changePassword({ ...principal(), authorizationVersion: account.version - 1 }, request)).rejects.toThrow('不可修改');
+    await expect(service.changePassword({ ...principal(), accountId: 'local-external-' + 'b'.repeat(64) }, request)).rejects.toThrow('不可修改');
+    await expect(service.changePassword({ ...principal(), impersonation: { actorAccountId: 'admin', actorName: '管理员', targetName: account.name, expiresAt: Date.now() + 10000 } }, request)).rejects.toThrow('不可修改');
+    expect(readFileSync(store.filePath, 'utf8')).toBe(before);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
   });
 
   it('retains source conflicts and never overwrites a concurrent password', async () => {

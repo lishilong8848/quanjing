@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Settings, RefreshCw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useLocation } from 'react-router-dom';
 import { useAccess } from '@/access/AccessProvider';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
@@ -24,14 +25,17 @@ import { PermissionRequestsPanel } from './PermissionRequestsPanel';
 import { ArchiveCorrectionsPanel } from './ArchiveCorrectionsPanel';
 import { ConfigurationNavigation } from './ConfigurationNavigation';
 import { AuditPanel } from './AuditPanel';
+import { permissionRequestLocation } from './permission-request-navigation';
 
 export default function SystemConfigurationPage() {
+  const location = useLocation();
+  const requestLocation = useMemo(() => permissionRequestLocation(location.search), [location.search]);
   const configuration = useConfiguration();
   const roles = useAuthorizationRoles(configuration.data?.revision);
   const { accountId, authorizationVersion, refreshSession, displayName } = useAccess();
-  const [tab, setTab] = useState('accounts');
+  const [tab, setTab] = useState(() => requestLocation?.tab || 'accounts');
   const [editor, setEditor] = useState<{ account?: ManagedAccount; external?: boolean; requestContext?: PersonnelPermissionRequest }>();
-  const [visited, setVisited] = useState(() => new Set(['accounts']));
+  const [visited, setVisited] = useState(() => new Set(['accounts', ...(requestLocation ? [requestLocation.tab] : [])]));
   const [previewGeneration, setPreviewGeneration] = useState(0);
   const [permissionPending, setPermissionPending] = useState<number>(), [correctionPending, setCorrectionPending] = useState<number>();
   const [permissionCapacity, setPermissionCapacity] = useState<PersonnelRequestCapacity>(), [correctionCapacity, setCorrectionCapacity] = useState<PersonnelRequestCapacity>();
@@ -40,6 +44,11 @@ export default function SystemConfigurationPage() {
   const setCorrectionCount = useCallback((count: number) => { countEpoch.current.correction++; setCorrectionPending(count); }, []);
   const refresh = useCallback(() => { setPreviewGeneration(value => value + 1); void configuration.refresh(); void roles.refresh(); }, [configuration.refresh, roles.refresh]);
   const changeTab = useCallback((next: string) => { setVisited(current => new Set([...current, next])); setTab(next); }, []);
+  useEffect(() => { if (requestLocation) changeTab(requestLocation.tab); }, [requestLocation, location.key, changeTab]);
+  const permissionGranted = useCallback(async () => {
+    setPreviewGeneration(value => value + 1);
+    await Promise.all([configuration.refresh(), roles.refresh(), refreshSession()]);
+  }, [configuration.refresh, roles.refresh, refreshSession]);
   const groupedAccounts = useMemo(() => {
     const accounts = configuration.data?.accounts || [], known = new Set(configuration.people.map(person => person.openId));
     const external = accounts.filter(account => account.kind === 'feishu' && (account.external || (!account.siteMember && !account.personnelIdentity && configuration.peopleReady && !configuration.peopleError && account.openId && !known.has(account.openId))));
@@ -83,7 +92,7 @@ export default function SystemConfigurationPage() {
       <ConfigurationNavigation tab={tab} onChange={changeTab} permissionPending={permissionPending} correctionPending={correctionPending} />
       {[{ name: '权限申请', capacity: permissionCapacity, tab: 'permission-requests' }, { name: '资料纠错', capacity: correctionCapacity, tab: 'archive-corrections' }].filter(item => item.capacity && item.capacity.level !== 'normal').map(item => <div key={item.tab} role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"><p>{item.name}记录{item.capacity!.level === 'full' ? '容量已满' : '接近容量上限'}：{item.capacity!.requests} / {item.capacity!.maxRequests} 条。请及时核对并导出记录，系统不会自动清理。</p><Button variant="outline" size="sm" onClick={() => changeTab(item.tab)}>查看记录</Button></div>)}
       {configuration.peopleLoading ? <p className="text-xs text-muted-foreground" role="status">人员资料正在更新，现有配置可继续编辑。</p> : configuration.peopleError && <div className="flex flex-wrap items-center gap-2 text-xs text-destructive" role="alert"><span>人员资料加载失败，现有配置保留。{configuration.peopleError}</span><Button variant="link" size="sm" className="h-auto p-0" onClick={() => void configuration.refreshPeople()}>重试</Button></div>}
-      <TabsContent value="permission-requests" forceMount className="data-[state=inactive]:hidden">{visited.has('permission-requests') && <PermissionRequestsPanel key={accountId || 'legacy'} revision={configuration.data.revision} onPendingCount={setPermissionCount} onEditAccount={(id, requestContext) => { const account = configuration.data?.accounts.find(item => item.id === id); if (!account) return false; setEditor({ account, requestContext, external: groupedAccounts.external.some(item => item.id === id) }); return true; }} />}</TabsContent>
+      <TabsContent value="permission-requests" forceMount className="data-[state=inactive]:hidden">{visited.has('permission-requests') && <PermissionRequestsPanel key={accountId || 'legacy'} revision={configuration.data.revision} onPendingCount={setPermissionCount} focusRequestId={requestLocation?.requestId} focusNavigationKey={location.key} onGranted={permissionGranted} onEditAccount={(id, requestContext) => { const account = configuration.data?.accounts.find(item => item.id === id); if (!account) return false; setEditor({ account, requestContext, external: groupedAccounts.external.some(item => item.id === id) }); return true; }} />}</TabsContent>
       <TabsContent value="accounts" forceMount className="data-[state=inactive]:hidden"><AccountPanel accounts={groupedAccounts.internal} allAccounts={configuration.data.accounts} appId={configuration.data.appId} templates={roles.data?.roles} onEdit={editAccount} /></TabsContent>
       <TabsContent value="external" forceMount className="data-[state=inactive]:hidden">{visited.has('external') && <>{(!configuration.peopleReady || configuration.peopleError) && <p className="mb-3 text-xs text-muted-foreground">人员目录尚未确认，未分组的已有账号暂保留在账号权限中。</p>}<AccountPanel accounts={groupedAccounts.external} allAccounts={configuration.data.accounts} appId={configuration.data.appId} templates={roles.data?.roles} external onEdit={editExternal} /></>}</TabsContent>
       <TabsContent value="external-employees" forceMount className="data-[state=inactive]:hidden">{visited.has('external-employees') && <AccountPanel accounts={groupedAccounts.employees} allAccounts={configuration.data.accounts} appId={configuration.data.appId} templates={roles.data?.roles} personnelPassword onEdit={editAccount} />}</TabsContent>

@@ -13,8 +13,10 @@ import { createProcessLockOwner } from '../../server/common/process-lock-owner';
 import type { AccessPrincipal } from '../../shared/access-control.interface';
 import type { CreatePersonnelPermissionRequest, RequestedPermission, ReviewPersonnelPermissionRequest } from '../../shared/personnel-permission-request.interface';
 import type { PersonalPermissionRule } from '../../shared/business-permissions';
+import { createBusinessPermissionEvaluator } from '../../shared/business-permissions';
+import { permissionGrantKey } from '../../server/common/access/personnel-permission-grant';
 
-describe('personnel permission requests use actual permissions without assigning grants', () => {
+describe('personnel permission requests grant only reviewed business permissions with durable recovery', () => {
   const appId = 'cli_permission_requests_test';
   const ids = ['applicant', 'other', 'reviewer'].map(label => `feishu-${feishuIdentityFingerprint(appId, `ou_${label}`)}`);
   const adminHash = hashAccessPassword('synthetic-only-admin-password');
@@ -64,6 +66,15 @@ describe('personnel permission requests use actual permissions without assigning
       authorizationOverrides: { rules, allowPages: pages, denyPages } }, admin);
     applicant = config.currentPrincipal(account.id, config.snapshot().accounts.find(row => row.id === account.id)!.version)!;
   }
+  function failNextRequestCommit() {
+    const nodeFs = require('node:fs') as typeof import('node:fs');
+    const rename = nodeFs.renameSync;
+    let fail = true;
+    jest.spyOn(nodeFs, 'renameSync').mockImplementation((from, to) => {
+      if (fail && String(to) === ledger.filePath) { fail = false; throw new Error('synthetic request commit failure'); }
+      return rename(from, to);
+    });
+  }
   it('records only own requests, hides stable identity and never writes authorization configuration', async () => {
     const before = JSON.stringify(configStore.read());
     const row = await service.create(applicant, input());
@@ -81,13 +92,19 @@ describe('personnel permission requests use actual permissions without assigning
     expect((await service.create(applicant, input())).id).toBe(first.id);
     expect(ledger.read().audit).toHaveLength(1);
   });
-  it('does not mark approved before current real grants are saved, then verifies without rewriting configuration', async () => {
+  it('grants the requested scope on approval once and keeps the original receipt on replay', async () => {
     const row = await service.create(applicant, input());
-    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('尚未全部生效');
-    expect(ledger.read().requests[row.id].status).toBe('pending');
-    await grant([grantRule()]); const before = readFileSync(configStore.filePath, 'utf8');
     const body = reviewInput(row.id); const approved = await service.review(admin, body);
     expect(approved.status).toBe('approved'); expect(approved.verifiedConfigurationRevision).toBe(configStore.read().revision);
+    expect(approved.currentEffect).toBe('current');
+    const account = config.snapshot().accounts.find(item => item.id === ids[0])!;
+    const evaluate = createBusinessPermissionEvaluator(config.currentPrincipal(account.id, account.version)!);
+    expect(evaluate({ module: 'inventory', action: 'create', building: 'A楼', specialty: '电气' }).allowed).toBe(true);
+    expect(evaluate({ module: 'inventory', action: 'create', building: 'B楼', specialty: '电气' }).allowed).toBe(false);
+    expect(evaluate({ module: 'inventory', action: 'create', building: 'A楼', specialty: '暖通' }).allowed).toBe(false);
+    expect(evaluate({ module: 'purchase', action: 'create', building: 'A楼', specialty: '电气' }).allowed).toBe(false);
+    expect(account.role).toBe('guest');
+    const before = readFileSync(configStore.filePath, 'utf8');
     expect(await service.review(admin, body)).toEqual(approved);
     expect(ledger.read().audit).toHaveLength(2);
     expect(readFileSync(configStore.filePath, 'utf8')).toBe(before);
@@ -96,24 +113,22 @@ describe('personnel permission requests use actual permissions without assigning
   it('requires every requested building-specialty point and honors deny over allow', async () => {
     const requested: RequestedPermission = { ...permission() as Extract<RequestedPermission, { kind: 'action' }>, buildings: ['A楼','B楼'] };
     const row = await service.create(applicant, input({ permissions: [requested] }));
-    await grant([grantRule()]);
-    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('尚未全部生效');
     await grant([grantRule({ buildings: ['A楼','B楼'] }), grantRule({ id: 'cap-deny', effect: 'deny', buildings: ['B楼'] })]);
-    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('尚未全部生效');
-    await grant([grantRule({ buildings: ['A楼','B楼'] })]);
+    const before = readFileSync(configStore.filePath, 'utf8');
+    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('冲突');
+    expect(readFileSync(configStore.filePath, 'utf8')).toBe(before);
+    await grant([grantRule()]);
     expect((await service.review(admin, reviewInput(row.id))).status).toBe('approved');
   });
   it('treats null scopes as all actual buildings and specialties, not any matching record', async () => {
     const row = await service.create(applicant, input({ permissions: [{ ...permission() as Extract<RequestedPermission, { kind: 'action' }>, buildings: null, specialties: null }] }));
     await grant([grantRule()]);
-    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('尚未全部生效');
-    await grant([grantRule({ buildings: null, specialties: null })]);
-    expect((await service.review(admin, reviewInput(row.id))).status).toBe('approved');
+    expect((await service.review(admin, reviewInput(row.id)))).toMatchObject({status:'approved',currentEffect:'current'});
   });
   it('checks page entries through actual page permissions including whole-page deny', async () => {
     const row = await service.create(applicant, input({ permissions: [{ kind: 'page', path: '/inventory-management' }, permission()] }));
     await grant([grantRule({ actions: ['read', 'create'] })], [], ['/inventory-management']);
-    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('尚未全部生效');
+    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('冲突');
     await grant([grantRule({ actions: ['read', 'create'] })], ['/inventory-management']);
     expect((await service.review(admin, reviewInput(row.id))).status).toBe('approved');
   });
@@ -129,18 +144,19 @@ describe('personnel permission requests use actual permissions without assigning
     const row = await service.create(applicant, input({ permissions: [{ kind: 'page', path: '/inventory-management' }] }));
     await grant([grantRule()], ['/inventory-management']);
     expect(config.pagePermissions(applicant.role, applicant.accountId, applicant.authorizationVersion).paths).toContain('/inventory-management');
-    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('尚未全部生效');
+    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('冲突');
     expect(ledger.read().requests[row.id].status).toBe('pending');
   });
   it.each([
     [{ kind: 'page', path: '/system-configuration' }],
-    [{ kind: 'page', path: 'https://www.sm.sjhl.online:8787/' }],
+    [{ kind: 'page', path: 'https://unregistered.invalid/' }],
+    [{ kind: 'action', module: 'external_twin', action: 'read', buildings: null, specialties: null }],
     [{ kind: 'action', module: 'organization', action: 'delete', buildings: null, specialties: null }],
     [{ kind: 'action', module: 'inventory', action: '*', buildings: null, specialties: null }],
     [{ kind: 'action', module: 'inventory', action: 'create', buildings: ['*'], specialties: null }],
     [{ kind: 'action', module: 'inventory', action: 'create', buildings: [], specialties: null }],
     [{ kind: 'action', module: 'organization', action: 'read', buildings: ['A楼'], specialties: null }],
-  ])('rejects invented/admin/external permissions and illegal scope %#', async permissions => {
+  ])('rejects invented/admin/external-system actions and illegal scope %#', async permissions => {
     await expect(service.create(applicant, input({ permissions: permissions as RequestedPermission[] }))).rejects.toThrow('权限申请内容无效');
     expect(ledger.read().audit).toEqual([]);
   });
@@ -358,5 +374,220 @@ describe('personnel permission requests use actual permissions without assigning
     expect(service.listAdmin(admin)).toHaveLength(51);expect(pages).toHaveBeenCalledTimes(1);
     await grant([]);pages.mockClear();
     expect(service.listAdmin(admin).every(item=>item.currentEffect==='none')).toBe(true);expect(pages).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a committed configuration grant after request-file failure without another grant or configuration audit', async () => {
+    const row = await service.create(applicant, input()), body = reviewInput(row.id, { comment: '已核对业务范围' });
+    failNextRequestCommit();
+    await expect(service.review(admin, body)).rejects.toThrow('synthetic request commit failure');
+    expect(ledger.read().requests[row.id].status).toBe('pending');
+    expect(service.listAdmin(admin)[0]).toMatchObject({ status: 'approved', currentEffect: 'current', comment: body.comment });
+    const before = readFileSync(configStore.filePath, 'utf8');
+    const restarted = new PersonnelPermissionRequestsService(config, new PersonnelPermissionRequestsStore(ledger.filePath));
+    const recovered = await restarted.review(admin, body);
+    expect(recovered).toMatchObject({ status: 'approved', version: 2, reviewerAccountId: admin.accountId, comment: body.comment });
+    expect(readFileSync(configStore.filePath, 'utf8')).toBe(before);
+    expect(configStore.read().audit.filter(item => item.action === '同意权限申请并授权')).toHaveLength(1);
+    expect(ledger.read().audit.map(item => item.action)).toEqual(['create', 'approve']);
+    expect(await restarted.review(admin, body)).toEqual(recovered);
+  });
+
+  it.each(['reject', 'cancel', 'update'] as const)('returns the true approved result when %s follows an interrupted request commit', async action => {
+    const row = await service.create(applicant, input()), original = reviewInput(row.id, { comment: '原审批意见' });
+    failNextRequestCommit();
+    await expect(service.review(admin, original)).rejects.toThrow('synthetic request commit failure');
+    const before = readFileSync(configStore.filePath, 'utf8');
+    const refreshed = config.snapshot().accounts.find(item => item.id === ids[0])!;
+    applicant = config.currentPrincipal(refreshed.id, refreshed.version)!;
+    const base = { requestId: row.id, expectedRequestVersion: 1, clientMutationId: randomUUID() };
+    const result = action === 'reject' ? await service.review(admin, { ...base, decision: 'reject', comment: '后到拒绝' })
+      : action === 'cancel' ? await service.cancel(applicant, base) : await service.update(applicant, { ...base, reason: '后到修改' });
+    expect(result).toMatchObject({ status: 'approved', version: 2, comment: '原审批意见', reason: row.reason });
+    expect(readFileSync(configStore.filePath, 'utf8')).toBe(before);
+    expect(ledger.read().audit.map(item => item.action)).toEqual(['create', 'approve']);
+    expect(service.summaryOwn(applicant)).toMatchObject({ pending: 0, approved: 1 });
+  });
+
+  it('recovers approval history without restoring a permission revoked after the original grant', async () => {
+    const row = await service.create(applicant, input()), body = reviewInput(row.id);
+    failNextRequestCommit();
+    await expect(service.review(admin, body)).rejects.toThrow('synthetic request commit failure');
+    const committedRevision = configStore.read().revision;
+    await grant([]);
+    const afterRevocation = readFileSync(configStore.filePath, 'utf8');
+    expect(await service.review(admin, body)).toMatchObject({ status: 'approved', currentEffect: 'none', verifiedConfigurationRevision: committedRevision });
+    expect(readFileSync(configStore.filePath, 'utf8')).toBe(afterRevocation);
+    expect(configStore.read().audit.filter(item => item.action === '同意权限申请并授权')).toHaveLength(1);
+  });
+
+  it.each(['malformed', 'unknown-version', 'wrong-identity', 'wrong-permissions', 'wrong-request-version', 'oversized'] as const)('fails closed on a %s grant receipt rather than rejecting or regranting', async fault => {
+    const row = await service.create(applicant, input()), body = reviewInput(row.id);
+    failNextRequestCommit();
+    await expect(service.review(admin, body)).rejects.toThrow('synthetic request commit failure');
+    const request = ledger.read().requests[row.id], key = permissionGrantKey(request);
+    await configStore.mutate(configStore.read().revision, randomUUID(), 'synthetic-invalid-receipt', state => {
+      const prefix = 'personnel-permission-grant-v1:', entry = state.mutations[key];
+      if (fault === 'malformed') entry.fingerprint = 'not-a-receipt';
+      else if (fault === 'oversized') entry.fingerprint = prefix + 'x'.repeat(4096);
+      else {
+        const receipt = JSON.parse(entry.fingerprint.slice(prefix.length));
+        if (fault === 'unknown-version') receipt.version = 2;
+        if (fault === 'wrong-identity') receipt.applicantIdentity = 'different-person';
+        if (fault === 'wrong-permissions') receipt.permissionsHash = '0'.repeat(64);
+        if (fault === 'wrong-request-version') receipt.requestVersion++;
+        entry.fingerprint = prefix + JSON.stringify(receipt);
+      }
+    });
+    const before = readFileSync(configStore.filePath, 'utf8'), requestBytes = readFileSync(ledger.filePath, 'utf8');
+    await expect(service.review(admin, reviewInput(row.id, { decision: 'reject', comment: '不应覆盖' }))).rejects.toThrow('回执无法核验');
+    expect(readFileSync(configStore.filePath, 'utf8')).toBe(before);
+    expect(readFileSync(ledger.filePath, 'utf8')).toBe(requestBytes);
+  });
+
+  it('preserves the followed role, native building and unrelated denies when granting another exact module scope', async () => {
+    const original = config.snapshot().accounts.find(item => item.id === ids[0])!;
+    const unrelated = grantRule({ id: 'unrelated-deny', module: 'thresholds', actions: ['update'], effect: 'deny', buildings: ['C楼'] });
+    await config.saveAccount({ clientMutationId: randomUUID(), expectedRevision: configStore.read().revision, id: original.id,
+      kind: original.kind, name: original.name, role: 'building_admin', building: 'A楼', buildings: ['A楼'], enabled: true,
+      personalRules: [unrelated] }, admin);
+    const before = config.snapshot().accounts.find(item => item.id === ids[0])!;
+    applicant = config.currentPrincipal(before.id, before.version)!;
+    const requested = { ...permission() as Extract<RequestedPermission, { kind: 'action' }>, buildings: ['B楼'] as ['B楼'] };
+    const row = await service.create(applicant, input({ permissions: [requested] }));
+    await service.review(admin, reviewInput(row.id));
+    const after = config.snapshot().accounts.find(item => item.id === ids[0])!;
+    expect(after.authorizationBinding).toEqual(before.authorizationBinding);
+    expect(after.role).toBe('building_admin'); expect(after.building).toBe('A楼'); expect(after.buildings).toEqual(['A楼']);
+    expect(after.authorizationOverrides!.rules).toContainEqual(unrelated);
+    const evaluate = createBusinessPermissionEvaluator(config.currentPrincipal(after.id, after.version)!);
+    expect(evaluate({ module: 'inventory', action: 'create', building: 'B楼', specialty: '电气' }).allowed).toBe(true);
+    expect(evaluate({ module: 'inventory', action: 'create', building: 'C楼', specialty: '电气' }).allowed).toBe(false);
+    expect(evaluate({ module: 'thresholds', action: 'update', building: 'C楼', specialty: '电气' }).allowed).toBe(false);
+  });
+
+  it('grants a requested static page through the unified page engine without granting business actions', async () => {
+    await grant([]);
+    const row = await service.create(applicant, input({ permissions: [{ kind: 'page', path: '/nantong-base' }] }));
+    const approved = await service.review(admin, reviewInput(row.id));
+    expect(approved).toMatchObject({ status: 'approved', currentEffect: 'current' });
+    const account = config.snapshot().accounts.find(item => item.id === ids[0])!;
+    expect(account.authorizationOverrides!.allowPages).toEqual(['/nantong-base']);
+    expect(account.authorizationOverrides!.rules).toEqual([]);
+    expect(account.authorizationBinding!.mode).toBe('independent');
+  });
+
+  it('grants only a registered external platform entry without changing any external system identity', async () => {
+    await grant([]);
+    const before = config.snapshot().accounts.find(item => item.id === ids[0])!;
+    const row = await service.create(applicant, input({ permissions: [{ kind: 'page', path: 'https://www.sm.sjhl.online:8787/' }] }));
+    expect((await service.review(admin, reviewInput(row.id)))).toMatchObject({ status: 'approved', currentEffect: 'current' });
+    const after = config.snapshot().accounts.find(item => item.id === ids[0])!;
+    expect(after.authorizationOverrides!.allowPages).toEqual(['https://www.sm.sjhl.online:8787/']);
+    expect(after.authorizationOverrides!.rules).toEqual([]);
+    expect(after.role).toBe(before.role); expect(after.identityHash).toBe(before.identityHash);
+    expect(after.openId).toBe(before.openId); expect(after.appId).toBe(before.appId);
+  });
+
+  it('does not grant any permissions when a request is rejected', async () => {
+    const row = await service.create(applicant, input()), before = JSON.stringify(configStore.read());
+    expect((await service.review(admin, reviewInput(row.id, { decision: 'reject', comment: '不符合职责' }))).status).toBe('rejected');
+    expect(JSON.stringify(configStore.read())).toBe(before);
+  });
+
+  it('enqueues create/replay durably and isolates wake failures from a committed approval', async () => {
+    const notifier = { enqueue: jest.fn().mockRejectedValueOnce(new Error('synthetic notification disk unavailable')).mockResolvedValue(undefined),
+      wake: jest.fn(() => { throw new Error('synthetic background wake failure'); }) };
+    const notified = new PersonnelPermissionRequestsService(config, ledger, notifier as any), body = input();
+    expect(notifier.enqueue).not.toHaveBeenCalled();
+    await expect(notified.create(applicant, body)).rejects.toThrow('notification disk unavailable');
+    const row = await notified.create(applicant, body);
+    expect(notifier.enqueue).toHaveBeenCalledTimes(2);
+    expect(Object.values(ledger.read().requests)).toHaveLength(1);
+    expect(ledger.read().audit).toHaveLength(1);
+    expect((await notified.review(admin, reviewInput(row.id))).status).toBe('approved');
+    expect(notifier.wake).toHaveBeenCalledTimes(1);
+    expect(ledger.read().audit).toHaveLength(2);
+  });
+
+  it('refuses a known full request ledger before committing any configuration grant', async () => {
+    const row = await service.create(applicant, input()), state = ledger.read();
+    state.audit = Array.from({ length: 20000 }, () => ({ ...state.audit[0] }));
+    writeFileSync(ledger.filePath, JSON.stringify(state));
+    const requestBytes = readFileSync(ledger.filePath, 'utf8'), before = JSON.stringify(configStore.read());
+    const granting = jest.spyOn(config, 'grantPersonnelPermissionRequest');
+    await expect(service.review(admin, reviewInput(row.id))).rejects.toThrow('台账容量已满');
+    expect(granting).not.toHaveBeenCalled();
+    expect(JSON.stringify(configStore.read())).toBe(before);
+    expect(readFileSync(ledger.filePath, 'utf8')).toBe(requestBytes);
+  });
+
+  it('serializes actual grant and cancellation under the request lock without producing cancelled-but-granted state', async () => {
+    const row = await service.create(applicant, input());
+    let entered!: () => void, release!: () => void;
+    const began = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const originalGrant = config.grantPersonnelPermissionRequest.bind(config);
+    jest.spyOn(config, 'grantPersonnelPermissionRequest').mockImplementation(async (...args) => {
+      entered(); await gate; return originalGrant(...args);
+    });
+    const approving = service.review(admin, reviewInput(row.id));
+    await began;
+    const cancelling = service.cancel(applicant, { requestId: row.id, expectedRequestVersion: 1, clientMutationId: randomUUID() });
+    release();
+    const results = await Promise.allSettled([approving, cancelling]);
+    expect(results[0].status).toBe('fulfilled'); expect(results[1].status).toBe('rejected');
+    expect(ledger.read().requests[row.id].status).toBe('approved');
+    expect(configStore.read().audit.filter(item => item.action === '同意权限申请并授权')).toHaveLength(1);
+    expect(ledger.read().audit.map(item => item.action)).toEqual(['create', 'approve']);
+  });
+
+  it('does not grant when cancellation wins before approval', async () => {
+    const row = await service.create(applicant, input()), before = JSON.stringify(configStore.read());
+    const granting = jest.spyOn(config, 'grantPersonnelPermissionRequest');
+    const results = await Promise.allSettled([
+      service.cancel(applicant, { requestId: row.id, expectedRequestVersion: 1, clientMutationId: randomUUID() }),
+      service.review(admin, reviewInput(row.id)),
+    ]);
+    expect(results[0].status).toBe('fulfilled'); expect(results[1].status).toBe('rejected');
+    expect(granting).not.toHaveBeenCalled();
+    expect(JSON.stringify(configStore.read())).toBe(before);
+    expect(ledger.read().requests[row.id].status).toBe('cancelled');
+  });
+
+  it('applies the same requested grant to the verified personnel login while preserving each login role and scope', async () => {
+    const native = (defaults.defaultAccessAccounts as jest.Mock).mock.results[0].value as Record<string, stores.StoredAccount>;
+    const localId = native[ids[0]].personnelIdentity!;
+    native[localId] = { id: localId, kind: 'local', name: '合成关联姓名登录', role: 'inventory_admin', building: 'B楼',
+      enabled: true, deleted: false, version: 1, source: 'default', passwordHash: adminHash, loginMethod: 'personnel-password',
+      personnelActive: true, personnelAppId: appId, personnelIdentity: localId, siteMember: true, permissionSource: 'manual' };
+    const row = await service.create(applicant, input());
+    await service.review(admin, reviewInput(row.id));
+    const snapshot = config.snapshot(), feishu = snapshot.accounts.find(item => item.id === ids[0])!, local = snapshot.accounts.find(item => item.id === localId)!;
+    expect(feishu.role).toBe('guest'); expect(feishu.building).toBeNull();
+    expect(local.role).toBe('inventory_admin'); expect(local.building).toBe('B楼');
+    expect(local.authorizationBinding).toEqual({ mode: 'follow', templateId: 'builtin-inventory_admin' });
+    expect(createBusinessPermissionEvaluator(config.currentPrincipal(local.id, local.version)!)({ module: 'inventory', action: 'create', building: 'A楼', specialty: '电气' }).allowed).toBe(true);
+    expect(createBusinessPermissionEvaluator(config.currentPrincipal(local.id, local.version)!)({ module: 'inventory', action: 'create', building: 'C楼', specialty: '电气' }).allowed).toBe(false);
+    expect(config.currentPrincipal(local.id, 1)).toBeUndefined();
+  });
+
+  it('reads one configuration snapshot for 1000 pending receipt checks and batches each listing and summary independently', async () => {
+    const row = await service.create(applicant, input()), state = ledger.read();
+    for (let i = 1; i < 1000; i++) { const id = randomUUID(); state.requests[id] = { ...state.requests[row.id], id }; }
+    writeFileSync(ledger.filePath, JSON.stringify(state));
+    const reading = jest.spyOn(configStore, 'read');
+    const firstSnapshot = config.permissionRequestGrantReceipts(Object.values(state.requests));
+    expect(reading).toHaveBeenCalledTimes(1); expect(firstSnapshot.size).toBe(0);
+    const batch = jest.spyOn(config, 'permissionRequestGrantReceipts'), single = jest.spyOn(config, 'permissionRequestGrantReceipt');
+    expect(service.listAdmin(admin)).toHaveLength(1000);
+    expect(batch).toHaveBeenCalledTimes(1); expect(batch.mock.calls[0][0]).toHaveLength(1000); expect(single).not.toHaveBeenCalled();
+    batch.mockClear();
+    expect(service.summaryAdmin(admin)).toMatchObject({ total: 1000, pending: 1000, approved: 0 });
+    expect(batch).toHaveBeenCalledTimes(1); expect(single).not.toHaveBeenCalled();
+    await config.grantPersonnelPermissionRequest(state.requests[row.id], admin, { clientMutationId: randomUUID(), comment: '' });
+    expect(firstSnapshot.size).toBe(0); // No cross-request mutable authorization cache.
+    batch.mockClear();
+    expect(service.summaryAdmin(admin)).toMatchObject({ total: 1000, pending: 999, approved: 1 });
+    expect(batch).toHaveBeenCalledTimes(1); expect(single).not.toHaveBeenCalled();
   });
 });

@@ -43,7 +43,11 @@ function PersonalCenter() {
     setPrefill({ key: ++prefillSequence.current, permission }); setPermissionView('request');
     requestAnimationFrame(() => permissionAnchor.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
   };
-  const updateRequest = (row: PersonnelPermissionRequest) => { requests.upsert(row); setNotice(row.status === 'cancelled' ? '权限申请已撤回，现有权限不变。' : '申请记录已同步，可在申请记录查看进度。'); };
+  const updateRequest = (row: PersonnelPermissionRequest) => {
+    requests.upsert(row);
+    if (row.status === 'approved') { setNotice('此申请已授权，正在更新权限显示。'); void profile.refresh(); void access.refreshSession(); }
+    else setNotice(row.status === 'cancelled' ? '权限申请已撤回，现有权限不变。' : '申请记录已同步，可在申请记录查看进度。');
+  };
   const updateCorrection = (row: PersonnelArchiveCorrection) => { corrections.upsert(row); setNotice(row.status === 'cancelled' ? '资料核对申请已撤回。' : '资料核对申请已同步，请在核对记录查看反馈。'); };
   const profileUnavailable = <section className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">{profile.loading ? '正在加载权限资料…' : '权限资料暂不可用，请重试。'}{!profile.loading && <Button variant="link" onClick={() => void profile.refresh()}>重试权限资料</Button>}</section>;
   const pendingCount = requests.items.filter(row => row.status === 'pending').length + corrections.items.filter(row => row.status === 'pending').length;
@@ -61,7 +65,7 @@ function PersonalCenter() {
         <div hidden={archiveView !== 'corrections'} className="space-y-5">{!readOnly && <ArchiveCorrectionForm onSubmitted={updateCorrection} />}<ReadStatus loading={corrections.loading} error={corrections.error} label="核对记录" onRetry={() => void corrections.refresh()} /><ArchiveCorrectionList rows={corrections.items} onUpdated={updateCorrection} readOnly={readOnly} /></div>
       </TabsContent>
       <TabsContent value="permissions" forceMount className="space-y-4 data-[state=inactive]:hidden">
-        <div ref={permissionAnchor} className="scroll-mt-24 space-y-2"><div className="flex flex-wrap gap-2" role="group" aria-label="权限与申请栏目">{[['overview', '我的权限'], ['request', '申请权限'], ['history', `申请记录${requests.items.some(row => row.status === 'pending') ? ` · ${requests.items.filter(row => row.status === 'pending').length} 待审核` : ''}`]].map(([value, label]) => <Button key={value} size="sm" variant={permissionView === value ? 'secondary' : 'ghost'} aria-pressed={permissionView === value} onClick={() => setPermissionView(value)}>{label}</Button>)}</div>{pendingCount > 0 && <p className="text-xs text-muted-foreground">目前有 {pendingCount} 条权限或资料申请待处理。处理结果会显示在本页记录中。</p>}</div>
+        <div ref={permissionAnchor} className="scroll-mt-24 space-y-2"><div className="flex flex-wrap gap-2" role="group" aria-label="权限与申请栏目">{[['overview', '我的权限'], ['request', '全部可申请权限'], ['history', `申请记录${requests.items.some(row => row.status === 'pending') ? ` · ${requests.items.filter(row => row.status === 'pending').length} 待审核` : ''}`]].map(([value, label]) => <Button key={value} size="sm" variant={permissionView === value ? 'secondary' : 'ghost'} aria-pressed={permissionView === value} onClick={() => setPermissionView(value)}>{label}</Button>)}</div>{pendingCount > 0 && <p className="text-xs text-muted-foreground">目前有 {pendingCount} 条权限或资料申请待处理。处理结果会显示在本页记录中。</p>}</div>
         <div hidden={permissionView !== 'overview'}>{currentProfile ? <PermissionOverview profile={currentProfile} principal={actor} readOnly={readOnly} onRequest={requestPermission} /> : profileUnavailable}</div>
         <div hidden={permissionView !== 'request'}>{currentProfile ? <section className="rounded-lg border bg-card p-4 md:p-6">{readOnly ? <p className="text-sm text-muted-foreground">代登录时不能提交权限申请。</p> : <PermissionRequestForm catalog={currentProfile.catalog} principal={actor} suggestedScopes={currentProfile.suggestedScopes} prefill={prefill} onSubmitted={updateRequest} />}</section> : profileUnavailable}</div>
         <div hidden={permissionView !== 'history'} className="space-y-4"><ReadStatus loading={requests.loading} error={requests.error} label="申请记录" onRetry={() => void requests.refresh()} />{profile.value ? <PermissionRequestList requests={requests.items} catalog={profile.value.catalog} onUpdated={updateRequest} readOnly={readOnly} /> : profileUnavailable}</div>

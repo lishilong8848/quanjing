@@ -7,19 +7,22 @@ import type { PersonnelPermissionRequest, RequestedPermission } from '@shared/pe
 import { createPermissionRequest, type PersonalPermissionCatalog } from '@/api/personal-access';
 import { createPersonalMutationIdentity } from '@/access/personal-password.logic';
 import { Button } from '@/components/ui/button';
-import { addRequestedPermission, alreadyOwnsPermission, personalActionCoverage, personalReadablePages, permissionRequestLabel, type PersonalPermissionPrincipal } from './permission-request.logic';
+import { addRequestedPermission, alreadyOwnsPermission, personalActionCoverage, personalReadablePages, permissionRequestLabel, requestablePermissionPages, type PersonalPermissionPrincipal } from './permission-request.logic';
 
 export interface PermissionRequestPrefill { key: number; permission: RequestedPermission }
 
 export function PermissionRequestForm({ catalog, onSubmitted, principal, suggestedScopes, prefill }: { catalog: PersonalPermissionCatalog; onSubmitted: (request: PersonnelPermissionRequest) => void; principal?: PersonalPermissionPrincipal; suggestedScopes?: { buildings: BuildingAdminBuilding[]; specialties: ProfessionalSpecialty[] }; prefill?: PermissionRequestPrefill }) {
-  const pages = catalog.pages.filter(page => page.kind !== 'external');
+  const pages = useMemo(() => requestablePermissionPages(catalog), [catalog]);
+  const [query, setQuery] = useState('');
+  const visiblePages = useMemo(() => requestablePermissionPages(catalog, query), [catalog, query]);
   const [path, setPath] = useState(pages[0]?.path || ''), [kind, setKind] = useState('page'), [moduleId, setModuleId] = useState(''), [action, setAction] = useState<BusinessAction>('read');
   const [buildings, setBuildings] = useState<BuildingAdminBuilding[] | null>(() => [...(suggestedScopes?.buildings || [])]), [specialties, setSpecialties] = useState<ProfessionalSpecialty[] | null>(() => [...(suggestedScopes?.specialties || [])]);
   const [permissions, setPermissions] = useState<RequestedPermission[]>([]), [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [success, setSuccess] = useState('');
   const pending = useRef(false), identity = useRef(createPersonalMutationIdentity()), alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; identity.current.clear(); }; }, []);
-  const selectedPage = pages.find(page => page.path === path) || pages[0];
+  const selectedPage = visiblePages.find(page => page.path === path) || visiblePages[0];
+  const selectedKind = kind === 'action' && selectedPage?.kind !== 'external' && selectedPage?.modules.length ? 'action' : 'page';
   const selectedModule = selectedPage?.modules.find(module => module.id === moduleId) || selectedPage?.modules[0];
   const selectedAction = selectedModule?.actions.find(value => value === action) || selectedModule?.actions[0];
   const ownedCoverage = useMemo(() => principal && selectedModule && selectedAction ? personalActionCoverage(principal, selectedModule.id, selectedAction, selectedModule.scoped) : null, [principal, selectedModule, selectedAction]);
@@ -30,7 +33,7 @@ export function PermissionRequestForm({ catalog, onSubmitted, principal, suggest
     const permission = prefill.permission;
     const page = permission.kind === 'page' ? pages.find(item => item.path === permission.path) : pages.find(item => item.modules.some(module => module.id === permission.module));
     if (!page) return;
-    setPath(page.path); setKind(permission.kind); setError(''); setSuccess('');
+    setPath(page.path); setQuery(''); setKind(permission.kind); setError(''); setSuccess('');
     if (permission.kind === 'action') { setModuleId(permission.module); setAction(permission.action); }
     else { setModuleId(''); setAction('read'); }
     resetScope();
@@ -40,9 +43,9 @@ export function PermissionRequestForm({ catalog, onSubmitted, principal, suggest
   function add() {
     setError(''); setSuccess('');
     if (!selectedPage) return;
-    if (kind === 'action' && (!selectedModule || !selectedAction)) { setError('请选择一个实际功能'); return; }
-    if (kind === 'action' && selectedModule?.scoped && (buildings?.length === 0 || specialties?.length === 0)) { setError('请至少选择一个楼栋和专业，或选择全部范围'); return; }
-    const next: RequestedPermission = kind === 'page' ? { kind: 'page', path: selectedPage.path } : {
+    if (selectedKind === 'action' && (!selectedModule || !selectedAction)) { setError('请选择一个实际功能'); return; }
+    if (selectedKind === 'action' && selectedModule?.scoped && (buildings?.length === 0 || specialties?.length === 0)) { setError('请至少选择一个楼栋和专业，或选择全部范围'); return; }
+    const next: RequestedPermission = selectedKind === 'page' ? { kind: 'page', path: selectedPage.path } : {
       kind: 'action', module: selectedModule!.id, action: selectedAction!,
       buildings: selectedModule!.scoped ? buildings : null, specialties: selectedModule!.scoped ? specialties : null,
     };
@@ -58,20 +61,25 @@ export function PermissionRequestForm({ catalog, onSubmitted, principal, suggest
     try {
       const result = await createPermissionRequest({ ...body, clientMutationId: identity.current.forPayload(body) });
       if (!alive.current) return;
-      onSubmitted(result); setPermissions([]); setReason(''); identity.current.clear(); setSuccess('申请已提交，等待管理员审核。授权完成前现有权限保持不变。');
+      onSubmitted(result); setPermissions([]); setReason(''); identity.current.clear();
+      setSuccess(result.status === 'approved' ? '此申请已授权，请刷新权限查看最新结果。' : result.status === 'rejected' ? '此申请已被驳回，请在申请记录查看审核意见。' : result.status === 'cancelled' ? '此申请已撤回，请在申请记录查看。' : '申请已提交，等待管理员审核。授权完成前现有权限保持不变。');
     } catch (failure) { if (alive.current) setError((failure as Error).message); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   return <section className="min-w-0 space-y-4">
-    <div><h2 className="text-lg font-semibold">申请权限</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">选择需要的页面或操作，并说明用途。审批职责和单据状态仍须符合业务要求。</p></div>
+    <div><h2 className="text-lg font-semibold">全部可申请权限</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">从平台完整目录选择需要的页面或操作，不受当前角色限制。系统管理员专用能力不在申请范围内。</p></div>
     <fieldset disabled={busy} className="space-y-4 rounded-lg border bg-muted/20 p-4">
-      <div className="grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm"><span>页面</span><select className="config-select min-w-0 w-full" value={selectedPage?.path || ''} onChange={event => { setPath(event.target.value); setModuleId(''); setAction('read'); resetScope(); }}>{pages.map(page => <option key={page.path} value={page.path}>{page.label}</option>)}</select></label>
-        <label className="grid gap-2 text-sm"><span>申请内容</span><select className="config-select min-w-0 w-full" value={kind} onChange={event => setKind(event.target.value)}><option value="page">页面查看</option><option value="action" disabled={!selectedPage?.modules.length}>具体功能操作</option></select></label></div>
-      {principal && <div className="rounded-md border bg-background p-3 text-sm" role="status"><p className="font-medium">当前已拥有的权限</p>{kind === 'page' ? <p className="mt-1 text-muted-foreground">{ownsPage ? '此页面已经可以查看，无需重复申请。' : '此页面尚未开放查看。'}</p> : <div className="mt-1 space-y-1 text-muted-foreground">{ownedCoverage?.allowed ? <><p>{ownedCoverage.allowed === ownedCoverage.total ? '该操作已开放全部适用范围。' : '该操作仅开放以下范围：'}</p>{ownedCoverage.ranges.map(range => <p key={range}>{range}</p>)}</> : <p>尚未获得此操作权限。</p>}</div>}</div>}
-      {kind === 'action' && selectedModule && <><div className="grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm"><span>功能</span><select className="config-select min-w-0 w-full" value={selectedModule.id} onChange={event => { setModuleId(event.target.value); setAction('read'); resetScope(); }}>{selectedPage?.modules.map(module => <option key={module.id} value={module.id}>{module.label}</option>)}</select></label>
+      <label className="grid gap-2 text-sm"><span>搜索全部可申请权限</span><input className="config-select min-w-0 w-full" value={query} onChange={event => { setQuery(event.target.value); setModuleId(''); setAction('read'); resetScope(); }} placeholder="搜索页面、功能或操作，如采购、出库、导出" /></label>
+      <p className="text-xs text-muted-foreground">{query.trim() ? `找到 ${visiblePages.length} / ${pages.length} 个页面` : `共 ${pages.length} 个可申请页面`}；已拥有的权限仅作提示，不会限制目录或可选范围。</p>
+      {!visiblePages.length && <p role="status" className="rounded-md border bg-background p-3 text-sm text-muted-foreground">没有匹配的页面或功能，请换个关键词。</p>}
+      <div className="grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm"><span>页面</span><select className="config-select min-w-0 w-full" value={selectedPage?.path || ''} onChange={event => { setPath(event.target.value); setModuleId(''); setAction('read'); resetScope(); }}>{visiblePages.map(page => <option key={page.path} value={page.path}>{page.label}</option>)}</select></label>
+        <label className="grid gap-2 text-sm"><span>申请内容</span><select className="config-select min-w-0 w-full" value={selectedKind} onChange={event => setKind(event.target.value)}><option value="page">{selectedPage?.kind === 'external' ? '本平台入口' : '页面查看'}</option><option value="action" disabled={selectedPage?.kind === 'external' || !selectedPage?.modules.length}>具体功能操作</option></select></label></div>
+      {selectedKind === 'page' && <p className="text-xs leading-5 text-muted-foreground">{selectedPage?.kind === 'external' ? '仅申请该外链在本平台的入口，不改变外部系统内部权限。' : '页面查看沿用现有数据范围，不会自动开放全部楼栋或专业。需要其他范围时，请另加“具体功能操作”中的查看权限并选择范围。'}</p>}
+      {principal && selectedPage && <div className="rounded-md border bg-background p-3 text-sm" role="status"><p className="font-medium">当前已拥有的权限</p>{selectedKind === 'page' ? <p className="mt-1 text-muted-foreground">{ownsPage ? '此页面已经可以查看，无需重复申请。' : '此页面尚未开放查看。'}</p> : <div className="mt-1 space-y-1 text-muted-foreground">{ownedCoverage?.allowed ? <><p>{ownedCoverage.allowed === ownedCoverage.total ? '该操作已开放全部适用范围。' : '该操作仅开放以下范围：'}</p>{ownedCoverage.ranges.map(range => <p key={range}>{range}</p>)}</> : <p>尚未获得此操作权限。</p>}</div>}</div>}
+      {selectedKind === 'action' && selectedModule && <><div className="grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm"><span>功能</span><select className="config-select min-w-0 w-full" value={selectedModule.id} onChange={event => { setModuleId(event.target.value); setAction('read'); resetScope(); }}>{selectedPage?.modules.map(module => <option key={module.id} value={module.id}>{module.label}</option>)}</select></label>
         <label className="grid gap-2 text-sm"><span>操作</span><select className="config-select min-w-0 w-full" value={selectedAction} onChange={event => setAction(event.target.value as BusinessAction)}>{selectedModule.actions.map(value => <option key={value} value={value}>{BUSINESS_ACTION_LABELS[value]}</option>)}</select></label></div>
         {selectedModule.scoped && <div className="grid gap-4 md:grid-cols-2"><ScopeSelection title="楼栋范围" options={BUILDING_ADMIN_BUILDINGS} value={buildings} onChange={setBuildings} /><ScopeSelection title="专业范围" options={PROFESSIONAL_SPECIALTIES} value={specialties} onChange={setSpecialties} /></div>}
-        {selectedModule.scoped && <p className="text-xs leading-5 text-muted-foreground">范围仅预选账号已明确的任职建议，请按工作需要核对；没有建议时须自行选择。选择“全部”表示明确申请全部范围。</p>}
+        {selectedModule.scoped && <p className="text-xs leading-5 text-muted-foreground">任职范围只是建议，可按工作需要选择其他楼栋或专业；没有建议时须自行选择。“全部”表示明确申请全部范围。</p>}
         <p className="text-xs leading-5 text-muted-foreground">操作申请不会自动开放整页数据；如需查看页面，请单独添加页面查看申请。审批和办理仍受本人职责、单据状态限制。</p>
       </>}
       <Button type="button" variant="outline" onClick={add} disabled={!selectedPage || permissions.length >= 20}><Plus className="size-4" />添加申请项</Button>

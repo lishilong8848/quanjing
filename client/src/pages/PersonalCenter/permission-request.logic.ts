@@ -3,9 +3,22 @@ import { BUILDING_ADMIN_BUILDINGS, type AccessPrincipal } from '@shared/access-c
 import { PROFESSIONAL_SPECIALTIES } from '@shared/professional-access';
 import type { RequestedPermission } from '@shared/personnel-permission-request.interface';
 import type { PersonalPermissionCatalog } from '@/api/personal-access';
+import { PAGE_ACCESS_CATALOG } from '@shared/page-access';
+
+const registeredPages = new Set<string>(PAGE_ACCESS_CATALOG.map(page => page.path));
+
+/** The request directory is the full configurable catalog, never the user's granted set. */
+export function requestablePermissionPages(catalog: PersonalPermissionCatalog, query = '') {
+  const needle = query.trim().toLocaleLowerCase();
+  return catalog.pages.filter(page => registeredPages.has(page.path) && page.path !== catalog.management.path &&
+    (!needle || `${page.label} ${page.modules.map(module => `${module.label} ${module.actions.map(action => BUSINESS_ACTION_LABELS[action]).join(' ')}`).join(' ')}`.toLocaleLowerCase().includes(needle)));
+}
 
 export function permissionRequestLabel(permission: RequestedPermission, catalog: PersonalPermissionCatalog): string {
-  if (permission.kind === 'page') return `${catalog.pages.find(page => page.path === permission.path)?.label || '页面'} · 页面查看`;
+  if (permission.kind === 'page') {
+    const page = catalog.pages.find(page => page.path === permission.path);
+    return `${page?.label || '页面'} · ${page?.kind === 'external' ? '本平台入口（不改变外部系统权限）' : '页面查看（不扩大数据范围）'}`;
+  }
   const page = catalog.pages.find(page => page.modules.some(module => module.id === permission.module));
   const module = page?.modules.find(module => module.id === permission.module);
   const range = module?.scoped ? ` · ${permission.buildings?.join('、') || '全部楼栋'} · ${permission.specialties?.join('、') || '全部专业'}` : '';

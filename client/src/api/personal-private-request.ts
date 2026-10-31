@@ -15,6 +15,12 @@ type PersonalPrivatePath = typeof PRIVATE_PATHS extends Set<infer Path> ? Path :
 const MAX_PHOTO_BYTES = EMPLOYEE_ONBOARDING_PHOTO_FILE_RULE.maxBytesPerFile;
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const PASSWORD_UNCERTAIN = '密码更新结果未确认，可能已更新，请尝试新密码登录；也可保留当前内容，使用原请求重试。';
+const PASSWORD_ALREADY_UPDATED = '上次密码已更新，请使用上次设置的新密码重新登录后再修改';
+const PASSWORD_PENDING_MESSAGES = new Set([
+  '上次密码处理结果待核对，请使用原请求重试',
+  '密码正在处理，请稍后使用原请求重试',
+  '密码安全状态正在恢复，请稍后重试',
+]);
 const SAFE_MESSAGES = new Set([
   '当前密码不正确', '请输入当前密码', '两次输入的新密码不一致', '两次密码不一致', '新密码需为 8 至 128 个字符',
   '新密码不能与当前密码或身份证号码相同', '人员身份核验未通过，暂不能重置密码', '当前账号不可修改人员密码',
@@ -38,6 +44,14 @@ const SAFE_MESSAGES = new Set([
   '仅系统管理员可以审核权限申请', '此账号当前不能申请或办理个人权限，请管理员核对在职及启用状态',
   '此账号当前不可用，请管理员核对在职及启用状态', '申请对应账号不存在，请管理员核对人员身份',
   '权限配置已变化，请重新核对', '重复提交内容不一致，请重新发起', '申请理由需填写1至500字', '审核说明需填写1至500字',
+  '申请权限与现有禁止规则冲突，请先在权限配置中调整后重试',
+  '此申请已完成授权，不能拒绝或撤回，请刷新后查看结果',
+  '管理员通知暂未登记，请保留申请并重试',
+  '申请权限与现有禁止规则或查看范围冲突，请先在权限配置中调整后重试',
+  '权限申请授权回执无法核验，请联系管理员，现有权限已保留',
+  '个人权限规则已达上限，请先在权限配置中整理后重试',
+  '权限申请内容无法核验，请刷新后重试',
+  '未找到可接收通知的飞书管理员，申请已保留，请联系管理员核对',
   '资料纠错内容无效', '已有较多待处理纠错，请等待管理员处理或撤回不再需要的申请', '只能撤回本人的资料纠错',
   '资料纠错处理决定无效', '不能处理本人或关联账号的资料纠错', '代登录期间不能办理资料纠错',
   '仅系统管理员可以处理资料纠错', '账号当前不可办理资料纠错', '当前账号尚未关联本人档案，请联系管理员',
@@ -46,8 +60,10 @@ const SAFE_MESSAGES = new Set([
 ]);
 
 class PersonalPrivateError extends Error {
-  constructor(message: string, readonly status?: number, readonly uncertain = false) { super(message); }
+  constructor(message: string, readonly status?: number, readonly uncertain = false,
+    readonly passwordRecovery?: PersonalPasswordRecovery) { super(message); }
 }
+export type PersonalPasswordRecovery = 'retry' | 'login';
 
 /** Sensitive bodies and archive results must not pass through the SDK's Axios telemetry hooks. */
 export async function personalPrivateRequest<T>(path: PersonalPrivatePath, options: {
@@ -119,8 +135,12 @@ function privateUrl(path: PersonalPrivatePath): string {
 }
 
 function failureForStatus(status: number, password: boolean, body: unknown, genericFailure: string): PersonalPrivateError {
-  if (password && (status === 401 || status === 408 || status >= 500)) return new PersonalPrivateError(PASSWORD_UNCERTAIN, status, true);
+  if (password && (status === 401 || status === 408 || status >= 500)) return new PersonalPrivateError(PASSWORD_UNCERTAIN, status, true, status === 401 ? 'login' : 'retry');
   const raw = body && typeof body === 'object' && !Array.isArray(body) ? (body as { message?: unknown }).message : undefined;
+  if (password && status === 409 && typeof raw === 'string') {
+    if (raw === PASSWORD_ALREADY_UPDATED) return new PersonalPrivateError(raw, status, false, 'login');
+    if (PASSWORD_PENDING_MESSAGES.has(raw)) return new PersonalPrivateError(raw, status, true, 'retry');
+  }
   // Only known application messages may leave this boundary; never preserve the raw response or a fetch/SDK error object.
   if (typeof raw === 'string' && SAFE_MESSAGES.has(raw)) return new PersonalPrivateError(raw, status);
   const csrfMessages = ['Invalid CSRF token', 'Missing CSRF token', 'CSRF token mismatch', 'Invalid CSRF token.',

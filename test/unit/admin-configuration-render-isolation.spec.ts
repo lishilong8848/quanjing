@@ -44,6 +44,8 @@ const mockAccount: ManagedAccount = { id: 'synthetic-account', kind: 'feishu', n
 const mockData: AccessConfigurationResponse = { revision: 1, appId: 'synthetic-app', accounts: [mockAccount], cardRules: [], audit: [] };
 const mockConfiguration = { data: mockData, people: [], loading: false, peopleLoading: false, error: '', peopleError: '', refresh: jest.fn(), refreshPeople: jest.fn(), commit: mockCommit };
 let mockAccountId = 'other-account';
+let mockLocation = { search: '', key: 'synthetic-navigation' };
+jest.mock('react-router-dom', () => ({ ...jest.requireActual('react-router-dom'), useLocation: () => mockLocation }));
 jest.mock('../../client/src/pages/SystemConfiguration/model', () => ({
   ...jest.requireActual('../../client/src/pages/SystemConfiguration/model'),
   useConfiguration: () => mockConfiguration,
@@ -60,6 +62,8 @@ import SystemConfigurationPage from '../../client/src/pages/SystemConfiguration'
 import { AccountPanel } from '../../client/src/pages/SystemConfiguration/AccountPanel';
 import { AccountEditor } from '../../client/src/pages/SystemConfiguration/AccountEditor';
 import { CardPanel } from '../../client/src/pages/SystemConfiguration/CardPanel';
+import { PermissionRequestsPanel } from '../../client/src/pages/SystemConfiguration/PermissionRequestsPanel';
+import { permissionRequestLocation } from '../../client/src/pages/SystemConfiguration/permission-request-navigation';
 
 function find(node: ReactNode, type: unknown): ReactElement<Record<string, any>> | undefined {
   if (Array.isArray(node)) return node.map(child => find(child, type)).find(Boolean);
@@ -72,7 +76,7 @@ function sameProps(a: Record<string, unknown>, b: Record<string, unknown>) {
 }
 
 describe('configuration editor render isolation', () => {
-  beforeEach(() => { mockSlots.length = 0; mockCursor = 0; mockAccountId = 'other-account'; mockConfiguration.data = mockData; jest.clearAllMocks(); });
+  beforeEach(() => { mockSlots.length = 0; mockCursor = 0; mockAccountId = 'other-account'; mockLocation = { search: '', key: 'synthetic-navigation' }; mockConfiguration.data = mockData; jest.clearAllMocks(); });
   it('memoizes the actual account and card panels using the default shallow boundary', () => {
     for (const panel of [AccountPanel, CardPanel]) {
       expect((panel as any).$$typeof).toBe(Symbol.for('react.memo'));
@@ -117,5 +121,21 @@ describe('configuration editor render isolation', () => {
     expect(mockCommit).toHaveBeenCalledWith(result);
     expect(mockRefreshSession).toHaveBeenCalledTimes(refreshCount);
     expect(find(renderPage(), AccountEditor)).toBeUndefined();
+  });
+  it('opens the exact request from a valid card location and refreshes configuration/session after returned grant', async () => {
+    const id = '1b732251-0af2-4916-9e3d-3de527f15ef9';
+    mockLocation = { search: `?tab=permission-requests&requestId=${id}`, key: 'card-navigation' };
+    const panel = find(renderPage(), PermissionRequestsPanel)!;
+    expect(panel.props.focusRequestId).toBe(id); expect(panel.props.focusNavigationKey).toBe('card-navigation');
+    await panel.props.onGranted({ status: 'approved' });
+    expect(mockConfiguration.refresh).toHaveBeenCalledTimes(1); expect(mockRefreshSession).toHaveBeenCalledTimes(1);
+  });
+  it('treats link parameters only as navigation and never fabricates administrator data', () => {
+    mockLocation = { search: '?tab=permission-requests&requestId=1b732251-0af2-4916-9e3d-3de527f15ef9', key: 'card-navigation' };
+    mockConfiguration.data = undefined as any;
+    expect(find(renderPage(), PermissionRequestsPanel)).toBeUndefined();
+    expect(permissionRequestLocation('?tab=permission-requests&requestId=../private')).toEqual({ tab: 'permission-requests' });
+    expect(permissionRequestLocation('?tab=permission-requests&requestId=a&requestId=b')).toEqual({ tab: 'permission-requests' });
+    expect(permissionRequestLocation('?tab=roles&requestId=1b732251-0af2-4916-9e3d-3de527f15ef9')).toBeNull();
   });
 });

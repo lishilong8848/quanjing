@@ -30,6 +30,8 @@ import type { AuthorizationAccountChange, AuthorizationAccountPreview, Authoriza
 import { authorizationPages, authorizationPolicyFingerprint, authorizationTemplateId, createAuthorizationTemplates, projectAuthorization, resolveAuthorization, validAuthorizationBinding, validAuthorizationOverrides } from './authorization-profile.policy';
 import { accountAuthorizationChange, authorizationMigrationPreview, bindUnconfiguredAuthorization, captureIndependentAuthorization, migrateAuthorizationState, reprojectAuthorizationState, roleAuthorizationChange } from './authorization-profile.configuration';
 import { effectiveCardDuties } from './effective-card-duties';
+import { addRequestedAuthorization, encodePermissionGrantReceipt, permissionApplicantIdentity, permissionGrantKey, permissionGrantPermissionsHash,
+  readPermissionGrantReceipt, type PermissionGrantRequest, type PermissionGrantReceipt, type VerifiedPermissionGrantReceipt } from './personnel-permission-grant';
 
 @Injectable()
 export class AccessConfigurationService implements OnModuleInit {
@@ -509,6 +511,64 @@ export class AccessConfigurationService implements OnModuleInit {
         previous ? describe(previous) : '无授权', describe(next));
     });
     return this.snapshot();
+  }
+  /** Internal lifecycle receipt, never included in an ordinary session or configuration response. */
+  permissionRequestGrantReceipt(request: PermissionGrantRequest): VerifiedPermissionGrantReceipt | undefined {
+    return readPermissionGrantReceipt(this.store.read(), request);
+  }
+  /** One request-local configuration read; only receipts leave this internal projection. */
+  permissionRequestGrantReceipts(requests: readonly PermissionGrantRequest[]): Map<string, VerifiedPermissionGrantReceipt> {
+    const receipts = new Map<string, VerifiedPermissionGrantReceipt>();
+    if (!requests.length) return receipts;
+    const state = this.store.read();
+    for (const request of requests) {
+      const receipt = readPermissionGrantReceipt(state, request);
+      if (receipt) receipts.set(request.id, receipt);
+    }
+    return receipts;
+  }
+  async grantPersonnelPermissionRequest(request: PermissionGrantRequest, actor: AccessPrincipal,
+    review: { clientMutationId: string; comment: string }): Promise<VerifiedPermissionGrantReceipt> {
+    const before = this.store.read();
+    this.assertActor(actor, before);
+    const prior = readPermissionGrantReceipt(before, request);
+    if (prior) return prior;
+    const reviewer = actor.accountId && this.accounts(before)[actor.accountId];
+    if (!reviewer || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u.test(review.clientMutationId) ||
+      typeof review.comment !== 'string' || review.comment.length > 500) throw new BadRequestException('权限审核内容无效');
+    const appId = process.env.FEISHU_APP_ID?.trim() || '';
+    if (reviewer.id === request.accountId || permissionApplicantIdentity(reviewer, appId) === request.applicantIdentity) {
+      throw new BadRequestException('不能审核本人或关联账号的权限申请');
+    }
+    const receipt: PermissionGrantReceipt = { version: 1, kind: 'personnel-permission-grant', decision: 'approve',
+      requestId: request.id, requestVersion: request.version, accountId: request.accountId, applicantIdentity: request.applicantIdentity,
+      permissionsHash: permissionGrantPermissionsHash(request.permissions), reviewerAccountId: reviewer.id, reviewerName: reviewer.name,
+      clientMutationId: review.clientMutationId, comment: review.comment, reviewedAt: new Date().toISOString() };
+    const saved = await this.store.mutate(before.revision, permissionGrantKey(request), encodePermissionGrantReceipt(receipt), state => {
+      this.assertActor(actor, state);
+      migrateAuthorizationState(state, this.defaults);
+      const accounts = this.accounts(state), target = accounts[request.accountId];
+      if (!target || target.permissionsRevoked || target.personnelActive === false || target.personnelSuspended || !this.canAuthenticatePersonnel(target, state)) {
+        throw new BadRequestException('此账号当前不能申请或办理个人权限，请管理员核对在职及启用状态');
+      }
+      if (permissionApplicantIdentity(target, appId) !== request.applicantIdentity) throw new ConflictException('申请人的账号身份已变化，请重新提交申请');
+      // Only verified stable identity links share these exact additional grants.
+      // Each login retains its own role, binding, unrelated rules and native scope.
+      const linked = Object.values(accounts).filter(account => account.id !== target.id && account.siteMember && !account.external &&
+        !account.permissionsRevoked && account.personnelActive !== false && !account.personnelSuspended &&
+        this.canAuthenticatePersonnel(account, state) && permissionApplicantIdentity(account, appId) === request.applicantIdentity);
+      const changed = [target, ...linked].map(previous => ({ previous, next: addRequestedAuthorization(state, previous, request.permissions) }));
+      for (const { previous, next } of changed) {
+        if (next.version !== previous.version) this.preservePermission(state, previous);
+        state.accounts[previous.id] = next;
+      }
+      this.assertAdministratorRemains(this.accounts(state), state);
+      state.legacySessionsRevoked = true;
+      this.audit(state, actor, target.name, '同意权限申请并授权', describe(target), describe(changed[0].next));
+    });
+    const confirmed = readPermissionGrantReceipt(saved, request);
+    if (!confirmed) throw new ConflictException('权限申请授权回执无法核验，请联系管理员，现有权限已保留');
+    return confirmed;
   }
   async saveCardRule(request: CardRoleMutation, actor: AccessPrincipal): Promise<AccessConfigurationResponse> {
     requireMutation(request, ['clientMutationId','expectedRevision','code','building','members','restoreDefault']);

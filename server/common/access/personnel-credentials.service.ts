@@ -115,8 +115,9 @@ export class PersonnelCredentialsService {
     return this.bounded(() => this.security.withAccountLock(account.id, async () => {
       const { account: current, raw } = this.eligible(principal);
       const source = await this.source(current);
-      const result = await this.execute(current, source, 'change', request, async () => {
-        if (!await this.matchesSource(request.currentPassword, source)) throw new BadRequestException('当前密码不正确');
+      const recovered = await this.reconcileForVerifiedChange(principal, current, source, request);
+      const result = recovered.completed || await this.execute(current, recovered.source, 'change', request, async () => {
+        if (!await this.matchesSource(request.currentPassword, recovered.source)) throw new BadRequestException('当前密码不正确');
       });
       if (raw.id === current.id) return result;
       const refreshed = this.configuration.getPersonnelCredentialAccount(raw.id);
@@ -151,6 +152,63 @@ export class PersonnelCredentialsService {
         await this.execute(current, fresh, 'reset', request, async () => undefined);
       });
     });
+  }
+
+  /** Recover only the signed-in person's pending operation, under the existing account lock. */
+  private async reconcileForVerifiedChange(principal: AccessPrincipal, account: StoredAccount,
+    source: PersonnelCredentialRecord, request: PersonnelPasswordChange): Promise<{ source: PersonnelCredentialRecord; completed?: AccessPrincipal }> {
+    const state = this.security.read(), ownKey = personnelFingerprint(`${account.id}\0${request.clientMutationId}`);
+    // An original request remains bound to its exact payload and may never retire another request.
+    if (state.intents[ownKey]) return { source };
+    const pending = Object.entries(state.intents).filter(([, item]) => item.accountId === account.id &&
+      ['prepared', 'written'].includes(item.status));
+    if (!pending.length) return { source };
+    if (pending.length !== 1) throw new ConflictException('上次密码处理结果待核对，请使用原请求重试');
+    const [key, intent] = pending[0], fresh = await this.gateway.fresh(source);
+    const checkCurrent = () => {
+      const current = this.eligible(principal).account;
+      if (current.id !== account.id || (personnelFingerprint(current.passwordHash || '') !== intent.expectedLocalHashFingerprint &&
+        current.passwordHash !== intent.newHash)) throw new ConflictException('密码来源已变化，请核对后重新提交');
+      return current;
+    };
+    checkCurrent();
+    if (fresh.password === intent.newHash) {
+      const currentPasswordVerified = await this.matchesSource(request.currentPassword, fresh);
+      // A refreshed browser has a new request ID. The original complete payload,
+      // authenticated with the server secret, can prove the already-written result.
+      const sameOriginalPayload = intent.kind === 'change' && intent.requestFingerprint ===
+        requestFingerprint(intent.newHash, 'change', account.id, { ...request, clientMutationId: intent.mutationId });
+      if (!currentPasswordVerified && !sameOriginalPayload) throw previousPasswordSaved();
+      const requestedPasswordAlreadySaved = await this.matchesSource(request.newPassword, fresh);
+      const current = checkCurrent();
+      const completed = await this.configuration.commitPersonnelPassword(current.id, current.passwordHash || '', intent.newHash, intent.mutationId);
+      this.security.update(next => {
+        next.intents[key].status = 'completed';
+        next.accounts[account.id] = { requiresPasswordChange: false, updatedAt: Date.now() };
+        if (requestedPasswordAlreadySaved) {
+          // Keep the refreshed request idempotent too if its success response is lost.
+          next.intents[ownKey] = { ...intent, mutationId: request.clientMutationId, kind: 'change',
+            requestFingerprint: requestFingerprint(intent.newHash, 'change', account.id, request),
+            status: 'completed', createdAt: Date.now() };
+        }
+      });
+      // Do not silently apply a second password change with a now-obsolete session.
+      if (!requestedPasswordAlreadySaved) throw previousPasswordSaved();
+      return { source: fresh, completed };
+    }
+    // Only an unwritten prepared operation with the exact previous source may be
+    // superseded. A written result or a third-party password must never be replayed over.
+    if (intent.status !== 'prepared' || sourcePasswordFingerprint(fresh.password) !== intent.previousSourceFingerprint) {
+      throw new ConflictException('密码来源已变化，请核对后重新提交');
+    }
+    if (!await this.matchesSource(request.currentPassword, fresh)) throw new BadRequestException('当前密码不正确');
+    const current = checkCurrent();
+    if (personnelFingerprint(current.passwordHash || '') !== intent.expectedLocalHashFingerprint) {
+      throw new ConflictException('密码来源已变化，请核对后重新提交');
+    }
+    // Retain the superseded operation as a tombstone so its old request cannot run later.
+    this.security.update(next => { next.intents[key].status = 'conflict'; });
+    return { source: fresh };
   }
 
   /** Only called after full identity/source verification, while holding the account lock. */
@@ -350,5 +408,6 @@ function fingerprintKey(): Buffer {
   return key;
 }
 function invalidReset() { return new BadRequestException('人员身份核验未通过，暂不能重置密码'); }
+function previousPasswordSaved() { return new ConflictException('上次密码已更新，请使用上次设置的新密码重新登录后再修改'); }
 function invalidLogin() { return new UnauthorizedException('登录凭据无效'); }
 function forbidden() { return new ForbiddenException('当前账号不可修改人员密码'); }

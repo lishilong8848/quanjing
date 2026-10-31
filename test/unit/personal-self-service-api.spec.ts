@@ -1,7 +1,7 @@
 jest.mock('@lark-apaas/client-toolkit/logger', () => ({ logger: { error: jest.fn(), warn: jest.fn() } }), { virtual: true });
 jest.mock('@lark-apaas/client-toolkit/utils/getAxiosForBackend', () => ({ axiosForBackend: jest.fn() }), { virtual: true });
 import { axiosForBackend } from '@lark-apaas/client-toolkit/utils/getAxiosForBackend';
-import { changePersonalPassword, resetPersonalPassword, listOwnPermissionRequests, getPersonalProfile, reviewPermissionRequest } from '../../client/src/api/personal-access';
+import { changePersonalPassword, resetPersonalPassword, listOwnPermissionRequests, getPersonalProfile, reviewPermissionRequest, createPermissionRequest } from '../../client/src/api/personal-access';
 import { loginAccess } from '../../client/src/api';
 const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -46,6 +46,39 @@ describe('personal password and permission transport boundaries', () => {
     await jest.advanceTimersByTimeAsync(1); await result;
     expect(privateFetch).toHaveBeenCalledTimes(1); expect(axiosForBackend).not.toHaveBeenCalled();
   });
+  it.each(['上次密码处理结果待核对，请使用原请求重试', '密码正在处理，请稍后使用原请求重试', '密码安全状态正在恢复，请稍后重试'])(
+    'keeps the known unresolved password response recoverable: %s', async message => {
+      privateFetch.mockResolvedValueOnce(response({ message }, 409));
+      await expect(changePersonalPassword({ currentPassword: 'synthetic-old', newPassword: 'synthetic-new', confirmPassword: 'synthetic-new', clientMutationId: 'same-mutation' }))
+        .rejects.toMatchObject({ message, status: 409, uncertain: true, passwordRecovery: 'retry' });
+      expect(privateFetch).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('makes the known prior successful password result actionable without claiming uncertainty', async () => {
+    const message = '上次密码已更新，请使用上次设置的新密码重新登录后再修改';
+    privateFetch.mockResolvedValueOnce(response({ message }, 409));
+    await expect(changePersonalPassword({ currentPassword: 'synthetic-old', newPassword: 'synthetic-new', confirmPassword: 'synthetic-new', clientMutationId: 'same-mutation' }))
+      .rejects.toMatchObject({ message, status: 409, uncertain: false, passwordRecovery: 'login' });
+  });
+  it('routes an expired password-update session to login instead of an endless same-session retry', async () => {
+    privateFetch.mockResolvedValueOnce(response({ message: 'unauthorized' }, 401));
+    await expect(changePersonalPassword({ currentPassword: 'synthetic-old', newPassword: 'synthetic-new', confirmPassword: 'synthetic-new', clientMutationId: 'same-mutation' }))
+      .rejects.toMatchObject({ status: 401, uncertain: true, passwordRecovery: 'login' });
+  });
+  it('does not label every password conflict or validation error as an uncertain write', async () => {
+    privateFetch.mockResolvedValueOnce(response({ message: '密码来源已变化，请核对后重新提交' }, 409)).mockResolvedValueOnce(response({ message: '当前密码不正确' }, 400));
+    const body = { currentPassword: 'synthetic-old', newPassword: 'synthetic-new', confirmPassword: 'synthetic-new', clientMutationId: 'same-mutation' };
+    await expect(changePersonalPassword(body)).rejects.toMatchObject({ status: 409, uncertain: false });
+    await expect(changePersonalPassword(body)).rejects.toMatchObject({ status: 400, uncertain: false });
+  });
+  it.each(['管理员通知暂未登记，请保留申请并重试', '未找到可接收通知的飞书管理员，申请已保留，请联系管理员核对'])(
+    'preserves a safe partial application-notification failure instead of claiming success: %s', async message => {
+      privateFetch.mockResolvedValueOnce(response({ message }, 503));
+      await expect(createPermissionRequest({ clientMutationId: 'synthetic-id', permissions: [{ kind: 'page', path: '/nantong-base' }], reason: '合成工作需要' }))
+        .rejects.toMatchObject({ message, status: 503 });
+      expect(privateFetch).toHaveBeenCalledTimes(1);
+    },
+  );
   it('never attaches private payloads or raw backend messages to password failures', async () => {
     privateFetch.mockResolvedValueOnce(response({ message: 'password=secret-new identity=synthetic-private' }, 400));
     const error = await resetPersonalPassword({ employeeName: '合成', identityNumber: 'synthetic-private', newPassword: 'secret-new', confirmPassword: 'secret-new', clientMutationId: 'same-mutation' }).catch(failure => failure);
@@ -54,7 +87,7 @@ describe('personal password and permission transport boundaries', () => {
     expect(JSON.stringify(error)).not.toMatch(/secret|synthetic-private|identity|employeeName/);
     expect(axiosForBackend).not.toHaveBeenCalled();
   });
-  it('passes the specific request version to administrator review, never an authorization grant', async () => {
+  it('passes only the specific request version and decision for server-side administrator authorization', async () => {
     privateFetch.mockResolvedValueOnce(response({ id: 'synthetic-request', version: 5 }));
     const body = { clientMutationId: 'synthetic-id', requestId: 'synthetic-request', expectedRequestVersion: 4, decision: 'approve' as const };
     await reviewPermissionRequest(body);

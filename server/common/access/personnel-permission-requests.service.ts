@@ -7,6 +7,8 @@ import { PROFESSIONAL_SPECIALTIES } from '../../../shared/professional-access';
 import { canonicalRequestedPermissions, validRequestedPermissions, type CreatePersonnelPermissionRequest, type PersonnelPermissionRequest, type RequestedPermission, type ReviewPersonnelPermissionRequest, type UpdatePersonnelPermissionRequest, type CancelPersonnelPermissionRequest, type PersonnelPermissionRequestSummary } from '../../../shared/personnel-permission-request.interface';
 import { AccessConfigurationService } from './access-configuration.service';
 import { getPersonnelPermissionRequestsStore, PersonnelPermissionRequestsStore, type PermissionRequestsState, type StoredPermissionRequest } from './personnel-permission-requests.store';
+import type { VerifiedPermissionGrantReceipt } from './personnel-permission-grant';
+import { PersonnelPermissionNotificationsService } from './personnel-permission-notifications.service';
 
 const MUTATION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
 type VerifiedAccount = { account: ManagedAccount; principal: AccessPrincipal; identity: string; revision: number };
@@ -16,20 +18,25 @@ type EffectReader = { identity: string; revision: number; count: PermissionCount
 @Injectable()
 export class PersonnelPermissionRequestsService {
   private readonly store: PersonnelPermissionRequestsStore;
-  constructor(private readonly configuration: AccessConfigurationService, @Optional() store?: PersonnelPermissionRequestsStore) {
+  constructor(private readonly configuration: AccessConfigurationService, @Optional() store?: PersonnelPermissionRequestsStore,
+    @Optional() private readonly notifications?: PersonnelPermissionNotificationsService) {
     this.store = store || getPersonnelPermissionRequestsStore();
   }
 
   listOwn(principal: AccessPrincipal): PersonnelPermissionRequest[] {
     const owner = this.verify(principal, true);
     const readers = new Map<string, EffectReader | null>();
-    return Object.values(this.store.read().requests).filter(row => row.applicantIdentity === owner.identity).map(row => this.present(row, readers)).sort(newestFirst);
+    const rows = Object.values(this.store.read().requests).filter(row => row.applicantIdentity === owner.identity);
+    const receipts = this.configuration.permissionRequestGrantReceipts(rows.filter(row => row.status === 'pending'));
+    return rows.map(row => this.present(row, readers, receipts)).sort(newestFirst);
   }
 
   listAdmin(actor: AccessPrincipal): PersonnelPermissionRequest[] {
     this.verifyAdministrator(actor);
     const readers = new Map<string, EffectReader | null>();
-    return Object.values(this.store.read().requests).map(row => this.present(row, readers)).sort(newestFirst);
+    const rows = Object.values(this.store.read().requests);
+    const receipts = this.configuration.permissionRequestGrantReceipts(rows.filter(row => row.status === 'pending'));
+    return rows.map(row => this.present(row, readers, receipts)).sort(newestFirst);
   }
 
   summaryOwn(principal: AccessPrincipal): PersonnelPermissionRequestSummary {
@@ -41,7 +48,9 @@ export class PersonnelPermissionRequestsService {
     return this.summary();
   }
   private summary(identity?: string): PersonnelPermissionRequestSummary {
-    const state = this.store.read(), rows = Object.values(state.requests).filter(row => !identity || row.applicantIdentity === identity);
+    const state = this.store.read(), matching = Object.values(state.requests).filter(row => !identity || row.applicantIdentity === identity);
+    const receipts = this.configuration.permissionRequestGrantReceipts(matching.filter(row => row.status === 'pending'));
+    const rows = matching.map(row => this.committedView(row, receipts));
     return { total: rows.length, pending: rows.filter(row => row.status === 'pending').length, approved: rows.filter(row => row.status === 'approved').length,
       rejected: rows.filter(row => row.status === 'rejected').length, cancelled: rows.filter(row => row.status === 'cancelled').length, capacity: this.store.capacity(state) };
   }
@@ -64,6 +73,10 @@ export class PersonnelPermissionRequestsService {
       const fingerprint = hash({ requestId: input.requestId, expectedRequestVersion: input.expectedRequestVersion, reason });
       const previous = replay(state, key, fingerprint);
       if (previous) return previous;
+      if (this.recoverGrantedRequest(state, request)) {
+        state.mutations[key] = { fingerprint, requestId: request.id };
+        return request;
+      }
       if (request.version !== input.expectedRequestVersion || request.status !== 'pending') throw new ConflictException('此申请已变化或已处理，请刷新后重试');
       if (action === 'update') request.reason = reason!;
       else request.status = 'cancelled';
@@ -72,6 +85,7 @@ export class PersonnelPermissionRequestsService {
       state.audit.push({ requestId: request.id, actorId: owner.account.id, action, at: request.updatedAt, version: request.version });
       return request;
     });
+    this.wakeNotifications();
     return this.present(result);
   }
 
@@ -86,9 +100,9 @@ export class PersonnelPermissionRequestsService {
       const key = hash(['create', owner.account.id, input.clientMutationId]);
       const fingerprint = hash({ permissions, reason });
       const previous = replay(state, key, fingerprint);
-      if (previous) return previous;
+      if (previous) { this.recoverGrantedRequest(state, previous); return previous; }
       if (this.satisfied(owner, permissions)) throw new BadRequestException('所申请的权限已经具备，无需重复申请');
-      const pending = Object.values(state.requests).filter(row => row.applicantIdentity === owner.identity && row.status === 'pending');
+      const pending = Object.values(state.requests).filter(row => row.applicantIdentity === owner.identity && this.committedView(row).status === 'pending');
       const duplicate = pending.find(row => JSON.stringify(row.permissions) === JSON.stringify(permissions));
       if (duplicate) {
         state.mutations[key] = { fingerprint, requestId: duplicate.id };
@@ -105,6 +119,8 @@ export class PersonnelPermissionRequestsService {
       state.audit.push({ requestId: request.id, actorId: owner.account.id, action: 'create', at: now, version: 1 });
       return request;
     });
+    // This await is a bounded local durable enqueue. Network delivery belongs to the background notifier.
+    await this.notifications?.enqueue(result);
     return this.present(result);
   }
 
@@ -115,7 +131,7 @@ export class PersonnelPermissionRequestsService {
       throw new BadRequestException('权限审核内容无效');
     }
     const comment = cleanText(input.comment, input.decision === 'reject', '审核说明');
-    const result = await this.store.mutate(state => {
+    const result = await this.store.mutate(async state => {
       const reviewer = this.verifyAdministrator(actor);
       const request = Object.hasOwn(state.requests, input.requestId) ? state.requests[input.requestId] : undefined;
       if (!request) throw new BadRequestException('权限申请不存在');
@@ -125,30 +141,79 @@ export class PersonnelPermissionRequestsService {
       const fingerprint = hash({ requestId: input.requestId, expectedRequestVersion: input.expectedRequestVersion, decision: input.decision, comment });
       const previous = replay(state, key, fingerprint);
       if (previous) return previous;
+      if (this.recoverGrantedRequest(state, request)) {
+        state.mutations[key] = { fingerprint, requestId: request.id };
+        return request;
+      }
       if (request.version !== input.expectedRequestVersion || request.status !== 'pending') throw new ConflictException('此申请已被处理，请刷新后查看结果');
-      let verifiedRevision: number | undefined;
       if (input.decision === 'approve') {
         const eligible = this.verifyTarget(request.accountId);
         if (eligible.identity !== request.applicantIdentity) throw new ConflictException('申请人的账号身份已变化，请重新提交申请');
-        if (!this.satisfied(eligible, request.permissions)) throw new ConflictException('申请权限尚未全部生效，请先在现有权限配置中保存并核对范围，再确认已授权');
-        verifiedRevision = eligible.revision;
+        const planned = structuredClone(state), plannedRow = planned.requests[request.id];
+        const plannedAt = new Date().toISOString();
+        Object.assign(plannedRow, { status: 'approved', version: plannedRow.version + 1, updatedAt: plannedAt,
+          reviewerAccountId: reviewer.account.id, reviewerName: reviewer.account.name, verifiedConfigurationRevision: Number.MAX_SAFE_INTEGER,
+          ...(comment ? { comment } : {}) });
+        planned.mutations[key] = { fingerprint, requestId: request.id };
+        planned.audit.push({ requestId: request.id, actorId: reviewer.account.id, action: 'approve', at: plannedAt, version: plannedRow.version });
+        planned.revision++;
+        this.store.assertCanPersist(planned);
+        const receipt = await this.configuration.grantPersonnelPermissionRequest(request, actor, { clientMutationId: input.clientMutationId, comment });
+        this.applyGrantReceipt(state, request, receipt);
+        return request;
       }
       const now = new Date().toISOString();
-      request.status = input.decision === 'approve' ? 'approved' : 'rejected';
+      request.status = 'rejected';
       request.version += 1;
       request.updatedAt = now;
       request.reviewerAccountId = reviewer.account.id;
       request.reviewerName = reviewer.account.name;
       if (comment) request.comment = comment;
-      if (input.decision === 'approve') request.verifiedConfigurationRevision = verifiedRevision;
       state.mutations[key] = { fingerprint, requestId: request.id };
-      state.audit.push({ requestId: request.id, actorId: reviewer.account.id, action: input.decision, at: now, version: request.version });
+      state.audit.push({ requestId: request.id, actorId: reviewer.account.id, action: 'reject', at: now, version: request.version });
       return request;
     });
+    this.wakeNotifications();
     return this.present(result);
   }
 
-  private present(row: StoredPermissionRequest, readers = new Map<string, EffectReader | null>()): PersonnelPermissionRequest {
+  private wakeNotifications(): void {
+    // A delivery failure cannot turn a committed authorization decision into a failed approval.
+    try { this.notifications?.wake(); } catch { /* The durable notification job remains retryable. */ }
+  }
+
+  private committedView(row: StoredPermissionRequest, receipts?: ReadonlyMap<string, VerifiedPermissionGrantReceipt>): StoredPermissionRequest {
+    if (row.status !== 'pending') return row;
+    const receipt = receipts ? receipts.get(row.id) : this.configuration.permissionRequestGrantReceipt(row);
+    return receipt ? this.grantedRow(row, receipt) : row;
+  }
+
+  private grantedRow(row: StoredPermissionRequest, receipt: VerifiedPermissionGrantReceipt): StoredPermissionRequest {
+    return { ...row, status: 'approved', version: row.version + 1, updatedAt: receipt.reviewedAt,
+      reviewerAccountId: receipt.reviewerAccountId, reviewerName: receipt.reviewerName,
+      ...(receipt.comment ? { comment: receipt.comment } : {}), verifiedConfigurationRevision: receipt.configurationRevision };
+  }
+
+  private recoverGrantedRequest(state: PermissionRequestsState, row: StoredPermissionRequest): boolean {
+    if (row.status !== 'pending') return false;
+    const receipt = this.configuration.permissionRequestGrantReceipt(row);
+    if (!receipt) return false;
+    this.applyGrantReceipt(state, row, receipt);
+    return true;
+  }
+
+  private applyGrantReceipt(state: PermissionRequestsState, row: StoredPermissionRequest, receipt: VerifiedPermissionGrantReceipt): void {
+    const key = hash(['review', receipt.reviewerAccountId, receipt.clientMutationId]);
+    const fingerprint = hash({ requestId: row.id, expectedRequestVersion: receipt.requestVersion, decision: 'approve', comment: receipt.comment });
+    const previous = state.mutations[key];
+    if (previous && (previous.requestId !== row.id || previous.fingerprint !== fingerprint)) throw new ConflictException('权限申请授权回执无法核验，请联系管理员，现有权限已保留');
+    Object.assign(row, this.grantedRow(row, receipt));
+    state.mutations[key] = { fingerprint, requestId: row.id };
+    state.audit.push({ requestId: row.id, actorId: receipt.reviewerAccountId, action: 'approve', at: receipt.reviewedAt, version: row.version });
+  }
+
+  private present(row: StoredPermissionRequest, readers = new Map<string, EffectReader | null>(), receipts?: ReadonlyMap<string, VerifiedPermissionGrantReceipt>): PersonnelPermissionRequest {
+    row = this.committedView(row, receipts);
     const result = publicRequest(row);
     if (row.status !== 'approved') return result;
     try {

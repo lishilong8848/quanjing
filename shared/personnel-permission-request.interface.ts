@@ -59,18 +59,20 @@ export interface PersonnelPermissionRequest {
   currentEffectRevision?: number | null;
 }
 
-const localPages = new Set(createPermissionCatalog().pages.filter(page => page.kind !== 'external').map(page => page.path));
+const catalogPages = createPermissionCatalog().pages;
+const requestablePages = new Set(catalogPages.map(page => page.path));
+const localPages = new Set(catalogPages.filter(page => page.kind !== 'external').map(page => page.path));
 function selection(value: unknown, options: readonly string[]): boolean {
   return value === null || (Array.isArray(value) && value.length > 0 && value.length <= options.length &&
     value.every(item => typeof item === 'string' && options.includes(item)) && new Set(value).size === value.length);
 }
 
-/** Only real local page entries and actions can be requested. Public/fixed-admin endpoints are never grants. */
+/** Registered external pages grant only this platform's entry; actions remain local business capabilities. */
 export function validRequestedPermissions(value: unknown): value is RequestedPermission[] {
   if (!Array.isArray(value) || !value.length || value.length > 20) return false;
   return value.every(item => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-    if (item.kind === 'page') return Object.keys(item).sort().join(',') === 'kind,path' && localPages.has(item.path);
+    if (item.kind === 'page') return Object.keys(item).sort().join(',') === 'kind,path' && requestablePages.has(item.path);
     if (item.kind !== 'action' || Object.keys(item).sort().join(',') !== 'action,buildings,kind,module,specialties') return false;
     const definition = BUSINESS_PERMISSION_CATALOG.find(module => module.id === item.module);
     return !!definition && localPages.has(definition.page) && configurableBusinessActions(definition.id).includes(item.action) &&

@@ -55,8 +55,17 @@ export class PersonnelPermissionRequestsStore {
     return value;
   }
 
-  async mutate(change: (state: PermissionRequestsState) => StoredPermissionRequest): Promise<StoredPermissionRequest> {
-    const operation = this.queue.then(() => {
+  /** Pure preflight for an intended final state, before a cross-store grant is committed. */
+  assertCanPersist(state: PermissionRequestsState): void {
+    const value = this.capacity(state);
+    if (value.bytes > value.maxBytes || value.requests > value.maxRequests || value.mutations > value.maxMutations || value.auditEntries > value.maxAuditEntries) {
+      throw new ServiceUnavailableException('权限申请台账容量已满，请联系管理员');
+    }
+    if (!validState(state)) throw new ServiceUnavailableException('权限申请校验失败，未保存');
+  }
+
+  async mutate(change: (state: PermissionRequestsState) => StoredPermissionRequest | Promise<StoredPermissionRequest>): Promise<StoredPermissionRequest> {
+    const operation = this.queue.then(async () => {
       assertOrdinaryPath(this.filePath);
       mkdirSync(dirname(this.filePath), { recursive: true });
       const lockPath = `${this.filePath}.lock`;
@@ -69,12 +78,11 @@ export class PersonnelPermissionRequestsStore {
         const state = this.read();
         const original = existsSync(this.filePath) ? readFileSync(this.filePath) : undefined;
         const before = JSON.stringify(state);
-        const result = change(state);
+        const result = await change(state);
         if (JSON.stringify(state) === before) return structuredClone(result);
         state.revision += 1;
-        if (!validState(state)) throw new ServiceUnavailableException('权限申请校验失败，未保存');
+        this.assertCanPersist(state);
         const bytes = Buffer.from(JSON.stringify(state));
-        if (bytes.length > 8 * 1024 * 1024) throw new ServiceUnavailableException('权限申请台账容量已满，请联系管理员');
         if (original && JSON.parse(original.toString('utf8')).schemaVersion === 1) {
           const backup = `${this.filePath}.v1.bak`;
           assertOrdinaryPath(backup);
