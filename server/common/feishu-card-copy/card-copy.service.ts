@@ -7,11 +7,13 @@ import { cancelHotfixInitialization, runHotfixInitialization } from '../hotfix-r
 import { FeishuCardCopyEngine } from './card-copy.engine';
 import { FeishuCardMirrorStore } from './mirror.store';
 import { registerCardCopyObserver } from './transport';
+import { FeishuCardCopyFanout } from './fanout';
+import { additionalReadonlyCardLedger, additionalReadonlyCardTargets } from './targets';
 
 @Injectable()
 export class FeishuCardCopyService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FeishuCardCopyService.name);
-  private engine?: FeishuCardCopyEngine;
+  private readonly engines: FeishuCardCopyEngine[] = [];
   private unregister?: () => void;
   private timer?: NodeJS.Timeout;
   private token?: { value: string; expiresAt: number };
@@ -32,31 +34,46 @@ export class FeishuCardCopyService implements OnModuleInit, OnModuleDestroy {
       env.PURCHASE_WORKFLOW_LEDGER_PATH, join(dirname(configurationFile), 'personnel-security.json'), join(dirname(configurationFile), 'personnel-permission-requests.json'),
       join(dirname(configurationFile), 'personnel-archive-corrections.json'), join(process.cwd(), '.runtime', 'purchase-workflow-ledger.json')].filter((p): p is string => !!p);
     if (!isAbsolute(file) || protectedFiles.some(p => resolve(p).toLowerCase() === resolve(file).toLowerCase())) { this.diagnostic('CARD_COPY_LEDGER_PATH_INVALID'); return; }
-    const fingerprint = createHash('sha256').update(`${appId}\0${recipient}`).digest('hex');
-    const targetValid = () => {
-      if (process.env.NODE_ENV !== 'production' || smokeMode() || process.env.FEISHU_APP_ID?.trim() !== appId ||
+    let additional: ReturnType<typeof additionalReadonlyCardTargets> = [];
+    try { additional = additionalReadonlyCardTargets(env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS); }
+    catch { this.diagnostic('CARD_COPY_ADDITIONAL_TARGETS_INVALID'); }
+    const targets = [{ name, openId: recipient, file }, ...additional.filter(target => target.openId !== recipient)
+      .map(target => ({ ...target, file: additionalReadonlyCardLedger(file, appId, target.openId) }))];
+    const validators: Array<() => boolean> = [];
+    for (const target of targets) {
+      const fingerprint = createHash('sha256').update(`${appId}\0${target.openId}`).digest('hex');
+      const targetValid = () => {
+        if (process.env.NODE_ENV !== 'production' || smokeMode() || process.env.FEISHU_APP_ID?.trim() !== appId ||
           process.env.FEISHU_CARD_READONLY_COPY_ENABLED !== 'true' || process.env.FEISHU_CARD_READONLY_COPY_APP_ID?.trim() !== expectedApp ||
           process.env.FEISHU_CARD_READONLY_COPY_OPEN_ID?.trim() !== recipient || process.env.FEISHU_CARD_READONLY_COPY_NAME?.trim() !== name) return false;
+        try {
+          if (target.openId !== recipient && !additionalReadonlyCardTargets(process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS)
+            .some(item => item.openId === target.openId && item.name === target.name)) return false;
+          const state = this.configuration!.snapshot();
+          const matches = state.accounts.filter(account => account.kind === 'feishu' && account.appId === appId && account.identityHash === fingerprint && account.name === target.name &&
+            account.enabled && !account.deleted && !account.reactivationRequired && !account.permissionsRevoked && account.personnelActive !== false);
+          return matches.length === 1 && !!this.configuration!.currentPrincipal(matches[0].id, matches[0].version);
+        } catch { return false; }
+      };
       try {
-        const state = this.configuration!.snapshot();
-        const matches = state.accounts.filter(account => account.kind === 'feishu' && account.appId === appId && account.identityHash === fingerprint && account.name === name &&
-          account.enabled && !account.deleted && !account.reactivationRequired && !account.permissionsRevoked && account.personnelActive !== false);
-        return matches.length === 1 && !!this.configuration!.currentPrincipal(matches[0].id, matches[0].version);
-      } catch { return false; }
-    };
+        if (protectedFiles.some(p => resolve(p).toLowerCase() === resolve(target.file).toLowerCase())) throw new Error('CARD_COPY_LEDGER_PATH_INVALID');
+        const store = new FeishuCardMirrorStore(resolve(target.file), { appId, recipientOpenId: target.openId });
+        store.read();
+        this.engines.push(new FeishuCardCopyEngine({ store, http: this.http.axiosRef, targetValid, accessToken: () => this.accessToken(appId), diagnostic: code => this.diagnostic(code) }));
+        validators.push(targetValid);
+      } catch { this.diagnostic('CARD_COPY_RECIPIENT_INITIALIZATION_FAILED'); }
+    }
+    if (!this.engines.length) return;
     try {
-      const store = new FeishuCardMirrorStore(resolve(file), { appId, recipientOpenId: recipient });
-      store.read();
-      this.engine = new FeishuCardCopyEngine({ store, http: this.http.axiosRef, targetValid, accessToken: () => this.accessToken(appId), diagnostic: code => this.diagnostic(code) });
-      this.unregister = registerCardCopyObserver(this.engine);
+      this.unregister = registerCardCopyObserver(new FeishuCardCopyFanout(this.engines, code => this.diagnostic(code)));
       await runHotfixInitialization(this, async () => {
-        if (!targetValid()) this.diagnostic('CARD_COPY_TARGET_UNAVAILABLE');
-        this.timer = setInterval(() => { void this.engine?.flush(); }, 5_000); this.timer.unref?.();
+        if (validators.some(valid => !valid())) this.diagnostic('CARD_COPY_TARGET_UNAVAILABLE');
+        this.timer = setInterval(() => { for (const engine of this.engines) void engine.flush(); }, 5_000); this.timer.unref?.();
       });
-    } catch { this.unregister?.(); this.unregister = undefined; this.engine?.stop(); this.diagnostic('CARD_COPY_INITIALIZATION_FAILED'); }
+    } catch { this.unregister?.(); this.unregister = undefined; for (const engine of this.engines) engine.stop(); this.diagnostic('CARD_COPY_INITIALIZATION_FAILED'); }
   }
   async onModuleDestroy(): Promise<void> {
-    this.engine?.stop(); this.unregister?.(); if (this.timer) clearInterval(this.timer);
+    for (const engine of this.engines) engine.stop(); this.unregister?.(); if (this.timer) clearInterval(this.timer);
     await cancelHotfixInitialization(this); this.token = undefined;
   }
   private async accessToken(appId: string): Promise<string> {

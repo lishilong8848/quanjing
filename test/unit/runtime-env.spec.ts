@@ -111,6 +111,13 @@ describe('runtime environment defaults', () => {
     expect(process.env.FEISHU_CARD_READONLY_COPY_ENABLED).toBe('false');
   });
 
+  it('preserves an explicitly empty extra-recipient list over dotenv', () => {
+    process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS = '[]';
+    jest.doMock('dotenv', () => ({ config: jest.fn(() => { process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS='[{"name":"synthetic","openId":"ou_other"}]'; }) }));
+    jest.isolateModules(() => { require('../../server/runtime-env'); });
+    expect(process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS).toBe('[]');
+  });
+
   it('keeps explicit process startup values above real dotenv files while preserving local FEISHU overrides', () => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'nantong-runtime-env-'));
     try {

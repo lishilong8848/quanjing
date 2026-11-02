@@ -1,12 +1,13 @@
 import 'reflect-metadata';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FeishuCardCopyService } from '../../server/common/feishu-card-copy/card-copy.service';
 import { FeishuCardCopyModule } from '../../server/common/feishu-card-copy/card-copy.module';
 import { FeishuCardMirrorStore } from '../../server/common/feishu-card-copy/mirror.store';
-import { observedCardPost } from '../../server/common/feishu-card-copy/transport';
+import { observedCardPost, observedCardPatch, isReadonlyCopyCallback } from '../../server/common/feishu-card-copy/transport';
+import { additionalReadonlyCardLedger, additionalReadonlyCardTargets } from '../../server/common/feishu-card-copy/targets';
 import { runHotfixInitialization } from '../../server/common/hotfix-runtime-activation';
 
 jest.mock('../../server/common/hotfix-runtime-activation', () => ({
@@ -25,6 +26,7 @@ describe('card copy activation isolation (no application or real transport)', ()
       FEISHU_CARD_READONLY_COPY_ENABLED: 'true', FEISHU_CARD_READONLY_COPY_APP_ID: appId,
       FEISHU_CARD_READONLY_COPY_OPEN_ID: recipient, FEISHU_CARD_READONLY_COPY_NAME: name,
       FEISHU_CARD_READONLY_COPY_LEDGER_PATH: file, ACCESS_CONFIGURATION_FILE: join(dir, 'configuration.json'), NANTONG_HOTFIX_SMOKE_MODE: 'false' };
+    delete process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS;
     account = { id: 'synthetic-account', version: 1, kind: 'feishu', appId, name, identityHash: createHash('sha256').update(`${appId}\0${recipient}`).digest('hex'), enabled: true, personnelActive: true };
     configuration = { snapshot: jest.fn(() => ({ accounts: [account] })), currentPrincipal: jest.fn(() => ({ accountId: account.id })) };
     http = { axiosRef: { post: jest.fn(() => { throw new Error('No real authentication or copy delivery allowed'); }), patch: jest.fn(), delete: jest.fn() } };
@@ -79,5 +81,97 @@ describe('card copy activation isolation (no application or real transport)', ()
     expect(Reflect.getMetadata('providers', FeishuCardCopyModule)).toContain(FeishuCardCopyService);
     await service.onModuleInit(); expect(jest.getTimerCount()).toBe(1); await service.onModuleDestroy();
     expect(jest.getTimerCount()).toBe(0); await source(); expect(Object.keys(groups())).toHaveLength(0);
+  });
+
+  const extraId = 'ou_synthetic_second';
+  function addSecond() {
+    const second = { ...account, id: 'second-account', name: '合成第二人', identityHash: createHash('sha256').update(`${appId}\0${extraId}`).digest('hex') };
+    configuration.snapshot.mockImplementation(() => ({ accounts: [account, second] }));
+    process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS = JSON.stringify([{ name: second.name, openId: extraId }]);
+    return second;
+  }
+  const extraFile = () => additionalReadonlyCardLedger(file, appId, extraId);
+  const extraGroups = () => new FeishuCardMirrorStore(extraFile(), { appId, recipientOpenId: extraId }).read().groups;
+  function fakeTransport() {
+    process.env.FEISHU_APP_SECRET = 'synthetic-secret';
+    http.axiosRef.post.mockImplementation(async (url: string, body: any) => ({ status: 200, data: url.includes('/auth/')
+      ? { code: 0, tenant_access_token: 'synthetic-token', expire: 7200 }
+      : { code: 0, data: { message_id: `om_copy_${body.receive_id}` } } }));
+    http.axiosRef.patch.mockResolvedValue({ status: 200, data: { code: 0 } });
+  }
+  const copyCalls = () => http.axiosRef.post.mock.calls.filter(([url]: [string]) => url.includes('/im/v1/messages'));
+  it('sends one readonly copy to each person and synchronizes updates and callback guards for both', async () => {
+    addSecond(); fakeTransport(); await service.onModuleInit(); await source(); await source('om_other_original');
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(copyCalls().map(([,body]: any[]) => body.receive_id).sort()).toEqual([recipient, extraId].sort());
+    expect(new Set(copyCalls().map(([,body]: any[]) => body.uuid)).size).toBe(2);
+    for (const [, body] of copyCalls()) { expect(body.content).toContain('只读抄送'); expect(body.content).not.toMatch(/"button"|"callback"/); }
+    expect(isReadonlyCopyCallback({ context: { open_message_id: `om_copy_${recipient}` } })).toBe(true);
+    expect(isReadonlyCopyCallback({ context: { open_message_id: `om_copy_${extraId}` } })).toBe(true);
+    const patch = { patch: jest.fn(async () => ({ status: 200, data: { code: 0 } })) };
+    await observedCardPatch(patch as never, 'synthetic', 'https://open.feishu.cn/open-apis/im/v1/messages/om_synthetic_original', {
+      content: JSON.stringify({ elements: [{ tag: 'div', text: { tag: 'plain_text', content: '审批完成' } }] }),
+    }, {});
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(http.axiosRef.patch).toHaveBeenCalledTimes(2);
+    expect(http.axiosRef.patch.mock.calls.every(([,body]: any[]) => body.content.includes('审批完成'))).toBe(true);
+    expect(copyCalls()).toHaveLength(2);
+  });
+  it('keeps the original recipient working when added settings or the added ledger are damaged', async () => {
+    addSecond(); writeFileSync(extraFile(), 'broken-ledger'); fakeTransport();
+    await service.onModuleInit(); await source(); await jest.advanceTimersByTimeAsync(5000);
+    expect(copyCalls().map(([,body]: any[]) => body.receive_id)).toEqual([recipient]);
+    expect(readFileSync(extraFile(),'utf8')).toBe('broken-ledger');
+  });
+  it('keeps the second recipient working when the original ledger is damaged', async () => {
+    addSecond(); writeFileSync(file, 'broken-original'); fakeTransport();
+    await service.onModuleInit(); await source(); await jest.advanceTimersByTimeAsync(5000);
+    expect(copyCalls().map(([,body]: any[]) => body.receive_id)).toEqual([extraId]);
+    expect(readFileSync(file,'utf8')).toBe('broken-original');
+  });
+  it('does not replay the first recipient history when the new recipient is added on restart', async () => {
+    await service.onModuleInit(); await source(); const originalBytes=readFileSync(file);
+    await service.onModuleDestroy(); addSecond(); service=new FeishuCardCopyService(http, configuration);
+    await service.onModuleInit();
+    expect(readFileSync(file).equals(originalBytes)).toBe(true); expect(existsSync(extraFile())).toBe(false);
+    const patch={patch:jest.fn(async()=>({status:200,data:{code:0}}))};
+    await observedCardPatch(patch as never,'synthetic','https://open.feishu.cn/open-apis/im/v1/messages/om_synthetic_original',{content:JSON.stringify({elements:[]})},{});
+    expect(Object.keys(extraGroups())).toHaveLength(0);
+    await source('om_new_card'); expect(Object.keys(extraGroups())).toHaveLength(1);
+  });
+  it('isolates ineligible recipients without granting permissions or disabling the other copy', async () => {
+    const second=addSecond(); await service.onModuleInit(); second.enabled=false; await source('om_first_only');
+    expect(Object.keys(groups())).toHaveLength(1); expect(Object.keys(extraGroups())).toHaveLength(0);
+    second.enabled=true; account.enabled=false; await source('om_second_only');
+    expect(Object.keys(extraGroups())).toHaveLength(1); expect(account.enabled).toBe(false);
+  });
+  it('deduplicates additional identities and the primary recipient', async () => {
+    const second=addSecond();
+    process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS=JSON.stringify([{name,openId:recipient},{name:second.name,openId:extraId},{name:second.name,openId:extraId}]);
+    fakeTransport(); await service.onModuleInit(); await source(); await jest.advanceTimersByTimeAsync(5000); expect(copyCalls()).toHaveLength(2);
+  });
+  it('retries only the throttled recipient and retains the successful original copy', async () => {
+    addSecond(); fakeTransport(); const normal=http.axiosRef.post.getMockImplementation(); let limited=true;
+    http.axiosRef.post.mockImplementation(async(url:string,body:any)=> body.receive_id===extraId&&limited
+      ? {status:429,data:{code:99991400}} : normal(url,body));
+    await service.onModuleInit(); await source(); await jest.advanceTimersByTimeAsync(5000);
+    limited=false; await jest.advanceTimersByTimeAsync(60000);
+    expect(copyCalls().filter(([,body]:any[])=>body.receive_id===recipient)).toHaveLength(1);
+    const retried=copyCalls().filter(([,body]:any[])=>body.receive_id===extraId); expect(retried).toHaveLength(2);
+    expect(retried[0][1].uuid).toBe(retried[1][1].uuid);
+  });
+  it('invalid additional settings pause only added recipients', async () => {
+    addSecond(); await service.onModuleInit(); process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS='not-json'; await source();
+    expect(Object.keys(groups())).toHaveLength(1); expect(Object.keys(extraGroups())).toHaveLength(0);
+  });
+});
+
+describe('explicit additional copy identities',()=>{
+  it('parses and deduplicates a bounded recipient list',()=>{
+    expect(additionalReadonlyCardTargets(undefined)).toEqual([]);
+    expect(additionalReadonlyCardTargets('[{"name":" 合成人员 ","openId":"ou_one"},{"name":"合成人员","openId":"ou_one"}]')).toEqual([{name:'合成人员',openId:'ou_one'}]);
+  });
+  it.each(['null','{}','[{}]','[{"name":"a","openId":"oc_group"}]','[{"name":"a","openId":"ou_one","path":"anything"}]','[{"name":"a","openId":"ou_one"},{"name":"b","openId":"ou_one"}]'])('rejects malformed or ambiguous identities: %s',raw=>{
+    expect(()=>additionalReadonlyCardTargets(raw)).toThrow();
   });
 });
