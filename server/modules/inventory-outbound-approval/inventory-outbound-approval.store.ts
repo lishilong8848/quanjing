@@ -163,6 +163,7 @@ export class InventoryOutboundApprovalStore {
   private deferredLockReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   private deferredLockReleaseAttempt = 0;
   private failed: ServiceUnavailableException | null = null;
+  private validatedRead: { raw: string; parsed: ReturnType<typeof parseLedger> } | null = null;
 
   constructor(
     @Optional()
@@ -1045,7 +1046,15 @@ export class InventoryOutboundApprovalStore {
       if (statSync(this.ledgerPath).size > this.maxFileBytes) {
         throw new Error('出库审批账本超过允许的最大字节数');
       }
-      const parsed = parseLedger(readFileSync(this.ledgerPath, 'utf8'));
+      const raw = readFileSync(this.ledgerPath, 'utf8');
+      let validated = this.validatedRead?.raw === raw ? this.validatedRead.parsed : undefined;
+      if (!validated) {
+        validated = parseLedger(raw);
+        // Exact bytes, never mtime/size: external edits still pass the full validator.
+        this.validatedRead = { raw, parsed: validated };
+      }
+      // Recovery and callers mutate private working copies, not the validated cache.
+      const parsed = structuredClone(validated);
       let changed = parsed.legacy;
       const now = this.now();
       const nowMs = now.getTime();

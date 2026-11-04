@@ -401,6 +401,28 @@ export class PurchaseInventoryController {
     return this.workflowService.selfTest(await this.getWorkflowSession(req));
   }
 
+  @AdminOnly()
+  @Post('workflows/retry-comparison-image-notifications')
+  retryComparisonImageNotifications(@Req() req: AccessRequest, @Body() body: unknown) {
+    return this.handleComparisonImageNotifications(req, body, false);
+  }
+
+  @AdminOnly()
+  @Post('workflows/preview-comparison-image-notifications')
+  previewComparisonImageNotifications(@Req() req: AccessRequest, @Body() body: unknown) {
+    return this.handleComparisonImageNotifications(req, body, true);
+  }
+
+  private handleComparisonImageNotifications(req: AccessRequest, body: unknown, preview: boolean) {
+    const principal = requirePrincipal(req);
+    if (principal.role !== 'admin' || !principal.accountId) denyAccess();
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).length !== 1 || !Array.isArray((body as { keys?: unknown }).keys)) {
+      throw new BadRequestException('采购通知恢复范围无效');
+    }
+    return this.workflowService.retryFailedComparisonImageNotifications((body as { keys: string[] }).keys, principal.accountId, preview);
+  }
+
   @ProfessionalScoped()
   @Get('workflows/:recordId')
   async getWorkflowDetail(

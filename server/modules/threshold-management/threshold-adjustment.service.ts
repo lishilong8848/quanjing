@@ -54,6 +54,8 @@ export class ThresholdAdjustmentService
   private recoveryError = '';
   private recoveryRetryAt = 0;
   private owner = randomUUID();
+  private readonly navigation = new Map<string, object>();
+  private readonly navigationUpdates = new Map<string, Promise<void>>();
   constructor(
     private readonly records: ThresholdStore,
     private readonly sync: ThresholdSyncService,
@@ -93,6 +95,7 @@ export class ThresholdAdjustmentService
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     await this.draining;
+    await Promise.allSettled(this.navigationUpdates.values());
   }
   kick() {
     if (this.running || this.stopped) return;
@@ -339,31 +342,10 @@ export class ThresholdAdjustmentService
     )
       throw new ForbiddenException('人员、审批阶段或消息不匹配');
     if (['open_reject', 'return'].includes(input.action)) {
-      const stage = entry.adjustment.stages.find((s) => s.role === input.role)!;
-      const prompt =
-        ['routing', 'pending'].includes(entry.adjustment.state) &&
-        !stage.decision &&
-        input.action === 'open_reject'
-          ? input.role
-          : undefined;
-      const card = thresholdAdjustmentCard(
-        entry.adjustment,
-        input.actorOpenId,
-        prompt,
-      );
-      try {
-        await this.messages.patchInteractiveCard(input.messageId, card);
-      } catch {
-        this.ledger.change(input.id, (e) => {
-          e.adjustment.error = '驳回表单切换失败，请重新点击';
-          e.adjustment.revision++;
-          e.adjustment.syncState = 'error';
-        });
-        throw new ConflictException('表单切换失败，请重新点击');
-      }
+      this.scheduleNavigation(input);
       return {
         claimed: false,
-        toast: prompt ? '请填写驳回原因' : '已返回审批',
+        toast: input.action === 'open_reject' ? '正在打开驳回表单' : '正在返回审批',
       };
     }
     const result = this.ledger.decide({
@@ -372,12 +354,64 @@ export class ThresholdAdjustmentService
       eventId,
       action: input.action as 'approve' | 'reject',
     });
+    this.navigation.delete(input.messageId);
     this.kick();
     return {
       claimed: result.claimed,
       card: thresholdAdjustmentCard(result.entry.adjustment, input.actorOpenId),
     };
   }
+  private scheduleNavigation(input: ReturnType<typeof parseThresholdAdjustmentAction>): void {
+    const marker = {};
+    this.navigation.set(input.messageId, marker);
+    const previous = this.navigationUpdates.get(input.messageId) || Promise.resolve();
+    const task = previous.catch(() => undefined).then(async () => {
+      if (this.stopped || this.navigation.get(input.messageId) !== marker) return;
+      assertFeishuBusinessIdentity(this.accessConfiguration, input.actorOpenId);
+      const current = this.ledger.get(input.id);
+      if (!current || !current.messages.some(message => message.kind === 'approval' &&
+        message.messageId === input.messageId && message.openId === input.actorOpenId)) return;
+      const stage = current.adjustment.stages.find(value => value.role === input.role && value.approver.openId === input.actorOpenId);
+      if (!stage) return;
+      const prompt = ['routing', 'pending'].includes(current.adjustment.state) && !stage.decision && input.action === 'open_reject'
+        ? stage.role : undefined;
+      await this.messages.patchInteractiveCard(input.messageId, thresholdAdjustmentCard(current.adjustment, input.actorOpenId, prompt));
+      // A decision may win while the navigation PATCH is already in flight.
+      const after = this.ledger.get(input.id);
+      if (after && (after.adjustment.revision !== current.adjustment.revision || this.navigation.get(input.messageId) !== marker) &&
+        (!['routing', 'pending'].includes(after.adjustment.state) || after.adjustment.stages.some(value => value.role === input.role && value.decision))) {
+        await this.messages.patchInteractiveCard(input.messageId, thresholdAdjustmentCard(after.adjustment, input.actorOpenId));
+      }
+    }).catch(async () => {
+      this.logger.warn('阈值审批表单切换失败，可从原卡片重试');
+      if (this.navigation.get(input.messageId) !== marker) {
+        const latest = this.ledger.get(input.id);
+        // A failed response can still mean that the remote PATCH was applied.
+        if (latest && (!['routing', 'pending'].includes(latest.adjustment.state) ||
+          latest.adjustment.stages.some(stage => stage.role === input.role && stage.decision))) {
+          assertFeishuBusinessIdentity(this.accessConfiguration, input.actorOpenId);
+          await this.messages.patchInteractiveCard(input.messageId, thresholdAdjustmentCard(latest.adjustment, input.actorOpenId));
+        }
+        return;
+      }
+      const failed = this.ledger.change(input.id, entry => {
+        entry.adjustment.error = '表单切换失败，请重新点击原按钮';
+        entry.adjustment.revision++;
+        entry.adjustment.syncState = 'error';
+      });
+      try {
+        assertFeishuBusinessIdentity(this.accessConfiguration, input.actorOpenId);
+        if (this.navigation.get(input.messageId) === marker) {
+          await this.messages.patchInteractiveCard(input.messageId, thresholdAdjustmentCard(failed.adjustment, input.actorOpenId));
+        }
+      } catch { this.logger.warn('阈值审批表单失败提示暂未送达，原卡片可安全重试'); }
+    }).catch(() => this.logger.warn('阈值审批表单错误状态暂未落账，原审批决定未变更')).finally(() => {
+      if (this.navigation.get(input.messageId) === marker) this.navigation.delete(input.messageId);
+      if (this.navigationUpdates.get(input.messageId) === task) this.navigationUpdates.delete(input.messageId);
+    });
+    this.navigationUpdates.set(input.messageId, task);
+  }
+
   async runPending() {
     if (this.running || this.stopped || !this.isEnabled()) return;
     this.running = true;

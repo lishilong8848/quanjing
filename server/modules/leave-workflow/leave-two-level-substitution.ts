@@ -5,6 +5,7 @@ import {
   containsExactPersonName,
   createLeaveRequestShiftGroups,
   isLeaveSubstituteStaffBlocked,
+  resolveLeaveScheduleKind,
   type LeaveRequestImpactSchedule,
   type LeaveRequestShiftGroup,
 } from '../../../shared/leave-request-impact';
@@ -28,6 +29,20 @@ export type TwoLevelSubstitutionResult =
   | { valid: false; message: string };
 
 const nameKey = (value: string): string => value.replace(/\s+/g, '');
+
+// Only an explicit long-white team proves this exemption. Shift text alone,
+// a missing team or mixed team evidence must keep the original post covered.
+export function requiresOriginalPostBackfill(input: {
+  kind?: LeaveRequestShiftGroup['kind'] | null;
+  teams: readonly string[];
+}): boolean {
+  return input.kind !== 'long_white' || !input.teams.length || input.teams.some(team =>
+    resolveLeaveScheduleKind({ recordId: '', scheduleDate: null, team, dutyStaffActual: [] }) !== 'long_white');
+}
+
+export function requiredOriginalPostGroups(groups: LeaveRequestShiftGroup[]): LeaveRequestShiftGroup[] {
+  return groups.filter(requiresOriginalPostBackfill);
+}
 
 function samePerson(
   left: LeaveRoutePerson,
@@ -112,19 +127,27 @@ export function buildTwoLevelSubstituteCandidates(input: {
     // Moving an overlapping post does not waive rest restrictions on adjacent shifts.
     if (isLeaveSubstituteStaffBlocked(substituteRule(transferredSchedules, group, applicant.name), person.name)) continue;
 
-    const originalRules = originalGroups.map((original) => substituteRule(schedules, original, person.name));
+    // Grouping merges equal intervals. Filter first so a long-white row cannot
+    // hide a duty-team row at the same time because it happened to appear first.
+    const requiredGroups = createLeaveRequestShiftGroups(impact.affectedSchedules.filter(row =>
+      requiresOriginalPostBackfill({ kind: row.kind, teams: row.team.trim() ? [row.team] : [] })));
+    if (!requiredGroups.length) {
+      candidates.push({ person, originalGroups: [], backfillCandidates: [] });
+      continue;
+    }
+    const originalRules = requiredGroups.map((original) => substituteRule(schedules, original, person.name));
     const backfillCandidates = people.filter(
       (backup) =>
         (!input.selection || backup.personRecordId === input.selection.backfillPersonRecordId) &&
         !samePerson(applicant, backup) &&
         !samePerson(person, backup) &&
         originalRules.every((rule) => rule.requiresSubstitute && !isLeaveSubstituteStaffBlocked(rule, backup.name)) &&
-        originalGroups.every((original) => {
+        requiredGroups.every((original) => {
           const backupImpact = impactFor(backup.name, original);
           return !backupImpact.invalidRange && !backupImpact.affectedSchedules.length && !backupImpact.unrecognizedShifts.length && !backupImpact.missingCalendarYears.length;
         }),
     );
-    if (backfillCandidates.length) candidates.push({ person, originalGroups, backfillCandidates });
+    if (backfillCandidates.length) candidates.push({ person, originalGroups: requiredGroups, backfillCandidates });
   }
   return candidates;
 }
@@ -151,7 +174,8 @@ export function resolveTwoLevelSubstitution(input: {
 }): TwoLevelSubstitutionResult {
   const choice = input.candidates.find((candidate) => candidate.person.personRecordId === input.primaryPersonRecordId);
   if (!choice) return { valid: false, message: '替班人员已不可选，请重新选择' };
-  if (!choice.originalGroups.length) {
+  const requiredGroups = requiredOriginalPostGroups(choice.originalGroups);
+  if (!requiredGroups.length) {
     if (input.backfillPersonRecordId) return { valid: false, message: '原岗位已变化，请重新核对替班安排' };
     return { valid: true, primary: choice.person, backfills: [] };
   }
@@ -162,6 +186,6 @@ export function resolveTwoLevelSubstitution(input: {
   return {
     valid: true,
     primary: choice.person,
-    backfills: choice.originalGroups.map((original) => ({ person: backup, group: original })),
+    backfills: requiredGroups.map((original) => ({ person: backup, group: original })),
   };
 }

@@ -711,12 +711,9 @@ describe('Monthly schedule leave request tool', () => {
       pageLoaderStart,
     );
     const pageLoader = source.slice(pageLoaderStart, pageLoaderEnd);
-    const monthMapStart = pageLoader.indexOf('const monthMap = new Map');
-    const monthMapEnd = pageLoader.indexOf(
-      'const monthsForWindow =',
-      monthMapStart,
-    );
-    const monthMapSource = pageLoader.slice(monthMapStart, monthMapEnd);
+    const monthWindowStart = source.indexOf('function getScheduleWindowMonths');
+    const monthWindowEnd = source.indexOf('\n}', monthWindowStart);
+    const monthWindowSource = source.slice(monthWindowStart, monthWindowEnd);
 
     expect(source).toContain("from './business-date'");
     expect(initialDateSource).toContain(
@@ -802,14 +799,17 @@ describe('Monthly schedule leave request tool', () => {
       ),
     ).toHaveLength(2);
 
-    expect(monthMapSource).toContain(
+    expect(monthWindowSource).toContain(
       'getAdjacentScheduleMonthDateKeys(businessDateKey)',
     );
-    expect(monthMapSource).toContain('selectedDate.getFullYear()');
-    expect(monthMapSource).toContain('selectedDate.getMonth()');
-    expect(monthMapSource).toContain('options.additionalDateKeys');
-    expect(monthMapSource).not.toContain('forceRefresh');
-    expect(monthMapSource).not.toContain('setSelectedDate');
+    expect(monthWindowSource).toContain('selectedDate.getFullYear()');
+    expect(monthWindowSource).toContain('selectedDate.getMonth()');
+    expect(monthWindowSource).toContain('...additionalDateKeys');
+    expect(monthWindowSource).not.toContain('forceRefresh');
+    expect(monthWindowSource).not.toContain('setSelectedDate');
+    expect(pageLoader).toMatch(
+      /getScheduleWindowMonths\(\s*selectedDate,\s*businessDateKey,\s*options\.additionalDateKeys,?\s*\)/,
+    );
     expect(pageLoader).toMatch(
       /getMonthlySchedulesWithInFlightDeduplication\(\s*item\.year,\s*item\.month,?\s*\)/,
     );
@@ -818,7 +818,7 @@ describe('Monthly schedule leave request tool', () => {
     );
     expect(pageLoader).not.toContain('businessClockMs');
     expect(pageLoader).toMatch(
-      /\},\s*\[[^\]]*businessDateKey,[^\]]*selectedDate,\s*setScreenshotSectionState\],\s*\);/,
+      /\},\s*\[[^\]]*businessDateKey,[^\]]*selectedDate,\s*setScreenshotSectionState,?\s*\],\s*\);/,
     );
   });
 

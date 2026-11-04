@@ -124,6 +124,32 @@ describe('InventoryOutboundApprovalStore', () => {
     ).rejects.toThrow('审批快照冲突');
   });
 
+  it('reuses exact-byte validation without sharing mutable records or skipping external same-size/mtime edits', async () => {
+    const store = new InventoryOutboundApprovalStore(ledgerPath);
+    await store.registerPending(snapshot());
+    const nativeParse = JSON.parse;
+    let ledgerParses = 0;
+    const parse = jest.spyOn(JSON, 'parse').mockImplementation((text: string, reviver?: Parameters<typeof JSON.parse>[1]) => {
+      if (typeof text === 'string' && text.includes('"entries"') && text.includes('"snapshotFingerprint"')) ledgerParses++;
+      return nativeParse(text, reviver);
+    });
+    const first = await store.find('rec_outbound_1', 1);
+    expect(first).toBeDefined();
+    first!.snapshot.itemName = 'mutated return value';
+    for (let index = 0; index < 10; index++) {
+      expect((await store.find('rec_outbound_1', 1))!.snapshot.itemName).not.toBe('mutated return value');
+    }
+    expect(ledgerParses).toBe(1);
+    parse.mockRestore();
+    const bytes = readFileSync(ledgerPath, 'utf8'), previousStat = fs.statSync(ledgerPath);
+    const invalid = bytes.slice(0, bytes.lastIndexOf('}')) + ']' + bytes.slice(bytes.lastIndexOf('}') + 1);
+    expect(Buffer.byteLength(invalid)).toBe(Buffer.byteLength(bytes));
+    writeFileSync(ledgerPath, invalid, 'utf8');
+    utimesSync(ledgerPath, previousStat.atime, previousStat.mtime);
+    await expect(store.find('rec_outbound_1', 1)).rejects.toThrow('审批账本不可用');
+    expect(readFileSync(ledgerPath, 'utf8')).toBe(invalid);
+  });
+
   it('fails closed and preserves a corrupted durable ledger', async () => {
     writeFileSync(ledgerPath, '{not-valid-json', 'utf8');
     const store = new InventoryOutboundApprovalStore(ledgerPath);

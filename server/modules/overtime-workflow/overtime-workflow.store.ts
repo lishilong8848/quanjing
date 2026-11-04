@@ -13,6 +13,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { readEnv } from '../../common/config/external-services.config';
 import { assertOvertimeApplicationCoverage } from '../../common/access/personnel-handover.coverage';
+import { FairOperationQueue } from '../../common/fair-operation-queue';
 import type {
   OvertimeApplicationSnapshot,
   OvertimeApprovalCardAction,
@@ -235,7 +236,9 @@ interface OvertimeWorkflowLedger {
 export class OvertimeWorkflowStore {
   private readonly ledgerPath: string;
   private readonly legacyLedgerPath: string;
-  private operation: Promise<unknown> = Promise.resolve();
+  private readonly operation = new FairOperationQueue();
+  private readCache: { path: string; source: Buffer; ledger: OvertimeWorkflowLedger } | undefined;
+  private readOnlyOperation = false;
 
   constructor(
     @Optional() @Inject(OVERTIME_WORKFLOW_LEDGER_PATH) ledgerPath?: string,
@@ -423,7 +426,7 @@ export class OvertimeWorkflowStore {
     recordId: string,
   ): Promise<OvertimeWorkflowApplicationEntry | null> {
     const normalized = requireRecordId(recordId);
-    return this.enqueue(async () => {
+    return this.enqueueCardRead(async () => {
       const ledger = await this.read();
       const entry = ledger.applications.find(
         (candidate) => candidate.recordId === normalized,
@@ -434,7 +437,7 @@ export class OvertimeWorkflowStore {
   }
 
   async listApplications(): Promise<OvertimeWorkflowApplicationEntry[]> {
-    return this.enqueue(async () => clone((await this.read()).applications));
+    return this.enqueueRead(async () => clone((await this.read()).applications));
   }
 
   async acceptApprovalHandover(input: OvertimeApprovalHandoverInput, notificationsManaged?: () => boolean): Promise<OvertimeApprovalHandoverReceipt> {
@@ -836,7 +839,7 @@ export class OvertimeWorkflowStore {
 
   async getTask(key: string): Promise<OvertimeWorkflowTaskEntry | null> {
     const normalized = clean(key);
-    return this.enqueue(async () => {
+    return this.enqueueRead(async () => {
       const entry = (await this.read()).tasks.find(
         (candidate) => candidate.key === normalized,
       );
@@ -859,10 +862,10 @@ export class OvertimeWorkflowStore {
   }
 
   async listTasks(): Promise<OvertimeWorkflowTaskEntry[]> {
-    return this.enqueue(async () => clone((await this.read()).tasks));
+    return this.enqueueRead(async () => clone((await this.read()).tasks));
   }
   async personnelHandoverSnapshot(): Promise<{applications:OvertimeWorkflowApplicationEntry[];tasks:OvertimeWorkflowTaskEntry[]}> {
-    return this.enqueue(async()=>{const ledger=await this.read();return clone({applications:ledger.applications,tasks:ledger.tasks});});
+    return this.enqueueRead(async()=>{const ledger=await this.read();return clone({applications:ledger.applications,tasks:ledger.tasks});});
   }
 
   async claimApprovalAction(
@@ -873,7 +876,7 @@ export class OvertimeWorkflowStore {
     claimed: boolean;
     entry: OvertimeWorkflowApprovalActionEntry;
   }> {
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const normalized = normalizeApprovalAction(input);
       const ledger = await this.read();
       const application = ledger.applications.find(
@@ -954,7 +957,7 @@ export class OvertimeWorkflowStore {
     recordId: string,
   ): Promise<OvertimeWorkflowApprovalActionEntry | null> {
     const normalized = requireRecordId(recordId);
-    return this.enqueue(async () => {
+    return this.enqueueCardRead(async () => {
       const entry = (await this.read()).approvalActions.find(
         (candidate) => candidate.recordId === normalized,
       );
@@ -970,7 +973,7 @@ export class OvertimeWorkflowStore {
     claimed: boolean;
     entry: OvertimeWorkflowConfirmationEntry;
   }> {
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const normalized = normalizeConfirmationInput(input);
       const fingerprint = fingerprintOf(normalized);
       const ledger = await this.read();
@@ -1036,7 +1039,7 @@ export class OvertimeWorkflowStore {
     recordId: string,
   ): Promise<OvertimeWorkflowConfirmationEntry | null> {
     const normalized = requireRecordId(recordId);
-    return this.enqueue(async () => {
+    return this.enqueueCardRead(async () => {
       const entry = (await this.read()).confirmations.find(
         (candidate) => candidate.recordId === normalized,
       );
@@ -1045,7 +1048,7 @@ export class OvertimeWorkflowStore {
   }
 
   async listConfirmations(): Promise<OvertimeWorkflowConfirmationEntry[]> {
-    return this.enqueue(async () => clone((await this.read()).confirmations));
+    return this.enqueueRead(async () => clone((await this.read()).confirmations));
   }
 
   async enqueueDailyConfirmationReminder(
@@ -1128,13 +1131,26 @@ export class OvertimeWorkflowStore {
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const run = () => operation();
-    const result = this.operation.then(run, run);
-    this.operation = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    return this.operation.enqueue(() => this.withReadSnapshot(operation));
+  }
+
+  private enqueueCard<T>(operation: () => Promise<T>): Promise<T> {
+    return this.operation.enqueue(() => this.withReadSnapshot(operation), true);
+  }
+
+  private enqueueRead<T>(operation: () => Promise<T>): Promise<T> {
+    return this.operation.enqueue(() => this.withReadSnapshot(operation, true));
+  }
+
+  private enqueueCardRead<T>(operation: () => Promise<T>): Promise<T> {
+    return this.operation.enqueue(() => this.withReadSnapshot(operation, true), true);
+  }
+
+  private async withReadSnapshot<T>(operation: () => Promise<T>, readOnly = false): Promise<T> {
+    this.readOnlyOperation = readOnly;
+    try {
+      return await operation();
+    } finally { this.readOnlyOperation = false; }
   }
 
   private async read(): Promise<OvertimeWorkflowLedger> {
@@ -1143,10 +1159,12 @@ export class OvertimeWorkflowStore {
 
   private async readFrom(path: string): Promise<OvertimeWorkflowLedger> {
     try {
-      const parsed = JSON.parse(
-        await readFile(path, 'utf8'),
-      ) as Partial<OvertimeWorkflowLedger>;
-      return {
+      const source = await readFile(path);
+      if (this.readCache?.path === path && this.readCache.source.equals(source)) {
+        return structuredClone(this.readCache.ledger);
+      }
+      const parsed = JSON.parse(source.toString('utf8')) as Partial<OvertimeWorkflowLedger>;
+      const ledger: OvertimeWorkflowLedger = {
         version: 1,
         applications: Array.isArray(parsed.applications)
           ? parsed.applications
@@ -1172,7 +1190,11 @@ export class OvertimeWorkflowStore {
             ).slice(-MAX_CONFIRMATIONS)
           : [],
       };
+      if (this.readOnlyOperation) this.readCache = source.byteLength <= 16 * 1024 * 1024
+        ? { path, source, ledger: structuredClone(ledger) } : undefined;
+      return ledger;
     } catch (error) {
+      this.readCache = undefined;
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
         return emptyLedger();
       throw error;
@@ -1241,10 +1263,11 @@ export class OvertimeWorkflowStore {
     try {
       await writeFile(
         temporaryPath,
-        `${JSON.stringify(ledger, null, 2)}\n`,
+        `${JSON.stringify(ledger)}\n`,
         'utf8',
       );
       await rename(temporaryPath, this.ledgerPath);
+      this.readCache = undefined;
     } finally {
       await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== 'ENOENT') throw error;

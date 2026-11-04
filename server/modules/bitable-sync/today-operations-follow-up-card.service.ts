@@ -8,7 +8,7 @@ import { TodayOperationsAnomalyGateway } from './today-operations-anomaly.gatewa
 import { TodayOperationsFollowUpCardStore } from './today-operations-follow-up-card.store';
 import { parseFollowUpCardAction } from './today-operations-follow-up-card.callback';
 import { buildFollowUpEditCard, buildFollowUpListCard, buildFollowUpProcessingCard, buildFollowUpResultCard, buildFollowUpNavigationErrorCard } from './today-operations-follow-up-card';
-import type { FollowUpCardCommand, FollowUpCardSnapshot } from './today-operations-follow-up-card.types';
+import { followUpRecordFingerprint, type FollowUpCardCommand, type FollowUpCardSnapshot } from './today-operations-follow-up-card.types';
 
 @Injectable()
 export class TodayOperationsFollowUpCardService implements OnModuleInit, OnModuleDestroy {
@@ -70,15 +70,31 @@ export class TodayOperationsFollowUpCardService implements OnModuleInit, OnModul
       setImmediate(() => {
         void this.enqueueMessage(action.messageId, async () => {
           if (this.navigation.get(action.messageId) !== marker) return;
-          if (action.action === 'edit') {
-            const record = await this.gateway.getFollowUp(snapshot.records[action.index].record.recordId);
-            await this.store.refreshRecord(action.batchId, action.messageId, record);
-          }
           if (this.navigation.get(action.messageId) !== marker) return;
           this.actor(action.actorOpenId, 'read');
           const current = await this.store.getSnapshot(action.batchId, action.messageId);
           this.assertApp(current);
           await this.gateway.patchInteractiveCard(action.messageId, this.render(current, this.canUpdate(action.actorOpenId)));
+          const after = await this.store.getSnapshot(action.batchId, action.messageId);
+          if (this.navigation.get(action.messageId) === marker && action.action === 'edit' &&
+            after.message?.view.kind === 'edit' && after.message.view.index === action.index &&
+            (after.records[action.index].pendingCommandId !== current.records[action.index].pendingCommandId ||
+              after.records[action.index].revision !== current.records[action.index].revision)) {
+            this.actor(action.actorOpenId, 'read');
+            this.assertApp(after);
+            await this.gateway.patchInteractiveCard(action.messageId, this.render(after, this.canUpdate(action.actorOpenId)));
+          }
+          if (action.action === 'edit' && this.navigation.get(action.messageId) === marker) {
+            // Feishu does not report keystrokes. Never PATCH a second refreshed form over a visible draft.
+            const shown = current.records[action.index].record;
+            void this.gateway.getFollowUp(shown.recordId).then(record => {
+              this.actor(action.actorOpenId, 'read');
+              if (record.recordId !== shown.recordId) throw new ConflictException('异常记录身份不匹配');
+              if (followUpRecordFingerprint(record) !== followUpRecordFingerprint(shown)) {
+                this.logger.warn('异常跟进源记录已变化；当前填写保留，提交时将核对版本');
+              }
+            }).catch(error => this.logger.warn(`异常跟进后台核对暂未完成，当前填写保留：${safeError(error)}`));
+          }
         }).catch(async error => {
           this.logger.warn(`异常跟进卡片打开失败，可从原按钮重试：${safeError(error)}`);
           if (action.action !== 'edit') return;

@@ -29,6 +29,11 @@ describe('card copy activation isolation (no application or real transport)', ()
     delete process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS;
     account = { id: 'synthetic-account', version: 1, kind: 'feishu', appId, name, identityHash: createHash('sha256').update(`${appId}\0${recipient}`).digest('hex'), enabled: true, personnelActive: true };
     configuration = { snapshot: jest.fn(() => ({ accounts: [account] })), currentPrincipal: jest.fn(() => ({ accountId: account.id })) };
+    configuration.isCurrentReadonlyCardRecipient = jest.fn((target: any) => {
+      const matches = configuration.snapshot().accounts.filter((row: any) => row.kind === 'feishu' && row.appId === target.appId &&
+        row.identityHash === target.identityHash && row.name === target.name && row.enabled && !row.deleted && !row.reactivationRequired && !row.permissionsRevoked && row.personnelActive !== false);
+      return matches.length === 1 && !!configuration.currentPrincipal(matches[0].id, matches[0].version);
+    });
     http = { axiosRef: { post: jest.fn(() => { throw new Error('No real authentication or copy delivery allowed'); }), patch: jest.fn(), delete: jest.fn() } };
     service = new FeishuCardCopyService(http, configuration);
   });
@@ -103,6 +108,7 @@ describe('card copy activation isolation (no application or real transport)', ()
   it('sends one readonly copy to each person and synchronizes updates and callback guards for both', async () => {
     addSecond(); fakeTransport(); await service.onModuleInit(); await source(); await source('om_other_original');
     await jest.advanceTimersByTimeAsync(5000);
+    expect(http.axiosRef.post.mock.calls.filter(([url]: [string]) => url.includes('/auth/'))).toHaveLength(1);
     expect(copyCalls().map(([,body]: any[]) => body.receive_id).sort()).toEqual([recipient, extraId].sort());
     expect(new Set(copyCalls().map(([,body]: any[]) => body.uuid)).size).toBe(2);
     for (const [, body] of copyCalls()) { expect(body.content).toContain('只读抄送'); expect(body.content).not.toMatch(/"button"|"callback"/); }
@@ -163,6 +169,29 @@ describe('card copy activation isolation (no application or real transport)', ()
   it('invalid additional settings pause only added recipients', async () => {
     addSecond(); await service.onModuleInit(); process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS='not-json'; await source();
     expect(Object.keys(groups())).toHaveLength(1); expect(Object.keys(extraGroups())).toHaveLength(0);
+  });
+  it('coalesces a failed token request and clears it for a subsequent retry', async () => {
+    process.env.FEISHU_APP_SECRET = 'synthetic-secret';
+    let rejectToken!: (error: Error) => void;
+    http.axiosRef.post.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectToken = reject; }));
+    const first = (service as any).accessToken(appId), second = (service as any).accessToken(appId);
+    expect(http.axiosRef.post).toHaveBeenCalledTimes(1);
+    const settled = Promise.allSettled([first, second]); rejectToken(new Error('synthetic auth failure'));
+    expect((await settled).every(result => result.status === 'rejected')).toBe(true);
+    http.axiosRef.post.mockResolvedValueOnce({ data: { code: 0, tenant_access_token: 'synthetic-retry-token', expire: 7200 } });
+    await expect((service as any).accessToken(appId)).resolves.toBe('synthetic-retry-token');
+    expect(http.axiosRef.post).toHaveBeenCalledTimes(2);
+  });
+  it('does not retain a late token after shutdown', async () => {
+    process.env.FEISHU_APP_SECRET = 'synthetic-secret';
+    let resolveToken!: (response: unknown) => void;
+    http.axiosRef.post.mockImplementationOnce(() => new Promise(resolve => { resolveToken = resolve; }));
+    const pending = (service as any).accessToken(appId);
+    await service.onModuleDestroy();
+    resolveToken({ data: { code: 0, tenant_access_token: 'synthetic-late-token', expire: 7200 } });
+    await pending;
+    expect((service as any).token).toBeUndefined();
+    expect((service as any).tokenRequest).toBeUndefined();
   });
 });
 

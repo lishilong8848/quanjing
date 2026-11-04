@@ -18,7 +18,7 @@ import { resolveLeaveWorkflowLedgerPath } from '../../common/feishu/leave-local-
 import { assertLeaveApplicationCoverage } from '../../common/access/personnel-handover.coverage';
 import {assertFutureManagerRoles,assertFutureManagerTasks,leavePlanHash} from './leave-future-manager-handover';
 import { fixedLeaveNotificationIds, originalLeaveNotificationRoleRecipients } from './leave-workflow.rules';
-import { originalPostSignature } from './leave-two-level-substitution';
+import { originalPostSignature, requiredOriginalPostGroups } from './leave-two-level-substitution';
 import { parseShanghaiLocalDateTime } from '../../../shared/leave-request-impact';
 import type {
   LeaveRequestShiftGroup,
@@ -253,7 +253,7 @@ export class LeaveWorkflowStore {
   private readonly normalizedApplications = new Map<string, { source: string; value: LeaveWorkflowApplicationEntry }>();
   private normalizationCacheCharacters = 0;
   private ledgerReadCache: { path: string; source: Buffer; parsed: Partial<Ledger> } | null = null;
-  private readonly serializedApplications = new WeakMap<LeaveWorkflowApplicationEntry, string>();
+  private readonly serializedApplications = new WeakMap<LeaveWorkflowApplicationEntry, Buffer>();
   private primaryTaskBurst = 0;
 
   constructor(
@@ -1519,16 +1519,24 @@ export class LeaveWorkflowStore {
     await mkdir(dirname(this.ledgerPath), { recursive: true });
     const temporaryPath = `${this.ledgerPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
     try {
-      // Reuse only immutable application JSON; mutable bookkeeping is encoded afresh.
+      // Reuse immutable UTF-8 bytes, not just JSON strings. Re-encoding the
+      // unchanged historical directory on every small commit blocks card replies.
       const { applications, ...fields } = ledger;
       const encodedApplications = applications.map(application => {
         const cached = this.serializedApplications.get(application);
         if (cached !== undefined) return cached;
-        const encoded = JSON.stringify(application);
+        const encoded = Buffer.from(JSON.stringify(application));
         if (Object.isFrozen(application)) this.serializedApplications.set(application, encoded);
         return encoded;
       });
-      const source = Buffer.from(`{"applications":[${encodedApplications.join(',')}],${JSON.stringify(fields).slice(1)}`);
+      const comma = Buffer.from(',');
+      const parts: Buffer[] = [Buffer.from('{"applications":[')];
+      for (const [index, encoded] of encodedApplications.entries()) {
+        if (index > 0) parts.push(comma);
+        parts.push(encoded);
+      }
+      parts.push(Buffer.from(`],${JSON.stringify(fields).slice(1)}`));
+      const source = Buffer.concat(parts);
       await writeFile(temporaryPath, source, {
         encoding: 'utf8',
         mode: 0o600,
@@ -2283,7 +2291,7 @@ function resolveCompleteShiftAssignments(
       openId: source.substituteOpenId,
     };
     const originalChoice = snapshot.candidateSets?.find((set) => set.shiftKey === group.shiftKey)?.twoLevelCandidates?.find((choice) => choice.person.personRecordId === substitute.personRecordId);
-    if (originalChoice?.originalGroups.length && !source.originalPostBackfills?.length) {
+    if (requiredOriginalPostGroups(originalChoice?.originalGroups || []).length && !source.originalPostBackfills?.length) {
       throw new BadRequestException('在岗替班必须同时安排原岗补位人员');
     }
     return {

@@ -435,7 +435,7 @@ describe('FeishuCardActionRouter', () => {
     jest.useRealTimers();
   });
 
-  function createRouter(threshold?: { isEnabled: jest.Mock; handleCardAction: jest.Mock }) {
+  function createRouter(threshold?: { isEnabled: jest.Mock; handleCardAction: jest.Mock }, feedback?: { enqueueLateFailure: jest.Mock }) {
     return new FeishuCardActionRouter(
       overtime as never,
       leave as never,
@@ -447,8 +447,28 @@ describe('FeishuCardActionRouter', () => {
       threshold as never,
       undefined,
       followUp as never,
+      feedback as never,
     );
   }
+
+  it.each(['leave', 'overtime'] as const)('reports a late %s failure once without replaying approval or pushing a success', async workflow => {
+    jest.useFakeTimers();
+    let reject!: (error: Error) => void;
+    const accept = workflow === 'leave' ? leave.acceptApprovalAction : overtime.acceptApprovalAction;
+    const worker = workflow === 'leave' ? leave.runPendingTasks : overtime.runPendingTasks;
+    accept.mockImplementationOnce(() => new Promise((_yes, no) => { reject = no; }));
+    const feedback = { enqueueLateFailure: jest.fn().mockResolvedValue(undefined) };
+    const router = createRouter(undefined, feedback);
+    const payload = workflow === 'leave' ? leavePayload() : overtimePayload();
+    const first = router.handle(payload), replay = router.handle({ ...payload, event_id: 'synthetic-transport-retry' });
+    await jest.advanceTimersByTimeAsync(2501);
+    expect((await first).toast.type).toBe('warning'); expect((await replay).toast.type).toBe('warning');
+    reject(new Error('synthetic late failure'));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(accept).toHaveBeenCalledTimes(1); expect(worker).not.toHaveBeenCalled();
+    expect(feedback.enqueueLateFailure).toHaveBeenCalledTimes(1);
+    expect(feedback.enqueueLateFailure).toHaveBeenCalledWith(payload, workflow, expect.any(Error));
+  });
 
   it.each(['leave', 'substitute', 'overtime', 'inventory', 'purchase-approval', 'purchase-single', 'purchase-order', 'purchase-receipt', 'threshold', 'anomaly'])(
     'keeps one %s action running after the callback deadline and wakes its worker',

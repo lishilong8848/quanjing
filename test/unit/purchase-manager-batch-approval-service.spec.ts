@@ -841,6 +841,7 @@ describe('purchase manager batch approval service', () => {
     expect(gateway.updateInteractiveCardAfterCallback).toHaveBeenCalledWith(
       'c-receipt-01',
       card,
+      'om_purchase_receipt_01',
     );
     expect(gateway.updateInteractiveCard).not.toHaveBeenCalled();
   });

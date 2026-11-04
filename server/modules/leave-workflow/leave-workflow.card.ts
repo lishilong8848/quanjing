@@ -6,7 +6,7 @@ import type {
   LeaveSubstituteCandidate,
 } from './leave-workflow.types';
 import type { LeaveRequestShiftGroup } from '../../../shared/leave-request-impact';
-import { originalPostSignature } from './leave-two-level-substitution';
+import { originalPostSignature, requiredOriginalPostGroups } from './leave-two-level-substitution';
 import { leaveBackfillFieldName } from './leave-workflow.form-fields';
 
 const CARD_MAX_BYTES = 30 * 1024;
@@ -192,7 +192,7 @@ function multiShiftSubstituteForm(
   );
   const reviewByShiftKey = new Map((context.substitutionReview || []).map((selection) => [selection.shiftKey, selection]));
   const reviewing = context.substitutionReview !== undefined;
-  const hasOnDutyChoices = (context.candidateSets || []).some((set) => set.twoLevelCandidates?.some((choice) => choice.originalGroups.length > 0));
+  const hasOnDutyChoices = (context.candidateSets || []).some((set) => set.twoLevelCandidates?.some((choice) => requiredOriginalPostGroups(choice.originalGroups).length > 0));
   const requireEverySelection =
     mode === 'approval' &&
     (!context.substituteDecisionRequired ||
@@ -206,6 +206,7 @@ function multiShiftSubstituteForm(
         const selected = reviewByShiftKey.get(group.shiftKey);
         const choices = context.candidateSets?.find((set) => set.shiftKey === group.shiftKey)?.twoLevelCandidates || [];
         const selectedChoice = choices.find((choice) => choice.person.personRecordId === selected?.substitutePersonRecordId);
+        const requiredGroups = requiredOriginalPostGroups(selectedChoice?.originalGroups || []);
         if (reviewing && !selectedChoice) throw new Error('替班人员已不可选，请重新选择');
         return [
           shiftSubstituteDetail(group, current),
@@ -226,14 +227,14 @@ function multiShiftSubstituteForm(
               }),
             ),
           },
-          ...(reviewing && selectedChoice?.originalGroups.length ? [
+          ...(reviewing && selectedChoice && requiredGroups.length ? [
             {
               tag: 'markdown',
-              content: `**原岗补位 · ${escape(selectedChoice.person.name)}**\n${selectedChoice.originalGroups.map((original) => `${escape(original.buildings.join('、'))} ${escape(original.shift)} · ${escape(formatTime(original.startAt))} 至 ${escape(formatTime(original.endAt))}`).join('\n')}`,
+              content: `**原岗补位 · ${escape(selectedChoice.person.name)}**\n${requiredGroups.map((original) => `${escape(original.buildings.join('、'))} ${escape(original.shift)} · ${escape(formatTime(original.startAt))} 至 ${escape(formatTime(original.endAt))}`).join('\n')}`,
             },
             {
               tag: 'select_static',
-              name: leaveBackfillFieldName(group.shiftKey, selectedChoice.person.personRecordId, originalPostSignature(selectedChoice.originalGroups)),
+              name: leaveBackfillFieldName(group.shiftKey, selectedChoice.person.personRecordId, originalPostSignature(requiredGroups)),
               required: true,
               width: 'fill',
               placeholder: { tag: 'plain_text', content: '选择原岗补位人员' },

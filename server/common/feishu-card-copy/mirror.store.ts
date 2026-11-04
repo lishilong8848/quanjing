@@ -37,6 +37,7 @@ export class MirrorStoreError extends Error { constructor(readonly code: string)
 export class FeishuCardMirrorStore {
   private queue: Promise<unknown> = Promise.resolve();
   private persisted = false;
+  private validated?: { digest: string; state: MirrorStoreSnapshot; serialized: string; messageIds: Set<string> };
   private readonly defaults: Required<MirrorStoreOptions>;
   private readonly initialEnabledAt: string;
   constructor(readonly filePath: string, readonly identity: MirrorIdentity, options: MirrorStoreOptions = {}) {
@@ -46,20 +47,29 @@ export class FeishuCardMirrorStore {
     this.defaults = { maxGroups: options.maxGroups ?? 20_000, maxSources: options.maxSources ?? 100_000, maxBytes: options.maxBytes ?? 32 * 1024 * 1024, leaseMs: options.leaseMs ?? 60_000 };
     if (Object.values(this.defaults).some(value => !Number.isSafeInteger(value) || value < 1) || this.defaults.leaseMs > 3_600_000) throw problem('LIMIT_INVALID');
   }
-  read(): MirrorStoreSnapshot {
+  read(): MirrorStoreSnapshot { return structuredClone(this.readValidated().state); }
+  /** Always hash the actual file bytes: size/mtime alone cannot detect external replacement or damage. */
+  private readValidated() {
     try {
       ordinary(this.filePath);
       if (!existsSync(this.filePath)) {
         if (this.persisted) throw problem('LEDGER_MISSING');
-        return { schemaVersion: 1, appId: this.identity.appId, recipientOpenId: this.identity.recipientOpenId, enabledAt: this.initialEnabledAt, revision: 0, groups: {}, sources: {} };
+        const state: MirrorStoreSnapshot = { schemaVersion: 1, appId: this.identity.appId, recipientOpenId: this.identity.recipientOpenId, enabledAt: this.initialEnabledAt, revision: 0, groups: {}, sources: {} };
+        return { digest: '', state, serialized: JSON.stringify(state), messageIds: new Set<string>() };
       }
       this.persisted = true;
       const stat = lstatSync(this.filePath);
       if (!stat.isFile() || stat.size > this.defaults.maxBytes) throw problem('LEDGER_SIZE');
-      const state: unknown = JSON.parse(readFileSync(this.filePath, 'utf8'));
+      const bytes = readFileSync(this.filePath), digest = createHash('sha256').update(bytes).digest('hex');
+      if (bytes.length > this.defaults.maxBytes) throw problem('LEDGER_SIZE');
+      if (this.validated?.digest === digest) {
+        if (this.validated.state.appId !== this.identity.appId || this.validated.state.recipientOpenId !== this.identity.recipientOpenId) throw problem('IDENTITY_MISMATCH');
+        return this.validated;
+      }
+      const state: unknown = JSON.parse(bytes.toString('utf8'));
       if (!validState(state)) throw problem('LEDGER_INVALID');
       if (state.appId !== this.identity.appId || state.recipientOpenId !== this.identity.recipientOpenId) throw problem('IDENTITY_MISMATCH');
-      return state;
+      return this.validated = validatedSnapshot(state, digest);
     } catch (error) { if (error instanceof MirrorStoreError) throw error; throw problem('LEDGER_UNAVAILABLE'); }
   }
   capacity(state = this.read()) {
@@ -68,12 +78,18 @@ export class FeishuCardMirrorStore {
     return { groups, sources, bytes, maxGroups: this.defaults.maxGroups, maxSources: this.defaults.maxSources, maxBytes: this.defaults.maxBytes, level: ratio >= 1 ? 'full' : ratio >= .8 ? 'warning' : 'normal' };
   }
   getBySource(sourceMessageId: string): MirrorGroup | null {
-    const state = this.read(), source = own(state.sources, sourceMessageId);
+    const state = this.readValidated().state, source = own(state.sources, sourceMessageId);
     return source ? structuredClone(state.groups[source.groupKey]) : null;
   }
   isMirrorMessageId(messageId: string): boolean {
     if (!message(messageId)) return false;
-    return Object.values(this.read().groups).some(group => group.messageId === messageId);
+    return this.readValidated().messageIds.has(messageId);
+  }
+  /** A read-only idle check; a racing enqueue is safely picked up by the next poll. Claims still recheck under lock. */
+  hasPendingWork(nowValue?: string | Date, groupKey?: string): boolean {
+    const now = timestamp(nowValue || new Date());
+    return Object.values(this.readValidated().state.groups).some(group =>
+      !!group.claim && Date.parse(group.claim.leaseUntil) <= Date.parse(now) || ready(group, now, groupKey));
   }
   async enroll(input: MirrorEnrollmentInput): Promise<MirrorGroup | null> {
     if (!message(input.sourceMessageId) || typeof input.groupKey !== 'string' || !input.groupKey.trim() || input.groupKey.length > 1000 || /[\u0000-\u001f]/.test(input.groupKey) || input.originalRecipientOpenId !== undefined && !/^ou_[A-Za-z0-9_-]{1,124}$/.test(input.originalRecipientOpenId)) throw problem('ENROLLMENT_INVALID');
@@ -105,6 +121,7 @@ export class FeishuCardMirrorStore {
   }
   async reserveUpdate(sourceMessageId: string): Promise<MirrorUpdateOperation | null> {
     if (!message(sourceMessageId)) throw problem('SOURCE_INVALID');
+    if (!own(this.readValidated().state.sources, sourceMessageId)) return null;
     return this.mutate(state => {
       const source = own(state.sources, sourceMessageId);
       if (!source) return null;
@@ -148,9 +165,9 @@ export class FeishuCardMirrorStore {
   /** groupKey is the persisted key returned by getBySource/enroll, not the enrollment grouping material. */
   async claimNext(nowValue?: string | Date, groupKey?: string): Promise<MirrorClaim | null> {
     const now = timestamp(nowValue || new Date());
+    if (!Object.values(this.readValidated().state.groups).some(row => ready(row, now, groupKey))) return null;
     return this.mutate(state => {
-      const group = Object.values(state.groups).filter(row => (groupKey === undefined || row.key === groupKey) && !row.claim && row.state !== 'unknown' && row.state !== 'failed' &&
-        (row.nativeRecipient ? !!row.messageId && !row.recalled : row.state === 'pending') && Date.parse(row.nextAttemptAt) <= Date.parse(now))
+      const group = Object.values(state.groups).filter(row => ready(row, now, groupKey))
         .sort((a,b) => a.updatedAt.localeCompare(b.updatedAt) || a.key.localeCompare(b.key))[0];
       if (!group) return null;
       const operation: MirrorOperationKind = group.nativeRecipient ? 'recall' : group.messageId ? 'update' : 'create';
@@ -192,6 +209,7 @@ export class FeishuCardMirrorStore {
   }
   async recoverInterrupted(nowValue?: string | Date): Promise<number> {
     const now = timestamp(nowValue || new Date());
+    if (!Object.values(this.readValidated().state.groups).some(group => group.claim && Date.parse(group.claim.leaseUntil) <= Date.parse(now))) return 0;
     return this.mutate(state => {
       let recovered = 0;
       for (const group of Object.values(state.groups)) if (group.claim && Date.parse(group.claim.leaseUntil) <= Date.parse(now) &&
@@ -209,7 +227,7 @@ export class FeishuCardMirrorStore {
       ordinary(this.filePath); mkdirSync(dirname(this.filePath), { recursive: true });
       const release = acquire(`${this.filePath}.lock`), temporary = `${this.filePath}.${randomUUID()}.tmp`;
       try {
-        const state = this.read(), before = JSON.stringify(state), result = change(state);
+        const cached = this.readValidated(), state = structuredClone(cached.state), before = cached.serialized, result = change(state);
         if (JSON.stringify(state) === before) return structuredClone(result);
         state.revision++;
         if (!validState(state)) throw problem('WRITE_INVALID');
@@ -218,11 +236,20 @@ export class FeishuCardMirrorStore {
         ordinary(this.filePath); const fd = openSync(temporary, 'wx', 0o600);
         try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
         renameSync(temporary, this.filePath); this.persisted = true;
+        this.validated = validatedSnapshot(state, createHash('sha256').update(bytes).digest('hex'), bytes.toString('utf8'));
         return structuredClone(result);
       } finally { if (existsSync(temporary)) unlinkSync(temporary); release(); }
     });
     this.queue = operation.catch(() => undefined); return operation;
   }
+}
+
+function validatedSnapshot(state: MirrorStoreSnapshot, digest: string, serialized = JSON.stringify(state)) {
+  return { digest, state, serialized, messageIds: new Set(Object.values(state.groups).map(group => group.messageId).filter(Boolean)) };
+}
+function ready(row: MirrorGroup, now: string, groupKey?: string): boolean {
+  return (groupKey === undefined || row.key === groupKey) && !row.claim && row.state !== 'unknown' && row.state !== 'failed' &&
+    (row.nativeRecipient ? !!row.messageId && !row.recalled : row.state === 'pending') && Date.parse(row.nextAttemptAt) <= Date.parse(now);
 }
 
 function markNative(group: MirrorGroup, now: string): void {

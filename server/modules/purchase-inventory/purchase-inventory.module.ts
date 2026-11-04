@@ -33,6 +33,7 @@ import {
   FeishuCardActionHealthController,
 } from './feishu-card-action.consumer';
 import { FeishuCardActionRouter } from './feishu-card-action.router';
+import { FeishuCardCallbackFeedbackService } from '../../common/feishu-card-callback-feedback.service';
 import { BitableSyncModule } from '../bitable-sync/bitable-sync.module';
 import { InventoryOutboundApprovalModule } from '../inventory-outbound-approval/inventory-outbound-approval.module';
 import { ThresholdModule } from '../threshold-management/threshold.module';
@@ -73,6 +74,7 @@ import { ThresholdModule } from '../threshold-management/threshold.module';
     PurchaseBatchAttachmentTicketService,
     PurchaseManagerApprovalScheduler,
     FeishuCardActionRouter,
+    FeishuCardCallbackFeedbackService,
     FeishuCardActionLongConnectionTransport,
     {
       provide: FEISHU_CARD_ACTION_TRANSPORT,

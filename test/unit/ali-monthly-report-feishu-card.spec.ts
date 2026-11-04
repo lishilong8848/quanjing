@@ -20,6 +20,22 @@ function visibleText(value: unknown): string[] {
 }
 
 describe('阿里月报飞书互动卡片', () => {
+  it('复用超功耗附件时成功卡显示已获取且仍跳转原记录', () => {
+    const recordUrl = 'https://vnet.feishu.cn/base/base_test?table=tbl_test&recordId=rec_existing';
+    const card = buildAliMonthlyReportManualSuccessCard({
+      year: 2026, month: 10, reportTypeLabel: '月度超功耗',
+      fileName: 'EA118机柜超功耗告警统计10月份.xlsx', recordUrl,
+      reusedExisting: true,
+    });
+    const text = visibleText(card).join('\n');
+    expect(text).toContain('阿里月报获取成功');
+    expect(text).toContain('获取结果：已读取已有多维表附件');
+    expect(text).not.toContain('已上传');
+    expect(card.body.elements).toContainEqual(expect.objectContaining({
+      tag: 'button', behaviors: [{ type: 'open_url', default_url: recordUrl }],
+    }));
+  });
+
   it('构造手动上传成功卡片并用按钮打开资料管理记录', () => {
     const recordUrl =
       'https://vnet.feishu.cn/base/MliKbC3fXa8PXrsndKscmxjdn1g?table=tbl3KED5CdvNSCwT&view=vewrHJHl3v&recordId=rec_test';
@@ -122,7 +138,7 @@ describe('阿里月报飞书互动卡片', () => {
     expect(text).toContain('执行结果：3/3 成功');
     expect(text).toContain('总耗时：06分42秒');
     expect(text).toContain('✅ 告警分析｜已上传');
-    expect(text).toContain('✅ 超功率｜已上传');
+    expect(text).toContain('✅ 超功率｜已获取');
     expect(text).toContain('✅ 人员变动｜已上传');
     expect(text).toContain('任务编号：AMR-202607-202608030900');
     expect(text).not.toContain('https://');
@@ -235,7 +251,7 @@ describe('阿里月报飞书互动卡片', () => {
     const text = visibleText(card).join('\n');
     expect(text).toContain('执行结果：0/3 成功，3项失败');
     expect(text).toContain('❌ 告警分析｜执行失败');
-    expect(text).toContain('❌ 超功率｜执行失败');
+    expect(text).toContain('❌ 超功率｜获取失败');
     expect(text).toContain('❌ 人员变动｜执行失败');
     expect(text).toContain('失败阶段：依赖检查');
     expect(text).toContain('失败原因：Python 运行环境未就绪');

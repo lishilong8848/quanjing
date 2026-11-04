@@ -115,8 +115,89 @@ describe('shared Feishu card action execution', () => {
       { actor: 'a', message: 'n', form: { amount: '1', quantity: '2' } },
       start,
     );
+    await Promise.resolve();
     expect(start).toHaveBeenCalledTimes(4);
     job.resolve('accepted');
     await Promise.all([a, replay, changed, otherActor, otherMessage]);
+  });
+
+  it('contains synchronous throws and releases capacity for the same identity', async () => {
+    const execution = new FeishuCardActionExecution<string>(jest.fn(), 1);
+    await expect(execution.run({ action: 'approve' }, () => { throw new Error('disk unavailable'); }))
+      .rejects.toThrow('disk unavailable');
+    await expect(execution.run({ action: 'approve' }, async () => 'recovered')).resolves.toBe('recovered');
+  });
+
+  it('installs the identity before invoking an immediately reentrant callback', async () => {
+    const execution = new FeishuCardActionExecution<string>(jest.fn());
+    let replay!: Promise<string>;
+    const other = jest.fn(async () => 'wrong second decision');
+    const first = execution.run({ action: 'approve' }, async () => {
+      replay = execution.run({ action: 'approve' }, other);
+      return 'one decision';
+    });
+    await expect(first).resolves.toBe('one decision');
+    await expect(replay).resolves.toBe('one decision');
+    expect(other).not.toHaveBeenCalled();
+  });
+
+  it('reports a late failure once for all waiting duplicates without repeating the action', async () => {
+    jest.useFakeTimers();
+    const job = deferred<string>(), late = jest.fn(), fallback = jest.fn(), timing = jest.fn();
+    const start = jest.fn(() => job.promise);
+    const execution = new FeishuCardActionExecution<string>(fallback);
+    const a = execution.run({ actor: 'a' }, start, { onLateFailure: late, onTiming: timing });
+    const b = execution.run({ actor: 'a', eventId: 'retry' }, start, { onLateFailure: late });
+    const settled = Promise.allSettled([a, b]);
+    await jest.advanceTimersByTimeAsync(2501);
+    expect((await settled).every(row => row.status === 'rejected')).toBe(true);
+    const failure = new Error('temporary write error');
+    job.reject(failure);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(late).toHaveBeenCalledTimes(1);
+    expect(late).toHaveBeenCalledWith(failure);
+    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(timing.mock.calls.map(([row]) => row.outcome)).toEqual(['timed_out', 'late_failed']);
+    await expect(execution.run({ actor: 'a' }, async () => 'retry accepted')).resolves.toBe('retry accepted');
+  });
+
+  it('never lets diagnostics or a recovery notification replace the business error', async () => {
+    jest.useFakeTimers();
+    const job = deferred<string>(), failure = new Error('original error');
+    const execution = new FeishuCardActionExecution<string>(() => { throw new Error('diagnostic failed'); });
+    const result = execution.run({ action: 'approve' }, () => job.promise, {
+      onTiming: () => { throw new Error('logger failed'); },
+      onLateFailure: async () => { throw new Error('notification failed'); },
+    });
+    const done = expect(result).rejects.toBeInstanceOf(FeishuCardActionDeadlineError);
+    await jest.advanceTimersByTimeAsync(2501); await done;
+    job.reject(failure); await jest.advanceTimersByTimeAsync(0);
+    await expect(execution.run({ action: 'approve' }, async () => 'accepted')).resolves.toBe('accepted');
+  });
+
+  it('coalesces refreshed transport envelopes while keeping different form values distinct', async () => {
+    const job = deferred<string>(), start = jest.fn(() => job.promise);
+    const execution = new FeishuCardActionExecution<string>(jest.fn());
+    const identity = { header: { event_id: 'evt1', create_time: '1', app_id: 'cli_synthetic' },
+      event: { token: 'cap1', context: { open_message_id: 'om_original' }, operator: { open_id: 'ou_original' },
+        action: { form_value: { token: 'business-token-1' } } } };
+    const a = execution.run(identity, start);
+    const b = execution.run({ ...identity, header: { ...identity.header, event_id: 'evt2', create_time: '2' }, event: { ...identity.event, token: 'cap2' } }, start);
+    const changed = execution.run({ ...identity, event: { ...identity.event, action: { form_value: { token: 'business-token-2' } } } }, start);
+    await Promise.resolve(); expect(start).toHaveBeenCalledTimes(2);
+    job.resolve('one per actual action'); await Promise.all([a, b, changed]);
+  });
+
+  it('allows late returned error results to be reported without converting them into another attempt', async () => {
+    jest.useFakeTimers();
+    const job = deferred<string>(), lateResult = jest.fn(), start = jest.fn(() => job.promise);
+    const execution = new FeishuCardActionExecution<string>(jest.fn());
+    const result = execution.run({ action: 'approve' }, start, { onLateResult: lateResult });
+    const timedOut = expect(result).rejects.toBeInstanceOf(FeishuCardActionDeadlineError);
+    await jest.advanceTimersByTimeAsync(2501); await timedOut;
+    job.resolve('returned-error'); await jest.advanceTimersByTimeAsync(0);
+    expect(lateResult).toHaveBeenCalledTimes(1); expect(lateResult).toHaveBeenCalledWith('returned-error');
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });

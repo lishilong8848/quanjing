@@ -280,6 +280,19 @@ export class AccessConfigurationService implements OnModuleInit {
     const revoked=state.personnelEmployment?.appId === appId && (state.personnelEmployment.inactive[accountId] === true || !!state.personnelEmployment.loginBlocked?.[accountId]);
     return !revoked && (!account || (account.kind === 'feishu' && account.appId === appId && account.enabled && !account.deleted && !account.reactivationRequired && !this.loginBlocked(account,state) && !this.employmentInactive(account,state)));
   }
+  /** Internal copy-target check, using one freshly verified configuration snapshot rather than the administrator response. */
+  isCurrentReadonlyCardRecipient(target: { appId: string; identityHash: string; name: string }): boolean {
+    try {
+      if (target.appId !== process.env.FEISHU_APP_ID?.trim()) return false;
+      const state = this.store.read();
+      const matches = Object.values(this.accounts(state)).filter(account => account.kind === 'feishu' && account.appId === target.appId &&
+        account.identityHash === target.identityHash && account.name === target.name && account.enabled && !account.deleted &&
+        !account.reactivationRequired && !account.permissionsRevoked && account.personnelActive !== false && !this.employmentInactive(account, state));
+      if (matches.length !== 1) return false;
+      const account = matches[0];
+      return this.validateStoredSession(account, state, account.version, account.role, account.building, account.specialties, account.buildings);
+    } catch { return false; }
+  }
   currentPrincipal(id: string | undefined, version: number | undefined): AccessPrincipal | undefined {
     if (!id) return undefined;
     const account = this.accounts()[id];
@@ -309,6 +322,9 @@ export class AccessConfigurationService implements OnModuleInit {
     const state = this.store.read();
     if (!id) return !['professional_admin', 'professional_engineer'].includes(role) && !state.legacySessionsRevoked;
     const account = this.accounts(state)[id];
+    return this.validateStoredSession(account, state, version, role, building, specialties, buildings);
+  }
+  private validateStoredSession(account: StoredAccount | undefined, state: ConfigurationState, version: number | undefined, role: string, building: string | null, specialties?: readonly string[], buildings?: readonly string[]): boolean {
     if (account && (this.employmentInactive(account,state) || account.reactivationRequired || this.loginBlocked(account,state))) return false;
     return !!account && account.enabled && !account.deleted && !this.employmentInactive(account,state) && (account.role !== 'site_member' || account.siteMember === true || account.id === SITE_MEMBER_BACKUP_ACCOUNT_ID) && account.version === version && account.role === role && account.building === building && JSON.stringify(account.buildings) === JSON.stringify(buildings) &&
       (!['professional_admin', 'professional_engineer'].includes(role) || JSON.stringify(account.specialties) === JSON.stringify(specialties)) &&

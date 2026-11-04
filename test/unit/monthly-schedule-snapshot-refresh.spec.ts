@@ -449,7 +449,9 @@ describe('MonthlySchedule local snapshot auto-refresh integration', () => {
   });
 
   it('does not poll while hidden or in screenshot mode', () => {
-    expect(pageSource).toContain('if (isScreenshotMode || access.isLoading) return undefined;');
+    expect(pageSource).toContain(
+      'if (!canReadMonthlySchedule || isScreenshotMode || access.isLoading) return undefined;',
+    );
     expect(pageSource).toContain(
       "if (document.visibilityState === 'hidden') return Promise.resolve();",
     );
@@ -502,8 +504,9 @@ describe('MonthlySchedule local snapshot auto-refresh integration', () => {
     const loaderSource = pageSource.slice(loaderStart, loaderEnd);
 
     expect(pageSource).toContain('additionalDateKeys?: readonly string[];');
-    expect(loaderSource).toContain('options.additionalDateKeys');
-    expect(loaderSource).toContain('monthMap.set(additionalMonthKey');
+    expect(loaderSource).toMatch(
+      /getScheduleWindowMonths\(\s*selectedDate,\s*businessDateKey,\s*options\.additionalDateKeys,?\s*\)/,
+    );
     expect(loaderSource).toContain(
       'if (!options.preserveExistingOnError || hasCompleteScheduleWindow)',
     );
@@ -514,7 +517,9 @@ describe('MonthlySchedule local snapshot auto-refresh integration', () => {
 
   it('preserves existing page and today-card data when a local-only reload fails', () => {
     expect(pageSource).toContain('signal?: AbortSignal;');
-    expect(pageSource).toContain('if (access.isLoading || options.signal?.aborted) return false;');
+    expect(pageSource).toContain(
+      'if (!canReadMonthlySchedule || access.isLoading || options.signal?.aborted) return false;',
+    );
     expect(pageSource).toContain('preserveExistingOnError?: boolean;');
     expect(pageSource).toContain(
       'if (!options.preserveExistingOnError || hasCompleteScheduleWindow)',
@@ -565,7 +570,7 @@ describe('MonthlySchedule local snapshot auto-refresh integration', () => {
       'const forceRefresh = refreshToken > lastSuccessfulRefreshTokenRef.current;',
     );
     expect(engineersSource).toContain(
-      'const forceRefresh = refreshToken > lastSuccessfulRefreshTokenRef.current;',
+      'const forceRefresh = canRefresh && refreshToken > lastSuccessfulRefreshTokenRef.current;',
     );
     expect(movementSource).not.toContain(
       'const forceRefresh = localSnapshotRefreshToken',

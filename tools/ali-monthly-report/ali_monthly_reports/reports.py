@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote, urlparse
 
 from .config import ReportConfig
 from .feishu import (
+    build_bitable_record_url,
     build_feishu_session,
+    download_attachment,
     download_record_attachments,
     fetch_bitable_records,
     request_tenant_token,
@@ -14,11 +18,13 @@ from .feishu import (
 )
 from .staff import write_staff_roster_workbook
 from .utils import (
+    cell_text,
     filter_records_by_year_month,
     generated_file_payload,
     make_unique_path,
     remove_url_query_param,
     require_config_values,
+    sanitize_download_filename,
 )
 
 
@@ -102,34 +108,119 @@ def generate_over_power_report(
     logger = log or default_log
     token = token_provider(config)
     records = table_records_fetcher(config, config.high_power_table_config, token, logger)
-    filtered_records = filter_records_by_year_month(records, year, month_number)
+
+    # Reuse requires an explicit, exact source period; an absent year is not this year.
+    def period_number(value: Any, suffix: str, digits: str) -> int | None:
+        match = re.fullmatch(rf"({digits}){suffix}?", cell_text(value))
+        return int(match.group(1)) if match else None
+
+    target_year = int(year)
+    filtered_records = []
+    for record in records:
+        fields = record.get("fields", {})
+        if (period_number(fields.get("年度"), "年", r"\d{4}") == target_year
+                and period_number(fields.get("月份"), "月", r"\d{1,2}") == month_number):
+            filtered_records.append(record)
     if not filtered_records:
         raise ValueError(f"没有找到 {year}年{month_number}月 的超功率记录")
 
     def attachment_matches(file_name: str) -> bool:
-        upper_name = file_name.upper()
-        return ("超功耗" in file_name or "超功率" in file_name) and "TOP5" not in upper_name
+        return (
+            Path(file_name).suffix.lower() == ".xlsx"
+            and ("超功耗" in file_name or "超功率" in file_name)
+            and "TOP5" not in file_name.upper()
+        )
 
     download_folder = Path(config.download_folder).expanduser()
     download_folder.mkdir(parents=True, exist_ok=True)
-    kwargs: dict[str, Any] = {}
-    if attachment_downloader is not None:
-        kwargs["attachment_downloader"] = attachment_downloader
-    downloaded, errors, paths = download_record_attachments(
-        filtered_records,
-        token,
-        download_folder,
-        attachment_filter=attachment_matches,
-        log=logger,
-        **kwargs,
-    )
+    downloaded: list[dict[str, str]] = []
+    failed_downloads = 0
+    paths: list[Path] = []
+    reused_records: list[dict[str, str]] = []
+    seen_attachments: set[str] = set()
+    seen_records: set[str] = set()
+
+    def download_existing(file_name: str, url: str) -> tuple[Path, int]:
+        initial_path = make_unique_path(download_folder, file_name)
+        save_path = initial_path
+        collision = 2
+        # Reserve only a new file. Distinct attachments can share a filename and timestamp.
+        while True:
+            try:
+                with save_path.open("xb"):
+                    pass
+                break
+            except FileExistsError:
+                save_path = initial_path.with_name(f"{initial_path.stem}_{collision}{initial_path.suffix}")
+                collision += 1
+        try:
+            logger(f"下载: {save_path.name}", "info")
+            (attachment_downloader or download_attachment)(url, save_path, token)
+            size = save_path.stat().st_size
+            if size == 0:
+                raise ValueError("附件为空或未下载完成")
+            return save_path, size
+        except Exception:
+            save_path.unlink(missing_ok=True)
+            raise
+
+    for record in filtered_records:
+        selected: list[tuple[str, str]] = []
+        for value in record.get("fields", {}).values():
+            if not isinstance(value, list):
+                continue
+            for attachment in value:
+                if not isinstance(attachment, dict):
+                    continue
+                file_name = sanitize_download_filename(str(attachment.get("name") or ""), "attachment.xlsx")
+                if not attachment_matches(file_name):
+                    continue
+                identity = str(attachment.get("file_token") or attachment.get("fileToken") or "").strip()
+                if not identity:
+                    raise ValueError("月度超功耗附件缺少 file_token，未执行生成或上传")
+                url = str(attachment.get("url") or "").strip() or (
+                    "https://open.feishu.cn/open-apis/drive/v1/medias/" + quote(identity, safe="") + "/download"
+                )
+                parsed = urlparse(url)
+                host = (parsed.hostname or "").lower().rstrip(".")
+                if (parsed.scheme != "https" or parsed.username is not None or parsed.password is not None or not any(
+                    host == domain or host.endswith("." + domain) for domain in ("feishu.cn", "larksuite.com")
+                )):
+                    raise ValueError("月度超功耗附件下载地址不受信任，未执行生成或上传")
+                if identity in seen_attachments:
+                    continue
+                seen_attachments.add(identity)
+                selected.append((file_name, url))
+        if not selected:
+            continue
+        record_id = str(record.get("record_id") or record.get("id") or "").strip()
+        if not record_id:
+            raise ValueError("月度超功耗附件缺少原多维表记录 ID，未执行生成或上传")
+        record_downloaded = False
+        for file_name, url in selected:
+            try:
+                save_path, size = download_existing(file_name, url)
+            except Exception:
+                failed_downloads += 1
+                continue
+            downloaded.append({"name": save_path.name, "size": f"{size / 1024:.1f}KB"})
+            paths.append(save_path)
+            record_downloaded = True
+        if record_downloaded and record_id not in seen_records:
+            seen_records.add(record_id)
+            reused_records.append({"record_id": record_id, "record_url": build_bitable_record_url(
+                config.feishu_app_token, config.high_power_table_config, record_id,
+            )})
+    if failed_downloads:
+        raise ValueError(f"月度超功耗附件读取失败（{failed_downloads} 个），请重试；未执行生成或上传")
     if not paths:
-        raise ValueError("未匹配到月度超功率附件")
+        raise ValueError(f"未找到 {year}年{month_number}月 已有的超功耗 XLSX 附件，未执行生成或上传")
     return {
         "action": "downloaded_existing_attachment",
         "files": [generated_file_payload(path) for path in paths],
         "downloaded": downloaded,
-        "errors": errors,
+        "errors": [],
+        "reused_records": reused_records,
         "message": "月度超功率已获取完成",
     }
 

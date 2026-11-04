@@ -155,6 +155,32 @@ export function buildPurchaseApprovalCard(
   };
 }
 
+export function buildProcessingPurchaseApprovalCard(
+  input: PurchaseApprovalCardInput,
+  action: PurchaseApprovalCardAction,
+  failed = false,
+): Record<string, unknown> {
+  const card = buildPurchaseApprovalCard({ ...input, statusLabel: failed
+    ? '审批同步待核对，请联系管理员' : '审批已受理，结果同步中' });
+  card.header = {
+    template: failed ? 'orange' : 'blue',
+    title: { tag: 'plain_text', content: failed ? '采购审批同步待核对' : '采购审批已受理' },
+    text_tag_list: [{ tag: 'text_tag', text: { tag: 'plain_text', content: action === 'approve' ? '确认请求' : '驳回请求' }, color: 'neutral' }],
+  };
+  const disable = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) { value.forEach(disable); return; }
+    const row = value as Record<string, unknown>;
+    if (row.tag === 'button') {
+      row.type = 'default'; row.disabled = true;
+      delete row.behaviors; delete row.value; delete row.name;
+    }
+    Object.values(row).forEach(disable);
+  };
+  disable(card);
+  return card;
+}
+
 export function buildWarehouseInboundCard(
   record: PurchaseWorkflowRecord,
   publicBaseUrl: string,

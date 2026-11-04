@@ -152,8 +152,8 @@ describe('阈值双审批、计划日期与工程师确认', () => {
     jest.spyOn(service, 'kick').mockImplementation(() => {});
     await service.runPending();
   });
-  afterEach(() => {
-    service.onModuleDestroy();
+  afterEach(async () => {
+    await service.onModuleDestroy();
     jest.restoreAllMocks();
     jest.useRealTimers();
     if (oldPath === undefined)
@@ -393,6 +393,64 @@ describe('阈值双审批、计划日期与工程师确认', () => {
       service.ledger.get(id)!.adjustment.stages.every((s) => !s.decision),
     ).toBe(true);
   });
+  test('慢速驳回表单PATCH不阻塞回调，后来的返回操作最后生效', async () => {
+    const id = await submit(), m = service.ledger.get(id)!.messages.find(value => value.openId === 'ou_qa_building')!;
+    let finish!: () => void;
+    const slow = new Promise<void>(resolve => { finish = resolve; });
+    messages.patchInteractiveCard.mockImplementationOnce(() => slow);
+    const response = await service.handleCardAction(action(id, 'building', 'ou_qa_building', m.messageId, 'open_reject'));
+    expect(response).toMatchObject({ claimed: false });
+    expect(response.card).toBeUndefined();
+    await service.handleCardAction(action(id, 'building', 'ou_qa_building', m.messageId, 'return'));
+    finish();
+    await settleNavigation(service);
+    expect(JSON.stringify(messages.patchInteractiveCard.mock.calls.at(-1)![1])).not.toContain('threshold_reject_submit:');
+    expect(service.ledger.get(id)!.adjustment.stages.every(value => !value.decision)).toBe(true);
+  });
+
+  test('已发出的旧表单PATCH不能覆盖随后生效的审批决定', async () => {
+    const id = await submit(), m = service.ledger.get(id)!.messages.find(value => value.openId === 'ou_qa_building')!;
+    let finish!: () => void;
+    messages.patchInteractiveCard.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    await service.handleCardAction(action(id, 'building', 'ou_qa_building', m.messageId, 'open_reject'));
+    for (let tick = 0; tick < 10 && !finish; tick++) await Promise.resolve();
+    expect(finish).toBeDefined();
+    await approve(id, 'building');
+    finish();
+    await settleNavigation(service);
+    const last = JSON.stringify(messages.patchInteractiveCard.mock.calls.at(-1)![1]);
+    expect(last).not.toContain('threshold_reject_submit:');
+    expect(last).toContain('disabled');
+    expect(service.ledger.get(id)!.adjustment.stages.find(value => value.role === 'building')!.decision?.action).toBe('approve');
+  });
+
+  test('旧表单PATCH响应不确定失败后仍以已经受理的审批终态收口', async () => {
+    const id = await submit(), m = service.ledger.get(id)!.messages.find(value => value.openId === 'ou_qa_building')!;
+    let reject!: (error: Error) => void;
+    messages.patchInteractiveCard.mockImplementationOnce(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+    await service.handleCardAction(action(id, 'building', 'ou_qa_building', m.messageId, 'open_reject'));
+    for (let tick = 0; tick < 10 && !reject; tick++) await Promise.resolve();
+    expect(reject).toBeDefined();
+    await approve(id, 'building');
+    reject(new Error('synthetic unknown network result'));
+    await settleNavigation(service);
+    expect(JSON.stringify(messages.patchInteractiveCard.mock.calls.at(-1)![1])).not.toContain('threshold_reject_submit:');
+    expect(service.ledger.get(id)!.adjustment.stages.find(value => value.role === 'building')!.decision?.action).toBe('approve');
+  });
+
+  test('表单PATCH失败会保留可见错误及原按钮重试，不创建审批命令', async () => {
+    const id = await submit(), m = service.ledger.get(id)!.messages.find(value => value.openId === 'ou_qa_building')!;
+    messages.patchInteractiveCard.mockRejectedValueOnce(new Error('synthetic timeout'));
+    await service.handleCardAction(action(id, 'building', 'ou_qa_building', m.messageId, 'open_reject'));
+    await settleNavigation(service);
+    expect(service.ledger.get(id)!.adjustment.error).toContain('表单切换失败');
+    expect(JSON.stringify(messages.patchInteractiveCard.mock.calls.at(-1)![1])).toContain('表单切换失败');
+    expect(service.ledger.get(id)!.adjustment.stages.every(value => !value.decision)).toBe(true);
+    await service.handleCardAction(action(id, 'building', 'ou_qa_building', m.messageId, 'open_reject'));
+    await settleNavigation(service);
+    expect(JSON.stringify(messages.patchInteractiveCard.mock.calls.at(-1)![1])).toContain('threshold_reject_submit:');
+  });
+
   test('审批期间原值变化，完成确认不会覆盖他人的新阈值', async () => {
     const id = await submit();
     await approve(id, 'building');
@@ -501,3 +559,7 @@ describe('阈值双审批、计划日期与工程师确认', () => {
     ).toContain('单路180S');
   });
 });
+
+async function settleNavigation(service: ActualThresholdAdjustmentService): Promise<void> {
+  await Promise.all((service as unknown as { navigationUpdates: Map<string, Promise<void>> }).navigationUpdates.values());
+}

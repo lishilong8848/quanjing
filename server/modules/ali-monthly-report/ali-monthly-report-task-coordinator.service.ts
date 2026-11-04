@@ -170,7 +170,10 @@ export class AliMonthlyReportTaskCoordinatorService {
       if (result.status === 'fulfilled') {
         const response = result.value;
         const recordUrl = response.bitableRecordUrls?.find(Boolean)?.trim();
-        if (response.success === true && recordUrl) {
+        const hasRequiredFile =
+          reportType !== 'over_power' ||
+          (Array.isArray(response.files) && response.files.length > 0);
+        if (response.success === true && recordUrl && hasRequiredFile) {
           periodState.tasks[reportType] = {
             status: 'succeeded',
             attempts,
@@ -185,7 +188,9 @@ export class AliMonthlyReportTaskCoordinatorService {
           finishedAt,
           response.success === false
             ? response.message || '生成或上传失败'
-            : '未返回多维表记录链接',
+            : !hasRequiredFile
+              ? '未取得对应月份的超功耗附件'
+              : '未返回多维表记录链接',
         );
         return;
       }

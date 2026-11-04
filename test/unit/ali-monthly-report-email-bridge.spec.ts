@@ -8,12 +8,12 @@ describe('阿里月报服务器邮件桥接', () => {
       'server/modules/ali-monthly-report/ali-monthly-report.service.ts',
     ),
     'utf8',
-  );
+  ).replace(/\r\n/g, '\n');
   const bridgeStart = serviceSource.indexOf(
     'const EMAIL_BRIDGE_SCRIPT = String.raw`',
   );
   const bridgeEnd = serviceSource.indexOf(
-    'const LEGACY_GENERATE_BRIDGE_SCRIPT',
+    'const REPORT_TYPES:',
     bridgeStart,
   );
   const emailBridgeSource = serviceSource.slice(bridgeStart, bridgeEnd);

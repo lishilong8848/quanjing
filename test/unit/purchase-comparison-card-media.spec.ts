@@ -68,7 +68,7 @@ describe('采购审批比价图片准备与跨重试缓存', () => {
 
   it('部分上传失败交给outbox重试；重启后复用已经成功的一张', async () => {
     post.mockResolvedValueOnce({ data: { code: 0, data: { image_key: 'img_first' } } }).mockRejectedValueOnce(new Error('synthetic upstream failure token must not escape'));
-    await expect(prepare()).rejects.toThrow('采购比价图片缓存暂不可用');
+    await expect(prepare()).rejects.toThrow('采购比价图片上传失败');
     expect(post).toHaveBeenCalledTimes(2);
     cache = new PurchaseComparisonCardAssetsStore(file);
     const result = await prepare();
@@ -109,13 +109,76 @@ describe('采购审批比价图片准备与跨重试缓存', () => {
 
   it.each([{ data: Buffer.from('<html>not an image</html>'), headers: { 'content-type': 'image/png' } }, { data: png, headers: { 'content-type': 'text/html' } }])('伪装图片或矛盾MIME不能上传 %#', async response => {
     get.mockResolvedValue(response);
-    await expect(prepare()).rejects.toThrow('暂不可用'); expect(post).not.toHaveBeenCalled();
+    await expect(prepare()).rejects.toThrow('采购比价图片内容校验失败'); expect(post).not.toHaveBeenCalled();
   });
 
   it('坏缓存保留原字节，不重新上传伪造成功', async () => {
     writeFileSync(file, '{broken');
     await expect(prepare()).rejects.toThrow('暂不可用');
     expect(readFileSync(file, 'utf8')).toBe('{broken'); expect(get).not.toHaveBeenCalled();
+  });
+
+  it('可信的多维表下载链接提供当前表权限参数，仍只请求固定飞书下载端点', async () => {
+    const extra = { bitablePerm: { tableId: source.tableId, rev: 32 } };
+    const url = `https://open.feishu.cn/open-apis/drive/v1/medias/file_synthetic_1/download?extra=${encodeURIComponent(JSON.stringify(extra))}`;
+    get.mockImplementation(async (_url, options) => {
+      if (options.params?.extra !== JSON.stringify(extra)) throw new Error('synthetic upstream 400: extra required');
+      return { data: png, headers: { 'content-type': 'application/octet-stream' } };
+    });
+    await prepare([{ ...attachment(1), url }]);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get.mock.calls[0][0]).toBe('https://open.feishu.cn/open-apis/drive/v1/medias/file_synthetic_1/download');
+    expect(JSON.parse(get.mock.calls[0][1].params.extra)).toEqual(extra);
+  });
+
+  it('字段和记录限定的权限参数只用于对应附件', async () => {
+    const extra = { bitablePerm: { tableId: source.tableId, attachments: { fldSynthetic: { [record.recordId]: ['file_synthetic_1'] } } } };
+    const url = `https://open.feishu.cn/open-apis/drive/v1/medias/file_synthetic_1/download?extra=${encodeURIComponent(JSON.stringify(extra))}`;
+    await prepare([{ ...attachment(1), url }]);
+    expect(JSON.parse(get.mock.calls[0][1].params.extra)).toEqual(extra);
+  });
+
+  it.each([
+    'https://attacker.example.test/open-apis/drive/v1/medias/file_synthetic_1/download?extra=%7B%7D',
+    'http://open.feishu.cn/open-apis/drive/v1/medias/file_synthetic_1/download?extra=%7B%7D',
+    'https://user:secret@open.feishu.cn/open-apis/drive/v1/medias/file_synthetic_1/download?extra=%7B%7D',
+    'https://open.feishu.cn:444/open-apis/drive/v1/medias/file_synthetic_1/download?extra=%7B%7D',
+    'https://open.feishu.cn/open-apis/drive/v1/medias/file_other/download?extra=%7B%7D',
+  ])('不向伪造来源或其他附件地址发送请求 %s', async url => {
+    try { await prepare([{ ...attachment(1), url }]); } catch { /* A rejected source is also safe. */ }
+    for (const [address, options] of get.mock.calls) {
+      expect(address).toBe('https://open.feishu.cn/open-apis/drive/v1/medias/file_synthetic_1/download');
+      expect(options.params).toBeUndefined();
+    }
+  });
+
+  it.each([
+    { bitablePerm: { tableId: 'tblOther', rev: 32 } },
+    { bitablePerm: { tableId: source.tableId, attachments: { fldSynthetic: { recOther: ['file_synthetic_1'] } } } },
+    { bitablePerm: { tableId: source.tableId, attachments: { fldSynthetic: { [record.recordId]: ['file_other'] } } } },
+  ])('不转发其他表、记录或附件的权限参数 %#', async extra => {
+    const url = `https://open.feishu.cn/open-apis/drive/v1/medias/file_synthetic_1/download?extra=${encodeURIComponent(JSON.stringify(extra))}`;
+    try { await prepare([{ ...attachment(1), url }]); } catch { /* A rejected parameter is also safe. */ }
+    for (const [, options] of get.mock.calls) expect(options.params?.extra).not.toBe(JSON.stringify(extra));
+  });
+
+  it('重复或无法解析的 extra 不发起下载', async () => {
+    const base = 'https://open.feishu.cn/open-apis/drive/v1/medias/file_synthetic_1/download?';
+    const valid = encodeURIComponent(JSON.stringify({ bitablePerm: { tableId: source.tableId, rev: 32 } }));
+    for (const query of [`extra=${valid}&extra=${valid}`, 'extra=not-json']) {
+      await expect(prepare([{ ...attachment(1), url: base + query }])).rejects.toThrow('采购比价附件授权信息无效');
+      expect(get).not.toHaveBeenCalled();
+    }
+  });
+
+  it('下载失败给出可重试的阶段提示，不泄漏上游错误和授权数据', async () => {
+    get.mockRejectedValue(new Error('synthetic-tenant-token https://secret.example/file'));
+    let message = '';
+    try { await prepare(); } catch (error) { message = (error as Error).message; }
+    expect(message).toContain('采购比价图片下载失败');
+    expect(message).not.toContain('synthetic-tenant-token');
+    expect(message).not.toContain('secret.example');
+    expect(post).not.toHaveBeenCalled();
   });
 
   it.each(['https://attacker.example.test/base/app', 'http://vnet.feishu.cn/base/app', 'https://vnet.feishu.cn:3001/base/app', 'https://user:secret@vnet.feishu.cn/base/app'])('原件地址不接受不可信源 %s', sourceUrl => {

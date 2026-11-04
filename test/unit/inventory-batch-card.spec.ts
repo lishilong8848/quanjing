@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InventoryBatchCardService } from '../../server/modules/inventory-outbound-approval/inventory-batch-card.service';
@@ -98,6 +98,94 @@ describe('inventory batch card', () => {
     await service.flushPending();
     expect(gateway.sendInteractiveCard).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(gateway.patchInteractiveCard.mock.calls.at(-1)?.[1]).replace(/\\/gu, '')).toContain('rec_2');
+  });
+
+  it('persists callback state and reuses the validated original message without sending a replacement card', async () => {
+    let finish!: () => void;
+    gateway.patchInteractiveCard.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const service = new InventoryBatchCardService(gateway as never, path);
+    const response = await service.stageForCallback('outbound', batchId, recipient,
+      { ...item('rec_1'), status: '同步中', approvalVersion: 1 }, 'om_original_approval');
+    expect(JSON.stringify(response)).toContain('同步中');
+    const saved = JSON.parse(await readFile(path, 'utf8'));
+    expect(saved[0]).toMatchObject({ messageId: 'om_original_approval', items: [{ id: 'rec_1', status: '同步中' }] });
+    expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
+    const flush = service.flushPending();
+    while (!finish) await new Promise<void>(resolve => setImmediate(resolve));
+    finish();
+    await flush;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await service.flushPending();
+    expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1);
+    const reopened = new InventoryBatchCardService(gateway as never, path);
+    await reopened.stageForCallback('outbound', batchId, recipient,
+      { ...item('rec_1'), status: '同步中', approvalVersion: 1 }, 'om_original_approval');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await reopened.flushPending();
+    expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a callback batch PATCH after failure without sending another approval message', async () => {
+    gateway.patchInteractiveCard.mockRejectedValueOnce(new Error('synthetic unknown patch result'));
+    const service = new InventoryBatchCardService(gateway as never, path);
+    await expect(service.stageForCallback('outbound', batchId, recipient,
+      { ...item('rec_1'), status: '同步中', approvalVersion: 1 }, 'om_original_approval')).resolves.toBeDefined();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await service.flushPending();
+    const pending = JSON.parse(await readFile(path, 'utf8'));
+    const reopened = new InventoryBatchCardService(gateway as never, path);
+    await reopened.flushPending();
+    expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
+    expect(pending[0].messageId).toBe('om_original_approval');
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(await readFile(path, 'utf8'))[0]).toMatchObject({ sentRevision: 1, revision: 1, messageId: 'om_original_approval' });
+  });
+
+  it('binds a validated original message to an existing blank receipt atomically and never sends another card', async () => {
+    const value = { ...item('rec_1'), status: '待审批', approvalVersion: 1 };
+    await writeFile(path, JSON.stringify([{ key: `outbound:${batchId}:${recipient}`, kind: 'outbound', batchId,
+      recipientOpenId: recipient, deliveryUuid: 'synthetic-stable-uuid', items: [value], revision: 1, sentRevision: 0 }]));
+    const service = new InventoryBatchCardService(gateway as never, path);
+    await service.stageForCallback('outbound', batchId, recipient, value, 'om_validated_original');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await service.flushPending();
+    const restarted = new InventoryBatchCardService(gateway as never, path);
+    await restarted.stageForCallback('outbound', batchId, recipient, value, 'om_validated_original');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await restarted.flushPending();
+    expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1);
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledWith('om_validated_original', expect.any(Object));
+    expect(JSON.parse(await readFile(path, 'utf8'))[0]).toMatchObject({ messageId: 'om_validated_original', deliveryUuid: 'synthetic-stable-uuid' });
+  });
+
+  it.each([0, 180_000])('refuses an uncertain send receipt even when its lease is %sms old, including after restart', async age => {
+    const value = { ...item('rec_1'), status: '待审批', approvalVersion: 1 };
+    const bytes = JSON.stringify([{ key: `outbound:${batchId}:${recipient}`, kind: 'outbound', batchId,
+      recipientOpenId: recipient, deliveryUuid: 'synthetic-stable-uuid', items: [value], revision: 1, sentRevision: 0,
+      inFlight: { kind: 'send', at: Date.now() - age, revision: 1 } }]);
+    await writeFile(path, bytes);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const service = new InventoryBatchCardService(gateway as never, path);
+      await expect(service.stageForCallback('outbound', batchId, recipient, value, 'om_validated_original')).rejects.toThrow('发送结果待核对');
+      expect(await readFile(path, 'utf8')).toBe(bytes);
+    }
+    expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
+    expect(gateway.patchInteractiveCard).not.toHaveBeenCalled();
+  });
+
+  it('does not replace a different existing receipt with a callback source message', async () => {
+    const value = { ...item('rec_1'), status: '待审批', approvalVersion: 1 };
+    const bytes = JSON.stringify([{ key: `outbound:${batchId}:${recipient}`, kind: 'outbound', batchId,
+      recipientOpenId: recipient, deliveryUuid: 'synthetic-stable-uuid', messageId: 'om_other_receipt', items: [value], revision: 1, sentRevision: 1 }]);
+    await writeFile(path, bytes);
+    const service = new InventoryBatchCardService(gateway as never, path);
+    await expect(service.stageForCallback('outbound', batchId, recipient, value, 'om_validated_original')).rejects.toThrow('回执不一致');
+    expect(await readFile(path, 'utf8')).toBe(bytes);
+    expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();
+    expect(gateway.patchInteractiveCard).not.toHaveBeenCalled();
   });
 
   it('rejects a conflicting terminal result for the same item', async () => {

@@ -96,6 +96,7 @@ type CallbackControllerModule = {
     overtimeService?: unknown,
     configuration?: unknown,
     workflowService?: unknown,
+    feedbackService?: unknown,
   ) => CallbackController;
   readPurchaseCardCallbackConfig?: () => {
     verificationToken: string;
@@ -187,9 +188,10 @@ function createManagerService(
 function createController(
   store = createStore(),
   managerService = createManagerService(),
+  feedbackService?: { enqueueLateFailure: jest.Mock },
 ): CallbackController {
   const { PurchaseWorkflowCallbackController } = loadControllerModule();
-  return new PurchaseWorkflowCallbackController(store, managerService, undefined, { canUseFeishuBusinessIdentity: () => true }, { acceptApprovalCardAction: (input: Parameters<CallbackStore['claimCardAction']>[0]) => store.claimCardAction(input) });
+  return new PurchaseWorkflowCallbackController(store, managerService, undefined, { canUseFeishuBusinessIdentity: () => true }, { acceptApprovalCardAction: (input: Parameters<CallbackStore['claimCardAction']>[0]) => store.claimCardAction(input) }, feedbackService);
 }
 
 function readCallbackConfig() {
@@ -681,6 +683,26 @@ describe('purchase workflow card callback API', () => {
     finish(managerCard);
     await jest.advanceTimersByTimeAsync(0);
     expect(service.runAcceptedTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it('records a late HTTP failure for read-only feedback without re-executing the decision', async () => {
+    process.env.PURCHASE_WORKFLOW_PROGRAM_ENABLED = 'false';
+    process.env.PURCHASE_MANAGER_APPROVAL_CARD_ENABLED = 'true';
+    jest.useFakeTimers({ doNotFake: ['Date'] });
+    let reject!: (error: Error) => void;
+    const service = createManagerService();
+    service.handleManagerBatchCardAction.mockImplementationOnce(() => new Promise((_yes, no) => { reject = no; }));
+    const feedback = { enqueueLateFailure: jest.fn().mockResolvedValue(undefined) };
+    const controller = createController(createStore(), service, feedback);
+    const response = controller.handlePurchaseCardCallback(requestFor(managerBatchActionPayload()));
+    await jest.advanceTimersByTimeAsync(2501);
+    await expect(response).resolves.toMatchObject({ toast: { type: 'warning' } });
+    reject(new Error('synthetic late failure'));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(service.handleManagerBatchCardAction).toHaveBeenCalledTimes(1);
+    expect(service.runAcceptedTasks).not.toHaveBeenCalled();
+    expect(feedback.enqueueLateFailure).toHaveBeenCalledTimes(1);
+    expect(feedback.enqueueLateFailure).toHaveBeenCalledWith(expect.objectContaining({ kind: 'manager_batch_action' }), 'purchase', expect.any(Error));
   });
 
   it.each([

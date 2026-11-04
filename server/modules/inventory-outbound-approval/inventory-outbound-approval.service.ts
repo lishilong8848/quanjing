@@ -90,6 +90,8 @@ export class InventoryOutboundApprovalService {
   private readonly logger = new Logger(InventoryOutboundApprovalService.name);
   private phaseCursor = 0;
   private readonly finalizedEntries = new Set<string>();
+  private readonly callbackRecoveries = new Map<string, Promise<void>>();
+  private readonly callbackRecoveryFailures = new Map<string, number>();
 
   constructor(
     private readonly store: InventoryOutboundApprovalStore,
@@ -211,7 +213,7 @@ export class InventoryOutboundApprovalService {
     if (current.decision || current.personnelHandover) {
       return {
         claimed: false,
-        card: await this.resultCard(current, action.actorOpenId),
+        card: await this.resultCard(current, action.actorOpenId, action.messageId),
       };
     }
 
@@ -246,7 +248,7 @@ export class InventoryOutboundApprovalService {
       });
       return {
         claimed: claim.claimed,
-        card: await this.resultCard(claim.entry, action.actorOpenId),
+        card: await this.resultCard(claim.entry, action.actorOpenId, action.messageId),
       };
     } catch (error) {
       if (!(error instanceof ConflictException)) throw error;
@@ -254,7 +256,7 @@ export class InventoryOutboundApprovalService {
       if (!raced?.decision && !raced?.personnelHandover) throw error;
       return {
         claimed: false,
-        card: await this.resultCard(raced, action.actorOpenId),
+        card: await this.resultCard(raced, action.actorOpenId, action.messageId),
       };
     }
   }
@@ -731,17 +733,8 @@ export class InventoryOutboundApprovalService {
   ): Promise<InventoryOutboundApprovalEntry> {
     let entry = await this.store.find(recordId, version);
     if (!entry) {
-      const record = await this.gateway.readOutboundRecord(recordId);
-      const recovery = parseInventoryOutboundApprovalRecoveryRecord(record, {
-        allowFinalized: true,
-      });
-      if (
-        recovery.kind === 'not_registered' ||
-        recovery.snapshot.version !== version
-      ) {
-        throw new NotFoundException('出库审批记录不存在');
-      }
-      entry = (await this.store.restoreFromBase(recovery)).entry;
+      this.prepareCallbackRecovery(recordId, version);
+      throw new ConflictException('审批记录正在恢复，本次操作未受理，请稍后从原卡片重试');
     }
     const card = entry.approvalCards.find(
       (candidate) =>
@@ -751,6 +744,28 @@ export class InventoryOutboundApprovalService {
     );
     if (!card) throw new ForbiddenException('审批消息不属于当前审批人');
     return entry;
+  }
+
+  private prepareCallbackRecovery(recordId: string, version: number): void {
+    const key = `${recordId}:${version}`;
+    if (this.callbackRecoveries.has(key) || (this.callbackRecoveryFailures.get(key) || 0) > Date.now()) return;
+    if (this.callbackRecoveries.size >= 64) return;
+    // Recovery only restores authoritative source evidence. A retry still runs
+    // identity, original-message binding, version and decision checks before claim.
+    const task = new Promise<void>(resolve => setImmediate(resolve)).then(async () => {
+      const record = await this.gateway.readOutboundRecord(recordId);
+      const recovery = parseInventoryOutboundApprovalRecoveryRecord(record, { allowFinalized: true });
+      if (recovery.kind === 'not_registered' || recovery.snapshot.version !== version) throw new NotFoundException('出库审批记录不存在');
+      await this.store.restoreFromBase(recovery);
+      this.callbackRecoveryFailures.delete(key);
+    }).catch(() => {
+      this.callbackRecoveryFailures.set(key, Date.now() + 5_000);
+      if (this.callbackRecoveryFailures.size > 256) this.callbackRecoveryFailures.delete(this.callbackRecoveryFailures.keys().next().value!);
+      this.logger.warn('出库审批原记录恢复尚未确认，可从原卡片重试；本次没有受理审批');
+    }).finally(() => {
+      if (this.callbackRecoveries.get(key) === task) this.callbackRecoveries.delete(key);
+    });
+    this.callbackRecoveries.set(key, task);
   }
 
   private async finalizeCompletedEntries(
@@ -777,18 +792,25 @@ export class InventoryOutboundApprovalService {
   private async resultCard(
     entry: InventoryOutboundApprovalEntry,
     recipientOpenId: string,
+    sourceMessageId: string,
   ): Promise<Record<string, unknown>> {
     const replacementVersion = replacementVersionOf(entry);
     if (!entry.decision && replacementVersion === null) throw new Error('出库审批结果卡片缺少审批决定');
     const batchId = inventoryNotificationBatchId(entry.snapshot.outboundNumber, 'outbound');
     if (batchId) {
       const service = this.requireBatchCardService();
-      await service.upsert('outbound', batchId, recipientOpenId, toBatchCardItem(entry.snapshot,
-        replacementVersion !== null ? '审批失效' :
-        entry.baseSync?.status === 'completed'
-          ? entry.decision!.action === 'approve' ? '已出库' : '已驳回'
-          : entry.decision!.action === 'approve' ? '同步中' : '已驳回'));
-      return service.render('outbound', batchId, recipientOpenId);
+      const boundEntries = (await this.store.listEntries()).filter(candidate =>
+        inventoryNotificationBatchId(candidate.snapshot.outboundNumber, 'outbound') === batchId &&
+        candidate.approvalCards.some(card => card.recipientOpenId === recipientOpenId && card.status === 'completed' && card.messageId === sourceMessageId));
+      if (!boundEntries.some(candidate => candidate.snapshot.recordId === entry.snapshot.recordId && candidate.snapshot.version === entry.snapshot.version)) {
+        throw new ConflictException('审批已受理，原批卡范围尚待核对，请稍后查看');
+      }
+      const items = boundEntries.map(candidate => toBatchCardItem(candidate.snapshot,
+        replacementVersionOf(candidate) !== null ? '审批失效' : !candidate.decision ? '待审批' :
+        candidate.baseSync?.status === 'completed'
+          ? candidate.decision.action === 'approve' ? '已出库' : '已驳回'
+          : candidate.decision.action === 'approve' ? '同步中' : '已驳回'));
+      return service.stageForCallback('outbound', batchId, recipientOpenId, items, sourceMessageId);
     }
     if (replacementVersion !== null) {
       return buildInventoryOutboundSupersededCard(

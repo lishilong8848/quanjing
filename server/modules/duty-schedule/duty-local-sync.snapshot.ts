@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
+import type { BigIntStats } from 'node:fs';
 import { readFile, open, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { BitableRecordItem, PersistedBitableRecordSnapshot } from '../../common/feishu/bitable-direct-read';
@@ -15,40 +16,99 @@ interface Position { month: string | null; sourceStartedAt: number; invalidation
 interface Store { version: 1; appToken: string; tableId: string; months: Record<string, DutyMonthSnapshot>; positions: Record<string, Position>; }
 const MAX_BYTES = 64 * 1024 * 1024;
 
+function fileStamp(stats: BigIntStats): string {
+  return [stats.dev, stats.ino, stats.size, stats.mtimeNs, stats.ctimeNs].join(':');
+}
+
+function freezeParsedSnapshot(value: object): void {
+  for (const child of Object.values(value)) {
+    if (child && typeof child === 'object') freezeParsedSnapshot(child);
+  }
+  Object.freeze(value);
+}
+
 /** Separate month publications never overwrite or truncate the historical full-table cache. */
 export class DutyLocalMonthSnapshots {
   private writes = new Map<string, Promise<unknown>>();
+  private reads = new Map<string, Promise<Store | null>>();
+  private cachedStore?: { file: string; stamp: string; state: Store };
+  private preferredMonths = new WeakMap<DutyMonthSnapshot, PersistedBitableRecordSnapshot>();
   constructor(private readonly directory = resolve(process.env.FEISHU_LOCAL_CACHE_DIR?.trim() || join(process.cwd(), 'data', 'feishu-bitable-cache'), 'duty-local-sync')) {}
   private file(appToken: string, tableId: string): string { return join(this.directory, createHash('sha256').update(appToken + '\0' + tableId).digest('hex') + '.json'); }
   private async read(appToken: string, tableId: string): Promise<Store> {
+    const file = this.file(appToken, tableId);
     try {
-      const file = this.file(appToken, tableId), size = (await stat(file)).size;
-      if (size > MAX_BYTES) throw new Error('LOCAL_SYNC_SNAPSHOT_TOO_LARGE');
-      const value = JSON.parse(await readFile(file, 'utf8')) as Store;
-      if (value.version !== 1 || value.appToken !== appToken || value.tableId !== tableId || !value.months || Array.isArray(value.months) || !value.positions || Array.isArray(value.positions) ||
-          !Object.values(value.positions).every(position => position && (position.month === null || /^\d{4}-\d{2}$/.test(position.month)) && Number.isFinite(position.sourceStartedAt) && (position.invalidationToken === null || typeof position.invalidationToken === 'string')) ||
-          !Object.entries(value.months).every(([month, row]) => /^\d{4}-(?:0[1-9]|1[0-2])$/.test(month) && row && Array.isArray(row.records) &&
-            Number.isFinite(row.sourceStartedAt) && Number.isFinite(row.fetchedAt) && Number.isFinite(row.expiresAt) && (row.invalidationToken === null || typeof row.invalidationToken === 'string'))) throw new Error('LOCAL_SYNC_SNAPSHOT_INVALID');
-      return value;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const stats = await stat(file, { bigint: true });
+        if (stats.size > BigInt(MAX_BYTES)) throw new Error('LOCAL_SYNC_SNAPSHOT_TOO_LARGE');
+        const stamp = fileStamp(stats);
+        const cached = this.cachedStore;
+        if (cached?.file === file && cached.stamp === stamp) return cached.state;
+
+        const key = file + '\0' + stamp;
+        let operation = this.reads.get(key);
+        if (!operation) {
+          operation = this.load(file, stamp, appToken, tableId).finally(() => this.reads.delete(key));
+          this.reads.set(key, operation);
+        }
+        const state = await operation;
+        if (state) return state;
+      }
+      throw new Error('LOCAL_SYNC_SNAPSHOT_CHANGED');
     } catch (error) {
+      if (this.cachedStore?.file === file) this.cachedStore = undefined;
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, appToken, tableId, months: {}, positions: {} };
       throw error;
     }
   }
-  async readMonth(appToken: string, tableId: string, month: string): Promise<DutyMonthSnapshot | undefined> { return (await this.read(appToken, tableId)).months[month]; }
+
+  private async load(file: string, stamp: string, appToken: string, tableId: string): Promise<Store | null> {
+    const raw = await readFile(file, 'utf8');
+    // A different writer can replace the file while the cold read is in flight.
+    if (fileStamp(await stat(file, { bigint: true })) !== stamp) return null;
+    const value = JSON.parse(raw) as Store;
+    if (value.version !== 1 || value.appToken !== appToken || value.tableId !== tableId || !value.months || Array.isArray(value.months) || !value.positions || Array.isArray(value.positions) ||
+        !Object.values(value.positions).every(position => position && (position.month === null || /^\d{4}-\d{2}$/.test(position.month)) && Number.isFinite(position.sourceStartedAt) && (position.invalidationToken === null || typeof position.invalidationToken === 'string')) ||
+        !Object.entries(value.months).every(([month, row]) => /^\d{4}-(?:0[1-9]|1[0-2])$/.test(month) && row && Array.isArray(row.records) &&
+          Number.isFinite(row.sourceStartedAt) && Number.isFinite(row.fetchedAt) && Number.isFinite(row.expiresAt) && (row.invalidationToken === null || typeof row.invalidationToken === 'string'))) throw new Error('LOCAL_SYNC_SNAPSHOT_INVALID');
+    freezeParsedSnapshot(value);
+    this.cachedStore = { file, stamp, state: value };
+    return value;
+  }
+
+  async readMonth(appToken: string, tableId: string, month: string): Promise<DutyMonthSnapshot | undefined> {
+    const snapshot = (await this.read(appToken, tableId)).months[month];
+    return snapshot ? structuredClone(snapshot) : undefined;
+  }
+
+  /** An owned month publication has a stable, read-only result while the file is unchanged. */
   async readPreferredMonth(appToken: string, tableId: string, month: string, full: PersistedBitableRecordSnapshot | null, invalidationToken: string | null): Promise<PersistedBitableRecordSnapshot | null> {
-    const state = await this.read(appToken, tableId), selected = preferDutyMonthSnapshot(full, state.months[month], invalidationToken);
+    const state = await this.read(appToken, tableId);
+    const monthSnapshot = state.months[month];
+    const selected = preferDutyMonthSnapshot(full, monthSnapshot, invalidationToken);
     if (!selected) return null;
+    const owned = selected === monthSnapshot;
+    const cached = owned ? this.preferredMonths.get(monthSnapshot) : undefined;
+    if (cached) return cached;
+
     const startedAt = selected.sourceStartedAt ?? selected.fetchedAt;
-    return { ...selected, records: selected.records.filter(record => {
+    const preferred = { ...selected, records: selected.records.filter(record => {
       const position = state.positions[record.record_id || record.id || ''];
       return !position || position.invalidationToken !== invalidationToken || position.sourceStartedAt < startedAt || position.month === month;
     }) };
+    if (owned) {
+      Object.freeze(preferred.records);
+      Object.freeze(preferred);
+      this.preferredMonths.set(monthSnapshot, preferred);
+    }
+    return preferred;
   }
   async publish(appToken: string, tableId: string, range: DutySyncRange, records: BitableRecordItem[], sourceStartedAt: number, invalidationToken: string | null, dateOf: (record: BitableRecordItem) => string | null): Promise<number> {
     const file = this.file(appToken, tableId), previous = this.writes.get(file) || Promise.resolve();
     const operation = previous.catch(() => undefined).then(async () => {
-      const state = await this.read(appToken, tableId), byMonth = new Map(range.months.map(month => [month, [] as BitableRecordItem[]])), ids = new Set<string>();
+      const current = await this.read(appToken, tableId);
+      const state = { ...current, months: { ...current.months } };
+      const byMonth = new Map(range.months.map(month => [month, [] as BitableRecordItem[]])), ids = new Set<string>();
       for (const record of records) {
         const date = dateOf(record), id = record.record_id || record.id;
         if (!date || date < range.startDate || date > range.endDate || !byMonth.has(date.slice(0, 7)) || !id || ids.has(id)) throw new Error('LOCAL_SYNC_RANGE_INVALID');
@@ -72,7 +132,13 @@ export class DutyLocalMonthSnapshots {
       if (Buffer.byteLength(bytes) > MAX_BYTES) throw new Error('LOCAL_SYNC_SNAPSHOT_TOO_LARGE');
       await mkdir(this.directory, { recursive: true });
       const temporary = file + '.' + randomUUID() + '.tmp';
-      try { const handle = await open(temporary, 'wx', 0o600); try { await handle.writeFile(bytes, 'utf8'); await handle.sync(); } finally { await handle.close(); } await rename(temporary, file); }
+      try {
+        const handle = await open(temporary, 'wx', 0o600);
+        try { await handle.writeFile(bytes, 'utf8'); await handle.sync(); }
+        finally { await handle.close(); }
+        await rename(temporary, file);
+        if (this.cachedStore?.file === file) this.cachedStore = undefined;
+      }
       finally { await rm(temporary, { force: true }); }
       if (await readFile(file, 'utf8') !== bytes) throw new Error('LOCAL_SYNC_SNAPSHOT_NOT_PERSISTED');
       return fetchedAt;

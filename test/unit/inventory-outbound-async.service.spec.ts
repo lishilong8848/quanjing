@@ -2855,6 +2855,48 @@ describe('InventoryOutboundWorkflowService async submission', () => {
     });
   });
 
+  it('backs off unchanged uncertain recovery, deduplicates repeated errors and schedules the next due task', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-11-02T06:00:00Z'));
+    const restarted = createService(gateway, ledgerPath, { initialScanDelayMs: 1_000, maximumScanDelayMs: 30_000 });
+    const internal = restarted.service as unknown as {
+      scheduleUncertainTask(entry: unknown): boolean;
+      reconcileUncertainTask(entry: unknown): Promise<unknown>;
+      inFlightUncertainTasks: Map<string, Promise<void>>;
+      uncertainRecoveryBackoff: Map<string, { delayMs: number; nextAt: number }>;
+      logUncertainRecoveryFailure(taskId: string, error: unknown): void;
+      scheduleRecoveryScan(): void;
+      runRecoveryScan(): Promise<void>;
+    };
+    const reconcile = jest.spyOn(internal, 'reconcileUncertainTask').mockRejectedValue(new ConflictException('已出库记录缺少出库确认标识'));
+    const entry = { task: { id: 'synthetic-old-uncertain', status: 'uncertain' } };
+    try {
+      expect(internal.scheduleUncertainTask(entry)).toBe(true);
+      await Promise.all(internal.inFlightUncertainTasks.values());
+      expect(internal.uncertainRecoveryBackoff.get(entry.task.id)?.delayMs).toBe(2_000);
+      for (let tick = 0; tick < 10; tick++) expect(internal.scheduleUncertainTask(entry)).toBe(false);
+      expect(reconcile).toHaveBeenCalledTimes(1);
+      const scan = jest.spyOn(internal, 'runRecoveryScan').mockResolvedValue(undefined);
+      internal.scheduleRecoveryScan();
+      await jest.advanceTimersByTimeAsync(1_999);
+      expect(scan).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(1);
+      expect(scan).toHaveBeenCalledTimes(1);
+      expect(internal.scheduleUncertainTask(entry)).toBe(true);
+      await Promise.all(internal.inFlightUncertainTasks.values());
+      expect(internal.uncertainRecoveryBackoff.get(entry.task.id)?.delayMs).toBe(4_000);
+      expect(loggerError.mock.calls.filter(call => String(call[0]).includes('synthetic-old-uncertain'))).toHaveLength(1);
+      internal.logUncertainRecoveryFailure(entry.task.id, new ConflictException('另一个异常'));
+      expect(loggerError.mock.calls.filter(call => String(call[0]).includes('synthetic-old-uncertain'))).toHaveLength(2);
+      expect(gateway.createRecord).not.toHaveBeenCalled();
+      expect(gateway.updateRecord).not.toHaveBeenCalled();
+    } finally {
+      await restarted.service.onModuleDestroy?.();
+      reconcile.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
   it('safely resumes a durable pending task when a new service instance starts', async () => {
     const seededLedger = new InventoryOutboundTaskLedgerStore(ledgerPath);
     await seededLedger.reserve({

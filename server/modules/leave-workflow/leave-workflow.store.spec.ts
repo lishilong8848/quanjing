@@ -93,6 +93,23 @@ describe('LeaveWorkflowStore', () => {
     expect(dates).not.toHaveBeenCalled();
   });
 
+  it('preserves UTF-8 and independent application changes when unchanged historical bytes are reused', async () => {
+    const first = application(), reason = '中文😀、引号"、换行\n和反斜杠\\均保留';
+    await store.acceptApplication({ ...first, snapshot: { ...first.snapshot, reason } });
+    await store.getApplication(first.recordId);
+    await store.acceptApplication({ ...application(), recordId: 'rec_utf8_second', clientMutationId: 'utf8-second' });
+    await store.patchApplication('rec_utf8_second', { lastError: '第二条更新' });
+    let persisted = JSON.parse(await readFile(join(directory, 'ledger.json'), 'utf8'));
+    expect(persisted.applications.find((row: any) => row.recordId === first.recordId).snapshot.reason).toBe(reason);
+    const current = (await store.getApplication(first.recordId))!;
+    await store.patchApplication(first.recordId, { snapshot: { ...current.snapshot, reason: '新原因🚀' } });
+    persisted = JSON.parse(await readFile(join(directory, 'ledger.json'), 'utf8'));
+    expect(persisted.applications.find((row: any) => row.recordId === first.recordId).snapshot.reason).toBe('新原因🚀');
+    const reopened = new LeaveWorkflowStore(join(directory, 'ledger.json'));
+    expect((await reopened.getApplication('rec_utf8_second'))!.lastError).toBe('第二条更新');
+    expect((await reopened.getApplication(first.recordId))!.snapshot.reason).toBe('新原因🚀');
+  });
+
   it('invalidates normalization for external same-size edits even when timestamps are restored', async () => {
     await store.acceptApplication(application());
     await store.getApplication('rec_leave_1');

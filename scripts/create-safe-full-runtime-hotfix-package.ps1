@@ -2499,6 +2499,7 @@ $releaseFileSources = [ordered]@{
   'scripts/weekly-report/nantong_weekly_report.py' = 'scripts/weekly-report/nantong_weekly_report.py'
   'scripts/weekly-report/env_loader.py' = 'scripts/weekly-report/env_loader.py'
   'scripts/weekly-report/native_feishu.py' = 'scripts/weekly-report/native_feishu.py'
+  'tools/ali-monthly-report/ali_monthly_reports/reports.py' = 'tools/ali-monthly-report/ali_monthly_reports/reports.py'
   'scripts/ensure-inventory-outbound-approval-fields.mjs' = 'scripts/ensure-inventory-outbound-approval-fields.mjs'
   'scripts/ensure-leave-workflow-fields.mjs' = 'scripts/ensure-leave-workflow-fields.mjs'
   'scripts/migrate-leave-shift-substitute-details.mjs' = 'scripts/migrate-leave-shift-substitute-details.mjs'

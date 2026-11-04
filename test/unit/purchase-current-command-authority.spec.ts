@@ -59,9 +59,9 @@ describe('采购原命令受理使用当前权限',()=>{
     const module=await Test.createTestingModule({providers:[...providers,{provide:AccessConfigurationService,useValue:access}]}).compile();
     try{expect((module.get(PurchaseWorkflowService) as unknown as {accessConfiguration:AccessConfigurationService}).accessConfiguration).toBe(access);}finally{await module.close();}
   });
-  it('普通角色的委托操作也携带实际登录账号和授权版本，不以应用操作人替代',async()=>{
+  it('普通角色的委托操作携带实际登录账号和授权版本，不借用配置操作人',async()=>{
     const saved=process.env.PURCHASE_WORKFLOW_PURCHASE_ADMIN_OPEN_ID;process.env.PURCHASE_WORKFLOW_PURCHASE_ADMIN_OPEN_ID='ou_app_operator';
-    try{const value=await resolvePurchaseWorkflowSession({principal:access.currentPrincipal(sourceId,1)!,getTenantAccessToken:async()=>'synthetic-not-a-real-token'});expect(value.openId).toBe('ou_app_operator');expect(value.permissionPrincipal).toMatchObject({accountId:sourceId,authorizationVersion:1,role:'purchase_admin'});}
+    try{const identity={principal:access.currentPrincipal(sourceId,1)!,getTenantAccessToken:async()=>'synthetic-not-a-real-token'};await expect(resolvePurchaseWorkflowSession(identity)).rejects.toThrow('未配置有效操作人');const value=await resolvePurchaseWorkflowSession({...identity,professionalOpenId:'ou_source'});expect(value.openId).toBe('ou_source');expect(value.permissionPrincipal).toMatchObject({accountId:sourceId,authorizationVersion:1,role:'purchase_admin'});}
     finally{if(saved===undefined)delete process.env.PURCHASE_WORKFLOW_PURCHASE_ADMIN_OPEN_ID;else process.env.PURCHASE_WORKFLOW_PURCHASE_ADMIN_OPEN_ID=saved;}
   });
   it('异步人员读取期间收权，原账本认领之前拒绝旧人写入',async()=>{
@@ -161,7 +161,7 @@ describe('采购原命令受理使用当前权限',()=>{
     const action=(await native.takeNextManagerApprovalBatchAction())!,purchaser={purchaserOpenId:'ou_source',purchaserName:'合成采购员',...(scoped?{authorityTarget:{building:'B楼' as const,specialty:'电气' as const}}:{})};await native.completeManagerApprovalBatchActionRecord(action.key,action.claimToken,recordId,purchaser);
     for(;;){task=(await native.takeNextManagerApprovalNotification())!;expect(task).toBeTruthy();if(task.kind==='manager_batch_purchase_assigned')break;await native.completeNotification(task.key,task.claimToken,{messageId:'om_synthetic_result'});}
     await native.markManagerApprovalBatchSendStarted(task.key,task.claimToken,(await native.findManagerApprovalBatch(batchId))!.cardContext);await native.completeNotification(task.key,task.claimToken,{messageId:'om_purchase_assignment'});
-    const original=native.getPurchaseBatchForFulfillmentCard.bind(native),intercept=jest.spyOn(native,'getPurchaseBatchForFulfillmentCard').mockImplementation(async(...args)=>{const value=await original(...args);await config.mutate(config.read().revision,randomUUID(),'synthetic-executor-transfer',state=>{state.personnelDutyAssignments={recExecutor:{appId,dutyRecordId:'recExecutor',kind:choice==='comprehensive'?'purchase_executor':'building_executor',buildings:['B楼'],specialties:scoped?['电气']:null,version:1,startsAt:0,endsAt:null,confirmedBatchId:randomUUID(),members:[{personId:`local-external-${'a'.repeat(64)}`,recordId:'recTarget',openId:'ou_target',name:'合成现任'}]}};});return value;});
+    const original=native.claimPurchaseBatchFulfillmentCommand.bind(native),intercept=jest.spyOn(native,'claimPurchaseBatchFulfillmentCommand').mockImplementation(async(...args)=>{await config.mutate(config.read().revision,randomUUID(),'synthetic-executor-transfer',state=>{state.personnelDutyAssignments={recExecutor:{appId,dutyRecordId:'recExecutor',kind:choice==='comprehensive'?'purchase_executor':'building_executor',buildings:['B楼'],specialties:scoped?['电气']:null,version:1,startsAt:0,endsAt:null,confirmedBatchId:randomUUID(),members:[{personId:`local-external-${'a'.repeat(64)}`,recordId:'recTarget',openId:'ou_target',name:'合成现任'}]}};});return original(...args);});
     const before=readFileSync(join(folder,'purchase.json'),'utf8'),service=new PurchaseManagerApprovalService({} as never,native,undefined,undefined,undefined,access);jest.spyOn(service,'isEnabled').mockReturnValue(true);
     await expect(service.handlePurchaseBatchFulfillmentCardAction({kind:'purchase_batch_fulfillment_action',action:'submit_order',approvalBatchId:batchId,executionRecordId:recordId,eventId:'synthetic-old-executor-order',operatorOpenId:'ou_source',messageId:'om_purchase_assignment',actualQuantity:1,actualAmount:100,note:'合成验收'})).rejects.toThrow('当前采购岗位');
     expect(readFileSync(join(folder,'purchase.json'),'utf8')).toBe(before);
@@ -250,6 +250,54 @@ describe('采购原命令受理使用当前权限',()=>{
     const currentActor=mode==='return'?'ou_source':'ou_target',messageId=mode==='return'?'om_synthetic_returned_executor':'om_synthetic_new_executor';
     expect((await worker.handlePurchaseBatchFulfillmentCardAction({kind:'purchase_batch_fulfillment_action',eventId:'synthetic-current-new-command',operatorOpenId:currentActor,messageId,action:'submit_order',approvalBatchId:batchId,executionRecordId:recordId,actualQuantity:2,actualAmount:100,note:''})).claimed).toBe(true);
     expect((await worker.handlePurchaseBatchFulfillmentCardAction({kind:'purchase_batch_fulfillment_action',eventId:'synthetic-other-duty-command',operatorOpenId:'ou_source',messageId:'om_synthetic_old_executor',action:'submit_order',approvalBatchId:batchId,executionRecordId:otherId,actualQuantity:2,actualAmount:100,note:''})).claimed).toBe(true);
+  });
+  async function boundLegacyApproval(configureDuty=true) {
+    const current={...record(),status:'未开始（待审批）',approvalCompleted:false,warehouseConfirmed:false,purchaserOpenId:'',purchaserName:''};
+    if(configureDuty)await config.mutate(config.read().revision,randomUUID(),'synthetic-fast-approver',state=>{state.personnelDutyAssignments={recApprover:{appId,dutyRecordId:'recApprover',kind:'purchase_approver',buildings:['B楼'],specialties:['电气'],version:1,startsAt:0,endsAt:null,confirmedBatchId:randomUUID(),members:[{personId:`local-external-${'b'.repeat(64)}`,recordId:'recSource',openId:'ou_source',name:'合成审批人'}]}};});
+    await native.enqueueNotification({businessEventId:'synthetic-fast-approval',recordId:current.recordId,recipientOpenId:'ou_source',kind:'approval_requested'});
+    const notice=(await native.takeNextNotification())!;
+    const cardContext=JSON.stringify({executionRecordId:current.recordId,requester:'合成申请人',building:'B楼',title:'合成物品',quantity:1,unit:'件',createdAt:new Date().toISOString(),statusLabel:current.status});
+    await native.markLegacyApprovalSendStarted(notice.key,notice.claimToken,{appId,scope:{building:'B楼',specialty:'电气'}},cardContext,()=>{});
+    await native.completeNotification(notice.key,notice.claimToken,{messageId:'om_fast_approval'});
+    const gateway={getExecutionRecordAsApp:jest.fn(async()=>structuredClone(current)),resolveConfiguredApproversAsApp:jest.fn(async()=>[{openId:'ou_source',name:'合成审批人',positions:[],buildings:[]}]),resolvePurchaseAdminAsApp:jest.fn(async()=>({openId:'ou_buyer',name:'合成采购员',positions:[],buildings:['B楼']})),updateExecutionRecordAsApp:jest.fn(async()=>{}),listExecutionRecordsAsApp:jest.fn(async()=>[]),sendInteractiveCard:jest.fn(async()=> 'om_never_sent'),updateInteractiveCard:jest.fn(async()=>{})};
+    const workflow=new PurchaseWorkflowService(gateway as never,native,undefined,access);jest.spyOn(workflow,'isEnabled').mockReturnValue(true);
+    return{current,gateway,workflow,input:{eventId:'evt_fast_approval',recordId:current.recordId,actorOpenId:'ou_source',action:'approve' as const,deliveryMessageId:'om_fast_approval'}};
+  }
+  it('已送达范围快照及当前本地岗位可先认领，不依赖云读取且重复点击只落一个动作',async()=>{
+    const {gateway,workflow,input}=await boundLegacyApproval();
+    gateway.getExecutionRecordAsApp.mockImplementation(async()=>{throw new Error('SYNTHETIC_SOURCE_MUST_NOT_BE_READ');});
+    const claims=await Promise.all([workflow.acceptApprovalCardAction(input),workflow.acceptApprovalCardAction({...input,eventId:'evt_fast_duplicate'})]);
+    expect(claims.filter(claim=>claim.claimed)).toHaveLength(1);expect(gateway.getExecutionRecordAsApp).not.toHaveBeenCalled();expect(gateway.resolveConfiguredApproversAsApp).not.toHaveBeenCalled();expect(await native.listCardActions()).toHaveLength(1);expect(gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();
+    for(const claim of claims){expect(JSON.stringify(claim.card)).toContain('审批已受理，结果同步中');expect(JSON.stringify(claim.card)).not.toContain('"callback"');expect(JSON.stringify(claim.card)).not.toContain('审批通过');}
+  });
+  it('快受理排队期间岗位已移除时，原子认领内再次校验并拒绝',async()=>{
+    const {gateway,workflow,input}=await boundLegacyApproval();
+    const claim=native.claimCardAction.bind(native);jest.spyOn(native,'claimCardAction').mockImplementation(async(...args)=>{await config.mutate(config.read().revision,randomUUID(),'synthetic-fast-removed',state=>{state.personnelDutyAssignments!.recApprover.members=[];});return claim(...args);});
+    await expect(workflow.acceptApprovalCardAction(input)).rejects.toThrow('当前采购审批岗位');expect(await native.listCardActions()).toHaveLength(0);expect(gateway.getExecutionRecordAsApp).not.toHaveBeenCalled();expect(gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();
+  });
+  it.each(['approve','reject'] as const)('已完成%s回放不再把冻结待审批状态显示为当前结果',async action=>{
+    const {gateway,workflow,input}=await boundLegacyApproval();
+    await workflow.acceptApprovalCardAction({...input,action});
+    const pending=(await native.takeNextCardAction())!;
+    await native.completeCardAction(pending.key,pending.claimToken);
+    const replay=await workflow.acceptApprovalCardAction({...input,action,eventId:`evt_completed_${action}`});
+    expect(replay.claimed).toBe(false);
+    expect(JSON.stringify(replay.card)).toContain(action==='approve'?'审批已确认':'审批已驳回');
+    expect(JSON.stringify(replay.card)).not.toContain('未开始（待审批）');
+    expect(gateway.getExecutionRecordAsApp).not.toHaveBeenCalled();
+    expect(gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();
+    expect(await native.listCardActions()).toHaveLength(1);
+  });
+  it.each(['scope','stage'] as const)('快受理后云端%s变更，worker复核拒绝业务写入且不推送新卡',async mode=>{
+    const {current,gateway,workflow,input}=await boundLegacyApproval();
+    expect((await workflow.acceptApprovalCardAction(input)).claimed).toBe(true);
+    if(mode==='scope')current.building='A楼';else current.status='到货已签收（待入库）';
+    const result=await workflow.runPendingTasks(1);expect(result.failed).toBe(1);expect(gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();expect(gateway.sendInteractiveCard).not.toHaveBeenCalled();expect(await native.listCardActions()).toHaveLength(1);
+  });
+  it('有原投递快照但岗位来源为云端时仍执行权威源校验，不把未知岗位视为允许',async()=>{
+    const {gateway,workflow,input}=await boundLegacyApproval(false);
+    gateway.getExecutionRecordAsApp.mockImplementation(async()=>{throw new Error('SYNTHETIC_REQUIRED_SOURCE_CHECK');});
+    await expect(workflow.acceptApprovalCardAction(input)).rejects.toThrow('SYNTHETIC_REQUIRED_SOURCE_CHECK');expect(gateway.getExecutionRecordAsApp).toHaveBeenCalledTimes(1);expect(await native.listCardActions()).toHaveLength(0);
   });
   it.each(['race','accepted','handover','lost_write','co_role','send_retry','return'] as const)('%s旧版审批新动作核当前岗位，已受理动作在收权后仍沿原队列执行',async mode=>{
     const recordId='recSyntheticOrder',current={...record(),status:'未开始（待审批）',approvalCompleted:false,warehouseConfirmed:false,purchaserOpenId:'',purchaserName:''};

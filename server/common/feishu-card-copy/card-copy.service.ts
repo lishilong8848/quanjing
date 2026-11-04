@@ -17,6 +17,8 @@ export class FeishuCardCopyService implements OnModuleInit, OnModuleDestroy {
   private unregister?: () => void;
   private timer?: NodeJS.Timeout;
   private token?: { value: string; expiresAt: number };
+  private tokenRequest?: Promise<string>;
+  private tokenGeneration = 0;
   private readonly lastDiagnostics = new Map<string, number>();
   constructor(private readonly http: HttpService, @Optional() private readonly configuration?: AccessConfigurationService) {}
   async onModuleInit(): Promise<void> {
@@ -49,10 +51,7 @@ export class FeishuCardCopyService implements OnModuleInit, OnModuleDestroy {
         try {
           if (target.openId !== recipient && !additionalReadonlyCardTargets(process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS)
             .some(item => item.openId === target.openId && item.name === target.name)) return false;
-          const state = this.configuration!.snapshot();
-          const matches = state.accounts.filter(account => account.kind === 'feishu' && account.appId === appId && account.identityHash === fingerprint && account.name === target.name &&
-            account.enabled && !account.deleted && !account.reactivationRequired && !account.permissionsRevoked && account.personnelActive !== false);
-          return matches.length === 1 && !!this.configuration!.currentPrincipal(matches[0].id, matches[0].version);
+          return this.configuration!.isCurrentReadonlyCardRecipient({ appId, identityHash: fingerprint, name: target.name });
         } catch { return false; }
       };
       try {
@@ -74,16 +73,23 @@ export class FeishuCardCopyService implements OnModuleInit, OnModuleDestroy {
   }
   async onModuleDestroy(): Promise<void> {
     for (const engine of this.engines) engine.stop(); this.unregister?.(); if (this.timer) clearInterval(this.timer);
-    await cancelHotfixInitialization(this); this.token = undefined;
+    await cancelHotfixInitialization(this); this.token = undefined; this.tokenRequest = undefined; this.tokenGeneration++;
   }
   private async accessToken(appId: string): Promise<string> {
     if (this.token && this.token.expiresAt > Date.now()) return this.token.value;
+    if (this.tokenRequest) return this.tokenRequest;
     const secret = process.env.FEISHU_APP_SECRET?.trim(); if (!secret) throw new Error('CARD_COPY_AUTH_UNAVAILABLE');
-    const response = await this.http.axiosRef.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', { app_id: appId, app_secret: secret }, { timeout: 15_000, maxRedirects: 0 });
-    if (response.data?.code !== 0 || typeof response.data?.tenant_access_token !== 'string') throw new Error('CARD_COPY_AUTH_UNAVAILABLE');
-    const seconds = Number(response.data.expire);
-    this.token = { value: response.data.tenant_access_token, expiresAt: Date.now() + (Number.isFinite(seconds) ? Math.max(30, seconds - 300) : 300) * 1000 };
-    return this.token.value;
+    const generation = this.tokenGeneration;
+    const request = (async () => {
+      const response = await this.http.axiosRef.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', { app_id: appId, app_secret: secret }, { timeout: 15_000, maxRedirects: 0 });
+      if (response.data?.code !== 0 || typeof response.data?.tenant_access_token !== 'string') throw new Error('CARD_COPY_AUTH_UNAVAILABLE');
+      const seconds = Number(response.data.expire);
+      const token = { value: response.data.tenant_access_token, expiresAt: Date.now() + (Number.isFinite(seconds) ? Math.max(30, seconds - 300) : 300) * 1000 };
+      if (generation === this.tokenGeneration) this.token = token;
+      return token.value;
+    })();
+    this.tokenRequest = request;
+    try { return await request; } finally { if (this.tokenRequest === request) this.tokenRequest = undefined; }
   }
   private diagnostic(code: string): void {
     const now = Date.now(); if (now - (this.lastDiagnostics.get(code) || 0) < 60_000) return;

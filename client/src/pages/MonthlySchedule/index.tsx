@@ -859,6 +859,39 @@ function getScheduleMonthKey(dateKey: string): string | null {
   return `${year}-${month}`;
 }
 
+function getScheduleWindowMonths(
+  selectedDate: Date,
+  businessDateKey: string,
+  additionalDateKeys: readonly string[] = [],
+) {
+  const months = new Map<string, { year: number; month: number; key: string }>();
+  const addMonth = (year: number, month: number) => {
+    const key = `${year}-${month}`;
+    months.set(key, { year, month, key });
+  };
+
+  // Read the selected month first. The endpoints cover the whole ±5-day window.
+  for (const offset of [0, -5, 5]) {
+    const date = new Date(
+      selectedDate.getFullYear(),
+      selectedDate.getMonth(),
+      selectedDate.getDate() + offset,
+    );
+    addMonth(date.getFullYear(), date.getMonth() + 1);
+  }
+  // The leave form retains its independent three-month window.
+  for (const dateKey of [
+    ...getAdjacentScheduleMonthDateKeys(businessDateKey),
+    ...additionalDateKeys,
+  ]) {
+    const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(dateKey);
+    if (!match) continue;
+    const month = Number(match[2]);
+    if (month >= 1 && month <= 12) addMonth(Number(match[1]), month);
+  }
+  return Array.from(months.values());
+}
+
 function mergeSchedulesByRecord(
   currentSchedules: MonthlySchedule[],
   incomingSchedules: MonthlySchedule[],
@@ -2026,7 +2059,7 @@ function WeatherWidget({
     onLoadStateChange(weatherSnapshot.screenshotReadiness);
   }, [onLoadStateChange, weatherSnapshot.screenshotReadiness]);
 
-  if (weatherSnapshot.screenshotReadiness === 'loading') {
+  if (!weather && weatherSnapshot.screenshotReadiness === 'loading') {
     return (
       <div className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-blue-600">
         <span>加载中...</span>
@@ -2289,7 +2322,11 @@ function WeatherTrendPanel({
     />
   );
 
-  if (weatherSnapshot.screenshotReadiness === 'loading') {
+  if (
+    !weatherReady &&
+    hourlyData.length === 0 &&
+    weatherSnapshot.screenshotReadiness === 'loading'
+  ) {
     return (
       <>
         <div className="duty-weather-trend-panel flex min-h-[224px] w-full self-start flex-col rounded-xl border border-slate-100 bg-white/80 p-2.5 text-sm text-slate-500">
@@ -4000,7 +4037,13 @@ function MonthlySchedulePageContent() {
       document.removeEventListener('visibilitychange', refreshBusinessClock);
     };
   }, [refreshBusinessClock]);
-  const [schedules, setSchedules] = useState<MonthlySchedule[]>([]);
+  const [schedules, setSchedules] = useState<MonthlySchedule[]>(() =>
+    canReadMonthlySchedule && !access.isLoading
+      ? getScheduleWindowMonths(selectedDate, businessDateKey).flatMap(
+          ({ key }) => monthlyScheduleCache.get(key)?.schedules || [],
+        )
+      : [],
+  );
   const selfServiceMonth = businessDateKey.slice(0, 7);
   useEffect(() => {
     if (!selfServiceOnly || access.isLoading) return;
@@ -4718,44 +4761,24 @@ function MonthlySchedulePageContent() {
       setScreenshotSectionState('schedules', 'loading');
       const requestId = scheduleLoadSeqRef.current + 1;
       scheduleLoadSeqRef.current = requestId;
+      const isCurrentLoad = () =>
+        !options.signal?.aborted &&
+        activeScheduleReadScopeRef.current === scheduleReadScope &&
+        requestId === scheduleLoadSeqRef.current;
+      const showProgressively =
+        !isScreenshotMode && !options.preserveExistingOnError;
+      const selectedMonthKey = `${selectedDate.getFullYear()}-${selectedDate.getMonth() + 1}`;
 
-      const monthMap = new Map<
-        string,
-        { year: number; month: number; key: string }
-      >();
-      for (let offset = -5; offset <= 5; offset += 1) {
-        const date = new Date(
-          selectedDate.getFullYear(),
-          selectedDate.getMonth(),
-          selectedDate.getDate() + offset,
-        );
-        const year = date.getFullYear();
-        const month = date.getMonth() + 1;
-        const key = `${year}-${month}`;
-        monthMap.set(key, { year, month, key });
-      }
-      // Leave options always cover three months, independent of the viewed date.
-      for (const dateKey of [
-        ...getAdjacentScheduleMonthDateKeys(businessDateKey),
-        ...(options.additionalDateKeys || []),
-      ]) {
-        const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(dateKey);
-        if (!match) continue;
-        const year = Number(match[1]);
-        const month = Number(match[2]);
-        if (month < 1 || month > 12) continue;
-        const additionalMonthKey = `${year}-${month}`;
-        monthMap.set(additionalMonthKey, {
-          year,
-          month,
-          key: additionalMonthKey,
-        });
-      }
-
-      const monthsForWindow = Array.from(monthMap.values());
-      const cachedSchedules = monthsForWindow.flatMap(
-        (item) => monthlyScheduleCache.get(item.key)?.schedules || [],
+      const monthsForWindow = getScheduleWindowMonths(
+        selectedDate,
+        businessDateKey,
+        options.additionalDateKeys,
       );
+      const readWindow = () =>
+        monthsForWindow.flatMap(
+          ({ key }) => monthlyScheduleCache.get(key)?.schedules || [],
+        );
+      const cachedSchedules = readWindow();
       const now = Date.now();
       const monthsToFetch = monthsForWindow.filter((item) => {
         const cached = monthlyScheduleCache.get(item.key);
@@ -4779,7 +4802,12 @@ function MonthlySchedulePageContent() {
         return true;
       }
 
-      if (cachedSchedules.length === 0 && !options.preserveExistingOnError) {
+      if (
+        !options.preserveExistingOnError &&
+        (showProgressively
+          ? !monthlyScheduleCache.has(selectedMonthKey)
+          : cachedSchedules.length === 0)
+      ) {
         setLoading(true);
       }
 
@@ -4796,20 +4824,42 @@ function MonthlySchedulePageContent() {
             scheduleMonthRequestGenerationRef.current.set(item.key, generation);
             return { ...item, generation };
           });
-        const results = await Promise.allSettled(
-          monthRequests.map((item) =>
-            getMonthlySchedulesWithInFlightDeduplication(item.year, item.month),
-          ),
-        );
-        if (
-          options.signal?.aborted ||
-          activeScheduleReadScopeRef.current !== scheduleReadScope ||
-          requestId !== scheduleLoadSeqRef.current
-        ) {
-          return false;
-        }
-
         let successfulFetchCount = 0;
+        const acceptMonth = (
+          monthInfo: (typeof monthRequests)[number],
+          schedules: MonthlySchedule[],
+        ) => {
+          if (
+            !isCurrentLoad() ||
+            scheduleMonthRequestGenerationRef.current.get(monthInfo.key) !==
+              monthInfo.generation ||
+            scheduleMonthForceRefreshGenerationRef.current.has(monthInfo.key)
+          ) {
+            return false;
+          }
+          successfulFetchCount += 1;
+          monthlyScheduleCache.set(monthInfo.key, {
+            schedules,
+            fetchedAt: Date.now(),
+          });
+          return true;
+        };
+
+        const results = await Promise.allSettled(
+          monthRequests.map(async (item) => {
+            const result = await getMonthlySchedulesWithInFlightDeduplication(
+              item.year,
+              item.month,
+            );
+            if (showProgressively && acceptMonth(item, result.schedules || [])) {
+              setSchedules(readWindow());
+              if (item.key === selectedMonthKey) setLoading(false);
+            }
+            return result;
+          }),
+        );
+        if (!isCurrentLoad()) return false;
+
         results.forEach((result, index) => {
           const monthInfo = monthRequests[index];
           if (result.status === 'rejected') {
@@ -4819,38 +4869,16 @@ function MonthlySchedulePageContent() {
                 result.reason,
               );
             }
-            return;
+          } else if (!showProgressively) {
+            acceptMonth(monthInfo, result.value.schedules || []);
           }
-          if (
-            scheduleMonthRequestGenerationRef.current.get(monthInfo.key) !==
-              monthInfo.generation ||
-            scheduleMonthForceRefreshGenerationRef.current.has(monthInfo.key)
-          ) {
-            return;
-          }
-          successfulFetchCount += 1;
-          monthlyScheduleCache.set(monthInfo.key, {
-            schedules: result.value.schedules || [],
-            fetchedAt: Date.now(),
-          });
         });
 
-        if (
-          options.signal?.aborted ||
-          activeScheduleReadScopeRef.current !== scheduleReadScope ||
-          requestId !== scheduleLoadSeqRef.current
-        ) {
-          return false;
-        }
-
-        const mergedSchedules = monthsForWindow.flatMap(
-          (item) => monthlyScheduleCache.get(item.key)?.schedules || [],
-        );
         const hasCompleteScheduleWindow = monthsForWindow.every((item) =>
           monthlyScheduleCache.has(item.key),
         );
         if (!options.preserveExistingOnError || hasCompleteScheduleWindow) {
-          setSchedules(mergedSchedules);
+          setSchedules(readWindow());
         }
         setScreenshotSectionState(
           'schedules',
@@ -4865,32 +4893,34 @@ function MonthlySchedulePageContent() {
         }
         return hasCompleteScheduleWindow;
       } catch (error) {
-        if (options.signal?.aborted || activeScheduleReadScopeRef.current !== scheduleReadScope) return false;
+        if (!isCurrentLoad()) return false;
         if (!options.silent) logger.error('加载排班数据失败', error);
-        if (requestId === scheduleLoadSeqRef.current) {
-          setScreenshotSectionState('schedules', 'error');
-          if (cachedSchedules.length === 0 && !options.silent) {
-            toast.error('加载排班数据失败，请稍后重试');
-          }
+        setScreenshotSectionState('schedules', 'error');
+        if (cachedSchedules.length === 0 && !options.silent) {
+          toast.error('加载排班数据失败，请稍后重试');
         }
         return false;
       } finally {
-        if (
-          !options.signal?.aborted &&
-          activeScheduleReadScopeRef.current === scheduleReadScope &&
-          requestId === scheduleLoadSeqRef.current
-        ) {
-          setLoading(false);
-        }
+        if (isCurrentLoad()) setLoading(false);
       }
     },
-    [canReadMonthlySchedule, access.isLoading, businessDateKey, getMonthlySchedulesWithInFlightDeduplication, monthlyScheduleCache, scheduleReadScope, selectedDate, setScreenshotSectionState],
+    [
+      canReadMonthlySchedule,
+      access.isLoading,
+      businessDateKey,
+      getMonthlySchedulesWithInFlightDeduplication,
+      isScreenshotMode,
+      monthlyScheduleCache,
+      scheduleReadScope,
+      selectedDate,
+      setScreenshotSectionState,
+    ],
   );
 
   const loadSchedulesRef = useRef(loadSchedules);
   loadSchedulesRef.current = loadSchedules;
 
-  const invalidateScheduleLoads = useCallback(() => {
+  const invalidateScheduleLoads = useCallback((discardInFlight = true) => {
     scheduleLoadSeqRef.current += 1;
     for (const [
       monthKey,
@@ -4898,7 +4928,7 @@ function MonthlySchedulePageContent() {
     ] of scheduleMonthRequestGenerationRef.current.entries()) {
       scheduleMonthRequestGenerationRef.current.set(monthKey, generation + 1);
     }
-    monthlyScheduleReadInFlight.clear();
+    if (discardInFlight) monthlyScheduleReadInFlight.clear();
   }, [monthlyScheduleReadInFlight]);
 
   const revalidateLocalScheduleSnapshot = useCallback(
@@ -4956,7 +4986,8 @@ function MonthlySchedulePageContent() {
 
     return () => {
       snapshotRefreshCoordinator.stop();
-      invalidateScheduleLoads();
+      // Leave ordinary reads available to the next mount of this same scope.
+      invalidateScheduleLoads(false);
       window.clearInterval(refreshInterval);
       window.removeEventListener('focus', checkScheduleSnapshotRevision);
       document.removeEventListener(
@@ -6521,6 +6552,7 @@ function MonthlySchedulePageContent() {
   const refreshAfterLocalSync = useCallback(async (invalidate: boolean, signal: AbortSignal) => {
     if (signal.aborted || activeScheduleReadScopeRef.current !== scheduleReadScope) return { schedules: false, sealings: false, cancelled: true };
     if (invalidate) {
+      invalidateScheduleLoads();
       monthlyScheduleCache.clear();
       longWhiteScheduleCache.clear();
       yearlySealingCache.clear();
@@ -6531,7 +6563,7 @@ function MonthlySchedulePageContent() {
       loadSealingInfo(true),
     ]);
     return { schedules: scheduleLoaded, sealings: sealingInfoLoaded };
-  }, [scheduleReadScope, monthlyScheduleCache, loadSchedules, loadSealingInfo]);
+  }, [scheduleReadScope, monthlyScheduleCache, invalidateScheduleLoads, loadSchedules, loadSealingInfo]);
   const localSync = useLocalScheduleSync(principalFingerprint, canRefreshMonthlySchedule && !access.isLoading, refreshAfterLocalSync);
   const manualSyncing = localSync.state.busy;
   const handleManualSync = useCallback(() => {
@@ -10888,9 +10920,9 @@ function MonthlySchedulePageContent() {
         }
       >
         <CardHeader>
-          <div className="duty-overview-header relative flex flex-col items-center gap-4 md:flex-row md:items-center md:justify-center">
-            {/* 左侧：VNET Logo - 绝对定位 */}
-            <div className="duty-overview-logo md:absolute md:left-0 flex items-center">
+          <div className="duty-overview-header relative flex flex-col items-center gap-4 max-lg:flex-col! lg:flex-row lg:justify-center">
+            {/* VNET 标识 */}
+            <div className="duty-overview-logo flex items-center max-lg:static! lg:absolute lg:left-0">
               <UniversalLink
                 to="/"
                 className="flex-shrink-0 transition-opacity hover:opacity-80"
@@ -10947,8 +10979,8 @@ function MonthlySchedulePageContent() {
               </Button>
             </div>
 
-            {/* 右侧：天气组件 - 绝对定位 */}
-            <div className="duty-overview-weather-widget md:absolute md:right-0 flex-shrink-0">
+            {/* 天气组件 */}
+            <div className="duty-overview-weather-widget shrink-0 max-lg:static! lg:absolute lg:right-0">
               <WeatherWidget
                 weatherSnapshot={weatherSnapshot}
                 onLoadStateChange={handleWeatherWidgetLoadStateChange}
@@ -11073,6 +11105,11 @@ function MonthlySchedulePageContent() {
                   const emergencyDuty = getEmergencyDutyByDate(dateStr);
                   const sealing = getSealingInfoByDate(dateStr);
                   const hasSealing = !!sealing;
+                  const monthLoading =
+                    screenshotReadiness.schedules === 'loading' &&
+                    !monthlyScheduleCache.has(
+                      `${date.getFullYear()}-${date.getMonth() + 1}`,
+                    );
 
                   const isToday =
                     date.getFullYear() === selectedDate.getFullYear() &&
@@ -11258,7 +11295,11 @@ function MonthlySchedulePageContent() {
                           )}
                         </div>
                       </div>
-                      {BUILDING_ORDER.map((building) => {
+                      {monthLoading ? (
+                        <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+                          排班加载中…
+                        </div>
+                      ) : BUILDING_ORDER.map((building) => {
                         const { shiftInfo } = getScheduleByDateAndBuilding(
                           dateStr,
                           building,

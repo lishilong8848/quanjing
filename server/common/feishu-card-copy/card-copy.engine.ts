@@ -51,10 +51,11 @@ export class FeishuCardCopyEngine implements CardCopyObserver {
     } catch { this.diagnostic('CARD_COPY_OUTBOX_UNAVAILABLE'); return 0; }
   }
   private async flushGroup(limit: number, groupKey?: string): Promise<number> {
-    if (this.running || this.stopped || !this.options.targetValid()) return 0;
+    if (this.running || this.stopped) return 0;
     this.running = true;
     let attempted = 0;
     try {
+      if (!this.options.store.hasPendingWork(this.now(), groupKey) || !this.options.targetValid()) return 0;
       await this.options.store.recoverInterrupted(this.now());
       for (let index = 0; index < limit && !this.stopped; index++) {
         if (!this.options.targetValid()) break;

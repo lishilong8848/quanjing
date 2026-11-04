@@ -73,57 +73,102 @@ export class InventoryBatchCardService implements OnModuleInit, OnModuleDestroy 
     recipientOpenId: string,
     item: InventoryBatchCardItem,
   ): Promise<string> {
+    const persisted = await this.persistItem(kind, batchId, recipientOpenId, item);
+    if (persisted.messageId) {
+      void this.flushKey(persisted.key).catch(error => this.logger.warn(`批量通知更新待重试：${safeError(error)}`));
+      return persisted.messageId;
+    }
+    return this.flushKey(persisted.key);
+  }
+
+  async stageForCallback(
+    kind: InventoryNotificationBatchKind,
+    batchId: string,
+    recipientOpenId: string,
+    item: InventoryBatchCardItem | InventoryBatchCardItem[],
+    sourceMessageId: string,
+  ): Promise<Record<string, unknown>> {
+    // The approval ledger already validated this original message. Rebind a missing
+    // batch-card ledger to it; never send an extra card while returning its callback.
+    const persisted = await this.persistItem(kind, batchId, recipientOpenId, item, sourceMessageId);
+    const card = await this.render(kind, batchId, recipientOpenId);
+    setImmediate(() => {
+      void this.flushKey(persisted.key).catch(error => this.logger.warn(`批量通知更新待重试：${safeError(error)}`));
+    });
+    return card;
+  }
+
+  private async persistItem(
+    kind: InventoryNotificationBatchKind,
+    batchId: string,
+    recipientOpenId: string,
+    item: InventoryBatchCardItem | InventoryBatchCardItem[],
+    sourceMessageId?: string,
+  ): Promise<{ key: string; messageId?: string }> {
     if (!/^[a-f0-9]{32}$/u.test(batchId) || !/^ou_[A-Za-z0-9_-]{1,124}$/u.test(recipientOpenId)) {
       throw new Error('批量通知标识或收件人无效');
     }
-    const normalized = normalizeItem(item);
+    if (sourceMessageId && !/^om_[A-Za-z0-9_-]{1,252}$/u.test(sourceMessageId)) throw new Error('批量审批原消息无效');
+    const normalizedItems = (Array.isArray(item) ? item : [item]).map(normalizeItem);
+    if (!normalizedItems.length || normalizedItems.length > MAX_ITEMS || new Set(normalizedItems.map(value => value.id)).size !== normalizedItems.length) throw new Error('批量通知明细无效');
     const key = `${kind}:${batchId}:${recipientOpenId}`;
     const existing = await this.withLock(async () => {
       const entries = await this.read();
-      let entry = entries.find((candidate) => candidate.key === key);
-      if (!entry) {
-        entry = {
-          key, kind, batchId, recipientOpenId, deliveryUuid: randomUUID(),
-          items: [], revision: 0, sentRevision: 0,
-        };
-        entries.push(entry);
+      let entry = entries.find(candidate => candidate.key === key);
+      if (sourceMessageId && ((!entry && this.localFlights.has(key)) || entry?.inFlight?.kind === 'send' || (!!entry?.inFlight && !entry.messageId))) {
+        throw new ServiceUnavailableException('原批卡发送结果待核对，请稍后重试');
       }
-      const prior = entry.items.find((candidate) => candidate.id === normalized.id);
-      if (prior) {
-        if (normalized.status === '审批失效' && normalized.approvalVersion && prior.approvalVersion &&
-          prior.approvalVersion > normalized.approvalVersion && sameBatchItemBusinessIdentity(prior, normalized)) return entry.messageId;
-        const { status: oldStatus, ...oldIdentity } = prior;
-        const { status: newStatus, ...newIdentity } = normalized;
-        if (JSON.stringify(oldIdentity) !== JSON.stringify(newIdentity)) {
-          if (oldStatus !== '审批失效' || !prior.approvalVersion || !normalized.approvalVersion || normalized.approvalVersion <= prior.approvalVersion) {
-            throw new Error('同一批量通知明细与已持久化内容冲突');
-          }
-          entry.items.splice(entry.items.indexOf(prior), 1, normalized);
-          entry.revision += 1;
-          await this.write(entries);
-        } else if (oldStatus !== newStatus) {
-          if (oldStatus === '已出库' || oldStatus === '已驳回' || oldStatus === '审批失效') {
-            if (newStatus !== '待审批' && newStatus !== '同步中') throw new Error('批量通知终态与已持久化内容冲突');
-          } else if (newStatus !== '待审批') {
-            prior.status = newStatus;
-            entry.revision += 1;
-            await this.write(entries);
-          }
+      let changed = false;
+      if (!entry) {
+        entry = { key, kind, batchId, recipientOpenId, deliveryUuid: randomUUID(), items: [], revision: 0, sentRevision: 0 };
+        entries.push(entry);
+        changed = true;
+      }
+      if (sourceMessageId) {
+        if (!entry.messageId) {
+          // Even an expired send lease may have delivered remotely. Never turn
+          // an unknown send receipt into a second message or overwrite it blindly.
+          if (entry.inFlight?.kind === 'send') throw new ServiceUnavailableException('原批卡发送结果待核对，请稍后重试');
+          entry.messageId = sourceMessageId;
+          changed = true;
+        } else if (entry.messageId !== sourceMessageId) {
+          throw new ServiceUnavailableException('原批卡消息与当前回执不一致，请核对后重试');
         }
       }
-      if (!prior) {
-        if (entry.items.length >= MAX_ITEMS) throw new Error('批量通知明细超过上限');
-        entry.items.push(normalized);
-        entry.revision += 1;
-        await this.write(entries);
+      for (const normalized of normalizedItems) {
+        const prior = entry.items.find(candidate => candidate.id === normalized.id);
+        if (prior) {
+          if (normalized.status === '审批失效' && normalized.approvalVersion && prior.approvalVersion &&
+            prior.approvalVersion > normalized.approvalVersion && sameBatchItemBusinessIdentity(prior, normalized)) continue;
+          const { status: oldStatus, ...oldIdentity } = prior;
+          const { status: newStatus, ...newIdentity } = normalized;
+          if (JSON.stringify(oldIdentity) !== JSON.stringify(newIdentity)) {
+            if (oldStatus !== '审批失效' || !prior.approvalVersion || !normalized.approvalVersion || normalized.approvalVersion <= prior.approvalVersion) {
+              throw new Error('同一批量通知明细与已持久化内容冲突');
+            }
+            entry.items.splice(entry.items.indexOf(prior), 1, normalized);
+            entry.revision++;
+            changed = true;
+          } else if (oldStatus !== newStatus) {
+            if (oldStatus === '已出库' || oldStatus === '已驳回' || oldStatus === '审批失效') {
+              if (newStatus !== '待审批' && newStatus !== '同步中') throw new Error('批量通知终态与已持久化内容冲突');
+            } else if (newStatus !== '待审批') {
+              prior.status = newStatus;
+              entry.revision++;
+              changed = true;
+            }
+          }
+        } else {
+          if (entry.items.length >= MAX_ITEMS) throw new Error('批量通知明细超过上限');
+          entry.items.push(normalized);
+          entry.revision++;
+          changed = true;
+        }
       }
+      if (changed) await this.write(entries);
       return entry.messageId;
     });
-    if (existing) {
-      void this.flushKey(key).catch((error) => this.logger.warn(`批量通知更新待重试：${safeError(error)}`));
-      return existing;
-    }
-    return this.flushKey(key);
+    return { key, messageId: existing };
   }
 
   async upsertConfirmed(kind: InventoryNotificationBatchKind, batchId: string, recipientOpenId: string, item: InventoryBatchCardItem): Promise<string> {
@@ -159,6 +204,9 @@ export class InventoryBatchCardService implements OnModuleInit, OnModuleDestroy 
       await Promise.all(keys.map((key) => this.flushKey(key).catch((error) => {
         this.logger.warn(`批量通知投递待重试：${safeError(error)}`);
       })));
+      // A concurrent flight may already have persisted its receipt, so it no
+      // longer appears dirty above but must finish releasing its file lock.
+      await Promise.allSettled(this.localFlights.values());
     } catch (error) {
       this.logger.error(`批量通知恢复扫描失败：${safeError(error)}`);
     }

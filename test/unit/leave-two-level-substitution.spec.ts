@@ -39,6 +39,47 @@ describe('two-level leave substitution rules',()=>{
   const rows=[schedules[0],{...schedules[1],scheduleDate:'2026-10-15',shift:'夜班'}];
   expect(build(rows).some((x:any)=>x.person.personRecordId==='rec_wu')).toBe(false);
  });
+ it('waives only a substitute long-white original post while still requiring the primary substitute',()=>{
+  const rows=[schedules[0],{...schedules[1],team:'长白',shift:'长白'}];
+  const candidates=build(rows,[applicant,wu]);
+  expect(candidates).toHaveLength(1);
+  expect(candidates[0]).toMatchObject({person:{personRecordId:'rec_wu'},originalGroups:[],backfillCandidates:[]});
+  expect(helper().resolveTwoLevelSubstitution({candidates,primaryPersonRecordId:'rec_wu'})).toMatchObject({valid:true,backfills:[]});
+  expect(helper().resolveTwoLevelSubstitution({candidates,primaryPersonRecordId:''}).valid).toBe(false);
+ });
+ it.each([false,true])('requires duty-team original coverage even alongside a long-white post, long-white first=%s',(longWhiteFirst)=>{
+  const longWhite={...schedules[1],recordId:'rec_long_white',team:'长白',shift:'长白'};
+  const rows=[schedules[0],...(longWhiteFirst?[longWhite,schedules[1]]:[schedules[1],longWhite])];
+  const candidates=build(rows),choice=candidates.find((row:any)=>row.person.personRecordId==='rec_wu');
+  expect(choice.originalGroups).toHaveLength(1);
+  expect(choice.originalGroups[0].scheduleRecordIds).toEqual(['rec_schedule_c']);
+  expect(helper().resolveTwoLevelSubstitution({candidates,primaryPersonRecordId:'rec_wu'}).valid).toBe(false);
+  expect(helper().resolveTwoLevelSubstitution({candidates,primaryPersonRecordId:'rec_wu',backfillPersonRecordId:'rec_free'})).toMatchObject({valid:true,backfills:[{group:{scheduleRecordIds:['rec_schedule_c']}}]});
+ });
+ it.each(['B班','未知班组',''])('never waives original coverage from long-white shift text when actual team is %j',(team)=>{
+  const candidates=build([schedules[0],{...schedules[1],team,shift:'长白'}]);
+  const choice=candidates.find((row:any)=>row.person.personRecordId==='rec_wu');
+  expect(choice.originalGroups).toHaveLength(1);
+  expect(helper().requiredOriginalPostGroups(choice.originalGroups)).toHaveLength(1);
+  expect(helper().resolveTwoLevelSubstitution({candidates,primaryPersonRecordId:'rec_wu'}).valid).toBe(false);
+  expect(helper().resolveTwoLevelSubstitution({candidates,primaryPersonRecordId:'rec_wu',backfillPersonRecordId:'rec_free'}).valid).toBe(true);
+ });
+ it('uses the same explicit-team predicate for current source rows and saved groups',()=>{
+  for(const teams of [[],['B班'],['未知班组'],['长白','B班']]){
+   expect(helper().requiresOriginalPostBackfill({kind:'long_white',teams})).toBe(true);
+   expect(helper().requiredOriginalPostGroups([{...group,kind:'long_white',teams}])).toHaveLength(1);
+  }
+  for(const team of ['长白','长白班'])expect(helper().requiresOriginalPostBackfill({kind:'long_white',teams:[team]})).toBe(false);
+ });
+ it('keeps mixed original teams conservative in an older merged snapshot',()=>{
+  expect(helper().requiredOriginalPostGroups([{...group,kind:'long_white',teams:['长白','B班']}])).toHaveLength(1);
+ });
+ it('never infers a long-white exemption from the job title',()=>{
+  const specialist={...wu,position:'长白班工程师'};
+  const candidates=build(schedules,[applicant,specialist,free]);
+  expect(candidates.find((row:any)=>row.person.personRecordId==='rec_wu').originalGroups).toHaveLength(1);
+  expect(helper().resolveTwoLevelSubstitution({candidates,primaryPersonRecordId:'rec_wu'}).valid).toBe(false);
+ });
  it('fails closed for an unknown original shift or ambiguous personnel names',()=>{
   expect(build([schedules[0],{...schedules[1],shift:'未知班次'}]).some((x:any)=>x.person.personRecordId==='rec_wu')).toBe(false);
   expect(build(schedules,[applicant,wu,person('rec_other_wu','吴亚兵'),free]).some((x:any)=>x.person.personRecordId==='rec_wu')).toBe(false);

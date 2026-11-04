@@ -12,7 +12,7 @@ import type {
   LeaveSubstituteCandidate,
 } from './leave-workflow.types';
 import type { LeaveWorkflowApplicationEntry } from './leave-workflow.store';
-import { buildTwoLevelSubstituteCandidates, originalPostSignature, resolveTwoLevelSubstitution } from './leave-two-level-substitution';
+import { buildTwoLevelSubstituteCandidates, originalPostSignature, requiredOriginalPostGroups, resolveTwoLevelSubstitution } from './leave-two-level-substitution';
 import {
   calculateLeaveRequestSubstituteRule,
   isLeaveSubstituteStaffBlocked,
@@ -484,7 +484,8 @@ export function validateLeaveShiftAssignmentPlan(input: {
     let originalPostBackfills: LeaveShiftSubstituteAssignment['originalPostBackfills'];
     if (candidateSet?.twoLevelCandidates) {
       const choice = candidateSet.twoLevelCandidates.find((row) => row.person.personRecordId === candidate.personRecordId);
-      if (choice?.originalGroups.length && selection.originalPostSignature !== originalPostSignature(choice.originalGroups)) {
+      const requiredGroups = requiredOriginalPostGroups(choice?.originalGroups || []);
+      if (requiredGroups.length && selection.originalPostSignature !== originalPostSignature(requiredGroups)) {
         return assignmentError(group.shiftKey, '原岗位已变化，请重新核对替班安排');
       }
       const resolved = resolveTwoLevelSubstitution({

@@ -34,6 +34,8 @@ import { TodayOperationsFollowUpCardService } from '../bitable-sync/today-operat
 import { InventoryOutboundApprovalService } from '../inventory-outbound-approval/inventory-outbound-approval.service';
 import { ThresholdAdjustmentService } from '../threshold-management/threshold-adjustment.service';
 import { FeishuCardActionExecution, FeishuCardActionDeadlineError, CARD_ACTION_PROCESSING_RESPONSE } from '../../common/feishu-card-action-execution';
+import { cardActionDiagnosticName } from '../../common/feishu-card-action-diagnostics';
+import { FeishuCardCallbackFeedbackService } from '../../common/feishu-card-callback-feedback.service';
 
 const ACCEPTED_RESPONSE: FeishuCardActionResponse = {
   toast: { type: 'info', content: '审批操作已受理' },
@@ -76,6 +78,7 @@ export class FeishuCardActionRouter {
     @Optional() private readonly thresholdAdjustments?: ThresholdAdjustmentService,
     @Inject(AccessConfigurationService) private readonly accessConfiguration?: AccessConfigurationService,
     @Optional() private readonly followUpCards?: TodayOperationsFollowUpCardService,
+    @Optional() private readonly callbackFeedback?: FeishuCardCallbackFeedbackService,
   ) {}
 
   isAnyEnabled(): boolean {
@@ -91,6 +94,7 @@ export class FeishuCardActionRouter {
   }
 
   async handle(payload: unknown): Promise<FeishuCardActionResponse> {
+    const receivedAt = performance.now();
     if (!currentHotfixActivation().isAcceptingNewWork()) {
       return { toast: { type: 'error', content: '系统更新中，本次操作未受理，请稍后重试' } };
     }
@@ -99,12 +103,25 @@ export class FeishuCardActionRouter {
         return { toast: { type: 'error', content: '此卡片为只读同步副本，请在原卡片办理' } };
       }
       const kind = classifyCardAction(payload);
+      const phases = { guardMs: Math.round(performance.now() - receivedAt), businessMs: null as number | null, mirrorMs: null as number | null };
       return await this.execution.run(requireObject(payload), async () => {
-        const result = await this.dispatch(payload, kind);
+        const businessAt = performance.now();
+        const result = await this.dispatch(payload, kind).finally(() => { phases.businessMs = Math.round(performance.now() - businessAt); });
         const source = kind === 'inventory_outbound' || kind === 'threshold_adjustment' ? 'inventory-outbound'
           : kind === 'today_operations_followup' || kind === 'today_operations_anomaly' ? 'today-operations' : kind;
+        const mirrorAt = performance.now();
         await observeCardCallbackResult(source, payload, result);
+        phases.mirrorMs = Math.round(performance.now() - mirrorAt);
         return result;
+      }, {
+        onLateFailure: error => this.callbackFeedback?.enqueueLateFailure(payload, kind, error),
+        onLateResult: result => result.toast.type === 'error'
+          ? this.callbackFeedback?.enqueueLateFailure(payload, kind, new Error('CARD_CALLBACK_LATE_ERROR')) : undefined,
+        onTiming: timing => {
+          if (timing.elapsedMs >= 500 || timing.outcome !== 'completed') {
+            this.logger.warn(`卡片回调耗时 ${JSON.stringify({ transport: 'ws', workflow: kind, action: cardActionDiagnosticName(payload), ...phases, ...timing, totalMs: Math.round(performance.now() - receivedAt) })}`);
+          }
+        },
       });
     } catch (error) {
       this.logger.warn(`Feishu card action rejected: ${safeErrorMessage(error)}`);
@@ -329,7 +346,7 @@ export class FeishuCardActionRouter {
           actorOpenId: result.operatorOpenId,
           ...(result.messageId ? { deliveryMessageId: result.messageId } : {}),
         }));
-      return claim.claimed ? ACCEPTED_RESPONSE : REPLAY_RESPONSE;
+      return { ...(claim.claimed ? ACCEPTED_RESPONSE : REPLAY_RESPONSE), ...(claim.card ? { card: toFeishuRawCardUpdate(claim.card) } : {}) };
     }
 
     if (result.kind === 'manager_batch_action') {
@@ -650,7 +667,7 @@ function safeErrorMessage(error: unknown): string {
 
 function cardActionErrorResponse(error: unknown): FeishuCardActionResponse {
   if (error instanceof FeishuCardActionDeadlineError) {
-    return { toast: { type: 'warning', content: '处理时间较长，请勿重复点击，稍后查看卡片状态' } };
+    return CARD_ACTION_PROCESSING_RESPONSE;
   }
   if (error instanceof HttpException) {
     const status = error.getStatus();

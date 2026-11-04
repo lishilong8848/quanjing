@@ -47,6 +47,7 @@ import { legacyApprovalVersion, legacyApprovalReceiptVersion, legacyApprovalAcce
 import { normalizeWebReceiptCommand, webReceiptRecoveryVersion, type PurchaseWebReceiptCommand } from './purchase-web-receipt-command';
 import type { PersonnelRecoveryActor, PersonnelRecoveryRequest } from '../../../shared/personnel-task-recovery.interface';
 import { assertRecoveryRequest } from '../../common/access/personnel-task-recovery.validation';
+import { FairOperationQueue } from '../../common/fair-operation-queue';
 
 export const PURCHASE_WORKFLOW_LEDGER_PATH = Symbol(
   'PURCHASE_WORKFLOW_LEDGER_PATH',
@@ -97,7 +98,9 @@ interface SharedLedgerState {
   ledgerPath: string;
   lockPath: string;
   instanceId: string;
-  operation: Promise<unknown>;
+  operation: FairOperationQueue;
+  readCache?: { source: Buffer; ledger: PurchaseWorkflowLedger };
+  readOnlyOperation?: boolean;
   refCount: number;
   lockPromise: Promise<void> | null;
   lockOwned: boolean;
@@ -211,6 +214,7 @@ export interface PurchaseManagerApprovalDeliveryAuditEntry {
     | 'delivery_unknown_timeout'
     | 'operator_verified_delivered'
     | 'operator_verified_absent'
+    | 'comparison_image_requeued'
     | 'callback_bound'
     | 'replacement_bound';
   at: string;
@@ -656,7 +660,7 @@ export class PurchaseWorkflowStore {
     this.sharedState.refCount = Math.max(0, this.sharedState.refCount - 1);
     if (this.sharedState.refCount > 0) return;
 
-    await this.sharedState.operation;
+    await this.sharedState.operation.idle();
     if (this.sharedState.refCount > 0) return;
     await releaseLedgerLock(this.sharedState);
     if (sharedLedgerStates.get(this.ledgerPath) === this.sharedState) {
@@ -665,7 +669,7 @@ export class PurchaseWorkflowStore {
   }
 
   async findCommand(key: string): Promise<PurchaseWorkflowCommandEntry | null> {
-    return this.enqueue(async () => {
+    return this.enqueueRead(async () => {
       const ledger = await this.read();
       return ledger.commands.find((entry) => entry.key === key) || null;
     });
@@ -766,7 +770,7 @@ export class PurchaseWorkflowStore {
   }
 
   async hasReminder(key: string): Promise<boolean> {
-    return this.enqueue(async () =>
+    return this.enqueueRead(async () =>
       (await this.read()).reminders.includes(key),
     );
   }
@@ -793,7 +797,7 @@ export class PurchaseWorkflowStore {
   async listRecentCommands(
     limit = 30,
   ): Promise<PurchaseWorkflowCommandEntry[]> {
-    return this.enqueue(async () =>
+    return this.enqueueRead(async () =>
       (await this.read()).commands
         .slice(-Math.max(1, Math.min(limit, 100)))
         .reverse(),
@@ -801,7 +805,7 @@ export class PurchaseWorkflowStore {
   }
 
   async listPendingOrderNoticeCommands(limit = 20, afterKey = ''): Promise<PurchaseWorkflowCommandEntry[]> {
-    return this.enqueue(async () => {
+    return this.enqueueRead(async () => {
       const pending = (await this.read()).commands
         .filter(entry => entry.action === 'order' && !entry.completedAt && entry.orderNotice && !entry.orderNotice.deferUntilFulfillment)
         .sort((left, right) => left.key.localeCompare(right.key));
@@ -835,7 +839,7 @@ export class PurchaseWorkflowStore {
     now: Date | number = new Date(),
     authorize?: () => PurchaseCardActionAuthority,
   ): Promise<{ claimed: boolean; entry: PurchaseWorkflowCardActionEntry }> {
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const normalized = normalizeCardActionClaim(input);
       const ledger = await this.read();
       if (input.deliveryMessageId !== undefined && !ledger.notifications.some(notification =>
@@ -1001,7 +1005,7 @@ export class PurchaseWorkflowStore {
     key: string,
   ): Promise<PurchaseWorkflowCardActionEntry | null> {
     const normalizedKey = clean(key);
-    return this.enqueue(
+    return this.enqueueCardRead(
       async () =>
         (await this.read()).cardActions.find(
           (entry) => entry.key === normalizedKey,
@@ -1016,7 +1020,7 @@ export class PurchaseWorkflowStore {
     } = {},
   ): Promise<PurchaseWorkflowCardActionEntry[]> {
     const recordId = clean(filter.recordId);
-    return this.enqueue(async () =>
+    return this.enqueueRead(async () =>
       (await this.read()).cardActions.filter(
         (entry) =>
           (!recordId || entry.recordId === recordId) &&
@@ -1070,12 +1074,24 @@ export class PurchaseWorkflowStore {
     });
   }
 
+  async getApprovalCardDelivery(input: Pick<PurchaseWorkflowCardActionClaimInput, 'recordId' | 'actorOpenId' | 'deliveryMessageId'>): Promise<PurchaseWorkflowNotificationEntry | null> {
+    const recordId = clean(input.recordId), actorOpenId = boundedText(input.actorOpenId, MAX_OPEN_ID_LENGTH);
+    const messageId = boundedText(input.deliveryMessageId, MAX_DELIVERY_ID_LENGTH);
+    if (!RECORD_ID_PATTERN.test(recordId) || !OPEN_ID_PATTERN.test(actorOpenId) || !messageId) return null;
+    return this.enqueueCardRead(async () => {
+      const matches = (await this.read()).notifications.filter(notification => notification.kind === 'approval_requested' &&
+        notification.recordId === recordId && notification.recipientOpenId === actorOpenId && notification.status === 'completed' && notification.messageId === messageId);
+      if (matches.length > 1) throw new ConflictException('采购审批原消息映射不唯一');
+      return matches[0] || null;
+    });
+  }
+
   async listPersonnelHandovers(): Promise<PurchaseManagerBatchHandover[]> {
-    return this.enqueue(async () => (await this.read()).personnelHandovers.map(entry => structuredClone(entry)));
+    return this.enqueueRead(async () => (await this.read()).personnelHandovers.map(entry => structuredClone(entry)));
   }
 
   async executorHandoverSnapshot() {
-    return this.enqueue(async () => {
+    return this.enqueueRead(async () => {
       const ledger = await this.read();
       return structuredClone({ batches: ledger.managerApprovalBatches, commands: ledger.commands, notifications: ledger.notifications });
     });
@@ -1241,7 +1257,7 @@ export class PurchaseWorkflowStore {
   }
 
   async findWarehouseInboundHandover(mutationId: string): Promise<WarehouseInboundHandover | undefined> {
-    return this.enqueue(async () => (await this.read()).warehouseInboundHandovers.find(job => job.mutationId === mutationId));
+    return this.enqueueRead(async () => (await this.read()).warehouseInboundHandovers.find(job => job.mutationId === mutationId));
   }
 
   async takeNextWarehouseInboundHandover(now = new Date(), leaseMs = DEFAULT_LEASE_MS): Promise<WarehouseInboundHandover | null> {
@@ -1831,7 +1847,7 @@ export class PurchaseWorkflowStore {
   ): Promise<PurchaseManagerApprovalBatchEntry | null> {
     const approvalBatchId =
       normalizeManagerApprovalBatchId(approvalBatchIdValue);
-    return this.enqueue(async () => {
+    return this.enqueueRead(async () => {
       const matches = (await this.read()).managerApprovalBatches.filter(
         (entry) => entry.approvalBatchId === approvalBatchId,
       );
@@ -1843,7 +1859,7 @@ export class PurchaseWorkflowStore {
   }
 
   async listManagerApprovalBatchIds(): Promise<string[]> {
-    return this.enqueue(async () =>
+    return this.enqueueRead(async () =>
       (await this.read()).managerApprovalBatches.map(
         (entry) => entry.approvalBatchId,
       ),
@@ -2257,7 +2273,7 @@ export class PurchaseWorkflowStore {
     const messageId = boundedText(messageIdValue, MAX_DELIVERY_ID_LENGTH);
     const actorOpenId = boundedText(actorOpenIdValue, MAX_OPEN_ID_LENGTH);
     if (!messageId || !OPEN_ID_PATTERN.test(actorOpenId)) return null;
-    return this.enqueue(async () => {
+    return this.enqueueCardRead(async () => {
       const matches = (await this.read()).managerApprovalBatches.filter(
         (entry) =>
           managerBatchDeliveries(entry).some(delivery => delivery.messageId === messageId && delivery.recipientOpenId === actorOpenId) &&
@@ -2279,7 +2295,7 @@ export class PurchaseWorkflowStore {
     batch: PurchaseManagerApprovalBatchEntry;
   }> {
     const identity = normalizeManagerApprovalBatchCardIdentity(inputValue);
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const ledger = await this.read();
       const matches = ledger.managerApprovalBatches.filter(
         (entry) => entry.approvalBatchId === identity.approvalBatchId,
@@ -2401,7 +2417,7 @@ export class PurchaseWorkflowStore {
   }> {
     const input = normalizeManagerApprovalBatchCardIdentity(inputValue);
     const executionRecordId = normalizeRecordId(inputValue.executionRecordId);
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const ledger = await this.read();
       const batch = requireActiveManagerApprovalBatch(ledger, input);
       if (batch.state !== 'active') return { opened: false, batch };
@@ -2430,7 +2446,7 @@ export class PurchaseWorkflowStore {
     batch: PurchaseManagerApprovalBatchEntry;
   }> {
     const input = normalizeManagerApprovalBatchCardIdentity(inputValue);
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const ledger = await this.read();
       const batch = requireActiveManagerApprovalBatch(ledger, input);
       if (batch.state !== 'reject_editing') {
@@ -2482,7 +2498,7 @@ export class PurchaseWorkflowStore {
     entry: PurchaseManagerApprovalBatchActionEntry | null;
     batch: PurchaseManagerApprovalBatchEntry;
   }> {
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const ledger = await this.read();
       const replay = ledger.managerApprovalBatchActions.find(
         (entry) => entry.eventId === input.eventId,
@@ -2989,7 +3005,7 @@ export class PurchaseWorkflowStore {
     const approvalBatchId = filter.approvalBatchId
       ? normalizeManagerApprovalBatchId(filter.approvalBatchId)
       : '';
-    return this.enqueue(async () =>
+    return this.enqueueRead(async () =>
       (await this.read()).managerApprovalBatchActions.filter(
         (entry) =>
           (!approvalBatchId || entry.approvalBatchId === approvalBatchId) &&
@@ -3005,7 +3021,7 @@ export class PurchaseWorkflowStore {
     source: PurchaseWorkflowNotificationEntry;
   }> {
     const identity = normalizePurchaseBatchFulfillmentIdentity(identityValue);
-    return this.enqueue(async () =>
+    return this.enqueueCardRead(async () =>
       requirePurchaseBatchFulfillmentSource(await this.read(), identity),
     );
   }
@@ -3029,7 +3045,7 @@ export class PurchaseWorkflowStore {
     ) {
       throw new BadRequestException('采购签收材料类型无效');
     }
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const timestamp = resolveNow(now);
       const ledger = await this.read();
       const { batch } = requirePurchaseBatchFulfillmentSource(ledger, identity);
@@ -3095,7 +3111,7 @@ export class PurchaseWorkflowStore {
     ) {
       throw new BadRequestException('采购签收图片消息无效');
     }
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const timestamp = resolveNow(now);
       const ledger = await this.read();
       const existing = ledger.notifications.find(
@@ -3200,7 +3216,7 @@ export class PurchaseWorkflowStore {
       }
     };
     if (fixedContext) validateIdentity(fixedContext);
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const readStartedAt = Date.now();
       const timestamp = resolveNow(now).toISOString();
       const ledger = await this.read();
@@ -3304,7 +3320,7 @@ export class PurchaseWorkflowStore {
   }
 
   async readAcceptedFulfillmentCommand(proof:PurchaseFulfillmentClaimProof,recordId:string,action:PurchaseWorkflowAction,actorOpenId:string):Promise<PurchaseAcceptedFulfillment>{
-    return this.enqueue(async()=>structuredClone(requireAcceptedFulfillment(await this.read(),proof,{recordId,action,actorOpenId})));
+    return this.enqueueRead(async()=>structuredClone(requireAcceptedFulfillment(await this.read(),proof,{recordId,action,actorOpenId})));
   }
 
   async completePurchaseBatchFulfillmentCommandAndEnqueue(
@@ -3591,7 +3607,7 @@ export class PurchaseWorkflowStore {
   }
 
   async findWebReceipt(taskId: string): Promise<PurchaseWorkflowNotificationEntry | null> {
-    return this.enqueue(async () => structuredClone((await this.read()).notifications.find(entry => entry.kind === 'web_receipt_command' && entry.webReceipt?.taskId === taskId) || null));
+    return this.enqueueRead(async () => structuredClone((await this.read()).notifications.find(entry => entry.kind === 'web_receipt_command' && entry.webReceipt?.taskId === taskId) || null));
   }
 
   async acceptWebReceipt(recordId: string, value: PurchaseWebReceiptCommand, authorize: () => void): Promise<PurchaseWorkflowNotificationEntry> {
@@ -4174,7 +4190,7 @@ export class PurchaseWorkflowStore {
     card: PurchaseManagerApprovalCardEntry;
   }> {
     const identity = normalizeManagerApprovalCallbackBinding(input);
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const ledger = await this.read();
       const existingCards = ledger.managerApprovalCards.filter(
         (card) =>
@@ -4414,7 +4430,7 @@ export class PurchaseWorkflowStore {
   }
 
   async singleManagerHandoverSnapshot():Promise<{cards:PurchaseManagerApprovalCardEntry[];actions:PurchaseManagerApprovalActionEntry[];notifications:PurchaseWorkflowNotificationEntry[]}>{
-    return this.enqueue(async()=>{const ledger=await this.read();return structuredClone({cards:ledger.managerApprovalCards,actions:ledger.managerApprovalActions,notifications:ledger.notifications});});
+    return this.enqueueRead(async()=>{const ledger=await this.read();return structuredClone({cards:ledger.managerApprovalCards,actions:ledger.managerApprovalActions,notifications:ledger.notifications});});
   }
 
   async acceptSingleManagerHandover(input:PurchaseSingleManagerHandoverInput,authorize:()=>void):Promise<{status:'accepted'|'already_completed';version:string}>{
@@ -4458,7 +4474,7 @@ export class PurchaseWorkflowStore {
     if (!normalizedMessageId || !OPEN_ID_PATTERN.test(normalizedRecipient)) {
       return null;
     }
-    return this.enqueue(async () => {
+    return this.enqueueCardRead(async () => {
       const ledger = await this.read();
       if (
         ledger.managerApprovalCards.some((card) =>
@@ -4482,7 +4498,7 @@ export class PurchaseWorkflowStore {
   }
 
   async getManagerApprovalRecordState(recordId: string): Promise<PurchaseManagerApprovalCardEntry | null> {
-    return this.enqueue(async () => {
+    return this.enqueueCardRead(async () => {
       const cards = (await this.read()).managerApprovalCards.filter(card => card.executionRecordId === recordId && !card.personnelHandover);
       return cards.find(card => !['initial', 'reject_editing'].includes(card.state)) || null;
     });
@@ -4496,7 +4512,7 @@ export class PurchaseWorkflowStore {
     card: PurchaseManagerApprovalCardEntry;
   }> {
     const identity = normalizeManagerApprovalCardIdentity(input);
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const ledger = await this.read();
       const card = requireActiveManagerApprovalCard(ledger, identity);
       if(card.personnelHandover)return{opened:false,card};
@@ -4531,7 +4547,7 @@ export class PurchaseWorkflowStore {
     card: PurchaseManagerApprovalCardEntry;
   }> {
     const normalized = normalizeManagerApprovalActionClaim(input);
-    return this.enqueue(async () => {
+    return this.enqueueCard(async () => {
       const ledger = await this.read();
       const eventReplay = ledger.managerApprovalActions.find(
         (entry) => entry.eventId === normalized.eventId,
@@ -4881,7 +4897,7 @@ export class PurchaseWorkflowStore {
     } = {},
   ): Promise<PurchaseManagerApprovalActionEntry[]> {
     const recordId = clean(filter.recordId);
-    return this.enqueue(async () =>
+    return this.enqueueRead(async () =>
       (await this.read()).managerApprovalActions.filter(
         (entry) =>
           (!recordId || entry.recordId === recordId) &&
@@ -5148,6 +5164,74 @@ export class PurchaseWorkflowStore {
     });
   }
 
+  async retryFailedComparisonImageNotifications(keys: readonly string[], actorId: string, preview = false): Promise<{ requeued: number; alreadyRequeued: number; candidates: Array<{ batchId: string; recipientName: string }> }> {
+    if (!Array.isArray(keys) || keys.length < 1 || keys.length > 20 || new Set(keys).size !== keys.length ||
+      keys.some(key => typeof key !== 'string' || !key || key.length > 1000) || !actorId || actorId.length > MAX_OPEN_ID_LENGTH) {
+      throw new BadRequestException('采购通知恢复范围无效');
+    }
+    return this.enqueue(async () => {
+      const ledger = await this.read();
+      // The normal reader accepts legacy records and fills missing delivery fields.
+      // Recovery must inspect the original bytes while holding the same ledger lock,
+      // otherwise an unknown historic send could look like an unattempted one.
+      const original: unknown = JSON.parse((await readFile(this.ledgerPath)).toString('utf8'));
+      if (!isRecord(original) || !Array.isArray(original.notifications)) {
+        throw new ConflictException('采购通知原始记录无法核对，未恢复任何任务');
+      }
+      const tasks = keys.map(key => ledger.notifications.find(task => task.key === key));
+      const recoverable: Array<{ task: PurchaseWorkflowNotificationEntry; source: Record<string, unknown> }> = [];
+      const candidates: Array<{ batchId: string; recipientName: string }> = [];
+      let alreadyRequeued = 0;
+      for (const task of tasks) {
+        if (!task) throw new ConflictException('采购通知不存在，未恢复任何任务');
+        if (task.deliveryAudit.some(entry => entry.action === 'comparison_image_requeued')) {
+          alreadyRequeued += 1;
+          continue;
+        }
+        const batch = ledger.managerApprovalBatches.find(entry => managerBatchDeliveries(entry).some(delivery => delivery.sourceNotificationKey === task.key));
+        const delivery = batch && managerBatchDeliveries(batch).find(entry => entry.sourceNotificationKey === task.key);
+        const originals = original.notifications.filter(entry => isRecord(entry) && entry.key === task.key);
+        const source = originals[0];
+        if (task.kind !== 'manager_batch_approval_requested' || task.status !== 'failed' ||
+          task.lastError !== '采购比价图片缓存暂不可用，请重试原通知任务' || task.sendOutcome !== 'unattempted' ||
+          task.messageId || task.firstSendAttemptAt || task.deliveryAudit.length || !task.deliveryUuid ||
+          originals.length !== 1 || !isRecord(source) || source.kind !== task.kind || source.status !== 'failed' ||
+          source.sendOutcome !== 'unattempted' || source.messageId !== '' || source.deliveryId !== '' ||
+          source.firstSendAttemptAt !== '' || !Array.isArray(source.deliveryAudit) || source.deliveryAudit.length !== 0 ||
+          source.deliveryUuid !== task.deliveryUuid || source.deliveryGeneration !== task.deliveryGeneration ||
+          source.businessEventId !== task.businessEventId || source.recordId !== task.recordId || source.recipientOpenId !== task.recipientOpenId ||
+          source.lastError !== task.lastError || source.leaseUntil !== '' || source.claimToken !== '' ||
+          !batch || !delivery || delivery.messageId || delivery.recipientOpenId !== task.recipientOpenId ||
+          !['awaiting_delivery', 'active'].includes(batch.state) || batch.items.some(item => item.status !== 'pending') ||
+          !batch.recordIds.includes(task.recordId)) {
+          throw new ConflictException('采购通知状态已变化，未恢复任何任务');
+        }
+        recoverable.push({ task, source });
+        candidates.push({ batchId: batch.approvalBatchId, recipientName: delivery.recipientName || '采购审批负责人' });
+      }
+      if (recoverable.length && !preview) {
+        const timestamp = new Date().toISOString();
+        for (const { task, source } of recoverable) {
+          source.status = 'pending';
+          source.attempts = 0;
+          source.updatedAt = timestamp;
+          source.nextAttemptAt = timestamp;
+          source.completedAt = '';
+          source.lastError = '';
+          source.claimToken = '';
+          source.leaseUntil = '';
+          source.deliveryAudit = appendDeliveryAudit(task.deliveryAudit, {
+            action: 'comparison_image_requeued', at: timestamp, operatorOpenId: actorId,
+            generation: task.deliveryGeneration, deliveryUuid: task.deliveryUuid, messageId: '',
+          });
+        }
+        // Preserve unrelated original fields and unrecognized delivery evidence.
+        await this.write(original as unknown as PurchaseWorkflowLedger);
+      }
+      return { requeued: recoverable.length, alreadyRequeued, candidates };
+    });
+  }
+
   async failNotification(
     key: string,
     claimToken: string,
@@ -5172,7 +5256,7 @@ export class PurchaseWorkflowStore {
     key: string,
   ): Promise<PurchaseWorkflowNotificationEntry | null> {
     const normalizedKey = clean(key);
-    return this.enqueue(
+    return this.enqueueRead(
       async () =>
         (await this.read()).notifications.find(
           (entry) => entry.key === normalizedKey,
@@ -5190,7 +5274,7 @@ export class PurchaseWorkflowStore {
   ): Promise<PurchaseWorkflowNotificationEntry[]> {
     const recordId = clean(filter.recordId);
     const recipientOpenId = clean(filter.recipientOpenId);
-    return this.enqueue(async () =>
+    return this.enqueueRead(async () =>
       (await this.read()).notifications.filter(
         (entry) =>
           (!recordId || entry.recordId === recordId) &&
@@ -5315,17 +5399,29 @@ export class PurchaseWorkflowStore {
     });
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>, interactive = false, readOnly = false): Promise<T> {
     const run = async () => {
       await this.ensureLock();
-      return operation();
+      this.sharedState.readOnlyOperation = readOnly;
+      try {
+        return await operation();
+      } finally {
+        this.sharedState.readOnlyOperation = false;
+      }
     };
-    const result = this.sharedState.operation.then(run, run);
-    this.sharedState.operation = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    return this.sharedState.operation.enqueue(run, interactive);
+  }
+
+  private enqueueCard<T>(operation: () => Promise<T>): Promise<T> {
+    return this.enqueue(operation, true);
+  }
+
+  private enqueueRead<T>(operation: () => Promise<T>): Promise<T> {
+    return this.enqueue(operation, false, true);
+  }
+
+  private enqueueCardRead<T>(operation: () => Promise<T>): Promise<T> {
+    return this.enqueue(operation, true, true);
   }
 
   private ensureLock(): Promise<void> {
@@ -5342,7 +5438,16 @@ export class PurchaseWorkflowStore {
 
   private async read(): Promise<PurchaseWorkflowLedger> {
     try {
-      const parsed = JSON.parse(await readFile(this.ledgerPath, 'utf8')) as {
+      // Always read bytes: mtime/size alone can miss an external same-size edit.
+      const source = await readFile(this.ledgerPath);
+      const cached = this.sharedState.readCache;
+      if (cached?.source.equals(source)) {
+        const ledger = structuredClone(cached.ledger);
+        // This retention predicate depends on wall time even when file bytes are unchanged.
+        ledger.managerApprovalCards = pruneResolvedManagerApprovalCards(ledger.managerApprovalCards, new Date(), ledger.notifications);
+        return ledger;
+      }
+      const parsed = JSON.parse(source.toString('utf8')) as {
         commands?: unknown;
         reminders?: unknown;
         cardActions?: unknown;
@@ -5367,7 +5472,7 @@ export class PurchaseWorkflowStore {
             MAX_NOTIFICATIONS,
           )
         : [];
-      return {
+      const ledger: PurchaseWorkflowLedger = {
         version: 2,
         personnelHandovers: parsed.personnelHandovers === undefined ? [] : normalizePurchaseManagerHandovers(parsed.personnelHandovers),
         warehouseInboundHandovers: normalizeWarehouseInboundHandovers(parsed.warehouseInboundHandovers),
@@ -5446,7 +5551,13 @@ export class PurchaseWorkflowStore {
             )
           : [],
       };
+      // Only explicitly read-only operations build a private snapshot. Mutations
+      // never cache their tentative objects, or pay for an extra full ledger clone.
+      if (this.sharedState.readOnlyOperation) this.sharedState.readCache = source.byteLength <= 16 * 1024 * 1024
+        ? { source, ledger: structuredClone(ledger) } : undefined;
+      return ledger;
     } catch (error) {
+      this.sharedState.readCache = undefined;
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
         return emptyLedger();
       throw error;
@@ -5459,10 +5570,13 @@ export class PurchaseWorkflowStore {
     try {
       await writeFile(
         temporaryPath,
-        `${JSON.stringify(ledger, null, 2)}\n`,
+        `${JSON.stringify(ledger)}\n`,
         'utf8',
       );
       await rename(temporaryPath, this.ledgerPath);
+      // Internal mutations are validated at their entry points, but the next read still
+      // normalizes the new bytes before caching. A failed write never publishes state.
+      this.sharedState.readCache = undefined;
     } finally {
       await removeFileIfExists(temporaryPath);
     }
@@ -5476,7 +5590,7 @@ function getSharedLedgerState(ledgerPath: string): SharedLedgerState {
     ledgerPath,
     lockPath: `${ledgerPath}.lock`,
     instanceId: randomUUID(),
-    operation: Promise.resolve(),
+    operation: new FairOperationQueue(),
     refCount: 0,
     lockPromise: null,
     lockOwned: false,
@@ -8339,6 +8453,7 @@ function isManagerDeliveryAuditAction(
     value === 'delivery_unknown_timeout' ||
     value === 'operator_verified_delivered' ||
     value === 'operator_verified_absent' ||
+    value === 'comparison_image_requeued' ||
     value === 'callback_bound' ||
     value === 'replacement_bound'
   );

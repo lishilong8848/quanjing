@@ -37,6 +37,8 @@ import { PurchaseWorkflowStore } from './purchase-workflow.store';
 import { PurchaseWorkflowService } from './purchase-workflow.service';
 import { FeishuCardActionExecution, FeishuCardActionDeadlineError, CARD_ACTION_PROCESSING_RESPONSE } from '../../common/feishu-card-action-execution';
 import type { FeishuCardActionResponse } from '../overtime-workflow/overtime-workflow.card-action.consumer';
+import { cardActionDiagnosticName } from '../../common/feishu-card-action-diagnostics';
+import { FeishuCardCallbackFeedbackService } from '../../common/feishu-card-callback-feedback.service';
 
 type CallbackResponse = Omit<FeishuCardActionResponse, 'card'> & {
   card?: Record<string, unknown> | FeishuCardActionResponse['card'];
@@ -61,6 +63,7 @@ export class PurchaseWorkflowCallbackController {
     private readonly accessConfiguration?: AccessConfigurationService,
     @Inject(PurchaseWorkflowService)
     private readonly workflowService?: PurchaseWorkflowService,
+    @Optional() private readonly callbackFeedback?: FeishuCardCallbackFeedbackService,
   ) {}
 
   @Post('purchase-card')
@@ -132,12 +135,27 @@ export class PurchaseWorkflowCallbackController {
   }
 
   private async execute(identity: object, operation: () => Promise<CallbackResponse>): Promise<CallbackResponse> {
+    const receivedAt = performance.now();
     if (isReadonlyCopyCallback(identity)) throw new ForbiddenException('此卡片为只读同步副本，请在原卡片办理');
+    const kind = (identity as { kind?: string }).kind === 'overtime_action' ? 'overtime' : 'purchase';
+    const phases = { guardMs: Math.round(performance.now() - receivedAt), businessMs: null as number | null, mirrorMs: null as number | null };
     try {
       return await this.execution.run(identity, async () => {
-        const result = await operation();
-        await observeCardCallbackResult((identity as { kind?: string }).kind === 'overtime_action' ? 'overtime' : 'purchase', identity, result);
+        const businessAt = performance.now();
+        const result = await operation().finally(() => { phases.businessMs = Math.round(performance.now() - businessAt); });
+        const mirrorAt = performance.now();
+        await observeCardCallbackResult(kind, identity, result);
+        phases.mirrorMs = Math.round(performance.now() - mirrorAt);
         return result;
+      }, {
+        onLateFailure: error => this.callbackFeedback?.enqueueLateFailure(identity, kind, error),
+        onLateResult: result => result.toast.type === 'error'
+          ? this.callbackFeedback?.enqueueLateFailure(identity, kind, new Error('CARD_CALLBACK_LATE_ERROR')) : undefined,
+        onTiming: timing => {
+          if (timing.elapsedMs >= 500 || timing.outcome !== 'completed') {
+            this.logger.warn(`卡片回调耗时 ${JSON.stringify({ transport: 'http', workflow: kind, action: cardActionDiagnosticName(identity), ...phases, ...timing, totalMs: Math.round(performance.now() - receivedAt) })}`);
+          }
+        },
       });
     } catch (error) {
       if (error instanceof FeishuCardActionDeadlineError) return CARD_ACTION_PROCESSING_RESPONSE;
@@ -196,7 +214,7 @@ export class PurchaseWorkflowCallbackController {
           actorOpenId: result.operatorOpenId,
           ...(result.messageId ? { deliveryMessageId: result.messageId } : {}),
         }));
-      return claim.claimed
+      const response = claim.claimed
         ? {
             toast: { type: 'info' as const, content: '审批操作已受理' },
           }
@@ -206,6 +224,7 @@ export class PurchaseWorkflowCallbackController {
               content: '该申请已处理或正在处理',
             },
           };
+      return { ...response, ...(claim.card ? { card: toFeishuRawCardUpdate(claim.card) } : {}) };
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
       throw new ServiceUnavailableException('采购审批回调暂时不可用');
@@ -292,7 +311,9 @@ export class PurchaseWorkflowCallbackController {
       result.action === 'open_order' ||
       result.action === 'return_purchase_list' ||
       result.action === 'open_receipt' ||
-      result.action === 'return_receipt_list';
+      result.action === 'return_receipt_list' ||
+      result.action === 'prepare_receipt_photo' ||
+      result.action === 'prepare_invoice';
     if (isNavigation) {
       if (!httpResponse) {
         throw new ServiceUnavailableException('采购履约卡片回调响应不可用');

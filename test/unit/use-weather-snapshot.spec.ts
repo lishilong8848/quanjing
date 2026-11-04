@@ -180,7 +180,7 @@ describe('useWeatherSnapshot refresh coordinator', () => {
     jest.useRealTimers();
   });
 
-  it('uses one initial all-settled load, then refreshes the warning every 10 minutes and current weather plus hourly data every 30 minutes', async () => {
+  it('loads each resource once, then refreshes the warning every 10 minutes and current weather plus hourly data every 30 minutes', async () => {
     jest.useFakeTimers();
     const requests = createRequests();
     const coordinator = createTrackedCoordinator({ requests });
@@ -209,6 +209,71 @@ describe('useWeatherSnapshot refresh coordinator', () => {
     expect(requests.getWeatherWarningSnapshot).toHaveBeenCalledTimes(4);
     expect(requests.getQWeatherNow).toHaveBeenCalledTimes(2);
     expect(requests.getQWeatherHourly).toHaveBeenCalledTimes(2);
+  });
+
+  it('publishes current and hourly weather before a pending warning without marking the screenshot ready', async () => {
+    jest.useFakeTimers();
+    const current = createNow();
+    const forecast = createHourly();
+    const hourly = createDeferred<QWeatherHourly>();
+    const warning = createDeferred<WeatherWarningSnapshot>();
+    const coordinator = createTrackedCoordinator({
+      requests: createRequests({
+        getQWeatherNow: jest.fn().mockResolvedValue(current),
+        getQWeatherHourly: jest.fn().mockReturnValue(hourly.promise),
+        getWeatherWarningSnapshot: jest.fn().mockReturnValue(warning.promise),
+      }),
+    });
+
+    const initialLoad = coordinator.start();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(coordinator.getState()).toMatchObject({
+      weather: current,
+      hourlyWeather: null,
+      warningStatus: 'loading',
+      screenshotReadiness: 'loading',
+    });
+
+    hourly.resolve(forecast);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(coordinator.getState()).toMatchObject({
+      hourlyWeather: forecast,
+      weatherStatus: 'ready',
+      warningStatus: 'loading',
+      screenshotReadiness: 'loading',
+    });
+
+    warning.resolve(createSnapshot('clear'));
+    await initialLoad;
+    expect(coordinator.getState().screenshotReadiness).toBe('ready');
+  });
+
+  it('publishes the initial warning before pending weather requests', async () => {
+    jest.useFakeTimers();
+    const activeWarning = createSnapshot('active');
+    const current = createDeferred<QWeatherNow>();
+    const hourly = createDeferred<QWeatherHourly>();
+    const coordinator = createTrackedCoordinator({
+      requests: createRequests({
+        getQWeatherNow: jest.fn().mockReturnValue(current.promise),
+        getQWeatherHourly: jest.fn().mockReturnValue(hourly.promise),
+        getWeatherWarningSnapshot: jest.fn().mockResolvedValue(activeWarning),
+      }),
+    });
+
+    const initialLoad = coordinator.start();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(coordinator.getState()).toMatchObject({
+      warningSnapshot: activeWarning,
+      warningStatus: 'ready',
+      weather: null,
+      screenshotReadiness: 'loading',
+    });
+
+    current.resolve(createNow());
+    hourly.resolve(createHourly());
+    await initialLoad;
+    expect(coordinator.getState().screenshotReadiness).toBe('ready');
   });
 
   it('allows a stable screenshot when warning data is unavailable but weather content and the warning fallback are rendered', async () => {
@@ -459,6 +524,37 @@ describe('useWeatherSnapshot refresh coordinator', () => {
 
     expect(coordinator.getState().warningSnapshot?.status).toBe('active');
     coordinator.stop();
+  });
+
+  it('ignores an older weather response even when it arrives alone after a newer refresh', async () => {
+    jest.useFakeTimers();
+    const oldCurrent = createDeferred<QWeatherNow>();
+    const oldHourly = createDeferred<QWeatherHourly>();
+    const newCurrent = createNow();
+    const newHourly = createHourly();
+    const coordinator = createTrackedCoordinator({
+      requests: createRequests({
+        getQWeatherNow: jest.fn()
+          .mockReturnValueOnce(oldCurrent.promise)
+          .mockResolvedValueOnce(newCurrent),
+        getQWeatherHourly: jest.fn()
+          .mockReturnValueOnce(oldHourly.promise)
+          .mockResolvedValueOnce(newHourly),
+      }),
+    });
+
+    const initialLoad = coordinator.start();
+    await coordinator.refreshCurrentAndHourly();
+
+    oldCurrent.resolve(createNow());
+    await jest.advanceTimersByTimeAsync(0);
+    expect(coordinator.getState().weather).toBe(newCurrent);
+
+    oldHourly.resolve(createHourly());
+    await initialLoad;
+    expect(coordinator.getState().weather).toBe(newCurrent);
+    expect(coordinator.getState().hourlyWeather).toBe(newHourly);
+    expect(coordinator.getState().weatherStatus).toBe('ready');
   });
 
   it('aborts both request groups and publishes no late result after it stops', async () => {

@@ -399,6 +399,40 @@ describe('two-level leave service flow', () => {
       expect(await store.getStageAction(data().application.recordId, 'supervisor', 1)).not.toBeNull();
     } finally { jest.useRealTimers(); }
   });
+  it('approves a substitute with a long-white original post without backfill despite an older saved candidate snapshot', async () => {
+    rows[1] = { ...rows[1], team: '长白', shift: '长白' };
+    const recordId = data().application.recordId;
+    const existing = (await store.getApplication(recordId))!;
+    const candidateSets = structuredClone(existing.snapshot.candidateSets!);
+    candidateSets[0].twoLevelCandidates![0].originalGroups = candidateSets[0].twoLevelCandidates![0].originalGroups.map(original => ({ ...original, kind: 'long_white', teams: ['长白'], shift: '长白' }));
+    await store.patchApplication(recordId, { snapshot: { ...existing.snapshot, candidateSets } });
+    const result = await service.acceptApprovalAction({ ...viewInput(), eventId: 'test-long-white-original-approval', stageKey: 'supervisor', action: 'approve', shiftSelections: [{ shiftKey: data().selection.shiftKey, substitutePersonRecordId: primary.personRecordId }] });
+    expect(result.claimed).toBe(true);
+    const action = await store.getStageAction(recordId, 'supervisor', 1);
+    expect(action!.shiftAssignments).toHaveLength(1);
+    expect(action!.shiftAssignments[0]).toMatchObject({ substitutePersonRecordId: primary.personRecordId });
+    expect(action!.shiftAssignments[0].originalPostBackfills).toBeUndefined();
+    expect(action!.shiftAssignments[0].scheduleRecordIds).toEqual(['rec_schedule_d']);
+    expect(rows[1].dutyStaffActual).toContain(primary.name);
+    expect(sync.syncApprovedLeaveScheduleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a long-white exemption after the actual substitute original team changes to duty roster', async () => {
+    const recordId = data().application.recordId, existing = (await store.getApplication(recordId))!;
+    const candidateSets = structuredClone(existing.snapshot.candidateSets!);
+    candidateSets[0].twoLevelCandidates![0].originalGroups = candidateSets[0].twoLevelCandidates![0].originalGroups.map(original => ({ ...original, kind: 'long_white', teams: ['长白'], shift: '长白' }));
+    await store.patchApplication(recordId, { snapshot: { ...existing.snapshot, candidateSets } });
+    // Cached card says long-white, while the current roster is the original duty team.
+    await expect(service.acceptApprovalAction({ ...viewInput(), eventId: 'test-stale-long-white-exemption', stageKey: 'supervisor', action: 'approve', shiftSelections: [{ shiftKey: data().selection.shiftKey, substitutePersonRecordId: primary.personRecordId }] })).rejects.toThrow(/不可用|补位|原岗/);
+    expect(await store.getStageAction(recordId, 'supervisor', 1)).toBeNull();
+  });
+
+  it('rejects an empty primary choice even when the potential substitute works long-white', async () => {
+    rows[1] = { ...rows[1], team: '长白', shift: '长白' };
+    await expect(service.acceptApprovalAction({ ...viewInput(), eventId: 'test-long-white-no-primary', stageKey: 'supervisor', action: 'approve', shiftSelections: [] })).rejects.toThrow('请为每个班次选择替班人员');
+    expect(await store.getStageAction(data().application.recordId, 'supervisor', 1)).toBeNull();
+  });
+
   it('approves a selected free substitute without requiring an original-post backup', async () => {
     const result = await service.acceptApprovalAction({ ...viewInput(), eventId: 'test-free-primary-approval', stageKey: 'supervisor', action: 'approve', shiftSelections: [{ shiftKey: data().selection.shiftKey, substitutePersonRecordId: replacement.personRecordId }] });
     expect(result.claimed).toBe(true);

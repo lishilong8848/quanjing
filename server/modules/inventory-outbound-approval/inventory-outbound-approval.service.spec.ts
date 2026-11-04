@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { InventoryOutboundApprovalService as ActualInventoryOutboundApprovalService } from './inventory-outbound-approval.service';
 import { withSyntheticBusinessIdentity } from '../../../test/unit/synthetic-business-identity.fixture';
@@ -66,6 +67,35 @@ describe('InventoryOutboundApprovalService', () => {
     expect(JSON.stringify(action.card)).toContain('同步中');
     expect((await store.find('rec_outbound_2', 1))?.decision).toBeUndefined();
     expect(gateway.sendInteractiveCard).toHaveBeenCalledTimes(1);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await batchCard.flushPending();
+  });
+
+  it('reconstructs every item bound to the original batch message after the batch-card ledger is lost', async () => {
+    const path = join(directory, 'lost-batch-cards.json');
+    const batchCard = new InventoryBatchCardService(gateway as never, path);
+    service = new InventoryOutboundApprovalService(store, gateway as never, finalizer as never, warehouseRoleDirectory as never, batchCard);
+    const batchId = 'a'.repeat(32), approvers = [{ openId: 'ou_approver_a', name: '审批人甲' }];
+    await service.registerPending(snapshot({ outboundNumber: `inventory_batch_outbound_${batchId}_1`, approvers }));
+    await service.registerPending(snapshot({ recordId: 'rec_outbound_2', itemName: '第二个待审批物品', outboundNumber: `inventory_batch_outbound_${batchId}_2`, approvers }));
+    await service.runPending();
+    await batchCard.flushPending();
+    const messageId = (await store.find('rec_outbound_1', 1))!.approvalCards[0].messageId!;
+    await unlink(path);
+    const sends = gateway.sendInteractiveCard.mock.calls.length;
+    const result = await service.handleCardAction(directActionPayload('approve', 'ou_approver_a', messageId));
+    const card = JSON.stringify(result.card);
+    expect(card).toContain('地磅秤');
+    expect(card).toContain('第二个待审批物品');
+    expect((await batchCard.render('outbound', batchId, 'ou_approver_a')).body).toBeDefined();
+    expect(card).toContain('rec_outbound_2');
+    expect(card).toContain('同步中');
+    expect(card).toContain('待审批');
+    expect((await store.find('rec_outbound_2', 1))!.decision).toBeUndefined();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await batchCard.flushPending();
+    expect(gateway.sendInteractiveCard).toHaveBeenCalledTimes(sends);
+    expect(gateway.patchInteractiveCard).toHaveBeenLastCalledWith(messageId, expect.any(Object));
   });
 
   it('reserves the durable approval outbox before writing and confirming the pending Base state', async () => {
@@ -589,7 +619,9 @@ describe('InventoryOutboundApprovalService', () => {
       service.handleCardAction(
         directActionPayload('open_reject', 'ou_approver_a', 'om_approver_a'),
       ),
-    ).resolves.toMatchObject({ claimed: false });
+    ).rejects.toThrow('本次操作未受理');
+    await waitForCallbackRecovery(service);
+    await expect(service.handleCardAction(directActionPayload('open_reject', 'ou_approver_a', 'om_approver_a'))).resolves.toMatchObject({ claimed: false });
 
     expect(gateway.readOutboundRecord).toHaveBeenCalledWith('rec_outbound_1');
     await expect(store.find('rec_outbound_1', 1)).resolves.toMatchObject({
@@ -615,7 +647,9 @@ describe('InventoryOutboundApprovalService', () => {
       service.handleCardAction(
         directActionPayload('approve', 'ou_approver_a', 'om_approver_a'),
       ),
-    ).resolves.toMatchObject({ claimed: false });
+    ).rejects.toThrow('本次操作未受理');
+    await waitForCallbackRecovery(service);
+    await expect(service.handleCardAction(directActionPayload('approve', 'ou_approver_a', 'om_approver_a'))).resolves.toMatchObject({ claimed: false });
 
     expect(gateway.readOutboundRecord).toHaveBeenCalledWith('rec_outbound_1');
     expect(gateway.writeDecision).not.toHaveBeenCalled();
@@ -627,6 +661,29 @@ describe('InventoryOutboundApprovalService', () => {
         { recipientOpenId: 'ou_approver_b', status: 'completed' },
       ],
     });
+  });
+
+  it('rejects a missing-record callback promptly and coalesces slow authoritative recovery before any decision', async () => {
+    const source = pendingRecoveryRecord(snapshot());
+    source.fields['出库审批投递台账'] = JSON.stringify({ schemaVersion: 1, recordId: 'rec_outbound_1', version: 1,
+      deliveries: [{ recipientOpenId: 'ou_approver_a', recipientName: '审批人甲',
+        deliveryUuid: deterministicUuid('inventory-outbound-approval-card:rec_outbound_1:1:ou_approver_a'), messageId: 'om_approver_a' }] });
+    let resolveSource!: (value: typeof source) => void;
+    gateway.readOutboundRecord.mockImplementationOnce(() => new Promise<typeof source>(resolve => { resolveSource = resolve; }));
+    const clicks = await Promise.allSettled(Array.from({ length: 10 }, () =>
+      service.handleCardAction(directActionPayload('approve', 'ou_approver_a', 'om_approver_a'))));
+    expect(clicks.every(result => result.status === 'rejected' && String(result.reason).includes('本次操作未受理'))).toBe(true);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(gateway.readOutboundRecord).toHaveBeenCalledTimes(1);
+    expect(await store.find('rec_outbound_1', 1)).toBeUndefined();
+    expect(gateway.writeDecision).not.toHaveBeenCalled();
+    resolveSource(source);
+    await waitForCallbackRecovery(service);
+    await expect(service.handleCardAction(directActionPayload('approve', 'ou_approver_b', 'om_approver_a'))).rejects.toThrow('审批消息不属于');
+    expect((await store.find('rec_outbound_1', 1))!.decision).toBeUndefined();
+    await expect(service.handleCardAction(directActionPayload('approve', 'ou_approver_a', 'om_approver_a'))).resolves.toMatchObject({ claimed: true });
+    expect(gateway.readOutboundRecord).toHaveBeenCalledTimes(1);
+    expect(gateway.writeDecision).not.toHaveBeenCalled();
   });
 
   it('opens the rejection form without claiming a decision or calling external systems', async () => {
@@ -1259,4 +1316,8 @@ function deterministicUuid(seed: string): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = bytes.toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function waitForCallbackRecovery(service: ActualInventoryOutboundApprovalService): Promise<void> {
+  await Promise.all((service as unknown as { callbackRecoveries: Map<string, Promise<void>> }).callbackRecoveries.values());
 }

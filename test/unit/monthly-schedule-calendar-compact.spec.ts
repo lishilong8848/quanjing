@@ -15,9 +15,10 @@ function getCalendarDayWithChangesSource(): string {
 describe('MonthlySchedule compact calendar day cell', () => {
   it('keeps overview navigation inside its own positioned month container', () => {
     const source = readFileSync(join(process.cwd(), 'client/src/pages/MonthlySchedule/index.tsx'), 'utf8');
-    const start = source.indexOf('<Calendar\n', source.indexOf('const calendarWeatherSection'));
-    const overview = source.slice(start, source.indexOf('</Calendar>', start) > start ? source.indexOf('</Calendar>', start) : source.indexOf('/>',start));
+    const start = source.indexOf('const mainScheduleCalendar = useMemo');
+    const overview = source.slice(start, source.indexOf('/>', start));
     expect(overview).toContain("months: 'relative w-full'");
+    expect(source).toContain('{mainScheduleCalendar}');
   });
   it('uses a dedicated compact picker instead of the overview day cards', () => {
     const source = readFileSync(join(process.cwd(), 'client/src/pages/MonthlySchedule/index.tsx'), 'utf8');

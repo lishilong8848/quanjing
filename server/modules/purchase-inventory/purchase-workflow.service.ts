@@ -41,6 +41,7 @@ import {
   buildInventoryInboundCompletedCard,
   buildManualInventoryInboundCompletedCard,
   buildPurchaseApprovalCard,
+  buildProcessingPurchaseApprovalCard,
   buildTransferredPurchaseApprovalCard,
   buildResolvedPurchaseApprovalCard,
   buildWarehouseInboundCard,
@@ -484,11 +485,37 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     if (!this.accessConfiguration) throw new ServiceUnavailableException('采购审批鉴权端口未配置');
     const appId = process.env.FEISHU_APP_ID?.trim();
     if (!appId || !/^cli_[A-Za-z0-9_-]+$/.test(appId)) throw new ServiceUnavailableException('采购审批应用身份未配置');
+    const delivery = await this.store.getApprovalCardDelivery(input);
+    if (delivery?.approvalAuthority && delivery.cardContext) {
+      const authority = delivery.approvalAuthority;
+      let frozen: PurchaseApprovalCardInput;
+      try { frozen = JSON.parse(delivery.cardContext) as PurchaseApprovalCardInput; }
+      catch { throw new ConflictException('采购审批原卡内容不可核对'); }
+      if (authority.appId !== appId || !frozen || frozen.executionRecordId !== input.recordId ||
+        frozen.building !== authority.scope.building || resolvePurchaseStage(frozen.statusLabel) !== 'application') {
+        throw new ConflictException('采购审批原卡应用、记录或授权范围不一致');
+      }
+      // A delivered card already has a durable, scoped authority snapshot. Only
+      // locally confirmed duties can use this fast acceptance path; the worker
+      // still reads the current source stage/scope before any business write.
+      if (this.accessConfiguration.currentDutyRoutePeople('purchase_approver', authority.scope) !== null) {
+        const claim = await this.store.claimCardAction(input, new Date(), () => {
+          assertFeishuBusinessIdentity(this.accessConfiguration, input.actorOpenId);
+          if (appId !== process.env.FEISHU_APP_ID?.trim()) throw new ConflictException('采购审批应用身份已变化');
+          const current = this.accessConfiguration!.currentDutyRoutePeople('purchase_approver', authority.scope);
+          if (current === null || !current.some(person => person.openId === input.actorOpenId)) {
+            throw new ForbiddenException('当前采购审批岗位已变化，请核对后重试');
+          }
+          return authority;
+        });
+        return { ...claim, card: approvalClaimCard(frozen, claim.entry) };
+      }
+    }
     const record = await this.gateway.getExecutionRecordAsApp(input.recordId), scope = purchaseAuthorityTarget(record);
     if (record.recordId !== input.recordId || !scope) throw new ConflictException('采购审批记录或授权范围不明确');
     const configured = this.accessConfiguration.currentDutyRoutePeople('purchase_approver', scope);
     const fallback = configured === null ? await this.gateway.resolveConfiguredApproversAsApp(scope) : configured;
-    return this.store.claimCardAction(input, new Date(), () => {
+    const claim = await this.store.claimCardAction(input, new Date(), () => {
       if (!input.deliveryMessageId) throw new ForbiddenException('采购审批原消息凭据缺失，请使用新审批卡办理');
       assertFeishuBusinessIdentity(this.accessConfiguration, input.actorOpenId);
       if (appId !== process.env.FEISHU_APP_ID?.trim()) throw new ConflictException('采购审批应用身份已变化');
@@ -497,6 +524,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       if (resolvePurchaseStage(record.status) !== 'application') throw new ConflictException('采购申请已处于其他流程阶段');
       return { appId, scope };
     });
+    return { ...claim, card: approvalClaimCard(toApprovalCardInput(record), claim.entry) };
   }
 
   async enqueueApprovalRequests(recordId: string): Promise<void> {
@@ -992,6 +1020,10 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     if (!this.isEnabled() && accessRole !== 'admin') {
       throw new ServiceUnavailableException(DISABLED_REASON);
     }
+  }
+
+  async retryFailedComparisonImageNotifications(keys: readonly string[], actorId: string, preview = false) {
+    return this.store.retryFailedComparisonImageNotifications(keys, actorId, preview);
   }
 
   private async recoverMissingApprovalRequests(limit: number): Promise<number> {
@@ -2614,6 +2646,12 @@ function sentinelResetFields(
 
 function isHealthcheckRecord(requestCode: string): boolean {
   return requestCode.startsWith('CODEX-PURCHASE-WORKFLOW-');
+}
+
+function approvalClaimCard(input: PurchaseApprovalCardInput, entry: PurchaseWorkflowCardActionEntry): Record<string, unknown> {
+  return entry.status === 'completed'
+    ? buildResolvedPurchaseApprovalCard({ ...input, statusLabel: entry.action === 'approve' ? '审批已确认' : '审批已驳回' }, { decision: entry.action, actorName: entry.actorOpenId, processedAt: entry.completedAt || entry.updatedAt })
+    : buildProcessingPurchaseApprovalCard(input, entry.action, entry.status === 'failed');
 }
 
 function toApprovalCardInput(

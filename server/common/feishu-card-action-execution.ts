@@ -20,6 +20,19 @@ interface InFlightAction<T> {
   timedOut: boolean;
 }
 
+export interface FeishuCardActionTiming {
+  outcome: 'completed' | 'failed' | 'timed_out' | 'late_completed' | 'late_failed';
+  elapsedMs: number;
+}
+
+export interface FeishuCardActionExecutionOptions<T> {
+  /** Receives no payload; callers may log only their fixed business/action labels. */
+  onTiming?: (timing: FeishuCardActionTiming) => void;
+  /** A late error must not turn into a second business attempt. */
+  onLateFailure?: (error: unknown) => void | Promise<void>;
+  onLateResult?: (result: T) => void | Promise<void>;
+}
+
 export class FeishuCardActionExecution<T> {
   private readonly pending = new Map<string, InFlightAction<T>>();
 
@@ -28,23 +41,41 @@ export class FeishuCardActionExecution<T> {
     private readonly capacity = 256,
   ) {}
 
-  async run(identity: object, execute: () => Promise<T>): Promise<T> {
+  async run(identity: object, execute: () => Promise<T>, options: FeishuCardActionExecutionOptions<T> = {}): Promise<T> {
+    const waitingAt = performance.now();
     const key = fingerprint(identity);
     let entry = this.pending.get(key);
     if (!entry) {
       if (this.pending.size >= this.capacity) {
         throw new HttpException('当前处理中的操作较多，请稍后重试', 429);
       }
+      const startedAt = performance.now();
+      const timing = (outcome: FeishuCardActionTiming['outcome']) => {
+        try { options.onTiming?.({ outcome, elapsedMs: Math.round(performance.now() - startedAt) }); }
+        catch { /* Diagnostics cannot change a decision or prevent recovery. */ }
+      };
       const created: InFlightAction<T> = {
         timedOut: false,
-        promise: execute().then(
+        // Install the in-flight identity before invoking any user code, including
+        // synchronous throws and immediate recursive delivery of the same action.
+        promise: Promise.resolve().then(execute).then(
           (result) => {
             this.pending.delete(key);
+            timing(created.timedOut ? 'late_completed' : 'completed');
+            if (created.timedOut) {
+              try { void Promise.resolve(options.onLateResult?.(result)).catch(() => undefined); }
+              catch { /* Result recovery must not execute the action again. */ }
+            }
             return result;
           },
           (error: unknown) => {
             this.pending.delete(key);
-            if (created.timedOut) this.onLateFailure(error);
+            timing(created.timedOut ? 'late_failed' : 'failed');
+            if (created.timedOut) {
+              try { this.onLateFailure(error); } catch { /* Preserve the original error. */ }
+              try { void Promise.resolve(options.onLateFailure?.(error)).catch(() => undefined); }
+              catch { /* A failed recovery notification must not repeat the business action. */ }
+            }
             throw error;
           },
         ),
@@ -60,6 +91,7 @@ export class FeishuCardActionExecution<T> {
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
             entry!.timedOut = true;
+            try { options.onTiming?.({ outcome: 'timed_out', elapsedMs: Math.round(performance.now() - waitingAt) }); } catch { /* Diagnostics only. */ }
             reject(new FeishuCardActionDeadlineError());
           }, DEADLINE_MS);
         }),
@@ -71,18 +103,15 @@ export class FeishuCardActionExecution<T> {
 }
 
 function fingerprint(identity: object): string {
-  const stable = Object.fromEntries(
-    Object.entries(identity).filter(
-      ([key]) =>
-        ![
-          'eventId',
-          'event_id',
-          'token',
-          'updateToken',
-          'update_token',
-        ].includes(key),
-    ),
-  );
+  const metadata = new Set(['eventId', 'event_id', 'token', 'updateToken', 'update_token', 'create_time']);
+  const withoutMetadata = (value: object) => Object.fromEntries(Object.entries(value).filter(([key]) => !metadata.has(key)));
+  const stable = withoutMetadata(identity);
+  // SDK/encrypted HTTP envelopes can carry fresh transport IDs inside header/event.
+  // Form values remain intact: an input named "token" may be real business content.
+  for (const name of ['header', 'event']) {
+    const value = stable[name];
+    if (value && typeof value === 'object' && !Array.isArray(value)) stable[name] = withoutMetadata(value);
+  }
   const serialized = JSON.stringify(stable, (_key, value: unknown) => {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       return Object.fromEntries(

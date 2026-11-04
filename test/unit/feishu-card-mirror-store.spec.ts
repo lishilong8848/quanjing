@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, basename } from 'node:path';
 import { FeishuCardMirrorStore, MirrorStoreError, type MirrorClaim } from '../../server/common/feishu-card-copy/mirror.store';
@@ -187,5 +187,52 @@ describe('isolated readonly card delivery ledger', () => {
   it('does not silently recreate a missing ledger or clear a malformed one', async () => {
     await enroll('om_source'); rmSync(file); expect(()=>store.read()).toThrow(MirrorStoreError);
     writeFileSync(file,'not-json'); const before=readFileSync(file); await expect(enroll('om_other')).rejects.toThrow(MirrorStoreError); expect(readFileSync(file).equals(before)).toBe(true);
+  });
+  it('reuses only byte-verified validation and an isolated message index', async () => {
+    await enroll('om_source'); await store.complete((await store.claimNext(now))!, 'om_mirror1', now);
+    const restarted = new FeishuCardMirrorStore(file, identity), parse = jest.spyOn(JSON, 'parse');
+    try {
+      expect(restarted.isMirrorMessageId('om_mirror1')).toBe(true);
+      expect(parse).toHaveBeenCalledTimes(1); parse.mockClear();
+      const exposed = restarted.read(); exposed.groups[Object.keys(exposed.groups)[0]].messageId = 'om_not_committed';
+      expect(restarted.isMirrorMessageId('om_not_committed')).toBe(false);
+      expect(restarted.isMirrorMessageId('om_mirror1')).toBe(true);
+      expect(parse).not.toHaveBeenCalled();
+      const before = statSync(file), bytes = readFileSync(file, 'utf8');
+      writeFileSync(file, bytes.replace('om_mirror1', 'om_mirror2')); utimesSync(file, before.atime, before.mtime);
+      expect(statSync(file).size).toBe(before.size);
+      expect(restarted.isMirrorMessageId('om_mirror1')).toBe(false);
+      expect(restarted.isMirrorMessageId('om_mirror2')).toBe(true);
+      expect(parse).toHaveBeenCalledTimes(1);
+    } finally { parse.mockRestore(); }
+  });
+  it('rejects same-size same-mtime corruption after warming the validated cache', async () => {
+    await enroll('om_source'); const snapshot = store.read(), before = statSync(file);
+    const group = Object.values(snapshot.groups)[0], corrupted = readFileSync(file, 'utf8').replace(group.fingerprint, '0'.repeat(64));
+    writeFileSync(file, corrupted); utimesSync(file, before.atime, before.mtime);
+    expect(statSync(file).size).toBe(before.size);
+    expect(() => store.isMirrorMessageId('om_any')).toThrow(MirrorStoreError);
+    await expect(store.reserveUpdate('om_source')).rejects.toThrow(MirrorStoreError);
+    expect(readFileSync(file, 'utf8')).toBe(corrupted);
+  });
+  it('invalidates warmed caches across two writers without losing update ordering', async () => {
+    await enroll('om_source'); const second = new FeishuCardMirrorStore(file, identity); second.read(); store.read();
+    const [older, newer] = await Promise.all([store.reserveUpdate('om_source'), second.reserveUpdate('om_source')]);
+    expect(newer!.sequence).toBeGreaterThan(older!.sequence);
+    await second.applyUpdate('om_source', newer!, done('newer result'), now);
+    await store.applyUpdate('om_source', older!, done('older result'), now);
+    expect(JSON.stringify(store.getBySource('om_source')?.readonlyCard)).toContain('newer result');
+    expect(store.read().sources.om_source.reservations).toEqual({});
+  });
+  it('does not publish uncommitted cached state when the atomic rename fails', async () => {
+    await enroll('om_source'); const claim = (await store.claimNext(now))!, original = readFileSync(file);
+    const rename = jest.spyOn(require('node:fs'), 'renameSync').mockImplementationOnce(() => { throw new Error('synthetic rename failure'); });
+    try { await expect(store.complete(claim, 'om_uncommitted', now)).rejects.toThrow('synthetic rename failure'); }
+    finally { rename.mockRestore(); }
+    expect(readFileSync(file).equals(original)).toBe(true);
+    expect(store.isMirrorMessageId('om_uncommitted')).toBe(false);
+    expect(store.getBySource('om_source')?.claim?.token).toBe(claim.token);
+    await store.complete(claim, 'om_committed', now);
+    expect(store.isMirrorMessageId('om_committed')).toBe(true);
   });
 });

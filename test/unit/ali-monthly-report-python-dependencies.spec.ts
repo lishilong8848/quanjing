@@ -43,9 +43,6 @@ type ServiceInternals = {
   ) => Promise<void>;
   getRuntimeConfig: () => RuntimeConfigForTest;
   runReport: (...args: unknown[]) => Promise<GenerateResponseForTest>;
-  runLegacyGeneratedReport: (
-    ...args: unknown[]
-  ) => Promise<GenerateResponseForTest>;
   attachFeishuNotification: (
     runtime: RuntimeConfigForTest,
     response: GenerateResponseForTest,
@@ -353,7 +350,7 @@ describe('阿里月报 Python 依赖准备', () => {
     expect(attachNotification).not.toHaveBeenCalled();
   });
 
-  it('月度超功耗生成只检查专用依赖档位', async () => {
+  it('月度超功耗读取已有附件只检查核心依赖档位', async () => {
     const { service, internals } = createService();
     const response: GenerateResponseForTest = {
       success: true,
@@ -379,29 +376,7 @@ describe('阿里月报 Python 依赖准备', () => {
       month: 7,
     });
 
-    expect(ensureDependencies).toHaveBeenCalledWith(runtime, 'over_power');
-  });
-
-  it('月度超功耗继续使用旧版完整生成上传逻辑', async () => {
-    const { internals } = createService();
-    const response: GenerateResponseForTest = {
-      success: true,
-      reportType: 'over_power',
-      year: 2026,
-      month: 7,
-      message: '月度超功耗已生成并上传',
-      files: [],
-      logs: [],
-    };
-    const runLegacy = jest
-      .spyOn(internals, 'runLegacyGeneratedReport')
-      .mockResolvedValue(response);
-    const runPython = jest.spyOn(internals, 'runPython');
-
-    await internals.runReport('over_power', 2026, 7, runtime);
-
-    expect(runLegacy).toHaveBeenCalledWith('over_power', 2026, 7, runtime);
-    expect(runPython).not.toHaveBeenCalled();
+    expect(ensureDependencies).toHaveBeenCalledWith(runtime, 'core');
   });
 
   it('告警分析把核心生成器返回的多维表记录链接带到服务响应', async () => {
@@ -432,50 +407,7 @@ describe('阿里月报 Python 依赖准备', () => {
     ]);
   });
 
-  it('超功耗把旧版生成器返回的全部多维表记录链接带到服务响应', async () => {
-    const { internals } = createService();
-    jest.spyOn(internals, 'runPython').mockResolvedValue({
-      stdout: JSON.stringify({
-        success: true,
-        result: {
-          action: 'generated_over_power_updated',
-          message: '月度超功耗已生成并覆盖',
-          files: [],
-          updated: {
-            record_id: 'rec-one',
-            record_url:
-              'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-one',
-          },
-          updated_records: [
-            {
-              record_id: 'rec-one',
-              record_url:
-                'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-one',
-            },
-            {
-              record_id: 'rec-two',
-              record_url:
-                'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-two',
-            },
-          ],
-        },
-        logs: [],
-      }),
-      stderr: '',
-    });
 
-    const response = await internals.runLegacyGeneratedReport(
-      'over_power',
-      2026,
-      7,
-      runtime,
-    );
-
-    expect(response.bitableRecordUrls).toEqual([
-      'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-one',
-      'https://vnet.feishu.cn/base/base-token?table=power-table&recordId=rec-two',
-    ]);
-  });
 });
 
 describe('阿里月报 Python 依赖部署契约', () => {

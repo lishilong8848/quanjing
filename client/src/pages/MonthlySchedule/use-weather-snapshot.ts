@@ -248,32 +248,6 @@ export function createWeatherSnapshotRefreshCoordinator(
     }));
   };
 
-  const applyWeatherResults = (
-    run: WeatherRequestRun,
-    currentResult: PromiseSettledResult<QWeatherNow>,
-    hourlyResult: PromiseSettledResult<QWeatherHourly>,
-  ) => {
-    if (!isCurrentWeatherRun(run)) return;
-    if (weatherController === run.controller) weatherController = null;
-
-    const hasUsableCurrentWeather =
-      currentResult.status === 'fulfilled' &&
-      isUsableCurrentWeather(currentResult.value);
-    const hasUsableHourlyWeather =
-      hourlyResult.status === 'fulfilled' &&
-      isUsableHourlyWeather(hourlyResult.value);
-    const hasFailure = !hasUsableCurrentWeather || !hasUsableHourlyWeather;
-    update((current) => ({
-      ...current,
-      weather: hasUsableCurrentWeather ? currentResult.value : current.weather,
-      hourlyWeather: hasUsableHourlyWeather
-        ? hourlyResult.value
-        : current.hourlyWeather,
-      weatherStatus: hasFailure ? 'error' : 'ready',
-      weatherError: hasFailure ? WEATHER_REFRESH_ERROR_MESSAGE : null,
-    }));
-  };
-
   const refreshWarning = async () => {
     if (disposed) return;
     const run = beginWarningRequest();
@@ -284,11 +258,33 @@ export function createWeatherSnapshotRefreshCoordinator(
   const refreshCurrentAndHourly = async () => {
     if (disposed) return;
     const run = beginWeatherRequest();
-    const [currentResult, hourlyResult] = await Promise.allSettled([
-      run.current,
-      run.hourly,
+    const results = await Promise.allSettled([
+      run.current.then((weather) => {
+        if (!isUsableCurrentWeather(weather)) return false;
+        if (isCurrentWeatherRun(run)) {
+          update((current) => ({ ...current, weather }));
+        }
+        return true;
+      }),
+      run.hourly.then((hourlyWeather) => {
+        if (!isUsableHourlyWeather(hourlyWeather)) return false;
+        if (isCurrentWeatherRun(run)) {
+          update((current) => ({ ...current, hourlyWeather }));
+        }
+        return true;
+      }),
     ]);
-    applyWeatherResults(run, currentResult, hourlyResult);
+    if (!isCurrentWeatherRun(run)) return;
+    if (weatherController === run.controller) weatherController = null;
+
+    const hasFailure = results.some(
+      (result) => result.status === 'rejected' || !result.value,
+    );
+    update((current) => ({
+      ...current,
+      weatherStatus: hasFailure ? 'error' : 'ready',
+      weatherError: hasFailure ? WEATHER_REFRESH_ERROR_MESSAGE : null,
+    }));
   };
 
   const refreshAll = async () => {
@@ -299,18 +295,8 @@ export function createWeatherSnapshotRefreshCoordinator(
     if (disposed || started) return initialLoad || Promise.resolve();
     started = true;
 
-    const warningRun = beginWarningRequest();
-    const weatherRun = beginWeatherRequest();
-    initialLoad = Promise.allSettled([
-      warningRun.request,
-      weatherRun.current,
-      weatherRun.hourly,
-    ]).then(([warningResult, currentResult, hourlyResult]) => {
-      applyWarningResult(warningRun, warningResult);
-      applyWeatherResults(weatherRun, currentResult, hourlyResult);
-      if (!disposed) {
-        update((current) => ({ ...current, isInitialLoading: false }));
-      }
+    initialLoad = refreshAll().then(() => {
+      update((current) => ({ ...current, isInitialLoading: false }));
     });
 
     warningTimer = globalThis.setInterval(() => {

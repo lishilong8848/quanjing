@@ -38,7 +38,7 @@ import {
 } from './leave-workflow.card';
 import { LeaveWorkflowGateway } from './leave-workflow.gateway';
 import { LeaveWorkflowDetailGateway } from './leave-workflow.detail-gateway';
-import { originalPostSignature } from './leave-two-level-substitution';
+import { originalPostSignature, requiredOriginalPostGroups } from './leave-two-level-substitution';
 import {
   buildLeaveShiftCandidateSets,
   buildLeaveApprovalPlan,
@@ -473,8 +473,9 @@ export class LeaveWorkflowService {
       const choice = candidateSets.find((set) => set.shiftKey === group.shiftKey)?.twoLevelCandidates?.find((row) => row.person.personRecordId === selection?.substitutePersonRecordId);
       if (!selection || !choice) throw new BadRequestException('请为每个班次选择当前可用的替班人员');
       const result: LeaveShiftAssignmentSelection = { shiftKey: group.shiftKey, substitutePersonRecordId: choice.person.personRecordId };
-      if (choice.originalGroups.length) {
-        result.originalPostSignature = originalPostSignature(choice.originalGroups);
+      const requiredGroups = requiredOriginalPostGroups(choice.originalGroups);
+      if (requiredGroups.length) {
+        result.originalPostSignature = originalPostSignature(requiredGroups);
         if (selection.originalPostSignature === result.originalPostSignature && choice.backfillCandidates.some((person) => person.personRecordId === selection.backfillPersonRecordId)) result.backfillPersonRecordId = selection.backfillPersonRecordId;
       }
       return result;

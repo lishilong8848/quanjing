@@ -69,6 +69,7 @@ import {
   readLatestPersistedBitableRecordSnapshot,
   readBitableCacheScopeRevision,
   resolveBitableAppToken,
+  type PersistedBitableRecordSnapshot,
 } from '@server/common/feishu/bitable-direct-read';
 import {
   enrichScheduleRecordsWithLeaveApproval,
@@ -1540,6 +1541,15 @@ export class DutyScheduleService {
   private currentTaskId: string | null = null; // 同步锁，防止并发同步
   private readonly localScheduleSyncTasks = new DutyLocalSyncTasks();
   private readonly localMonthSnapshots = new DutyLocalMonthSnapshots();
+  private readonly preparedMonthlySchedules = new WeakMap<
+    PersistedBitableRecordSnapshot,
+    {
+      startDate: string;
+      endDate: string;
+      approval: LeaveApprovalSnapshot;
+      schedules: MonthlySchedule[];
+    }
+  >();
   private threeMonthLocalSyncPromise?: Promise<DutyLocalSyncResult>;
   private sealingSourceSnapshot:
     | {
@@ -6464,7 +6474,7 @@ export class DutyScheduleService {
           return;
         }
         const normalizedShift = normalizeShiftForFrontend(shiftText);
-        if (normalizedShift && normalizedShift !== 'white') {
+        if (normalizedShift && normalizedShift !== 'white' && normalizedShift !== 'long_white') {
           return;
         }
 
@@ -21405,6 +21415,16 @@ export class DutyScheduleService {
     }
 
     const approvalSnapshot = await readCachedLeaveApprovalSnapshot();
+    const prepared = this.preparedMonthlySchedules.get(snapshot);
+    if (
+      approvalSnapshot.verified &&
+      prepared?.approval === approvalSnapshot &&
+      prepared.startDate === startDate &&
+      prepared.endDate === endDate
+    ) {
+      return prepared.schedules;
+    }
+
     const monthlyRecords = snapshot.records.filter((record) => {
       const scheduleDate = this.extractScheduleDateFromFields(
         record.fields || {},
@@ -21435,6 +21455,14 @@ export class DutyScheduleService {
     this.logger.debug(
       `本地缓存读取月度排班: ${startDate} 到 ${endDate}, 共 ${schedules.length} 条`,
     );
+    if (approvalSnapshot.verified) {
+      this.preparedMonthlySchedules.set(snapshot, {
+        startDate,
+        endDate,
+        approval: approvalSnapshot,
+        schedules,
+      });
+    }
     return schedules;
   }
 

@@ -1,4 +1,4 @@
-import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
+import { BadGatewayException, ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
@@ -57,7 +57,7 @@ export class PurchaseComparisonCardAssetsStore {
       temporary = undefined;
       return imageKey;
     } catch (error) {
-      if (error instanceof ConflictException) throw error;
+      if (error instanceof ConflictException || error instanceof BadGatewayException) throw error;
       // External preparation failures are retried by the existing notification outbox.
       throw unavailable();
     } finally {

@@ -52,6 +52,21 @@ describe('readonly mirror orchestration without application or network', () => {
     await observeCardCallbackResult('leave', { messageId: 'om_history' }, { card: { type: 'raw', data: card } }); await engine.flush();
     expect(http.post).not.toHaveBeenCalled(); expect(Object.keys(store.read().groups)).toHaveLength(0);
   });
+  it('does not acquire mutation locks or reread authorization on an idle poll', async () => {
+    await engine.delivered(source('om_original1')); await engine.flush();
+    const targetValid = jest.fn(() => true), idle = new FeishuCardCopyEngine({ store, http, accessToken: async () => 'synthetic-token', targetValid, diagnostic: jest.fn(), now: () => new Date(startedAt) });
+    const fsync = jest.spyOn(require('node:fs'), 'fsyncSync');
+    try {
+      await idle.flush(); await idle.flush();
+      expect(targetValid).not.toHaveBeenCalled(); expect(fsync).not.toHaveBeenCalled();
+      expect(http.post).toHaveBeenCalledTimes(1);
+    } finally { fsync.mockRestore(); idle.stop(); }
+  });
+  it('checks revoked authorization before dispatch even after an idle poll', async () => {
+    await engine.flush(); await engine.delivered(source('om_original1')); valid = false; await engine.flush();
+    expect(http.post).not.toHaveBeenCalled();
+    valid = true; await engine.flush(); expect(http.post).toHaveBeenCalledTimes(1);
+  });
   it('updates the enrolled copy after legal callback response, including cross-domain gateways', async () => {
     await engine.delivered(source('om_original1')); await engine.flush();
     const final = { header: { title: { tag: 'plain_text', content: '审批通过' }, template: 'green' }, elements: [{ tag: 'div', text: { tag: 'plain_text', content: '已完成' } }] };

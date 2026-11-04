@@ -258,6 +258,7 @@ export function buildAliMonthlyReportFeishuText(options: {
 }
 
 export interface AliMonthlyReportManualSuccessCardInput {
+  reusedExisting?: boolean;
   year: number;
   month: number;
   reportTypeLabel: string;
@@ -347,7 +348,9 @@ export function buildAliMonthlyReportManualSuccessCard(
     `统计月份：${input.year}年${input.month}月`,
     `月报类型：${escapeAliMonthlyReportCardMarkdown(input.reportTypeLabel)}`,
     `文件名称：${escapeAliMonthlyReportCardMarkdown(input.fileName)}`,
-    '上传结果：已上传资料管理多维表',
+    input.reusedExisting
+      ? '获取结果：已读取已有多维表附件'
+      : '上传结果：已上传资料管理多维表',
     ...(input.completedAt
       ? [`完成时间：${escapeAliMonthlyReportCardMarkdown(input.completedAt)}`]
       : []),
@@ -362,7 +365,10 @@ export function buildAliMonthlyReportManualSuccessCard(
     },
     header: {
       template: 'green',
-      title: { tag: 'plain_text', content: '阿里月报上传成功' },
+      title: {
+        tag: 'plain_text',
+        content: input.reusedExisting ? '阿里月报获取成功' : '阿里月报上传成功',
+      },
     },
     body: {
       direction: 'vertical',
@@ -440,7 +446,7 @@ export function buildAliMonthlyReportAutomationCard(
     if (item.status === 'success') {
       elements.push({
         tag: 'markdown',
-        content: `✅ ${meta.label}｜已上传\n文件名称：${escapeAliMonthlyReportCardMarkdown(
+        content: `✅ ${meta.label}｜${item.type === 'over_power' ? '已获取' : '已上传'}\n文件名称：${escapeAliMonthlyReportCardMarkdown(
           item.fileName,
         )}`,
       });
@@ -456,7 +462,7 @@ export function buildAliMonthlyReportAutomationCard(
     elements.push({
       tag: 'markdown',
       content: [
-        `❌ ${meta.label}｜${allFailed ? '执行失败' : '上传失败'}`,
+        `❌ ${meta.label}｜${item.type === 'over_power' ? '获取失败' : allFailed ? '执行失败' : '上传失败'}`,
         ...(item.failureStage
           ? [
               `失败阶段：${escapeAliMonthlyReportCardMarkdown(
@@ -560,7 +566,7 @@ function formatAliMonthlyReportDuration(durationMs: number): string {
   )}秒`;
 }
 
-function assertAliMonthlyReportBitableRecordUrl(value: string): string {
+export function assertAliMonthlyReportBitableRecordUrl(value: string): string {
   if (typeof value !== 'string' || hasAsciiControlCharacters(value)) {
     throw new Error('阿里月报多维表记录地址必须是安全的飞书 HTTPS 地址');
   }

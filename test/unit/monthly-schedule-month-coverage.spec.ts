@@ -30,10 +30,13 @@ function expectRequestedMonths(calls: number[][], expected: number[][]): void {
 }
 
 // Execute the actual page callback, including cache selection and request generations.
-function pageLoader(businessDateKey = '2026-10-15', gate?: Promise<void>) {
+function pageLoader(
+  businessDateKey = '2026-10-15',
+  gate?: Promise<void> | ((year: number, month: number) => Promise<void> | undefined),
+) {
   const read = jest.fn(
     async (year: number, month: number): Promise<MonthlyScheduleResponse> => {
-      await gate;
+      await (typeof gate === 'function' ? gate(year, month) : gate);
       return {
         schedules: [
           {
@@ -68,6 +71,8 @@ function pageLoader(businessDateKey = '2026-10-15', gate?: Promise<void>) {
   const context = {
     useCallback: (callback: unknown) => callback,
     access: { isLoading: false },
+    canReadMonthlySchedule: true,
+    isScreenshotMode: false,
     businessDateKey,
     selectedDate: new Date(2026, 9, 15),
     getAdjacentScheduleMonthDateKeys,
@@ -77,6 +82,7 @@ function pageLoader(businessDateKey = '2026-10-15', gate?: Promise<void>) {
     setSchedules: jest.fn(),
     scheduleLoadSeqRef: { current: 0 },
     monthlyScheduleCache: scope.cache,
+    monthlyScheduleReadInFlight: scope.inFlight,
     scheduleReadScope: scope,
     activeScheduleReadScopeRef: { current: scope },
     scheduleMonthRequestGenerationRef: { current: new Map<string, number>() },
@@ -89,8 +95,17 @@ function pageLoader(businessDateKey = '2026-10-15', gate?: Promise<void>) {
   };
   const start = pageSource.indexOf('  const loadSchedules = useCallback(');
   const end = pageSource.indexOf('  const loadSchedulesRef =', start);
+  const invalidateStart = pageSource.indexOf('  const invalidateScheduleLoads =', end);
+  const invalidateEnd = pageSource.indexOf('  const revalidateLocalScheduleSnapshot =', invalidateStart);
+  const windowStart = pageSource.indexOf('function getScheduleWindowMonths(');
+  const windowEnd = pageSource.indexOf('\nfunction ', windowStart + 1);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
+  expect(invalidateStart).toBeGreaterThan(end);
+  expect(invalidateEnd).toBeGreaterThan(invalidateStart);
+  expect(windowStart).toBeGreaterThan(-1);
+  expect(windowEnd).toBeGreaterThan(windowStart);
+  const windowSource = pageSource.slice(windowStart, windowEnd);
   const constants = ['LOCAL_DATA_CACHE_TTL_MS', 'MONTHLY_SCHEDULE_CACHE_TTL_MS']
     .map((name) => {
       const match = pageSource.match(new RegExp(`const ${name} = [^;]+;`));
@@ -99,7 +114,7 @@ function pageLoader(businessDateKey = '2026-10-15', gate?: Promise<void>) {
     })
     .join('\n');
   const compiled = transpileModule(
-    `${constants}\n${pageSource.slice(start, end)}\nloadSchedules;`,
+    `${constants}\n${windowSource}\n${pageSource.slice(start, end)}\nloadSchedules;`,
     {
       compilerOptions: {
         module: ModuleKind.CommonJS,
@@ -109,9 +124,29 @@ function pageLoader(businessDateKey = '2026-10-15', gate?: Promise<void>) {
   ).outputText;
   const load = runInNewContext(compiled, context) as (options?: {
     additionalDateKeys?: string[];
+    preserveExistingOnError?: boolean;
+    signal?: AbortSignal;
   }) => Promise<boolean>;
-  return { context, load, read, scope };
+  const initialStateStart = pageSource.indexOf('  const [schedules, setSchedules] =');
+  const initialStateEnd = pageSource.indexOf('  const selfServiceMonth =', initialStateStart);
+  expect(initialStateStart).toBeGreaterThan(-1);
+  expect(initialStateEnd).toBeGreaterThan(initialStateStart);
+  const initialState = transpileModule(
+    `${windowSource}\n${pageSource.slice(initialStateStart, initialStateEnd)}\nschedules;`,
+    { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } },
+  ).outputText;
+  const readInitialSchedules = () => runInNewContext(initialState, {
+    ...context,
+    useState: (initial: () => unknown) => [initial()],
+  }) as MonthlyScheduleResponse['schedules'];
+  const invalidate = runInNewContext(
+    `${pageSource.slice(invalidateStart, invalidateEnd)}\ninvalidateScheduleLoads;`,
+    context,
+  ) as (discardInFlight?: boolean) => void;
+  return { context, load, read, scope, readInitialSchedules, invalidate };
 }
+
+const flushReadyReads = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe('fixed three-month schedule coverage', () => {
   it.each([
@@ -314,6 +349,128 @@ describe('fixed three-month schedule coverage', () => {
     expect(await first).toBe(false);
     expect(await second).toBe(true);
     expect(read).toHaveBeenCalledTimes(3);
+  });
+
+  it('displays the selected month before slow additional months finish, while waiting for the full window to report ready', async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((resolve) => { release = resolve; });
+    const { context, load, read, scope } = pageLoader(
+      '2026-10-15',
+      (_year, month) => month === 10 ? undefined : slow,
+    );
+    const finished = jest.fn();
+    const pending = load().then(finished);
+    expect(read.mock.calls[0]).toEqual([2026, 10]);
+    const october = await scope.read(2026, 10);
+    await flushReadyReads();
+    expect(context.setSchedules).toHaveBeenLastCalledWith(october.schedules);
+    expect(context.setLoading).toHaveBeenLastCalledWith(false);
+    expect(context.setScreenshotSectionState).toHaveBeenLastCalledWith('schedules', 'loading');
+    expect(finished).not.toHaveBeenCalled();
+    release();
+    await pending;
+    expect(finished).toHaveBeenCalledWith(true);
+    expect(context.setScreenshotSectionState).toHaveBeenLastCalledWith('schedules', 'ready');
+  });
+
+  it.each(['screenshot', 'snapshot recovery'] as const)(
+    'keeps %s waiting for the complete window',
+    async (mode) => {
+      let release!: () => void;
+      const slow = new Promise<void>((resolve) => { release = resolve; });
+      const { context, load, scope } = pageLoader(
+        '2026-10-15',
+        (_year, month) => month === 10 ? undefined : slow,
+      );
+      context.isScreenshotMode = mode === 'screenshot';
+      const pending = load({ preserveExistingOnError: mode === 'snapshot recovery' });
+      await scope.read(2026, 10);
+      await flushReadyReads();
+      expect(context.setSchedules).not.toHaveBeenCalled();
+      expect(context.setScreenshotSectionState).toHaveBeenLastCalledWith('schedules', 'loading');
+      release();
+      await expect(pending).resolves.toBe(true);
+      expect(context.setSchedules).toHaveBeenCalledTimes(1);
+      expect(context.setScreenshotSectionState).toHaveBeenLastCalledWith('schedules', 'ready');
+    },
+  );
+
+  it.each([false, true])(
+    'handles a missing additional month with preserveExistingOnError=%s',
+    async (preserveExistingOnError) => {
+      let reject!: (error: Error) => void;
+      const slow = new Promise<void>((_resolve, fail) => { reject = fail; });
+      const { context, load, scope } = pageLoader(
+        '2026-10-15',
+        (_year, month) => month === 9 ? slow : undefined,
+      );
+      const pending = load({ preserveExistingOnError });
+      const october = await scope.read(2026, 10);
+      await flushReadyReads();
+      reject(new Error('synthetic additional month unavailable'));
+      await expect(pending).resolves.toBe(false);
+      if (preserveExistingOnError) {
+        expect(context.setSchedules).not.toHaveBeenCalled();
+      } else {
+        expect(context.setSchedules).toHaveBeenLastCalledWith(
+          expect.arrayContaining(october.schedules),
+        );
+        expect(context.setLoading).toHaveBeenLastCalledWith(false);
+      }
+      expect(context.setScreenshotSectionState).toHaveBeenLastCalledWith('schedules', 'error');
+    },
+  );
+
+  it('does not publish late additional months after navigation aborts the original view', async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((resolve) => { release = resolve; });
+    const { context, load, scope } = pageLoader(
+      '2026-10-15',
+      (_year, month) => month === 10 ? undefined : slow,
+    );
+    const navigation = new AbortController();
+    const pending = load({ signal: navigation.signal });
+    await scope.read(2026, 10);
+    await flushReadyReads();
+    navigation.abort();
+    context.setSchedules.mockClear();
+    release();
+    await expect(pending).resolves.toBe(false);
+    expect(context.setSchedules).not.toHaveBeenCalled();
+    expect([...scope.cache.keys()]).toEqual(['2026-10']);
+    expect(context.setScreenshotSectionState).toHaveBeenLastCalledWith('schedules', 'loading');
+  });
+
+  it('reads the warm window during initial state and respects pending or denied access', async () => {
+    const { context, load, read, readInitialSchedules } = pageLoader();
+    await expect(load()).resolves.toBe(true);
+    expect(readInitialSchedules().map(({ recordId }) => recordId)).toEqual([
+      'synthetic-2026-10', 'synthetic-2026-9', 'synthetic-2026-11',
+    ]);
+    context.access.isLoading = true;
+    expect(readInitialSchedules()).toEqual([]);
+    context.access.isLoading = false;
+    context.canReadMonthlySchedule = false;
+    expect(readInitialSchedules()).toEqual([]);
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
+  it('joins still-pending same-scope reads on reentry while a real refresh rejects obsolete results', async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((resolve) => { release = resolve; });
+    const { context, load, read, invalidate } = pageLoader('2026-10-15', slow);
+    const previous = load();
+    invalidate(false);
+    const reopened = load();
+    expect(read).toHaveBeenCalledTimes(3);
+    invalidate();
+    const authoritative = load();
+    expect(read).toHaveBeenCalledTimes(6);
+    release();
+    await expect(previous).resolves.toBe(false);
+    await expect(reopened).resolves.toBe(false);
+    await expect(authoritative).resolves.toBe(true);
+    expect(context.setScreenshotSectionState).toHaveBeenLastCalledWith('schedules', 'ready');
   });
 });
 

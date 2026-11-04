@@ -75,6 +75,7 @@ jest.mock(
     ),
     invalidateBitableRecordCache: jest.fn(),
     readLatestPersistedBitableRecordSnapshot: jest.fn(),
+    readBitableCacheScopeRevision: jest.fn(async () => null),
     normalizeBuildingForFrontend: jest.fn((value: string) =>
       String(value || '').includes('110') ? 'station_110' : value,
     ),
@@ -221,6 +222,42 @@ describe('DutyScheduleService construction crew ledger views', () => {
     expect(service.fetchFeishuScheduleRecords).toHaveBeenCalledWith(true, true, undefined, {
       startDate: '2026-10-24', endDate: '2026-10-27',
     });
+  });
+
+  it('reuses prepared monthly rows only for the same verified input snapshots', async () => {
+    const approvalSource = require('../../server/common/feishu/leave-approval-source');
+    const approval = { verified: true, requests: [] };
+    const approvalRead = jest.spyOn(approvalSource, 'readCachedLeaveApprovalSnapshot').mockResolvedValue(approval);
+    const service = createServiceWithAxios({});
+    const month = { records: [{ record_id: 'rec_schedule', fields: {} }] };
+    const monthRead = jest.spyOn(service.localMonthSnapshots, 'readPreferredMonth').mockResolvedValue(month);
+    service.extractScheduleDateFromFields = jest.fn(() => '2026-11-03');
+    service.mapFeishuScheduleRecord = jest.fn(() => ({
+      scheduleDate: '2026-11-03',
+      building: 'building_h',
+    }));
+    const load = () => service.getMonthlySchedules(2026, 11);
+    try {
+      const first = await load();
+      expect(first).toHaveLength(1);
+      expect(await load()).toEqual(first);
+      expect(service.mapFeishuScheduleRecord).toHaveBeenCalledTimes(1);
+
+      approvalRead.mockResolvedValue({ ...approval });
+      await load();
+      expect(service.mapFeishuScheduleRecord).toHaveBeenCalledTimes(2);
+
+      monthRead.mockResolvedValue({ ...month });
+      await load();
+      expect(service.mapFeishuScheduleRecord).toHaveBeenCalledTimes(3);
+
+      approvalRead.mockResolvedValue({ verified: false, requests: [] });
+      await load();
+      await load();
+      expect(service.mapFeishuScheduleRecord).toHaveBeenCalledTimes(5);
+    } finally {
+      approvalRead.mockRestore();
+    }
   });
 
   it('sends conservative Shanghai date filters to Base and still forces fresh approval validation', async () => {

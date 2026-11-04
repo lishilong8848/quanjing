@@ -13,6 +13,79 @@ describe('three-month publication with complete historical retention', () => {
     expect(dutyThreeMonthRange(new Date('2025-12-31T16:00:00Z'))).toEqual({ months: ['2025-12', '2026-01', '2026-02'], startDate: '2025-12-01', endDate: '2026-02-28' });
     expect(dutyThreeMonthRange(new Date('2024-01-31T16:00:00Z')).endDate).toBe('2024-03-31');
   });
+  it('shares one disk read and one immutable preferred result across cold and warm requests', async () => {
+    const range = dutyThreeMonthRange(new Date('2026-10-10'));
+    const original = row('old', '2026-10-01');
+    await store.publish('app', 'table', range, [original], 100, 'first', dateOf);
+    const reader = new DutyLocalMonthSnapshots(folder);
+    const diskRead = jest.spyOn(require('node:fs/promises') as typeof files, 'readFile');
+    const read = () => reader.readPreferredMonth('app', 'table', '2026-10', null, 'first');
+    const [first, second, third] = await Promise.all([read(), read(), read()]);
+    expect(first?.records).toEqual([original]);
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    expect(await read()).toBe(first);
+    expect(diskRead).toHaveBeenCalledTimes(1);
+    expect(Object.isFrozen(first?.records[0].fields)).toBe(true);
+
+    const mutableCopy = await reader.readMonth('app', 'table', '2026-10');
+    mutableCopy!.records[0].fields!.date = '2026-10-31';
+    expect((await read())?.records).toEqual([original]);
+    expect(await reader.readPreferredMonth('app', 'table', '2026-10', null, 'changed')).toBeNull();
+
+    await reader.publish('app', 'table', range, [row('new', '2026-10-02')], 200, 'first', dateOf);
+    const fresh = await read();
+    expect(fresh).not.toBe(first);
+    expect(fresh?.records).toEqual([row('new', '2026-10-02')]);
+    expect(first?.records).toEqual([original]);
+  });
+
+  it.each(['replacement', 'in-place update'])('reloads a same-size %s with identical modified time', async (mode) => {
+    const range = dutyThreeMonthRange(new Date('2026-10-10'));
+    await store.publish('app', 'table', range, [row('old', '2026-10-01')], 100, null, dateOf);
+    const [name] = await files.readdir(folder);
+    const file = join(folder, name);
+    const fixedTime = new Date('2026-10-10T00:00:00Z');
+    await files.utimes(file, fixedTime, fixedTime);
+    const before = await files.stat(file, { bigint: true });
+    const first = await store.readPreferredMonth('app', 'table', '2026-10', null, null);
+    const bytes = (await files.readFile(file, 'utf8')).replaceAll('"old"', '"new"');
+    const updatePath = mode === 'replacement' ? file + '.replacement' : file;
+    await files.writeFile(updatePath, bytes);
+    await files.utimes(updatePath, fixedTime, fixedTime);
+    if (mode === 'replacement') await files.rename(updatePath, file);
+    const after = await files.stat(file, { bigint: true });
+    expect(after.size).toBe(before.size);
+    expect(after.mtimeNs).toBe(before.mtimeNs);
+    if (mode === 'in-place update') expect(after.ino).toBe(before.ino);
+
+    const latest = await store.readPreferredMonth('app', 'table', '2026-10', null, null);
+    expect(latest).not.toBe(first);
+    expect(latest?.records).toEqual([row('new', '2026-10-01')]);
+    expect(await store.readPreferredMonth('app', 'table', '2026-10', null, null)).toBe(latest);
+  });
+
+  it('retries with the new file when another publisher replaces it during a cold read', async () => {
+    const range = dutyThreeMonthRange(new Date('2026-10-10'));
+    await store.publish('app', 'table', range, [row('old', '2026-10-01')], 100, null, dateOf);
+    const [name] = await files.readdir(folder);
+    const file = join(folder, name);
+    const oldBytes = await files.readFile(file, 'utf8');
+    const reader = new DutyLocalMonthSnapshots(folder);
+    const realRead = files.readFile;
+    const interceptedRead: typeof files.readFile = (async (...args: Parameters<typeof files.readFile>) => {
+      const data = await realRead(...args);
+      const replacement = file + '.replacement';
+      await files.writeFile(replacement, oldBytes.replaceAll('"old"', '"new"'));
+      await files.rename(replacement, file);
+      return data;
+    }) as typeof files.readFile;
+    jest.spyOn(require('node:fs/promises') as typeof files, 'readFile').mockImplementationOnce(interceptedRead);
+
+    const first = await reader.readPreferredMonth('app', 'table', '2026-10', null, null);
+    expect(first?.records).toEqual([row('new', '2026-10-01')]);
+    expect(await reader.readPreferredMonth('app', 'table', '2026-10', null, null)).toBe(first);
+  });
   it('updates only the chosen three months, preserving both older month publications and full-table bytes', async () => {
     const full = join(folder, 'full-table-history.fixture'), original = 'synthetic full history untouched'; await files.writeFile(full, original);
     await store.publish('app', 'table', dutyThreeMonthRange(new Date('2026-09-10')), [row('old', '2026-08-10'), row('deleted', '2026-09-01'), row('moved', '2026-09-02')], 100, null, dateOf);

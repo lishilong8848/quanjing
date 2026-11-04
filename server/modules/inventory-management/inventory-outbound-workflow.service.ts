@@ -207,6 +207,8 @@ export class InventoryOutboundWorkflowService
   >();
   private readonly inFlightPendingTasks = new Map<string, Promise<void>>();
   private readonly inFlightUncertainTasks = new Map<string, Promise<void>>();
+  private readonly uncertainRecoveryBackoff = new Map<string, { delayMs: number; nextAt: number }>();
+  private readonly uncertainRecoveryWarnings = new Map<string, { message: string; loggedAt: number }>();
   private readonly inFlightUnregisteredRecoveries = new Map<
     string,
     Promise<void>
@@ -223,6 +225,7 @@ export class InventoryOutboundWorkflowService
   private readonly preflightOperationTimeoutMs: number;
   private readonly writeOperationTimeoutMs: number;
   private recoveryScanDelayMs: number;
+  private pendingRecoveryCount = 0;
   private recoveryScanTimer: ReturnType<typeof setTimeout> | null = null;
   private recoveryScanExecution: Promise<void> | null = null;
   private recoveryStopped = false;
@@ -374,30 +377,63 @@ export class InventoryOutboundWorkflowService
         this.schedulePendingTask(entry.task.id);
       }
     }
-    for (const entry of uncertainTasks) {
-      this.scheduleUncertainTask(entry);
+    this.pendingRecoveryCount = pendingTasks.length;
+    let scheduledUncertain = 0;
+    const uncertainIds = new Set(uncertainTasks.map(entry => entry.task.id));
+    for (const taskId of this.uncertainRecoveryBackoff.keys()) {
+      if (!uncertainIds.has(taskId) && !this.inFlightUncertainTasks.has(taskId)) {
+        this.uncertainRecoveryBackoff.delete(taskId);
+        this.uncertainRecoveryWarnings.delete(taskId);
+      }
     }
-    return pendingTasks.length + uncertainTasks.length;
+    for (const entry of uncertainTasks) {
+      if (this.scheduleUncertainTask(entry)) scheduledUncertain++;
+    }
+    return pendingTasks.length + scheduledUncertain;
   }
 
-  private scheduleUncertainTask(entry: InventoryOutboundTaskLedgerEntry): void {
+  private scheduleUncertainTask(entry: InventoryOutboundTaskLedgerEntry): boolean {
     const taskId = entry.task.id;
-    if (this.recoveryStopped || this.inFlightUncertainTasks.has(taskId)) return;
+    if (this.recoveryStopped || this.inFlightUncertainTasks.has(taskId) ||
+      (this.uncertainRecoveryBackoff.get(taskId)?.nextAt || 0) > Date.now()) return false;
+    const defer = () => {
+      const prior = this.uncertainRecoveryBackoff.get(taskId);
+      const delayMs = Math.min((prior?.delayMs || this.recoveryScanInitialDelayMs) * 2, this.recoveryScanMaximumDelayMs);
+      this.uncertainRecoveryBackoff.set(taskId, { delayMs, nextAt: Date.now() + delayMs });
+    };
     const execution = this.reconcileUncertainTask(entry)
-      .then(() => undefined)
-      .catch((error) => {
-        this.logger.error(
-          `出库不确定任务后台对账失败，将继续定时重试: task=${taskId}, message=${safeErrorMessage(error)}`,
-        );
+      .then(result => {
+        if (result.task.status === 'uncertain') defer();
+        else {
+          this.uncertainRecoveryBackoff.delete(taskId);
+          this.uncertainRecoveryWarnings.delete(taskId);
+        }
+      })
+      .catch(error => {
+        defer();
+        this.logUncertainRecoveryFailure(taskId, error);
       })
       .finally(() => {
         this.inFlightUncertainTasks.delete(taskId);
       });
     this.inFlightUncertainTasks.set(taskId, execution);
+    return true;
+  }
+
+  private logUncertainRecoveryFailure(taskId: string, error: unknown): void {
+    const message = safeErrorMessage(error), now = Date.now();
+    const previous = this.uncertainRecoveryWarnings.get(taskId);
+    if (previous?.message === message && now - previous.loggedAt < 60_000) return;
+    this.uncertainRecoveryWarnings.set(taskId, { message, loggedAt: now });
+    if (this.uncertainRecoveryWarnings.size > 1_024) this.uncertainRecoveryWarnings.delete(this.uncertainRecoveryWarnings.keys().next().value!);
+    this.logger.error(`出库任务原编号对账暂未确认，将退避重试: task=${taskId}, message=${message}`);
   }
 
   private scheduleRecoveryScan(): void {
     if (this.recoveryStopped || this.recoveryScanTimer) return;
+    const retryTimes = this.pendingRecoveryCount === 0 ? [...this.uncertainRecoveryBackoff.entries()]
+      .filter(([taskId]) => !this.inFlightUncertainTasks.has(taskId)).map(([, value]) => value.nextAt) : [];
+    const delayMs = retryTimes.length ? Math.max(1, Math.min(...retryTimes) - Date.now()) : this.recoveryScanDelayMs;
     this.recoveryScanTimer = setTimeout(() => {
       this.recoveryScanTimer = null;
       if (this.recoveryStopped) return;
@@ -408,7 +444,7 @@ export class InventoryOutboundWorkflowService
           this.recoveryScanExecution = null;
         }
       });
-    }, this.recoveryScanDelayMs);
+    }, delayMs);
     this.recoveryScanTimer.unref?.();
   }
 
@@ -1305,9 +1341,7 @@ export class InventoryOutboundWorkflowService
           )
         : await reconcileRecord();
     } catch (error) {
-      this.logger.error(
-        `出库任务原编号对账暂未确认: task=${entry.task.id}, message=${safeErrorMessage(error)}`,
-      );
+      this.logUncertainRecoveryFailure(entry.task.id, error);
       if (!isRetryableReconciliationReadError(error)) throw error;
       return (await this.taskLedger.findByTaskId(entry.task.id)) || entry;
     }

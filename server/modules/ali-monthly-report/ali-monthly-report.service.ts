@@ -31,6 +31,7 @@ import type {
 import { readEnv } from '@server/common/config/external-services.config';
 import { readPublicApplicationUrl } from '@server/common/config/public-application-url';
 import {
+  assertAliMonthlyReportBitableRecordUrl,
   buildAliMonthlyReportAutomationCard,
   buildAliMonthlyReportFeishuText,
   buildAliMonthlyReportManualSuccessCard,
@@ -215,90 +216,6 @@ finally:
         app.cleanup_runtime_cache(external_log=add_log)
     except Exception as cleanup_exc:
         add_log(f"清理临时文件失败: {cleanup_exc}", "warning")
-
-print(json.dumps(payload, ensure_ascii=False, default=str))
-`;
-
-const LEGACY_GENERATE_BRIDGE_SCRIPT = String.raw`
-import json
-import os
-import sys
-import traceback
-
-import app
-
-logs = []
-
-
-def add_log(message, level="info"):
-    logs.append(f"[{level}] {message}")
-
-
-def apply_env(config):
-    env_map = {
-        "download_folder": "DOWNLOAD_FOLDER",
-        "feishu_app_id": "FEISHU_APP_ID",
-        "feishu_app_secret": "FEISHU_APP_SECRET",
-        "feishu_app_token": "FEISHU_APP_TOKEN",
-        "ali_power_alert_config_path": "ALI_POWER_ALERT_CONFIG_PATH",
-    }
-    for key, env_name in env_map.items():
-        value = os.environ.get(env_name, "").strip()
-        if value:
-            config[key] = value
-    return config
-
-
-_original_load_power_alert_config = app.load_power_alert_config
-app.DEFAULT_ALI_POWER_TEMPLATE_PATH = ""
-
-
-def load_power_alert_config_without_missing_template(config):
-    power_config = _original_load_power_alert_config(config)
-    template_path = str(power_config.get("template_path", "")).strip()
-    if template_path:
-        try:
-            app.resolve_runtime_path(template_path)
-        except Exception:
-            add_log("Power report template is missing; generating with a new workbook.", "warning")
-            power_config["template_path"] = ""
-    return power_config
-
-
-app.load_power_alert_config = load_power_alert_config_without_missing_template
-
-
-try:
-    report_type = sys.argv[1].strip()
-    year = sys.argv[2].strip()
-    month_number = int(sys.argv[3])
-    config = apply_env(app.load_config())
-    result = app.generate_ali_monthly_report(
-        report_type,
-        year,
-        month_number,
-        config,
-        force_new_record=False,
-        external_log=add_log,
-    )
-    payload = {
-        "success": True,
-        "result": result,
-        "logs": logs[-200:],
-    }
-except Exception as exc:
-    add_log(str(exc), "error")
-    add_log(traceback.format_exc(), "error")
-    payload = {
-        "success": False,
-        "error": str(exc),
-        "logs": logs[-200:],
-    }
-finally:
-    try:
-        app.cleanup_runtime_cache(external_log=add_log)
-    except Exception as cleanup_exc:
-        add_log(f"cleanup failed: {cleanup_exc}", "warning")
 
 print(json.dumps(payload, ensure_ascii=False, default=str))
 `;
@@ -537,7 +454,8 @@ export class AliMonthlyReportService {
         return {
           type: task.reportType,
           status: 'failed' as const,
-          failureStage: '生成或上传',
+          failureStage:
+            task.reportType === 'over_power' ? '读取已有附件' : '生成或上传',
           failureReason: task.error || '任务尚未完成',
         };
       }),
@@ -813,9 +731,6 @@ export class AliMonthlyReportService {
     month: number,
     runtime: RuntimeConfig,
   ): Promise<AliMonthlyReportGenerateResponse> {
-    if (reportType === 'over_power') {
-      return this.runLegacyGeneratedReport(reportType, year, month, runtime);
-    }
     if (reportType === 'four_item_bundle') {
       return this.runFourItemBundle(year, month, runtime);
     }
@@ -841,6 +756,15 @@ export class AliMonthlyReportService {
     const { stdout, stderr } = await this.runPython(args, runtime.values);
     const result = this.parseRunnerResult(stdout);
     const files = await this.normalizeGeneratedFiles(result.files || []);
+    const bitableRecordUrls = this.collectBitableRecordUrls(result);
+    if (reportType === 'over_power') {
+      if (result.action !== 'downloaded_existing_attachment' || !files.length) {
+        throw new Error('未取得对应月份的超功耗附件，不会自动生成或上传');
+      }
+      if (!bitableRecordUrls.length) {
+        throw new Error('未返回已有超功耗附件的多维表记录链接');
+      }
+    }
     const logs = [
       ...this.buildLogs(result, stderr),
       ...this.buildBitableUploadLogs(result),
@@ -855,7 +779,7 @@ export class AliMonthlyReportService {
       message: result.message || '阿里月报生成完成',
       files,
       logs,
-      bitableRecordUrls: this.collectBitableRecordUrls(result),
+      bitableRecordUrls,
     };
   }
 
@@ -940,69 +864,6 @@ export class AliMonthlyReportService {
     };
   }
 
-  private async runLegacyGeneratedReport(
-    reportType: AliMonthlyReportType,
-    year: number,
-    month: number,
-    runtime: RuntimeConfig,
-  ): Promise<AliMonthlyReportGenerateResponse> {
-    const emailAppDir = this.resolveEmailAppDir();
-    if (!existsSync(join(emailAppDir, 'app.py'))) {
-      throw new Error(
-        `阿里月报上传逻辑不存在: ${this.getPathLabel(emailAppDir)}`,
-      );
-    }
-
-    await mkdir(runtime.downloadFolder, { recursive: true });
-    const { stdout, stderr } = await this.runPython(
-      [
-        '-c',
-        LEGACY_GENERATE_BRIDGE_SCRIPT,
-        reportType,
-        String(year),
-        String(month),
-      ],
-      runtime.values,
-      {
-        cwd: emailAppDir,
-        timeoutMs: GENERATE_TIMEOUT_MS,
-        timeoutMessage: '阿里月报生成并上传超时',
-      },
-    );
-    const bridgeResult = this.parseRunnerResult(stdout) as RunnerResult & {
-      success?: boolean;
-      error?: string;
-      result?: RunnerResult;
-      logs?: string[];
-    };
-
-    if (bridgeResult.success === false) {
-      throw new Error(bridgeResult.error || '阿里月报生成并上传失败');
-    }
-
-    const result = (bridgeResult.result || {}) as RunnerResult;
-    const files = await this.normalizeGeneratedFiles(result.files || []);
-    const logs = [
-      ...(Array.isArray(bridgeResult.logs)
-        ? bridgeResult.logs.map(String)
-        : []),
-      ...this.buildBitableUploadLogs(result),
-      stderr.trim(),
-    ].filter(Boolean);
-
-    return {
-      success: true,
-      reportType,
-      year,
-      month,
-      action: result.action,
-      message: result.message || '阿里月报生成并上传完成',
-      files,
-      logs: logs.length ? logs : ['阿里月报生成并上传完成'],
-      bitableRecordUrls: this.collectBitableRecordUrls(result),
-    };
-  }
-
   private collectBitableRecordUrls(result: RunnerResult): string[] {
     const urls: string[] = [];
     const seen = new Set<string>();
@@ -1027,6 +888,9 @@ export class AliMonthlyReportService {
         ) {
           return;
         }
+        if (result.action === 'downloaded_existing_attachment') {
+          assertAliMonthlyReportBitableRecordUrl(normalizedUrl);
+        }
       } catch {
         return;
       }
@@ -1034,6 +898,12 @@ export class AliMonthlyReportService {
       urls.push(normalizedUrl);
     };
 
+    if (result.action === 'downloaded_existing_attachment') {
+      if (Array.isArray(result.reused_records)) {
+        result.reused_records.forEach(appendRecordUrl);
+      }
+      return urls;
+    }
     appendRecordUrl(result.uploaded);
     appendRecordUrl(result.updated);
     if (Array.isArray(result.updated_records)) {
@@ -1060,9 +930,6 @@ export class AliMonthlyReportService {
   private getPythonDependencyProfile(
     reportType: AliMonthlyReportType,
   ): PythonDependencyProfile {
-    if (reportType === 'over_power') {
-      return 'over_power';
-    }
     return reportType === 'four_item_bundle' ? 'over_power' : 'core';
   }
 
@@ -1340,6 +1207,9 @@ export class AliMonthlyReportService {
             fileName: generatedFileName,
             recordUrl: recordUrls[0],
             completedAt: this.formatShanghaiDateTime(new Date()),
+            reusedExisting:
+              response.reportType === 'over_power' &&
+              response.action === 'downloaded_existing_attachment',
           }),
         );
       } else {

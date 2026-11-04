@@ -57,6 +57,7 @@ import type {
 } from '@shared/purchase-application.interface';
 
 import { ManagementHeader } from './ManagementHeader';
+import { ComparisonNoticeRecovery } from './ComparisonNoticeRecovery';
 import { PurchaseApplicationDialog } from './PurchaseApplicationDialog';
 import { PurchaseRecordEditDialog } from './PurchaseAnomalyEditDialog';
 import { PurchaseCompletionAnalysisDialog } from './PurchaseCompletionAnalysisDialog';
@@ -881,7 +882,9 @@ export default function PurchaseOverviewPage() {
         onSearchChange={setSearchQuery}
         onRefresh={canForceRefresh ? requestForceRefresh : undefined}
         actions={
-          canCreateApplication ? (
+          <>
+          {principal.role === 'admin' && <ComparisonNoticeRecovery key={principalKey} />}
+          {canCreateApplication ? (
             <Button
               type="button"
               onClick={() => setApplicationDialogOpen(true)}
@@ -890,7 +893,8 @@ export default function PurchaseOverviewPage() {
               <ClipboardPlus className="h-4 w-4" />
               新建采购申请
             </Button>
-          ) : null
+          ) : null}
+          </>
         }
       />
 

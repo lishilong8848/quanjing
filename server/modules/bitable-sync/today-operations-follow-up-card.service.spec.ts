@@ -153,7 +153,7 @@ describe('TodayOperationsFollowUpCardService', () => {
     expect(gateway.updateFollowUp).not.toHaveBeenCalled();
   });
 
-  it('returns only a toast for navigation and patches the fresh form without writing a business record', async () => {
+  it('opens a cached form immediately and never overwrites its draft after background source verification', async () => {
     const id = await prepare();
     db.set('recA', record('recA', { treatmentMeasure: '外部已填写' }));
     const result = await service.handle(view(id));
@@ -162,8 +162,11 @@ describe('TodayOperationsFollowUpCardService', () => {
     await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1));
     const card = JSON.stringify(gateway.patchInteractiveCard.mock.calls[0][1]);
     expect(card).toContain('"tag":"form"');
-    expect(card).toContain('外部已填写');
-    expect(card).toContain(`today_followup_submit:${id}:0:2`);
+    expect(card).not.toContain('外部已填写');
+    expect(card).toContain(`today_followup_submit:${id}:0:1`);
+    await eventually(() => expect(Logger.prototype.warn).toHaveBeenCalledWith(expect.stringContaining('源记录已变化')));
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1);
+    expect((await store.getSnapshot(id, messageA)).records[0].revision).toBe(1);
     expect(card).not.toContain('open_url');
     expect(gateway.updateFollowUp).not.toHaveBeenCalled();
     expect(await store.pendingCommands()).toEqual([]);
@@ -221,7 +224,7 @@ describe('TodayOperationsFollowUpCardService', () => {
     expect(gateway.updateFollowUp).not.toHaveBeenCalled();
   });
 
-  it('rechecks eligibility after a slow read before patching the editing form', async () => {
+  it('opens before a slow background read and refuses submission after eligibility is revoked', async () => {
     const id = await prepare(), gate = deferred<TodayOperationsFollowUpRecord>();
     gateway.getFollowUp.mockImplementationOnce(() => gate.promise);
     gateway.getFollowUp.mockClear();
@@ -230,7 +233,8 @@ describe('TodayOperationsFollowUpCardService', () => {
     enabled = false;
     gate.resolve(record());
     await eventually(() => expect(Logger.prototype.warn).toHaveBeenCalled());
-    expect(gateway.patchInteractiveCard).not.toHaveBeenCalled();
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1);
+    await expect(service.handle(submit(id))).rejects.toThrow();
     expect(gateway.updateFollowUp).not.toHaveBeenCalled();
     expect(await store.pendingCommands()).toEqual([]);
   });
@@ -243,10 +247,38 @@ describe('TodayOperationsFollowUpCardService', () => {
     await eventually(() => expect(gateway.getFollowUp).toHaveBeenCalledTimes(1));
     await service.handle(view(id, 'summary'));
     gate.resolve(record());
-    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1));
-    expect(gateway.patchInteractiveCard).toHaveBeenCalledWith(messageA, summary);
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2));
+    expect(gateway.patchInteractiveCard).toHaveBeenLastCalledWith(messageA, summary);
     expect(gateway.updateFollowUp).not.toHaveBeenCalled();
     expect((await store.getSnapshot(id, messageA)).message?.view).toEqual({ kind: 'summary' });
+  });
+
+  it('repairs an editor PATCH already in flight when a submission has claimed the record', async () => {
+    const id = await prepare(), patch = deferred<void>();
+    gateway.patchInteractiveCard.mockImplementationOnce(() => patch.promise);
+    await service.handle(view(id));
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1));
+    const accepted = await service.handle(submit(id, { measure: '网络等待期间提交的措施' }));
+    expect(JSON.stringify(accepted.card)).toContain('正在同步');
+    patch.resolve();
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2));
+    expect(JSON.stringify(gateway.patchInteractiveCard.mock.calls[1][1])).toContain('正在同步');
+    expect(JSON.stringify(gateway.patchInteractiveCard.mock.calls[1][1])).not.toContain('"tag":"form"');
+    expect(gateway.updateFollowUp).not.toHaveBeenCalled();
+    expect(await store.pendingCommands()).toHaveLength(1);
+  });
+
+  it('retains the editable form when source verification fails and still uses the captured version on submit', async () => {
+    const id = await prepare(), source = deferred<TodayOperationsFollowUpRecord>();
+    gateway.getFollowUp.mockReturnValueOnce(source.promise);
+    await service.handle(view(id));
+    await eventually(() => expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1));
+    source.resolve(record('recA', { treatmentMeasure: '其他人刚更新' }));
+    await eventually(() => expect(Logger.prototype.warn).toHaveBeenCalled());
+    const accepted = await service.handle(submit(id, { measure: '我的表单草稿' }));
+    expect(accepted.card).toBeDefined();
+    expect((await store.pendingCommands())[0]).toMatchObject({ revision: 1, expected: { treatmentMeasure: '' }, update: { treatmentMeasure: '我的表单草稿' } });
+    expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(1);
   });
 
   it('accepts one of two concurrent submissions, updates only that record and makes old submissions idempotent', async () => {

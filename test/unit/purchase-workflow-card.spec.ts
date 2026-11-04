@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import {
   buildManualInventoryInboundCompletedCard,
   buildPurchaseApprovalCard,
+  buildProcessingPurchaseApprovalCard,
   buildResolvedPurchaseApprovalCard,
   buildWarehouseInboundCard,
 } from '../../server/modules/purchase-inventory/purchase-workflow-card';
@@ -211,6 +212,27 @@ describe('buildPurchaseApprovalCard', () => {
       ).toThrow(BadRequestException);
     },
   );
+});
+
+describe('buildProcessingPurchaseApprovalCard', () => {
+  const input = { executionRecordId: 'rec_processing', requester: 'SYNTHETIC', building: 'B楼', title: '合成物品', quantity: 1, unit: '件', createdAt: '2026-11-02', statusLabel: '未开始（待审批）' };
+  it.each(['approve', 'reject'] as const)('keeps both original button positions and labels but removes all capabilities for %s', action => {
+    const card = buildProcessingPurchaseApprovalCard(input, action);
+    expect(card).toMatchObject({ schema: '2.0', header: { template: 'blue', title: { content: '采购审批已受理' } } });
+    expect(collectContent(card).join('\n')).toContain('审批已受理，结果同步中');
+    expect(collectContent(card).join('\n')).not.toContain('审批通过');
+    const buttons = collectButtons(card);
+    expect(buttons.map(button => (button.text as JsonObject).content)).toEqual(['确认', '驳回']);
+    expect(buttons.every(button => button.disabled === true && button.type === 'default' && !button.behaviors && !button.value && !button.name)).toBe(true);
+    expect(JSON.stringify(card)).not.toContain('"callback"');
+    expect(JSON.stringify(card)).not.toContain('open_url');
+  });
+  it('shows a visible read-only failed synchronization state without claiming completion', () => {
+    const card = buildProcessingPurchaseApprovalCard(input, 'approve', true);
+    expect(collectContent(card).join('\n')).toContain('审批同步待核对，请联系管理员');
+    expect(collectContent(card).join('\n')).not.toContain('结果同步中');
+    expect(collectButtons(card).every(button => button.disabled === true)).toBe(true);
+  });
 });
 
 describe('buildResolvedPurchaseApprovalCard', () => {

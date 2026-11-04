@@ -30,6 +30,17 @@ describe('two-level leave approval card contract', () => {
       ? { action: 'return_to_approval', recordId: context.recordId, stageKey: 'supervisor', stageVersion: 1 }
       : { action: 'return_to_substitute_adjustment', recordId: context.recordId, expectedRevision: 3 });
   });
+  it.each(['approval', 'adjustment'] as const)('omits a long-white original-post selector in %s while retaining the primary selection', mode => {
+    const data = fixture(), context = structuredClone(data.cardContext);
+    const choice = context.candidateSets[0].twoLevelCandidates![0];
+    choice.originalGroups = choice.originalGroups.map(original => ({ ...original, kind: 'long_white', teams: ['长白'], shift: '长白' }));
+    const reviewed = { ...context, substitutionReview: [{ shiftKey: data.selection.shiftKey, substitutePersonRecordId: primary.personRecordId }] };
+    const card = mode === 'approval' ? buildLeaveApprovalCard(reviewed) : buildLeaveSubstituteAdjustmentCard(reviewed, 0);
+    expect(JSON.stringify(card)).not.toContain('选择原岗补位人员');
+    const primarySelect = nodes(card).find(row => row.tag === 'select_static' && row.name.startsWith('leave_shift_substitute_'));
+    expect(primarySelect).toMatchObject({ required: true, initial_option: primary.personRecordId });
+  });
+
   it('labels an on-duty first choice with its actual building and shift', () => {
     const card = buildLeaveApprovalCard(fixture().cardContext);
     const option = nodes(card).find(row => row.value === primary.personRecordId);
