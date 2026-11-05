@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": { "noEmit": true, "composite": false, "incremental": false, "declaration": false, "verbatimModuleSyntax": false },
+  "include": ["server/**/*", "shared/**/*", "test/unit/purchase-platform-module-wiring.spec.ts", "test/unit/purchase-platform-session-e2e.spec.ts"],
+  "exclude": ["node_modules", "dist", "client"]
+}

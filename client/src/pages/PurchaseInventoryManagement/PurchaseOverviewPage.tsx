@@ -64,6 +64,7 @@ import { PurchaseCompletionAnalysisDialog } from './PurchaseCompletionAnalysisDi
 import { PurchaseDeleteDialog } from './PurchaseDeleteDialog';
 import { PurchaseOnlineApprovalDialog } from './PurchaseOnlineApprovalDialog';
 import { PurchaseWorkflowDialog } from './PurchaseWorkflowDialog';
+import { canCheckPurchaseWorkflowActions } from './purchase-workflow-action.logic';
 import {
   buildPendingPurchaseApplicationItems,
   buildPurchaseAnomalies,
@@ -683,12 +684,17 @@ export default function PurchaseOverviewPage() {
   }
 
   function requestOrder(item: PurchaseInventoryRequestItem) {
-    if (item.stage !== 'executing' || !canOrderItem(item)) return;
+    if (item.stage !== 'executing' || !item.executionRecordId || item.pendingSync) return;
     setWorkflowItem(item);
   }
 
   function requestReceipt(item: PurchaseInventoryRequestItem) {
-    if (!canReceiveItem(item)) return;
+    if (item.stage !== 'receiving' || !item.executionRecordId || item.pendingSync) return;
+    setWorkflowItem(item);
+  }
+
+  function inspectApprovalWorkflow(item: PurchaseInventoryRequestItem) {
+    if (item.stage !== 'approval' || !item.executionRecordId || item.pendingSync) return;
     setWorkflowItem(item);
   }
 
@@ -1003,6 +1009,7 @@ export default function PurchaseOverviewPage() {
                 canDeleteItem={canDeleteRecord}
                 canEditItem={canEditRecord}
                 canApproveItem={canApproveItem}
+                onInspectWorkflow={inspectApprovalWorkflow}
                 onEditItem={requestEdit}
                 onApproveItem={requestApproval}
                 onDeleteItem={(item) => requestDeletion([item])}
@@ -1082,12 +1089,7 @@ export default function PurchaseOverviewPage() {
             ? (workflowItem?.executionRecordId ?? null)
             : null
         }
-        canOperate={Boolean(
-          workflowItem &&
-          ((workflowItem.stage === 'executing' && canOrderItem(workflowItem)) ||
-            (workflowItem.stage === 'receiving' &&
-              canReceiveItem(workflowItem))),
-        )}
+        canOperate={canCheckPurchaseWorkflowActions(workflowItem)}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setWorkflowItem(null);
         }}
@@ -1169,6 +1171,7 @@ interface ActivityPanelProps {
   onOrderItem?: (item: PurchaseInventoryRequestItem) => void;
   onReceiveItem?: (item: PurchaseInventoryRequestItem) => void;
   onOpenItem?: (item: PurchaseInventoryRequestItem) => void;
+  onInspectWorkflow?: (item: PurchaseInventoryRequestItem) => void;
   onEditItem: (item: PurchaseInventoryRequestItem) => void;
   onApproveItem?: (item: PurchaseInventoryRequestItem) => void;
   onDeleteItem: (item: PurchaseInventoryRequestItem) => void;
@@ -1192,6 +1195,7 @@ function ActivityPanel({
   onOrderItem,
   onReceiveItem,
   onOpenItem,
+  onInspectWorkflow,
   onEditItem,
   onApproveItem,
   onDeleteItem,
@@ -1428,7 +1432,9 @@ function ActivityPanel({
                     const itemCanEdit = canEditItem(item);
                     const itemCanApprove = Boolean(canApproveItem?.(item));
                     const itemCanOrder = Boolean(canOrderItem?.(item));
+                    const itemCanInspectOrder = Boolean(onOrderItem && item.stage === 'executing' && item.executionRecordId && !item.pendingSync && !itemCanOrder);
                     const itemCanReceive = Boolean(canReceiveItem?.(item));
+                    const itemCanInspectReceipt = Boolean(onReceiveItem && item.stage === 'receiving' && item.executionRecordId && !item.pendingSync && !itemCanReceive);
                     const itemCanOpen = Boolean(
                       onOpenItem && item.executionRecordId,
                     );
@@ -1558,11 +1564,14 @@ function ActivityPanel({
                               onApprove={() => onApproveItem?.(item)}
                               canOrder={itemCanOrder}
                               onOrder={() => onOrderItem?.(item)}
+                              canInspect={itemCanInspectOrder || itemCanInspectReceipt}
+                              onInspect={() => itemCanInspectOrder ? onOrderItem?.(item) : onReceiveItem?.(item)}
                               canReceive={itemCanReceive}
                               onReceive={() => onReceiveItem?.(item)}
                               canOpen={itemCanOpen}
                               onOpen={() => onOpenItem?.(item)}
                             />
+                            {onInspectWorkflow && item.stage === 'approval' && item.executionRecordId && !item.pendingSync && <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50" onClick={() => onInspectWorkflow(item)}>查看流程</button>}
                             {isApplication && item.approvalTarget && (
                               <span
                                 className="max-w-32 truncate text-xs font-medium text-slate-500"
@@ -1676,7 +1685,9 @@ function ActivityPanel({
                     const itemCanEdit = canEditItem(item);
                     const itemCanApprove = Boolean(canApproveItem?.(item));
                     const itemCanOrder = Boolean(canOrderItem?.(item));
+                    const itemCanInspectOrder = Boolean(onOrderItem && item.stage === 'executing' && item.executionRecordId && !item.pendingSync && !itemCanOrder);
                     const itemCanReceive = Boolean(canReceiveItem?.(item));
+                    const itemCanInspectReceipt = Boolean(onReceiveItem && item.stage === 'receiving' && item.executionRecordId && !item.pendingSync && !itemCanReceive);
                     const itemCanOpen = Boolean(
                       onOpenItem && item.executionRecordId,
                     );
@@ -1726,11 +1737,14 @@ function ActivityPanel({
                             onApprove={() => onApproveItem?.(item)}
                             canOrder={itemCanOrder}
                             onOrder={() => onOrderItem?.(item)}
+                            canInspect={itemCanInspectOrder || itemCanInspectReceipt}
+                            onInspect={() => itemCanInspectOrder ? onOrderItem?.(item) : onReceiveItem?.(item)}
                             canReceive={itemCanReceive}
                             onReceive={() => onReceiveItem?.(item)}
                             canOpen={itemCanOpen}
                             onOpen={() => onOpenItem?.(item)}
                           />
+                          {onInspectWorkflow && item.stage === 'approval' && item.executionRecordId && !item.pendingSync && <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50" onClick={() => onInspectWorkflow(item)}>查看流程</button>}
                         </div>
                         <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
                           <Meta
@@ -1924,27 +1938,31 @@ function StageBadge({
   canOrder = false,
   canReceive = false,
   canOpen = false,
+  canInspect = false,
   onApprove,
   onOrder,
   onReceive,
   onOpen,
+  onInspect,
 }: {
   item: PurchaseInventoryRequestItem;
   canApprove?: boolean;
   canOrder?: boolean;
   canReceive?: boolean;
   canOpen?: boolean;
+  canInspect?: boolean;
   onApprove?: () => void;
   onOrder?: () => void;
   onReceive?: () => void;
   onOpen?: () => void;
+  onInspect?: () => void;
 }) {
   const stage = activeStages.find((entry) => entry.key === item.stage);
   const Icon = stage?.icon ?? CheckCircle2;
   const badgeClassName = cn(
     'inline-flex max-w-36 items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold',
     stage?.panelClass ?? 'border-slate-200 bg-slate-50 text-slate-600',
-    (canApprove || canOrder || canReceive || canOpen) &&
+    (canApprove || canOrder || canReceive || canOpen || canInspect) &&
       'transition hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30',
   );
   const content = (
@@ -1953,21 +1971,21 @@ function StageBadge({
       <span className="truncate">{item.statusLabel}</span>
     </>
   );
-  if (canApprove || canOrder || canReceive || canOpen) {
+  if (canApprove || canOrder || canReceive || canOpen || canInspect) {
     const actionLabel = canApprove
       ? '审批'
       : canOrder
         ? '下单'
         : canReceive
           ? '签收'
-          : '入库';
+          : canOpen ? '入库' : '查看流程';
     const actionTitle = canApprove
       ? '打开采购审批'
       : canOrder
         ? '填写下单信息'
         : canReceive
           ? '打开到货签收'
-          : '前往库存管理入库';
+          : canOpen ? '前往库存管理入库' : '查看采购流程及当前可办理操作';
     return (
       <button
         type="button"
@@ -1981,7 +1999,7 @@ function StageBadge({
               ? onOrder
               : canReceive
                 ? onReceive
-                : onOpen
+                : canOpen ? onOpen : onInspect
         }
       >
         {content}

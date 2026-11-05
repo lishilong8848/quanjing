@@ -162,6 +162,8 @@ describe('PurchaseWorkflowService', () => {
       sendTextNotification: jest.fn().mockResolvedValue(undefined),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       hasReminder: jest.fn().mockResolvedValue(false),
       recordReminder: jest.fn().mockResolvedValue(undefined),
@@ -271,6 +273,8 @@ describe('PurchaseWorkflowService', () => {
       sendTextNotification: jest.fn().mockResolvedValue(['om_message']),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn().mockResolvedValue(null),
       claimCommand: jest.fn(claimedCommand),
@@ -445,6 +449,8 @@ describe('PurchaseWorkflowService', () => {
         .mockRejectedValue(new Error('消息服务不可用')),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn().mockResolvedValue(null),
       claimCommand: jest.fn(claimedCommand),
@@ -514,6 +520,8 @@ describe('PurchaseWorkflowService', () => {
       sendTextNotification: jest.fn().mockResolvedValue(['om_message']),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn().mockResolvedValue(null),
       claimCommand: jest.fn(claimedCommand),
@@ -559,6 +567,8 @@ describe('PurchaseWorkflowService', () => {
       sendTextNotification: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn().mockResolvedValue({
         key: 'order:rec_execution_1',
@@ -625,6 +635,8 @@ describe('PurchaseWorkflowService', () => {
       sendTextNotification: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn().mockResolvedValue(null),
       claimCommand: jest.fn(claimedCommand),
@@ -1489,6 +1501,8 @@ describe('PurchaseWorkflowService', () => {
       ]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn().mockResolvedValue([]),
     };
@@ -1526,6 +1540,8 @@ describe('PurchaseWorkflowService', () => {
         .mockResolvedValue([record({ recordId: 'rec_execution_batch_1' })]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn(),
       takeNextNotification: jest.fn().mockResolvedValue(null),
@@ -1556,6 +1572,8 @@ describe('PurchaseWorkflowService', () => {
       resolvePurchaseAdminAsApp: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn().mockResolvedValue([{ enqueued: true }]),
     };
@@ -1637,6 +1655,8 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundManagerNotificationUsersAsApp: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn().mockResolvedValue(null),
       claimCommand: jest.fn(claimedCommand),
@@ -1724,6 +1744,8 @@ describe('PurchaseWorkflowService', () => {
       ]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn().mockImplementation(async () => savedCommand),
       claimCommand: jest.fn(async (input: Record<string, unknown>) => ({
@@ -1789,6 +1811,8 @@ describe('PurchaseWorkflowService', () => {
       ]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest
         .fn()
@@ -1860,6 +1884,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn().mockResolvedValue('om_ready_card'),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest
         .fn()
@@ -1911,6 +1937,8 @@ describe('PurchaseWorkflowService', () => {
       listExecutionRecordsAsApp: jest.fn().mockResolvedValue([]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(null),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -1977,6 +2005,8 @@ describe('PurchaseWorkflowService', () => {
       resolveConfiguredApproversAsApp: jest.fn().mockResolvedValue(approvers),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       listNotifications: jest
         .fn()
@@ -2057,6 +2087,8 @@ describe('PurchaseWorkflowService', () => {
       ]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       listNotifications: jest
         .fn()
@@ -2135,6 +2167,8 @@ describe('PurchaseWorkflowService', () => {
         ]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       listNotifications: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn().mockResolvedValue([{ enqueued: true }]),
@@ -2202,6 +2236,8 @@ describe('PurchaseWorkflowService', () => {
       updateExecutionRecordAsApp: jest.fn().mockResolvedValue(undefined),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest
         .fn()
@@ -2297,6 +2333,8 @@ describe('PurchaseWorkflowService', () => {
       updateExecutionRecordAsApp: jest.fn().mockResolvedValue(undefined),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(action),
       takeNextNotification: jest.fn().mockResolvedValue(null),
@@ -2380,6 +2418,8 @@ describe('PurchaseWorkflowService', () => {
       updateExecutionRecordAsApp: jest.fn().mockResolvedValue(undefined),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest
         .fn()
@@ -2466,6 +2506,8 @@ describe('PurchaseWorkflowService', () => {
       updateExecutionRecordAsApp: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(null),
       takeNextCardAction: jest.fn().mockResolvedValue(action),
@@ -2539,6 +2581,8 @@ describe('PurchaseWorkflowService', () => {
       updateExecutionRecordAsApp: jest.fn().mockResolvedValue(undefined),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(null),
       takeNextCardAction: jest.fn().mockResolvedValue(action),
@@ -2624,6 +2668,8 @@ describe('PurchaseWorkflowService', () => {
         getExecutionRecordAsApp: jest.fn(),
       };
       const store = {
+        listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+        isLifecycleRecord: jest.fn().mockResolvedValue(false),
         listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
         takeNextNotification: jest.fn().mockResolvedValue(null),
         takeNextCardAction: jest.fn().mockResolvedValue(action),
@@ -2694,6 +2740,8 @@ describe('PurchaseWorkflowService', () => {
       updateExecutionRecordAsApp: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(null),
       takeNextCardAction: jest.fn().mockResolvedValue(action),
@@ -2758,6 +2806,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn().mockResolvedValue('om_approval_card'),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
       takeNextNotification: jest.fn().mockResolvedValue(notification),
@@ -2816,6 +2866,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn().mockResolvedValue('om_warehouse_card'),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       listNotifications: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -2875,6 +2927,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       listNotifications: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -2923,6 +2977,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       listNotifications: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -2968,6 +3024,8 @@ describe('PurchaseWorkflowService', () => {
       }),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest
         .fn()
@@ -3008,6 +3066,8 @@ describe('PurchaseWorkflowService', () => {
       getExecutionRecordAsApp: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest
         .fn()
@@ -3079,6 +3139,8 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn().mockResolvedValue([{ enqueued: true }]),
     };
@@ -3114,6 +3176,8 @@ describe('PurchaseWorkflowService', () => {
       const result = manualMovementResult();
       result.movement = { ...result.movement!, occurredAt };
       const store = {
+        listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+        isLifecycleRecord: jest.fn().mockResolvedValue(false),
         listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
         enqueueNotifications: jest.fn().mockResolvedValue([{ enqueued: true }]),
       };
@@ -3142,6 +3206,8 @@ describe('PurchaseWorkflowService', () => {
     };
     expectedContext.movement.unit = '';
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn().mockResolvedValue([{ enqueued: true }]),
     };
@@ -3168,6 +3234,8 @@ describe('PurchaseWorkflowService', () => {
       location: '',
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn().mockResolvedValue([{ enqueued: true }]),
     };
@@ -3197,6 +3265,8 @@ describe('PurchaseWorkflowService', () => {
       location: '位'.repeat(501),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn().mockResolvedValue([{ enqueued: true }]),
     };
@@ -3247,6 +3317,8 @@ describe('PurchaseWorkflowService', () => {
     });
     const store = {
       listNotifications: jest.fn().mockResolvedValue([]),
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(resolution),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3328,6 +3400,8 @@ describe('PurchaseWorkflowService', () => {
     const completeResolution = jest.fn();
     const store = {
       listNotifications: jest.fn().mockResolvedValue([]),
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(resolution),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3381,6 +3455,8 @@ describe('PurchaseWorkflowService', () => {
     const completeResolution = jest.fn();
     const store = {
       listNotifications: jest.fn().mockResolvedValue([]),
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(resolution),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3434,6 +3510,8 @@ describe('PurchaseWorkflowService', () => {
     const completeResolution = jest.fn();
     const store = {
       listNotifications: jest.fn().mockResolvedValue([]),
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(resolution),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3471,6 +3549,8 @@ describe('PurchaseWorkflowService', () => {
       resolveInboundResponsibleUsersAsApp: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn().mockResolvedValue([{ enqueued: true }]),
     };
@@ -3517,6 +3597,8 @@ describe('PurchaseWorkflowService', () => {
         ),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest.fn().mockResolvedValue(notification),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -3569,6 +3651,8 @@ describe('PurchaseWorkflowService', () => {
       claimToken: 'claim-ready-completed',
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest
         .fn()
@@ -3683,6 +3767,8 @@ describe('PurchaseWorkflowService', () => {
         .mockResolvedValue([]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn(),
       listNotifications: jest
@@ -3810,6 +3896,8 @@ describe('PurchaseWorkflowService', () => {
       notifications: [],
     });
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       enqueueNotifications: jest.fn(),
       listNotifications: jest.fn().mockResolvedValue([]),
@@ -3934,6 +4022,8 @@ describe('PurchaseWorkflowService', () => {
         notifications: [],
       });
       const store = {
+        listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+        isLifecycleRecord: jest.fn().mockResolvedValue(false),
         listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
         takeNextCardAction: jest.fn().mockResolvedValue(null),
         takeNextNotification: jest.fn().mockResolvedValue(resolution),
@@ -4026,6 +4116,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn().mockResolvedValue('om_inbound_completed'),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
       takeNextNotification: jest.fn().mockResolvedValueOnce(notification),
@@ -4086,6 +4178,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
       takeNextNotification: jest.fn().mockResolvedValueOnce(notification),
@@ -4128,6 +4222,8 @@ describe('PurchaseWorkflowService', () => {
         .mockResolvedValue('om_duplicate_success_card'),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
       takeNextNotification: jest.fn().mockResolvedValueOnce(notification),
@@ -4192,6 +4288,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn().mockResolvedValue('om_manual_completed'),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
       takeNextNotification: jest.fn().mockResolvedValue(notification),
@@ -4252,6 +4350,8 @@ describe('PurchaseWorkflowService', () => {
       sendTextNotification: jest.fn().mockResolvedValue(['om_completed']),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
       takeNextNotification: jest.fn().mockResolvedValueOnce(notification),
@@ -4296,6 +4396,8 @@ describe('PurchaseWorkflowService', () => {
       sendTextNotification: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest
         .fn()
@@ -4351,6 +4453,8 @@ describe('PurchaseWorkflowService', () => {
         .mockResolvedValue([]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextNotification: jest
         .fn()
@@ -4421,6 +4525,8 @@ describe('PurchaseWorkflowService', () => {
         sendTextNotification: jest.fn(),
       };
       const store = {
+        listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+        isLifecycleRecord: jest.fn().mockResolvedValue(false),
         listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
         takeNextCardAction: jest.fn().mockResolvedValue(null),
         takeNextNotification: jest.fn().mockResolvedValueOnce(notification),
@@ -4505,6 +4611,8 @@ describe('PurchaseWorkflowService', () => {
         .mockResolvedValue([]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest
         .fn()
@@ -4613,6 +4721,8 @@ describe('PurchaseWorkflowService', () => {
       ]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn(),
       listNotifications: jest
@@ -4711,6 +4821,8 @@ describe('PurchaseWorkflowService', () => {
         .mockResolvedValue([]),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       findCommand: jest.fn(),
       listNotifications: jest
@@ -4772,6 +4884,8 @@ describe('PurchaseWorkflowService', () => {
         sendInteractiveCard: jest.fn(),
       };
       const store = {
+        listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+        isLifecycleRecord: jest.fn().mockResolvedValue(false),
         listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
         listNotifications: jest.fn().mockResolvedValue([]),
         takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -4833,6 +4947,8 @@ describe('PurchaseWorkflowService', () => {
           .mockRejectedValue(new Error('飞书卡发送失败')),
       };
       const store = {
+        listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+        isLifecycleRecord: jest.fn().mockResolvedValue(false),
         listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
         listNotifications: jest.fn().mockResolvedValue([]),
         takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -4884,6 +5000,8 @@ describe('PurchaseWorkflowService', () => {
         .mockRejectedValue(new Error('飞书卡发送结果未知')),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       listNotifications: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
@@ -4942,6 +5060,8 @@ describe('PurchaseWorkflowService', () => {
       sendInteractiveCard: jest.fn(),
     };
     const store = {
+      listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+      isLifecycleRecord: jest.fn().mockResolvedValue(false),
       listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
       takeNextCardAction: jest.fn().mockResolvedValue(null),
       takeNextNotification: jest.fn().mockResolvedValue(notification),
@@ -5107,6 +5227,8 @@ function createDurableCommandStore(options: { failFirstRecord?: Error } = {}) {
   let command: Record<string, unknown> | null = null;
   let recordFailed = false;
   const store = {
+    listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+    isLifecycleRecord: jest.fn().mockResolvedValue(false),
     listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
     findCommand: jest.fn(async () => command),
     claimCommand: jest.fn(async (input: Record<string, unknown>) => {
@@ -5178,6 +5300,8 @@ it('keeps the page receipt action available when the retired program workflow is
     sendTextNotification: jest.fn().mockResolvedValue(undefined),
   };
   const store = {
+    listLifecycleInboundReconciliationCandidates: jest.fn().mockResolvedValue([]),
+    isLifecycleRecord: jest.fn().mockResolvedValue(false),
     listPendingOrderNoticeCommands: jest.fn().mockResolvedValue([]),
     findCommand: jest.fn().mockResolvedValue(null),
     claimCommand: jest.fn(claimedCommand),

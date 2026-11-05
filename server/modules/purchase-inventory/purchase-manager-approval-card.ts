@@ -316,7 +316,7 @@ export function buildResolvedPurchaseManagerApprovalCard(
           ['处理结果', choiceLabel(resolution.choice), BUSINESS_TEXT_LIMIT],
           ['处理人', resolution.actorName, BUSINESS_TEXT_LIMIT],
           ['处理时间', resolution.processedAt, BUSINESS_TEXT_LIMIT],
-          ...(rejected
+          ...(rejected && resolution.rejectionReason
             ? ([
                 ['驳回原因', resolution.rejectionReason, REASON_TEXT_LIMIT],
               ] as const)

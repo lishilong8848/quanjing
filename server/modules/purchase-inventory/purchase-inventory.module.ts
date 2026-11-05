@@ -1,8 +1,11 @@
-import { HttpModule } from '@nestjs/axios';
+import { HttpModule, HttpService } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
+import { readEnv } from '../../common/config/external-services.config';
+import { AccessConfigurationService } from '../../common/access/access-configuration.service';
+import { UnifiedAccessService } from '../../common/access/unified-access.service';
 import { PurchaseAccessPolicyService } from './purchase-access-policy.service';
 import { PurchaseApplicationTaskLedgerStore } from './purchase-application-task-ledger.store';
-import { PurchaseApplicationService } from './purchase-application.service';
+import { PurchaseApplicationService, PURCHASE_LIFECYCLE_NEW_APPLICATIONS, PURCHASE_LIFECYCLE_READINESS } from './purchase-application.service';
 import { PurchaseCodeService } from './purchase-code.service';
 import { PurchaseInventoryController } from './purchase-inventory.controller';
 import { PurchaseInventoryService } from './purchase-inventory.service';
@@ -11,6 +14,8 @@ import { PurchaseManagerApprovalService } from './purchase-manager-approval.serv
 import { PurchasePersonnelHandoverAdapter } from './purchase-personnel-handover.adapter';
 import { PERSONNEL_PREVIEW_READERS } from '../../common/access/personnel-preview.ports';
 import { PurchaseBatchAttachmentController } from './purchase-batch-attachment.controller';
+import { PurchaseLifecycleAttachmentAccessController } from './purchase-lifecycle-attachment-access.controller';
+import { PurchaseLifecycleAttachmentAccessRuntime } from './purchase-lifecycle-attachment-access.runtime';
 import { PurchaseBatchAttachmentTicketService } from './purchase-batch-attachment-ticket';
 import { PurchaseOnlineApprovalService } from './purchase-online-approval.service';
 import { PurchaseRecordDeletionService } from './purchase-record-deletion.service';
@@ -26,7 +31,6 @@ import { OvertimeWorkflowModule } from '../overtime-workflow/overtime-workflow.m
 import { LeaveWorkflowModule } from '../leave-workflow/leave-workflow.module';
 import {
   FEISHU_CARD_ACTION_TRANSPORT,
-  FeishuCardActionLongConnectionTransport,
 } from '../overtime-workflow/overtime-workflow.card-action.consumer';
 import {
   FeishuCardActionConsumer,
@@ -37,6 +41,25 @@ import { FeishuCardCallbackFeedbackService } from '../../common/feishu-card-call
 import { BitableSyncModule } from '../bitable-sync/bitable-sync.module';
 import { InventoryOutboundApprovalModule } from '../inventory-outbound-approval/inventory-outbound-approval.module';
 import { ThresholdModule } from '../threshold-management/threshold.module';
+import { PurchasePlatformSessionBinding, PURCHASE_PLATFORM_SESSION_BINDING } from './purchase-platform-session-binding';
+import {
+  PURCHASE_PLATFORM_APPROVAL_RUNTIME,
+  PURCHASE_PLATFORM_APPROVAL_SOURCE,
+  PURCHASE_PLATFORM_RECOVERY_OPTIONS,
+  createPurchasePlatformApprovalRuntime,
+} from './purchase-platform-approval-runtime';
+import { createPlatformLegacyApprovalGateway } from './purchase-platform-legacy-approval-gateway';
+import { PURCHASE_LIFECYCLE_PAYMENT_PROVIDERS, PURCHASE_LIFECYCLE_PAYMENT_CONTROLLERS, PURCHASE_LIFECYCLE_PROCESSING_PORT } from './purchase-lifecycle-payment.providers';
+import { PURCHASE_LIFECYCLE_RECEIPT_PROVIDERS } from './purchase-lifecycle-receipt.providers';
+import { PurchaseLifecycleCardTransport } from './purchase-lifecycle-card-transport';
+import { PurchaseLifecycleComposition, purchaseLifecycleNewApplicationsEnabled } from './purchase-lifecycle-composition';
+
+/** Background recovery is opt-in only: `/^(1|true|yes|on)$/i` in
+ * PURCHASE_PLATFORM_APPROVAL_RECOVERY_ENABLED. Anything else keeps the durable
+ * ledger read-only from the website path and never scans/writes in background. */
+function purchasePlatformRecoveryOptions(): { enabled: boolean } {
+  return { enabled: /^(1|true|yes|on)$/i.test(readEnv('PURCHASE_PLATFORM_APPROVAL_RECOVERY_ENABLED')) };
+}
 
 @Module({
   imports: [
@@ -48,12 +71,20 @@ import { ThresholdModule } from '../threshold-management/threshold.module';
     ThresholdModule,
   ],
   controllers: [
+    ...PURCHASE_LIFECYCLE_PAYMENT_CONTROLLERS,
     PurchaseInventoryController,
     PurchaseBatchAttachmentController,
+    PurchaseLifecycleAttachmentAccessController,
     PurchaseWorkflowCallbackController,
     FeishuCardActionHealthController,
   ],
   providers: [
+    ...PURCHASE_LIFECYCLE_PAYMENT_PROVIDERS,
+    ...PURCHASE_LIFECYCLE_RECEIPT_PROVIDERS,
+    PurchaseLifecycleComposition,
+    { provide: PURCHASE_LIFECYCLE_NEW_APPLICATIONS, useFactory: purchaseLifecycleNewApplicationsEnabled },
+    { provide: PURCHASE_LIFECYCLE_READINESS, useExisting: PurchaseLifecycleComposition },
+    { provide: PURCHASE_LIFECYCLE_PROCESSING_PORT, useExisting: PurchaseLifecycleComposition },
     PurchaseInventoryService,
     PurchaseAccessPolicyService,
     PurchaseRecordDeletionService,
@@ -72,16 +103,47 @@ import { ThresholdModule } from '../threshold-management/threshold.module';
     PurchasePersonnelHandoverAdapter,
     { provide: PERSONNEL_PREVIEW_READERS.purchase, useExisting: PurchasePersonnelHandoverAdapter },
     PurchaseBatchAttachmentTicketService,
+    PurchaseLifecycleAttachmentAccessRuntime,
     PurchaseManagerApprovalScheduler,
     FeishuCardActionRouter,
     FeishuCardCallbackFeedbackService,
-    FeishuCardActionLongConnectionTransport,
     {
       provide: FEISHU_CARD_ACTION_TRANSPORT,
-      useExisting: FeishuCardActionLongConnectionTransport,
+      useExisting: PurchaseLifecycleCardTransport,
     },
     FeishuCardActionConsumer,
+    // Personal purchase approvals: one signed-session proof binding plus the
+    // durable platform ledger runtime. Both are module-scoped singletons so the
+    // controller, the runtime and the recovery worker share one verification state.
+    PurchasePlatformSessionBinding,
+    {
+      provide: PURCHASE_PLATFORM_SESSION_BINDING,
+      useExisting: PurchasePlatformSessionBinding,
+    },
+    {
+      provide: PURCHASE_PLATFORM_RECOVERY_OPTIONS,
+      useFactory: purchasePlatformRecoveryOptions,
+    },
+    {
+      // Real app-token source gateway (metadata check, snapshot read, fenced write).
+      provide: PURCHASE_PLATFORM_APPROVAL_SOURCE,
+      inject: [PurchaseWorkflowGateway, HttpService],
+      useFactory: createPlatformLegacyApprovalGateway,
+    },
+    {
+      provide: PURCHASE_PLATFORM_APPROVAL_RUNTIME,
+      inject: [PurchaseWorkflowStore, PURCHASE_PLATFORM_APPROVAL_SOURCE, PURCHASE_PLATFORM_RECOVERY_OPTIONS],
+      useFactory: createPurchasePlatformApprovalRuntime,
+    },
   ],
-  exports: [PurchaseInventoryService, PurchaseWorkflowService, PurchaseApplicationService, PurchasePersonnelHandoverAdapter, PurchaseWorkflowStore],
+  exports: [
+    PurchaseInventoryService,
+    PurchaseWorkflowService,
+    PurchaseApplicationService,
+    PurchasePersonnelHandoverAdapter,
+    PurchaseWorkflowStore,
+    PurchasePlatformSessionBinding,
+    { provide: PURCHASE_PLATFORM_SESSION_BINDING, useExisting: PurchasePlatformSessionBinding },
+  ],
 })
 export class PurchaseInventoryModule {}

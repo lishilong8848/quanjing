@@ -1914,6 +1914,70 @@ describe('PurchaseApplicationService catalog reads', () => {
     ).toBe(true);
   });
 
+  it('passes the persisted new-flow marker to batch registration without changing legacy submissions', async () => {
+    let index = 0;
+    const httpService = {
+      axiosRef: {
+        post: jest.fn().mockImplementation((url: string) => {
+          if (url.includes('/auth/v3/tenant_access_token/internal')) {
+            return Promise.resolve({ data: { code: 0, tenant_access_token: 'tenant-token', expire: 7200 } });
+          }
+          index += 1;
+          return Promise.resolve({ data: { code: 0, data: { record: { record_id: `rec-flow-${index}` } } } });
+        }),
+      },
+    };
+    const manager = { isEnabled: jest.fn().mockReturnValue(true), enqueueApprovalRequest: jest.fn(), enqueueApprovalBatch: jest.fn().mockResolvedValue(undefined) };
+    const directory = mkdtempSync(join(tmpdir(), 'purchase-flow-marker-handoff-'));
+    temporaryLedgerDirectories.push(directory);
+    const ledger = new PurchaseApplicationTaskLedgerStore(join(directory, 'ledger.json'), { allowLifecycleReservations: true });
+    const service = new PurchaseApplicationService(httpService as never, manager as never, { allocate: jest.fn().mockResolvedValue('CG260710-778') } as never, ledger, true, { isReady: () => true });
+    const request = validRequest();
+    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(request, []);
+    const accepted = service.acceptApplications(request, [], '2026-07-10', 'purchase-lifecycle-handoff-01', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT);
+    await waitForSubmissionTerminal(service, accepted.taskId);
+    expect(manager.enqueueApprovalBatch).toHaveBeenCalledWith({
+      approvalBatchId: accepted.taskId,
+      requesterOpenId: request.shared.applicantOpenId,
+      recordIds: ['rec-flow-1', 'rec-flow-2'],
+      flowVersion: 'lifecycle_v1',
+    });
+  });
+
+  it('refuses new-flow submissions when the durable ledger is not enabled for them', () => {
+    const service = new PurchaseApplicationService({ axiosRef: { post: jest.fn() } } as never, { isEnabled: () => true } as never, undefined, testSubmissionLedger(), true, { isReady: () => true });
+    const request = validRequest();
+    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(request, []);
+    expect(() => service.acceptApplications(request, [], '2026-07-10', 'purchase-lifecycle-disabled-01', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT)).toThrow('采购全流程卡片尚未启用');
+  });
+
+  it('does not accept new-flow applications when the approval service is unavailable', () => {
+    const http = { axiosRef: { post: jest.fn() } };
+    const service = new PurchaseApplicationService(http as never, undefined, undefined, testSubmissionLedger(), true, { isReady: () => true });
+    const request = validRequest();
+    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(request, []);
+    expect(() => service.acceptApplications(request, [], '2026-07-10', 'purchase-lifecycle-unavailable-01', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT)).toThrow('采购全流程审批服务尚未就绪');
+    expect(http.axiosRef.post).not.toHaveBeenCalled();
+  });
+
+  it('refuses lifecycle activation when runtime readiness is missing', () => {
+    const http = { axiosRef: { post: jest.fn() } };
+    const service = new PurchaseApplicationService(http as never, { isEnabled: () => true } as never, undefined, testSubmissionLedger(), true);
+    const request = validRequest();
+    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(request, []);
+    expect(() => service.acceptApplications(request, [], '2026-07-10', 'purchase-lifecycle-not-ready-01', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT)).toThrow('采购全流程卡片尚未完成就绪检查');
+    expect(http.axiosRef.post).not.toHaveBeenCalled();
+  });
+
+  it('does not accept lifecycle submissions on asynchronous readiness checks', () => {
+    const http = { axiosRef: { post: jest.fn() } };
+    const service = new PurchaseApplicationService(http as never, { isEnabled: () => true } as never, undefined, testSubmissionLedger(), true, { isReady: () => Promise.reject(new Error('not ready')) } as never);
+    const request = validRequest();
+    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(request, []);
+    expect(() => service.acceptApplications(request, [], '2026-07-10', 'purchase-lifecycle-async-readiness-01', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT)).toThrow('采购全流程卡片尚未完成就绪检查');
+    expect(http.axiosRef.post).not.toHaveBeenCalled();
+  });
+
   it('keeps a created row successful and adds one sanitized warning when manager enqueue fails', async () => {
     const httpService = {
       axiosRef: {

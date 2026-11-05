@@ -5,6 +5,7 @@ import { isPersonalAccessAccount } from '../../../shared/self-service-applicant'
 import { bindSelfServiceApplicant } from '../../common/access/self-service-applicant';
 import { assertProfessionalRecordScope } from '../../common/access/professional-record-scope';
 import { assertGlobalBusinessOperation } from '../../common/access/global-business-operation';
+import { readEnv } from '../../common/config/external-services.config';
 import {
   BadRequestException,
   Body,
@@ -14,6 +15,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Inject,
   Optional,
   Param,
   Patch,
@@ -70,6 +72,7 @@ import {
   resolvePurchaseWorkflowReadSession,
   resolvePurchaseWorkflowSession,
 } from './purchase-workflow-session';
+import { PURCHASE_PLATFORM_SESSION_BINDING, type PurchasePlatformSessionBinding } from './purchase-platform-session-binding';
 type AccessRequest = Request & {
   accessPrincipal?: AccessPrincipal;
   accessPrincipalFingerprint?: string;
@@ -100,6 +103,7 @@ export class PurchaseInventoryController {
     private readonly workflowScheduler: PurchaseWorkflowScheduler,
     private readonly workflowGateway: PurchaseWorkflowGateway,
     @Optional() private readonly configuration?: AccessConfigurationService,
+    @Optional() @Inject(PURCHASE_PLATFORM_SESSION_BINDING) private readonly platformBinding?: PurchasePlatformSessionBinding,
   ) {}
 
   @Get('dashboard')
@@ -182,7 +186,10 @@ export class PurchaseInventoryController {
   @ProfessionalScoped()
   @Get('approval/tasks/:taskId')
   async getApprovalTask(@Req() req: AccessRequest, @Param('taskId') taskId: string) {
-    return this.onlineApprovalService.getAuthorizedDecisionTaskStatus(taskId, requirePrincipal(req));
+    const principal = requirePrincipal(req);
+    return this.platformBinding
+      ? this.onlineApprovalService.getAuthorizedDecisionTaskStatus(taskId, principal, await this.getWorkflowReadSession(req))
+      : this.onlineApprovalService.getAuthorizedDecisionTaskStatus(taskId, principal);
   }
 
   @Get('catalog-search')
@@ -416,6 +423,13 @@ export class PurchaseInventoryController {
   private handleComparisonImageNotifications(req: AccessRequest, body: unknown, preview: boolean) {
     const principal = requirePrincipal(req);
     if (principal.role !== 'admin' || !principal.accountId) denyAccess();
+    let expectedOrigin = '';
+    try {
+      const parsed = new URL(readEnv('PUBLIC_BASE_URL', ['FEISHU_PUBLIC_BASE_URL', 'APP_PUBLIC_URL']));
+      if (parsed.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)) throw new Error();
+      expectedOrigin = parsed.origin;
+    } catch { throw new ForbiddenException('采购通知恢复地址未配置'); }
+    if (req.headers?.origin !== expectedOrigin || req.headers?.['sec-fetch-site'] === 'cross-site') throw new ForbiddenException('采购通知恢复仅允许本站提交');
     if (!body || typeof body !== 'object' || Array.isArray(body) ||
       Object.keys(body).length !== 1 || !Array.isArray((body as { keys?: unknown }).keys)) {
       throw new BadRequestException('采购通知恢复范围无效');
@@ -442,12 +456,11 @@ export class PurchaseInventoryController {
     @Param('recordId') recordId: string,
     @Body() input: PurchaseWorkflowApprovalInput,
   ) {
-    this.workflowService.assertEnabled(requirePrincipal(req).role);
-    return this.workflowService.approve(
-      recordId,
-      await this.getWorkflowSession(req),
-      input,
-    );
+    const decision = input?.decision === 'rejected' || input?.purchaseMethod === '驳回' ? 'rejected' : input?.decision;
+    return this.onlineApprovalService.acceptAuthorizedDecision(recordId, {
+      decision,
+      ...(decision === 'approved' ? { purchaseMethod: input.purchaseMethod as '综合采购' | '需求自采' | '需求自采（楼内）' } : {}),
+    }, await this.getWorkflowSession(req));
   }
 
   @ProfessionalScoped()
@@ -484,6 +497,9 @@ export class PurchaseInventoryController {
     const input = parsePayload<
       Omit<PurchaseWorkflowOrderInput, 'paymentAttachmentTokens'>
     >(payload, '下单结果');
+    if (files.length) {
+      await this.workflowService.assertCanUploadOrderAttachments(recordId, session);
+    }
     const paymentAttachmentTokens = await this.uploadWorkflowFiles(
       files,
       session.accessToken,
@@ -558,6 +574,7 @@ export class PurchaseInventoryController {
     return resolvePurchaseWorkflowSession({
       principal: requirePrincipal(req),
       professionalOpenId: this.workflowOpenId(requirePrincipal(req)),
+      ...(this.platformBinding ? { platformIdentity: this.platformBinding.bind(req) } : {}),
       getTenantAccessToken: () =>
         this.workflowGateway.getTenantAccessTokenAsApp(),
     });
@@ -575,6 +592,7 @@ export class PurchaseInventoryController {
     return resolvePurchaseWorkflowReadSession({
       principal: requirePrincipal(req),
       professionalOpenId: this.workflowOpenId(requirePrincipal(req)),
+      ...(this.platformBinding ? { platformIdentity: this.platformBinding.bind(req) } : {}),
       getTenantAccessToken: () =>
         this.workflowGateway.getTenantAccessTokenAsApp(),
     });

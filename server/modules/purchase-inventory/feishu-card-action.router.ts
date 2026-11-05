@@ -36,6 +36,8 @@ import { ThresholdAdjustmentService } from '../threshold-management/threshold-ad
 import { FeishuCardActionExecution, FeishuCardActionDeadlineError, CARD_ACTION_PROCESSING_RESPONSE } from '../../common/feishu-card-action-execution';
 import { cardActionDiagnosticName } from '../../common/feishu-card-action-diagnostics';
 import { FeishuCardCallbackFeedbackService } from '../../common/feishu-card-callback-feedback.service';
+import { PurchaseLifecycleReceiptImageRuntime } from './purchase-lifecycle-receipt-image-runtime';
+import { parsePurchaseReceiptImageMessage } from './purchase-receipt-image-message';
 
 const ACCEPTED_RESPONSE: FeishuCardActionResponse = {
   toast: { type: 'info', content: '审批操作已受理' },
@@ -79,6 +81,7 @@ export class FeishuCardActionRouter {
     @Inject(AccessConfigurationService) private readonly accessConfiguration?: AccessConfigurationService,
     @Optional() private readonly followUpCards?: TodayOperationsFollowUpCardService,
     @Optional() private readonly callbackFeedback?: FeishuCardCallbackFeedbackService,
+    @Optional() private readonly lifecycleReceiptImages?: PurchaseLifecycleReceiptImageRuntime,
   ) {}
 
   isAnyEnabled(): boolean {
@@ -89,7 +92,8 @@ export class FeishuCardActionRouter {
       this.purchaseManagerApprovalService.isEnabled() ||
       this.todayOperationsAnomalyService.isEnabled() ||
       this.inventoryOutboundApprovalService.isEnabled() ||
-      Boolean(this.thresholdAdjustments?.isEnabled()) || Boolean(this.followUpCards?.isEnabled())
+      Boolean(this.thresholdAdjustments?.isEnabled()) || Boolean(this.followUpCards?.isEnabled()) ||
+      /^(1|true|yes|on)$/i.test(readEnv('PURCHASE_LIFECYCLE_CARD_ENABLED')) || this.lifecycleReceiptImages?.isReady()===true
     );
   }
 
@@ -166,8 +170,15 @@ export class FeishuCardActionRouter {
     if (!currentHotfixActivation().isAcceptingNewWork()) {
       throw new ServiceUnavailableException('系统更新中，本次消息未受理，请稍后重试');
     }
-    if (!this.purchaseManagerApprovalService.isEnabled()) return;
     try {
+      const image=parsePurchaseReceiptImageMessage(payload);
+      if(image && this.lifecycleReceiptImages && await this.purchaseWorkflowStore.ownsLifecycleReceiptImageMessage(readEnv('FEISHU_APP_ID'),image.actorOpenId,image.eventId,image.messageId)) {
+        // Ownership is only a route hint. The runtime must still authenticate
+        // the original WS object, read back the message and atomically bind it.
+        await this.lifecycleReceiptImages.accept(payload);
+        return;
+      }
+      if (!this.purchaseManagerApprovalService.isEnabled()) return;
       const result =
         await this.purchaseManagerApprovalService.handlePurchaseReceiptImageMessage(
           payload,
@@ -349,6 +360,22 @@ export class FeishuCardActionRouter {
       return { ...(claim.claimed ? ACCEPTED_RESPONSE : REPLAY_RESPONSE), ...(claim.card ? { card: toFeishuRawCardUpdate(claim.card) } : {}) };
     }
 
+    if (result.kind === 'lifecycle_page_action') {
+      if (!this.purchaseManagerApprovalService.isEnabled()) throw new ServiceUnavailableException('采购全流程分页暂不可用');
+      const outcome = await this.purchaseManagerApprovalService.handleLifecyclePage(result);
+      return { toast: { type: 'info', content: outcome.queued ? '正在切换页面' : '切换请求已处理' } };
+    }
+
+    if (result.kind === 'lifecycle_form_action') {
+      if (!this.purchaseManagerApprovalService.isEnabled()) throw new ServiceUnavailableException('采购全流程表单暂不可用');
+      const response = await this.purchaseManagerApprovalService.handleLifecycleForm(result);
+      if (response.claimed) void this.purchaseManagerApprovalService.runAcceptedTasks().catch(error => {
+        this.logger.error(`采购全流程操作已受理，后台处理失败：${safeErrorMessage(error)}`);
+      });
+      return { toast: response.claimed ? { type: 'info', content: '操作已受理，正在后台同步' } : REPLAY_RESPONSE.toast,
+        card: toFeishuRawCardUpdate(response.card) };
+    }
+
     if (result.kind === 'manager_batch_action') {
       return this.handlePurchaseManagerBatch(result);
     }
@@ -446,6 +473,10 @@ export class FeishuCardActionRouter {
     if (!this.purchaseManagerApprovalService.isEnabled()) {
       throw new ServiceUnavailableException('采购批次审批卡片未启用');
     }
+    if (result.lifecycle && result.action === 'open_item_reject') {
+      const outcome = await this.purchaseManagerApprovalService.handleLifecycleOpen(result);
+      return { toast: { type: 'info', content: outcome.queued ? '正在打开驳回表单' : '表单请求已处理' } };
+    }
     const card = await (this.purchaseManagerApprovalService.handleManagerBatchCardAction(result));
     if (result.action === 'open_item_reject' || result.action === 'cancel_item_reject') {
       this.schedulePurchaseManagerViewPatch(result.messageId, result.operatorOpenId, true);
@@ -454,6 +485,8 @@ export class FeishuCardActionRouter {
     if (
       result.action === 'approve_pending_comprehensive' ||
       result.action === 'approve_pending_building_self' ||
+      result.action === 'approve_item_comprehensive' ||
+      result.action === 'approve_item_building_self' ||
       result.action === 'submit_item_reject'
     ) {
       void this.purchaseManagerApprovalService
@@ -483,6 +516,18 @@ export class FeishuCardActionRouter {
     if (!this.purchaseManagerApprovalService.isEnabled()) {
       throw new ServiceUnavailableException('采购批次履约卡片未启用');
     }
+    if (result.lifecycle && (result.action === 'open_order' || result.action === 'open_receipt')) {
+      const outcome = await this.purchaseManagerApprovalService.handleLifecycleOpen(result);
+      return { toast: { type: 'info', content: outcome.queued ? '正在打开填写表单' : '表单请求已处理' } };
+    }
+    if (result.lifecycle && (result.action === 'prepare_receipt_photo' || result.action === 'prepare_invoice')) {
+      const service = this.purchaseManagerApprovalService as typeof this.purchaseManagerApprovalService & { handleLifecyclePrepareReceiptImage?: (action: typeof result) => Promise<{status:'pending'|'ready'|'failed'}> };
+      if (!/^oc_[A-Za-z0-9_-]+$/.test(result.authenticatedChatId || '') || typeof service.handleLifecyclePrepareReceiptImage !== 'function') throw new ServiceUnavailableException('采购全流程签收附件尚未就绪');
+      const outcome = await service.handleLifecyclePrepareReceiptImage(result);
+      if (!['pending','ready','failed'].includes(outcome?.status)) throw new ServiceUnavailableException('采购全流程签收附件状态不可用');
+      return { toast:{type:outcome.status === 'failed' ? 'error' : 'info',content:outcome.status === 'ready' ? '请在当前私聊发送图片' : outcome.status === 'failed' ? '上传权限核验失败，请重试' : '正在核验上传权限'} };
+    }
+    if (result.lifecycle && (result.action === 'return_purchase_list' || result.action === 'return_receipt_list')) throw new ServiceUnavailableException('采购全流程返回操作暂不可用');
     const response = await (this.purchaseManagerApprovalService.handlePurchaseBatchFulfillmentCardAction(
         result,
       ));
@@ -599,6 +644,7 @@ function classifyCardAction(payload: unknown): CardActionKind {
     return 'inventory_outbound';
   }
   if (actionValue.workflowType === 'leave') return 'leave';
+  if (actionValue.version === 5 && actionValue.workflowType === 'purchase_lifecycle_page') return 'purchase';
   if (
     actionValue.version === 3 &&
     Object.prototype.hasOwnProperty.call(actionValue, 'approvalBatchId')

@@ -84,6 +84,21 @@ function callbackValues(card: unknown): JsonObject[] {
 }
 
 describe('purchase manager batch approval Card 2.0', () => {
+  it('retains a trusted platform rejection with no invented reason and preserves legacy validation', () => {
+    const input = structuredClone(baseInput);
+    input.items[0] = { ...input.items[0], status:'rejected', choice:'reject', rejectionReason:'', decisionSource:'platform' };
+    const serialized = serializePurchaseManagerBatchApprovalCardContext(input);
+    expect(parsePurchaseManagerBatchApprovalCardContext(serialized).items[0]).toMatchObject({ status:'rejected', rejectionReason:'', decisionSource:'platform' });
+    expect(JSON.stringify(buildPurchaseManagerBatchApprovalCard(input))).toContain('已驳回');
+    const withoutSource = structuredClone(input); delete withoutSource.items[0].decisionSource;
+    expect(() => serializePurchaseManagerBatchApprovalCardContext(withoutSource)).toThrow();
+    const forged = structuredClone(input); (forged.items[0] as any).decisionSource = 'client';
+    expect(() => serializePurchaseManagerBatchApprovalCardContext(forged)).toThrow();
+    const misplaced = structuredClone(input); misplaced.items[0].status = 'pending'; misplaced.items[0].choice = '';
+    expect(() => serializePurchaseManagerBatchApprovalCardContext(misplaced)).toThrow();
+    // Legacy exact-key decoders reject the new shape, requiring the startup rollback guard.
+    expect(Object.hasOwn(JSON.parse(serialized).items[0], 'decisionSource')).toBe(true);
+  });
   it.each([
     [
       '待审批',

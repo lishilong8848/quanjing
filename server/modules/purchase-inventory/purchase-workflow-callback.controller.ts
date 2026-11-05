@@ -125,6 +125,22 @@ export class PurchaseWorkflowCallbackController {
     if (!this.managerApprovalService) {
       throw new ServiceUnavailableException('采购经理审批服务不可用');
     }
+    if (result.kind === 'lifecycle_page_action') {
+      return this.execute(result, async () => {
+        const outcome = await this.managerApprovalService!.handleLifecyclePage(result);
+        return { toast: { type: 'info' as const, content: outcome.queued ? '正在切换页面' : '切换请求已处理' } };
+      });
+    }
+    if (result.kind === 'lifecycle_form_action') {
+      return this.execute(result, async () => {
+        const response = await this.managerApprovalService!.handleLifecycleForm(result);
+        if (response.claimed) void this.managerApprovalService!.runAcceptedTasks().catch(error => {
+          this.logger.error(`采购全流程操作已受理，后台处理失败：${safeErrorMessage(error)}`);
+        });
+        return { toast: response.claimed ? { type: 'info' as const, content: '操作已受理，正在后台同步' }
+          : { type: 'warning' as const, content: '该申请已处理或正在处理' }, card: toFeishuRawCardUpdate(response.card) };
+      });
+    }
     if (result.kind === 'manager_batch_action') {
       return this.execute(result, () => this.handleManagerBatchCardAction(result, request.res));
     }
@@ -259,6 +275,10 @@ export class PurchaseWorkflowCallbackController {
     >,
     httpResponse?: RawBodyRequest<Request>['res'],
   ) {
+    if (result.lifecycle && result.action === 'open_item_reject') {
+      const outcome = await this.managerApprovalService!.handleLifecycleOpen(result);
+      return { toast: { type: 'info' as const, content: outcome.queued ? '正在打开驳回表单' : '表单请求已处理' } };
+    }
     const card = await (this.managerApprovalService!.handleManagerBatchCardAction(result));
     if (result.action === 'open_item_reject' || result.action === 'cancel_item_reject') {
       this.scheduleManagerCardViewPatch(result.messageId, result.operatorOpenId, true, httpResponse);
@@ -267,6 +287,8 @@ export class PurchaseWorkflowCallbackController {
     if (
       result.action === 'approve_pending_comprehensive' ||
       result.action === 'approve_pending_building_self' ||
+      result.action === 'approve_item_comprehensive' ||
+      result.action === 'approve_item_building_self' ||
       result.action === 'submit_item_reject'
     ) {
       void this.managerApprovalService!.runAcceptedTasks().catch((error) => {
@@ -297,6 +319,18 @@ export class PurchaseWorkflowCallbackController {
     >,
     httpResponse?: RawBodyRequest<Request>['res'],
   ) {
+    if (result.lifecycle && (result.action === 'open_order' || result.action === 'open_receipt')) {
+      const outcome = await this.managerApprovalService!.handleLifecycleOpen(result);
+      return { toast: { type: 'info' as const, content: outcome.queued ? '正在打开填写表单' : '表单请求已处理' } };
+    }
+    if (result.lifecycle && (result.action === 'prepare_receipt_photo' || result.action === 'prepare_invoice')) {
+      const service = this.managerApprovalService! as typeof this.managerApprovalService & { handleLifecyclePrepareReceiptImage?: (action: typeof result) => Promise<{status:'pending'|'ready'|'failed'}> };
+      if (!service || !/^oc_[A-Za-z0-9_-]+$/.test(result.authenticatedChatId || '') || typeof service.handleLifecyclePrepareReceiptImage !== 'function') throw new ServiceUnavailableException('采购全流程签收附件尚未就绪');
+      const outcome = await service.handleLifecyclePrepareReceiptImage(result);
+      if (!['pending','ready','failed'].includes(outcome?.status)) throw new ServiceUnavailableException('采购全流程签收附件状态不可用');
+      return { toast:{type:outcome.status === 'failed' ? 'error' as const : 'info' as const,content:outcome.status === 'ready' ? '请在当前私聊发送图片' : outcome.status === 'failed' ? '上传权限核验失败，请重试' : '正在核验上传权限'} };
+    }
+    if (result.lifecycle && (result.action === 'return_purchase_list' || result.action === 'return_receipt_list')) throw new ServiceUnavailableException('采购全流程返回操作暂不可用');
     const response = await (this.managerApprovalService!.handlePurchaseBatchFulfillmentCardAction(
         result,
       ));

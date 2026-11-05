@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import * as crypto from 'node:crypto';
+import crypto = require('node:crypto');
 import {
   existsSync,
   mkdirSync,
@@ -567,6 +567,82 @@ describe('PurchaseApplicationTaskLedgerStore', () => {
     expect(store.findByTaskId('purchase-application-task-1')).toBeUndefined();
     expect(store.findByTaskId('purchase-application-task-2')).toBeDefined();
     expect(store.findByTaskId('purchase-application-task-3')).toBeDefined();
+  });
+
+  it('keeps old entries legacy and refuses new lifecycle reservations by default', () => {
+    const path = temporaryLedgerPath();
+    const store = new PurchaseApplicationTaskLedgerStore(path);
+    store.reserve(ledgerEntry());
+    const bytes = readFileSync(path, 'utf8');
+    expect(store.findByTaskId('purchase-application-task-1')?.flowVersion).toBe('legacy');
+    expect(() => store.reserve(ledgerEntry({
+      flowVersion: 'lifecycle_v1', idempotencyKey: 'purchase-mutation-002',
+      task: { ...ledgerEntry().task, id: 'purchase-application-task-2' },
+    }))).toThrow('采购全流程卡片尚未启用');
+    expect(readFileSync(path, 'utf8')).toBe(bytes);
+  });
+
+  it('atomically persists and recovers lifecycle and legacy markers without changing retry identity', () => {
+    const path = temporaryLedgerPath();
+    const initial = new PurchaseApplicationTaskLedgerStore(path);
+    initial.reserve(ledgerEntry());
+    const old = JSON.parse(readFileSync(path, 'utf8'));
+    delete old.entries[0].flowVersion; // Existing v2 files have no marker.
+    writeFileSync(path, JSON.stringify(old));
+    const enabled = new PurchaseApplicationTaskLedgerStore(path, { allowLifecycleReservations: true });
+    const entry = ledgerEntry({
+      flowVersion: 'lifecycle_v1', idempotencyKey: 'purchase-mutation-002',
+      task: { ...ledgerEntry().task, id: 'purchase-application-task-2' },
+    });
+    expect(enabled.reserve(entry)).toMatchObject({ created: true, entry: { flowVersion: 'lifecycle_v1' } });
+    const saved = JSON.parse(readFileSync(path, 'utf8'));
+    expect(saved.version).toBe(3);
+    expect(saved.entries.map((row: {flowVersion: string}) => row.flowVersion)).toEqual(['legacy', 'lifecycle_v1']);
+    const restarted = new PurchaseApplicationTaskLedgerStore(path);
+    expect(restarted.findByTaskId('purchase-application-task-1')?.flowVersion).toBe('legacy');
+    expect(restarted.findByTaskId('purchase-application-task-2')?.flowVersion).toBe('lifecycle_v1');
+    expect(restarted.reserve({ ...entry, flowVersion: 'legacy' })).toMatchObject({ created: false, entry: { flowVersion: 'lifecycle_v1' } });
+    expect(enabled.updateTask(entry.task.id, { ...entry.task, message: '进行中' }).flowVersion).toBe('lifecycle_v1');
+    expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(3);
+  });
+
+  it.each([undefined, 'unknown', null])('rejects malformed v3 flow marker %s without rewriting the file', (flowVersion) => {
+    const path = temporaryLedgerPath();
+    const enabled = new PurchaseApplicationTaskLedgerStore(path, { allowLifecycleReservations: true });
+    enabled.reserve(ledgerEntry({ flowVersion: 'lifecycle_v1' }));
+    const saved = JSON.parse(readFileSync(path, 'utf8'));
+    if (flowVersion === undefined) delete saved.entries[0].flowVersion;
+    else saved.entries[0].flowVersion = flowVersion;
+    const bytes = JSON.stringify(saved);
+    writeFileSync(path, bytes);
+    expect(() => new PurchaseApplicationTaskLedgerStore(path).findByTaskId('purchase-application-task-1')).toThrow(ServiceUnavailableException);
+    expect(readFileSync(path, 'utf8')).toBe(bytes);
+  });
+
+  it('fails closed on a lifecycle marker hidden in a v2 ledger', () => {
+    const path = temporaryLedgerPath();
+    const enabled = new PurchaseApplicationTaskLedgerStore(path, { allowLifecycleReservations: true });
+    enabled.reserve(ledgerEntry({ flowVersion: 'lifecycle_v1' }));
+    const saved = JSON.parse(readFileSync(path, 'utf8'));
+    saved.version = 2;
+    writeFileSync(path, JSON.stringify(saved));
+    expect(() => new PurchaseApplicationTaskLedgerStore(path).findByTaskId('purchase-application-task-1')).toThrow('旧版采购申请账本包含不受支持的流程版本');
+  });
+
+  it('retains lifecycle entries after the usual TTL and fails safely at its capacity', () => {
+    const path = temporaryLedgerPath();
+    let now = Date.parse('2026-08-11T00:00:00Z');
+    const store = new PurchaseApplicationTaskLedgerStore(path, {
+      allowLifecycleReservations: true, maxEntries: 1, retentionTtlMs: 1_000, now: () => new Date(now),
+    });
+    store.reserve(ledgerEntry({ flowVersion: 'lifecycle_v1' }));
+    now += 10_000;
+    expect(store.findByTaskId('purchase-application-task-1')?.flowVersion).toBe('lifecycle_v1');
+    expect(() => store.reserve(ledgerEntry({
+      flowVersion: 'lifecycle_v1', idempotencyKey: 'purchase-mutation-002',
+      task: { ...ledgerEntry().task, id: 'purchase-application-task-2' },
+    }))).toThrow('采购全流程任务账本已满');
+    expect(store.findByTaskId('purchase-application-task-1')).toBeDefined();
   });
 
   function temporaryLedgerPath(): string {

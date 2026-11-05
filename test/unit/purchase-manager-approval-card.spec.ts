@@ -373,6 +373,14 @@ describe('purchase manager approval Card 2.0', () => {
     },
   );
 
+  it('does not invent a rejection reason when a platform decision supplied none', () => {
+    const card = buildResolvedPurchaseManagerApprovalCard(baseInput, { choice: 'reject', actorName: '姓名人员', processedAt: '2026-11-04 12:00', rejectionReason: '' });
+    const content = collectContent(card).join('\n');
+    expect(content).toContain('姓名人员');
+    expect(content).not.toContain('驳回原因');
+    expect(collectByTag(card, 'button').every(button => button.disabled === true)).toBe(true);
+  });
+
   it('serializes a bounded whitelist-only card context and parses the canonical value', () => {
     const serialized = serializePurchaseManagerApprovalCardContext({
       ...baseInput,

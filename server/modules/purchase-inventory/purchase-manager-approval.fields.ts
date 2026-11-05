@@ -203,6 +203,27 @@ export function buildPurchaseManagerResolvedFields(input: {
   };
 }
 
+/** Platform actions may be performed by a personnel account without a Feishu
+ * identity. In that case omit the person field so no existing value is erased;
+ * the server-owned command ledger records the actual actor and subject. */
+export function buildPurchasePlatformResolvedFields(input: {
+  choice: 'comprehensive' | 'building_self' | 'reject';
+  actorFeishuOpenId?: string;
+  eventId: string;
+  approvalTime: Date;
+}): Record<string, unknown> {
+  if (!input || !['comprehensive', 'building_self', 'reject'].includes(input.choice) ||
+      !/^[A-Za-z0-9_-]{1,160}$/.test(input.eventId) || !(input.approvalTime instanceof Date) || !Number.isFinite(input.approvalTime.getTime()) ||
+      (input.actorFeishuOpenId !== undefined && !/^ou_[A-Za-z0-9_-]+$/.test(input.actorFeishuOpenId))) throw new Error('平台采购审批结果无效');
+  return {
+    [PURCHASE_MANAGER_APPROVAL_FIELDS.state]: input.choice === 'reject' ? '已驳回' : '已通过',
+    [PURCHASE_MANAGER_APPROVAL_FIELDS.currentApprover]: [],
+    ...(input.actorFeishuOpenId ? { [PURCHASE_MANAGER_APPROVAL_FIELDS.actualApprover]: [{ id: input.actorFeishuOpenId }] } : {}),
+    [PURCHASE_MANAGER_APPROVAL_FIELDS.approvalTime]: input.approvalTime.getTime(),
+    [PURCHASE_MANAGER_APPROVAL_FIELDS.actionId]: input.eventId,
+  };
+}
+
 export function buildPurchaseReceiptCardRoutingFields(input: {
   batchId: string;
   deliveryUuid: string;

@@ -6,13 +6,18 @@ export interface PurchaseLifecycleStageContent {
   stage: PurchaseWorkflowStage;
   fields: ReadonlyArray<{ label: string; value: string }>;
   images?: ReadonlyArray<{ imageKey: string; alt: string }>;
+  attachments?: ReadonlyArray<{ purpose: 'comparison' | 'payment' | 'receipt' | 'invoice'; index: number }>;
 }
 
 export interface PurchaseLifecycleItem {
   recordId: string;
   status: string;
   stages: ReadonlyArray<PurchaseLifecycleStageContent>;
+  /** Non-sensitive overall progress, independently derived from verified source flags. */
+  overallProgress?: PurchaseLifecycleOverallProgress;
 }
+
+export type PurchaseLifecycleOverallProgress = 'pending_approval' | 'pending_warehouse' | 'pending_order' | 'ordered' | 'received' | 'inbounded' | 'terminated' | 'unknown';
 
 export type PurchaseLifecycleAction = 'approve' | 'start' | 'order' | 'receive' | 'inbound';
 
@@ -25,6 +30,7 @@ export interface PurchaseLifecycleItemGrant {
   recordId: string;
   visibleStages: ReadonlyArray<PurchaseWorkflowStage>;
   allowedActions: ReadonlyArray<PurchaseLifecycleAction>;
+  showOverallProgress?: boolean;
 }
 
 export type PurchaseLifecycleViewer =
@@ -36,7 +42,10 @@ export interface PurchaseLifecycleProjectedItem {
   currentStage: PurchaseWorkflowStage | null;
   stages: PurchaseLifecycleStageContent[];
   actions: PurchaseLifecycleAction[];
+  overallProgress?: PurchaseLifecycleOverallProgress;
 }
+
+const PROGRESS = new Set<PurchaseLifecycleOverallProgress>(['pending_approval', 'pending_warehouse', 'pending_order', 'ordered', 'received', 'inbounded', 'terminated', 'unknown']);
 
 const ACTION_STAGE: Readonly<Record<PurchaseLifecycleAction, PurchaseWorkflowStage>> = {
   approve: 'application',
@@ -89,12 +98,16 @@ export function projectPurchaseLifecycle(
         ...(stage.images === undefined ? {} : {
           images: stage.images.map(({ imageKey, alt }) => ({ imageKey, alt })),
         }),
+        ...(stage.attachments === undefined ? {} : { attachments: stage.attachments.map(({ purpose, index }) => ({ purpose, index })) }),
       }));
     if (!stageVisible && stages.length === 0) continue;
 
     const actions = viewer.kind === 'observer' || !stageVisible ? [] :
       [...new Set(grant!.allowedActions)].filter((action) => ACTION_STAGE[action] === current);
-    result.push({ recordId: item.recordId, currentStage: stageVisible ? current : null, stages, actions });
+    const showProgress = viewer.kind === 'observer' || grant?.showOverallProgress === true;
+    if (showProgress && item.overallProgress !== undefined && !PROGRESS.has(item.overallProgress)) throw new Error('Invalid purchase lifecycle progress');
+    result.push({ recordId: item.recordId, currentStage: stageVisible ? current : null, stages, actions,
+      ...(showProgress && item.overallProgress ? { overallProgress: item.overallProgress } : {}) });
   }
   return result;
 }

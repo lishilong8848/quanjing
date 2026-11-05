@@ -26,7 +26,7 @@ describe('purchase online approval UI contract', () => {
     expect(overview.match(/<StageBadge/g)?.length).toBe(2);
     expect(overview).toContain('const actionLabel = canApprove');
     expect(overview).toContain("? '签收'");
-    expect(overview).toContain(": '入库'");
+    expect(overview).toContain("canOpen ? '入库' : '查看流程'");
     expect(overview).toContain(
       'aria-label={`${actionLabel} ${item.requestCode || item.title}`}',
     );
@@ -110,7 +110,7 @@ describe('purchase online approval UI contract', () => {
     expect(overview).toContain('setWorkflowItem(item)');
     expect(overview).toContain("item.stage !== 'executing'");
     expect(overview).toContain('canReceivePurchaseRecord');
-    expect(overview).toContain('if (!canReceiveItem(item)) return;');
+    expect(overview).toContain("item.stage !== 'receiving' || !item.executionRecordId || item.pendingSync");
     expect(overview).not.toContain('<PurchaseWorkflowCenterDialog');
     expect(overview).toContain('workflowItem?.executionRecordId');
     expect(dialog).not.toContain('approvePurchaseWorkflow');

@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/access-control.interface';
 import { readEnv } from '../../common/config/external-services.config';
 import type { PurchaseWorkflowSession } from './purchase-workflow.service';
+import type { PurchasePlatformSessionIdentity } from './purchase-platform-session-binding';
 
 const OPERATOR_OPEN_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const OPERATOR_ENV: Partial<Record<AccessRole, string>> = {
@@ -24,11 +25,14 @@ export interface ResolvePurchaseWorkflowSessionInput {
   principal: AccessPrincipal;
   getTenantAccessToken: () => Promise<string>;
   professionalOpenId?: string;
+  /** Server-only binding created from a verified signed cookie; never request input. */
+  platformIdentity?: PurchasePlatformSessionIdentity;
 }
 
 export async function resolvePurchaseWorkflowSession(
   input: ResolvePurchaseWorkflowSessionInput,
 ): Promise<PurchaseWorkflowSession> {
+  if (input.platformIdentity) return resolveVerifiedPlatformSession(input);
   if (isProfessionalBusinessPrincipal(input.principal)) {
     if (!validScopedBusinessPrincipal(input.principal)) throw new UnauthorizedException('业务授权身份无效');
     const openId = resolveWorkflowActorOpenId(input);
@@ -36,7 +40,7 @@ export async function resolvePurchaseWorkflowSession(
     return { accessToken: await input.getTenantAccessToken(), openId, userName: input.principal.displayName || '',
       accessRole: input.principal.role, specialties: input.principal.specialties ? [...input.principal.specialties] : undefined,
       purchaseBuilding: input.principal.purchaseBuilding, purchaseBuildings: input.principal.buildings ? [...input.principal.buildings] : undefined,
-      permissionPrincipal: businessAuthorizationSnapshot(input.principal), authenticationMode: 'delegated-app' };
+      permissionPrincipal: businessAuthorizationSnapshot(input.principal), ...(input.principal.accountId ? { platformSession: true } : {}), ...(input.principal.impersonation ? { impersonated: true } : {}), authenticationMode: 'delegated-app' };
   }
   const role = input.principal.role;
   const operatorEnvironmentName = OPERATOR_ENV[role];
@@ -54,6 +58,8 @@ export async function resolvePurchaseWorkflowSession(
     accessToken: await input.getTenantAccessToken(),
     openId,
     userName: '',
+    ...(input.principal.accountId ? { platformSession: true } : {}),
+    ...(input.principal.impersonation ? { impersonated: true } : {}),
     accessRole: role,
     ...(input.principal.accountId ? { permissionPrincipal: businessAuthorizationSnapshot(input.principal) } : {}),
     ...(role === 'purchase_applicant' || role === 'building_admin'
@@ -66,13 +72,14 @@ export async function resolvePurchaseWorkflowSession(
 export async function resolvePurchaseWorkflowReadSession(
   input: ResolvePurchaseWorkflowSessionInput,
 ): Promise<PurchaseWorkflowSession> {
+  if (input.platformIdentity) return resolveVerifiedPlatformSession(input);
   if (isProfessionalBusinessPrincipal(input.principal)) {
     if (!validScopedBusinessPrincipal(input.principal)) throw new UnauthorizedException('业务授权身份无效');
     const openId = resolveWorkflowActorOpenId(input);
     return { accessToken: await input.getTenantAccessToken(), openId, userName: input.principal.displayName || '',
       accessRole: input.principal.role, specialties: input.principal.specialties ? [...input.principal.specialties] : undefined,
       purchaseBuilding: input.principal.purchaseBuilding, purchaseBuildings: input.principal.buildings ? [...input.principal.buildings] : undefined,
-      permissionPrincipal: businessAuthorizationSnapshot(input.principal), authenticationMode: 'delegated-app' };
+      permissionPrincipal: businessAuthorizationSnapshot(input.principal), ...(input.principal.accountId ? { platformSession: true } : {}), ...(input.principal.impersonation ? { impersonated: true } : {}), authenticationMode: 'delegated-app' };
   }
   const role = input.principal.role;
   const operatorEnvironmentName = OPERATOR_ENV[role];
@@ -87,6 +94,8 @@ export async function resolvePurchaseWorkflowReadSession(
       ? configuredOpenId
       : '',
     userName: '',
+    ...(input.principal.accountId ? { platformSession: true } : {}),
+    ...(input.principal.impersonation ? { impersonated: true } : {}),
     accessRole: role,
     ...(input.principal.accountId ? { permissionPrincipal: businessAuthorizationSnapshot(input.principal) } : {}),
     ...(role === 'purchase_applicant' || role === 'building_admin'
@@ -94,6 +103,31 @@ export async function resolvePurchaseWorkflowReadSession(
       : {}),
     authenticationMode: 'delegated-app',
   };
+}
+
+async function resolveVerifiedPlatformSession(input: ResolvePurchaseWorkflowSessionInput): Promise<PurchaseWorkflowSession> {
+  const binding = input.platformIdentity!, proof = binding.proof, principal = input.principal;
+  if (!proof || typeof binding.assertCurrent !== 'function' || typeof binding.assertCurrentPermissionForScope !== 'function' || !principal.accountId || proof.subjectAccountId !== principal.accountId ||
+      proof.subjectAuthorizationVersion !== principal.authorizationVersion ||
+      (proof.source === 'impersonation') !== !!principal.impersonation ||
+      (principal.impersonation && proof.actorAccountId !== principal.impersonation.actorAccountId)) throw new UnauthorizedException('采购会话身份不可用');
+  const result: PurchaseWorkflowSession & { platformProof: typeof proof; assertPlatformProof: PurchasePlatformSessionIdentity['assertCurrent']; assertPlatformPermission: PurchasePlatformSessionIdentity['assertCurrentPermissionForScope'] } = {
+    accessToken: await input.getTenantAccessToken(),
+    openId: proof.actorFeishuOpenId || '',
+    userName: proof.actorDisplayName,
+    accessRole: principal.role,
+    specialties: principal.specialties ? [...principal.specialties] : undefined,
+    purchaseBuilding: principal.purchaseBuilding,
+    purchaseBuildings: principal.buildings ? [...principal.buildings] : undefined,
+    permissionPrincipal: businessAuthorizationSnapshot(principal),
+    platformSession: true,
+    ...(proof.source === 'impersonation' ? { impersonated: true } : {}),
+    authenticationMode: 'delegated-app',
+    platformProof: proof,
+    assertPlatformProof: binding.assertCurrent,
+    assertPlatformPermission: binding.assertCurrentPermissionForScope,
+  };
+  return result;
 }
 
 function resolveWorkflowActorOpenId(input: ResolvePurchaseWorkflowSessionInput): string {

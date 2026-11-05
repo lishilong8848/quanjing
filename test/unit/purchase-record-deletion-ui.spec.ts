@@ -68,9 +68,12 @@ describe('purchase record deletion UI', () => {
     expect(dialogSource).toContain('<Checkbox');
     expect(dialogSource).toContain('删除所选');
     expect(overviewSource).toContain('canDeleteCompletedPurchaseRecords');
-    expect(overviewSource).toContain(
-      'const canDeleteCompletedRecords = canDeleteCompletedPurchaseRecords(principal);',
+    // 能力判断仍以 principal 为参数并驱动完成分析弹窗的 canDelete；
+    // 仅允许 prettier 拆行，不改变调用对象与委托关系。
+    expect(overviewSource).toMatch(
+      /const canDeleteCompletedRecords =\s*canDeleteCompletedPurchaseRecords\(\s*principal,?\s*\)/,
     );
+    expect(overviewSource).toMatch(/canDelete=\{canDeleteCompletedRecords\}/);
   });
 
   it('uses the unified administrator capability before calling the protected batch-delete API', () => {

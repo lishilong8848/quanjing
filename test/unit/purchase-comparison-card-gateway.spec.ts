@@ -51,4 +51,21 @@ describe('采购比价批量取源网关', () => {
     await expect(gateway.prepareManagerComparisonBatchEvidence([{ ...mapExecutionRecord(raw('recOne')), procurementForm: '单一采购' }])).rejects.toThrow('范围无效');
     expect(post).not.toHaveBeenCalled(); expect(get).not.toHaveBeenCalled();
   });
+
+  it('生命周期批量读取按记录 ID 复原顺序，仅请求一次', async () => {
+    post.mockResolvedValueOnce({ data: { code: 0, data: { records: [raw('recTwo'), raw('recOne')] } } });
+    expect((await gateway.getLifecycleExecutionRecordsAsApp(['recOne', 'recTwo'])).map(row => row.recordId)).toEqual(['recOne', 'recTwo']);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { records: [raw('recOne')] },
+    { records: [raw('recOne'), raw('recOne')] },
+    { records: [raw('recOne'), raw('recStranger')] },
+    { records: [raw('recOne'), raw('recTwo')], absent_record_ids: ['recTwo'] },
+    { records: [raw('recOne'), raw('recTwo')], forbidden_record_ids: ['recTwo'] },
+  ])('生命周期批量记录不完整时拒绝 %#', async data => {
+    post.mockResolvedValueOnce({ data: { code: 0, data } });
+    await expect(gateway.getLifecycleExecutionRecordsAsApp(['recOne', 'recTwo'])).rejects.toThrow();
+  });
 });

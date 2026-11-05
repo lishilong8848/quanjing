@@ -151,9 +151,9 @@ describe('server hotfix baseline exporter', () => {
     expect(targets.filter((target) => !lists.includes(target))).toEqual([]);
   });
 
-  it('captures both startup helpers with their real bytes and presence flags', () => {
+  it('captures startup and purchase ledger compatibility helpers with their real bytes and presence flags', () => {
     fs.mkdirSync(path.join(appRoot, 'scripts'), { recursive: true });
-    const helpers = ['verify-contract-storage-startup.mjs', 'verify-feishu-access-startup.mjs'];
+    const helpers = ['verify-contract-storage-startup.mjs', 'verify-feishu-access-startup.mjs', 'verify-hotfix-activation.cjs', 'verify-purchase-ledger-compatibility.cjs'];
     for (const name of helpers) {
       fs.writeFileSync(path.join(appRoot, 'scripts', name), `export const fixture = '${name}';`);
     }
@@ -331,7 +331,7 @@ describe('server hotfix baseline exporter', () => {
   it('uses the application portable Node runtime when Node is absent from PATH', () => {
     const portableNodeRoot = path.join(appRoot, '.runtime', 'node');
     fs.mkdirSync(portableNodeRoot, { recursive: true });
-    fs.linkSync(process.execPath, path.join(portableNodeRoot, 'node.exe'));
+    fs.copyFileSync(process.execPath, path.join(portableNodeRoot, 'node.exe'));
     const environment = createNodeIsolatedEnvironment();
 
     const result = spawnSync(

@@ -1,0 +1,9 @@
+import { createPurchaseLifecycleReceiptTransport } from '../../server/modules/purchase-inventory/purchase-lifecycle-receipt-transport';
+const app='cli_test', id='om_image', ts='1793780000000';
+const message={message_id:id,chat_id:'oc_chat',msg_type:'image',create_time:ts,deleted:false,sender:{id:'ou_user',id_type:'open_id',sender_type:'user'},body:{content:JSON.stringify({image_key:'img_image'})}};
+function setup(items:unknown[]=[message],code=0){const get=jest.fn().mockResolvedValue({data:{code,data:{items}}});const appAccessToken=jest.fn().mockResolvedValue('fake-app-token');const transport=createPurchaseLifecycleReceiptTransport({configuredAppId:()=>app,verifyEventOrigin:async()=>true,appAccessToken,get});return{get,appAccessToken,transport};}
+describe('lifecycle receipt authenticated readback adapter',()=>{
+ it('reads the exact image using the configured app and returns only sanitized fields',async()=>{const f=setup();const out=await f.transport.readImageMessage(id,app);expect(out).toEqual({messageId:id,chatId:'oc_chat',senderOpenId:'ou_user',messageType:'image',imageKey:'img_image',createdAtMs:Number(ts),deleted:false});expect(f.get).toHaveBeenCalledWith(expect.stringContaining('/'+id),expect.objectContaining({timeout:15000,maxRedirects:0}));expect(JSON.stringify(out)).not.toContain('fake-app-token');});
+ it('rejects unconfigured app before requesting any credential',async()=>{const f=setup();await expect(f.transport.readImageMessage(id,'cli_other')).rejects.toThrow();expect(f.appAccessToken).not.toHaveBeenCalled();});
+ it.each([[[],0],[[message,message],0],[[message],1],[[{...message,deleted:true}],0],[[{...message,sender:{...message.sender,id_type:'user_id'}}],0],[[{...message,body:{content:'{}'}}],0]] as const)('rejects ambiguous, failed, deleted or incomplete readback',async(items,code)=>{await expect(setup([...items],code).transport.readImageMessage(id,app)).rejects.toThrow();});
+});

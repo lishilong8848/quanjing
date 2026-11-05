@@ -62,8 +62,10 @@ describe('purchase application direct link', () => {
     expect(source).toMatch(
       /isPurchaseApplicationDirectPath\(\s*location\.pathname,?\s*\)[\s\S]*?\? 'purchase_applicant'/,
     );
-    expect(source).toContain(
-      'requestLogin(reason, location.pathname, preferredAccountType);',
+    // 人工登录按钮把采购申请人账号类型放在 requestLogin 的第三个参数位；
+    // 允许 prettier 换行，但参数顺序（reason, path, preferredAccountType）不得改变。
+    expect(source).toMatch(
+      /requestLogin\(\s*reason,\s*location\.pathname,\s*preferredAccountType,?\s*\)/,
     );
     expect(source).toContain('选择所属楼栋并输入访问密码');
   });

@@ -35,7 +35,9 @@ describe('purchase and inventory page split', () => {
     expect(headerSource).toContain('updatedAt: string;');
     expect(headerSource).toContain('onFilter?: () => void;');
     expect(headerSource).toContain('role="toolbar"');
-    expect(headerSource).toContain('aria-label="供应链页面工具栏"');
+    // 工具栏无障碍名称由 toolbarLabel 提供，属性上不再写字面量。
+    expect(headerSource).toContain('aria-label={toolbarLabel}');
+    expect(headerSource).toContain("toolbarLabel = '供应链页面工具栏'");
     expect(headerSource).toContain('h-14 w-36');
     expect(headerSource).toContain('md:h-16 md:w-40');
     expect(headerSource).toContain(
@@ -55,7 +57,10 @@ describe('purchase and inventory page split', () => {
       headerSource.indexOf('onClick={onRefresh}'),
     );
     expect(navigationSource).toContain('useAccess');
-    expect(navigationSource).toContain('getAccessibleNavigationDomains(role)');
+    // 导航仍以当前身份和可访问页面做过滤，现同时传入 pagePaths。
+    expect(navigationSource).toContain(
+      'getAccessibleNavigationDomains(role, pagePaths)',
+    );
     expect(navigationSource).toContain(
       "aria-current={active ? 'page' : undefined}",
     );

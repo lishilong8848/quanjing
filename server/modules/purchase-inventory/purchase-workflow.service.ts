@@ -79,9 +79,20 @@ import { isPurchaseManagerApprovalEnabled, readPurchaseManagerApprovers } from '
 import { InventoryBatchCardService } from '../inventory-outbound-approval/inventory-batch-card.service';
 import { inventoryNotificationBatchId } from '../inventory-outbound-approval/inventory-batch-notification-id';
 import { webReceiptInput, type WebReceiptInput } from './purchase-web-receipt-command';
+import { PurchaseLifecycleServerAuthorizer } from './purchase-lifecycle-delivery-authorizer';
+import { PurchaseLifecycleGatewayRecordSource } from './purchase-lifecycle-gateway-record-source';
+import { projectPurchaseLifecycle } from './purchase-lifecycle-projection';
+import type { PurchasePlatformAction, PurchasePlatformIdentityProof } from './purchase-platform-identity-proof';
 
 export interface PurchaseWorkflowSession {
   acceptedFulfillment?: PurchaseAcceptedFulfillment;
+  /** Set by the authenticated session resolver, never by request payload. */
+  impersonated?: boolean;
+  platformSession?: boolean;
+  /** Process-local signed-session proof; never deserialize it from a client body. */
+  platformProof?: PurchasePlatformIdentityProof;
+  assertPlatformProof?: (action: PurchasePlatformAction, record: Pick<PurchaseWorkflowRecord, 'status' | 'building' | 'specialty'>) => void;
+  assertPlatformPermission?: (action: PurchasePlatformAction, scope: { building: string; specialty?: string }) => void;
   accessToken: string;
   openId: string;
   userName: string;
@@ -162,6 +173,9 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
   private orderNoticeRecoveryCursor = '';
   private stopping = false;
   private nextWarehouseInboundRecoveryScanAt = 0;
+  private lifecycleInboundRecovery: Promise<void> | null = null;
+  private lifecycleInboundCursor = '';
+  private nextLifecycleInboundRecoveryAt = 0;
   private readonly detailCache = new Map<
     string,
     { expiresAt: number; detail: PurchaseWorkflowDetail }
@@ -194,6 +208,9 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     session: PurchaseWorkflowSession,
   ): Promise<PurchaseWorkflowDetail> {
     const normalizedRecordId = requireText(recordId, '采购执行记录 ID 缺失');
+    // Platform proofs can expire or be revoked without a configuration revision.
+    // Re-evaluate them for each detail request instead of reusing cached actions.
+    if (session.platformProof) return this.loadDetail(normalizedRecordId, session);
     const cacheKey = this.detailCacheKey(normalizedRecordId, session);
     const cached = this.detailCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
@@ -226,13 +243,19 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     session: PurchaseWorkflowSession,
   ): Promise<PurchaseWorkflowDetail> {
     const record = await this.gateway.getExecutionRecord(recordId, session.accessToken);
-    const actor = session.openId ? await this.resolveActor(session, record) : null;
+    const actor = session.openId || session.platformProof ? await this.resolveActor(session, record) : null;
     assertBuildingAdministratorWorkflowScope(record, session);
     const enabled = this.isEnabled();
     const adminOverride = session.accessRole === 'admin';
     const stage = resolvePurchaseStage(record.status);
-    const resolvedActions = actor ? resolveAllowedActions(record, actor) : [];
-    const pageWritebackEnabled = stage === 'ordering' || stage === 'receipt';
+    const resolvedActions = actor ? resolveAllowedActions(record, actor).filter(action => {
+      try {
+        if ((action === 'order' || action === 'receive' || action === 'start' && !!session.platformProof) && session.platformSession && !this.hasCurrentPlatformAction(record, session, action)) return false;
+        if (this.accessConfiguration && session.permissionPrincipal) this.assertCurrentCommandAuthority(action, record, session, actor);
+        return true;
+      } catch { return false; }
+    }) : [];
+    const pageWritebackEnabled = stage === 'ordering' || stage === 'receipt' || (!!session.platformProof && stage === 'application');
     return {
       record,
       stage,
@@ -240,7 +263,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
         enabled || adminOverride
           ? resolvedActions
           : resolvedActions.filter(
-              (action) => action === 'order' || action === 'receive',
+              (action) => action === 'order' || action === 'receive' || (action === 'approve' && !!session.platformProof),
             ),
       timeline: buildTimeline(stage),
       programEnabled: enabled || pageWritebackEnabled || adminOverride,
@@ -253,6 +276,11 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     recordId: string,
     session: PurchaseWorkflowSession,
   ): string {
+    let authorizationRevision = '';
+    try {
+      const snapshot = this.accessConfiguration?.snapshot();
+      authorizationRevision = snapshot ? `${snapshot.appId}:${snapshot.revision}` : '';
+    } catch { authorizationRevision = `unavailable-${Date.now()}-${Math.random()}`; }
     return [
       recordId,
       session.openId,
@@ -261,6 +289,10 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       (session.specialties || []).join(','),
       session.permissionPrincipal ? businessPermissionScopeKey(session.permissionPrincipal) : '',
       session.authenticationMode || '',
+      session.impersonated ? 'impersonated' : 'self',
+      session.platformSession ? 'platform' : 'other',
+      session.platformProof ? JSON.stringify(session.platformProof) : '',
+      authorizationRevision,
     ].join(':');
   }
 
@@ -331,12 +363,16 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     session: PurchaseWorkflowSession,
   ): Promise<PurchaseWorkflowCommandResult> {
     return this.execute('start', recordId, session, async (record, actor) => {
+      const existingPurchaser = session.platformProof && record.purchaserOpenId ? record.purchaserOpenId : '';
+      if (existingPurchaser && !/^ou_[A-Za-z0-9_-]+$/.test(existingPurchaser)) throw new ConflictException('原采购人身份不可核对');
       const comprehensivePurchaser =
-        record.purchaseMethod === '综合采购'
+        existingPurchaser ? { ...actor, openId: existingPurchaser } : record.purchaseMethod === '综合采购'
           ? await this.gateway.findComprehensivePurchaser(session.accessToken,{building:record.building,specialty:record.specialty})
           : actor;
       const patch = buildStartPatch(record, actor, comprehensivePurchaser);
-      const purchaser = firstUserOpenId(patch['采购人']);
+      if (existingPurchaser) delete patch['采购人'];
+      const purchaser = existingPurchaser || firstUserOpenId(patch['采购人']);
+      if (session.platformProof && !/^ou_[A-Za-z0-9_-]+$/.test(purchaser)) throw new ConflictException('采购人身份不可核对，请先维护');
       return {
         patch,
         recipients: [record.requesterOpenId, purchaser],
@@ -361,6 +397,22 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       }),
       input,
     );
+  }
+
+  /** Read-only preflight before accepting order attachments; the actual claim
+   * and write must still recheck identity, permissions, stage and record state. */
+  async assertCanUploadOrderAttachments(recordId: string, session: PurchaseWorkflowSession): Promise<void> {
+    const id = requireText(recordId, '采购执行记录 ID 缺失');
+    const record = await this.gateway.getExecutionRecord(id, session.accessToken);
+    const scopeSession = session.permissionPrincipal ? { ...session, permissionPrincipal: { ...session.permissionPrincipal, permissionContext: { module: 'purchase' as const, action: 'order' as const }, permissionRequirements: undefined } } : session;
+    assertBuildingAdministratorWorkflowScope(record, scopeSession);
+    if (session.platformSession && !this.hasCurrentPlatformAction(record, session, 'order')) throw new ForbiddenException('采购办理需要有效实名与对应权限');
+    const actor = await this.resolveActor(session, record);
+    if (resolvePurchaseStage(record.status) !== 'ordering' || !resolveAllowedActions(record, actor).includes('order')) throw new ForbiddenException('当前人员或阶段不能提交下单结果');
+    if (this.accessConfiguration && session.permissionPrincipal) this.assertCurrentCommandAuthority('order', record, session, actor);
+    if (await this.store.findCommand(`order:${id}`)) throw new ConflictException('该采购记录已有下单任务，请查看原结果');
+    const cardTasks = await this.store.listNotifications({ recordId: id, kind: 'manager_batch_order_command' });
+    if (cardTasks.some(task => task.status !== 'failed')) throw new ConflictException('该采购记录已有卡片下单任务，请查看原结果');
   }
 
   async orderFromCard(
@@ -415,7 +467,9 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     const task = await this.store.getNotification(proof.notificationKey), payload = task?.webReceipt;
     if (!task || task.kind !== 'web_receipt_command' || !payload) throw new ConflictException('原网页签收任务不存在');
     const accepted = await this.store.readAcceptedFulfillmentCommand(proof, task.recordId, 'receive', payload.actor.openId);
-    const session = { ...await this.appCardSession(payload.actor.openId), acceptedFulfillment: accepted };
+    const session: PurchaseWorkflowSession = accepted.platformIdentity
+      ? { accessToken: await this.gateway.getTenantAccessTokenAsApp(), openId: accepted.actor.openId, userName: accepted.actor.name, authenticationMode: 'delegated-app', acceptedFulfillment: accepted }
+      : { ...await this.appCardSession(payload.actor.openId), acceptedFulfillment: accepted };
     return this.receive(task.recordId, session, webReceiptInput(payload));
   }
 
@@ -691,6 +745,33 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     } finally {
       this.taskRunInProgress = false;
       this.startOrderNoticeRecovery(batchLimit, now);
+      this.startLifecycleInboundRecovery(now);
+    }
+  }
+
+  private startLifecycleInboundRecovery(now: Date): void {
+    if (this.stopping || this.lifecycleInboundRecovery || !this.isEnabled() || now.getTime() < this.nextLifecycleInboundRecoveryAt) return;
+    this.nextLifecycleInboundRecoveryAt = now.getTime() + 60_000;
+    const recovery = this.recoverLifecycleInbound(5).catch(error => {
+      if (!this.stopping) this.logger.warn(`采购全流程入库对账失败：${errorMessage(error).slice(0, 300)}`);
+    }).finally(() => { if (this.lifecycleInboundRecovery === recovery) this.lifecycleInboundRecovery = null; });
+    this.lifecycleInboundRecovery = recovery;
+  }
+
+  private async recoverLifecycleInbound(limit: number): Promise<void> {
+    const ids = await this.store.listLifecycleInboundReconciliationCandidates(limit, this.lifecycleInboundCursor);
+    if (!ids.length) { this.lifecycleInboundCursor = ''; return; }
+    for (const recordId of ids) {
+      if (this.stopping) return;
+      this.lifecycleInboundCursor = recordId;
+      try {
+        const record = await this.gateway.getExecutionRecordAsApp(recordId);
+        if (this.stopping) return;
+        if (record.recordId !== recordId || !['采购完成（已入库）', '物品签收已入库'].includes(record.status)) continue;
+        await this.store.enqueueLifecycleInboundReconciliation(recordId);
+      } catch (error) {
+        if (!this.stopping) this.logger.warn(`采购全流程入库记录对账失败：${errorMessage(error).slice(0, 300)}`);
+      }
     }
   }
 
@@ -1359,6 +1440,10 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
   ): Promise<boolean> {
     let activeNotification = notification;
     try {
+      if ((notification.kind === 'warehouse_inbound' || notification.kind === 'purchase_order_completed') && await this.store.isLifecycleRecord(notification.recordId)) {
+        await this.processLifecycleStageNotification(notification, now);
+        return true;
+      }
       if (notification.kind === 'inventory_inbound_completed_resolution') {
         await this.resolveInboundCompletedNotification(notification, now);
         return true;
@@ -1391,6 +1476,34 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     }
   }
 
+  private async processLifecycleStageNotification(notification: PurchaseWorkflowNotificationEntry, now: Date): Promise<void> {
+    if (!this.accessConfiguration) throw new ServiceUnavailableException('采购全流程当前授权配置不可用');
+    const identity = await this.store.lifecycleIdentityForNotification(notification.key, notification.claimToken);
+    const current = await this.store.getLifecycleOutbox(identity);
+    if (current && (current.replica.state !== 'delivered' || current.replica.appliedRevision !== current.desiredRevision)) {
+      await this.store.deferLifecycleStageNotification(notification.key, notification.claimToken, now);
+      return;
+    }
+    const source = new PurchaseLifecycleGatewayRecordSource(this.store, this.gateway, () => readEnv('FEISHU_APP_ID'));
+    const authorizer = new PurchaseLifecycleServerAuthorizer(this.accessConfiguration, source, () => ({ ...process.env, FEISHU_APP_ID: readEnv('FEISHU_APP_ID') }));
+    const grant = await authorizer.prepare(identity);
+    await grant.verifyLatest();
+    const check = (batch: import('./purchase-workflow.store').PurchaseManagerApprovalBatchEntry) => {
+      grant.assertCurrent();
+      grant.authorizeBatch(batch, 1);
+      const view = grant.project(batch, 1);
+      const item = projectPurchaseLifecycle(view.items, view.viewer).find(row => row.recordId === notification.recordId);
+      if (!item) throw new ForbiddenException('采购通知当前无可查看的明细');
+      if (notification.kind === 'warehouse_inbound' && (item.currentStage !== 'inbound' || !item.actions.includes('inbound'))) throw new ForbiddenException('当前无该采购记录的入库职责');
+    };
+    const entry = await this.store.enrollLifecycleRecipientFromNotification(notification.key, notification.claimToken, check);
+    if (entry.replica.state !== 'delivered' || entry.replica.appliedRevision !== entry.desiredRevision) {
+      await this.store.deferLifecycleStageNotification(notification.key, notification.claimToken, now);
+      return;
+    }
+    await this.store.completeLifecycleStageNotification(notification.key, notification.claimToken, entry.stageTargetRevision, undefined, check, now);
+  }
+
   private async resolveInboundCompletedNotification(
     notification: PurchaseWorkflowNotificationEntry,
     now: Date,
@@ -1398,6 +1511,12 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     const record = await this.gateway.getExecutionRecordAsApp(
       notification.recordId,
     );
+    if (await this.store.isLifecycleRecord(notification.recordId)) {
+      if (record.recordId !== notification.recordId || !['采购完成（已入库）', '物品签收已入库'].includes(record.status)) throw new ConflictException('采购全流程入库状态尚未确认');
+      const completed = await this.store.completeInboundCompletedResolutionAndEnqueueNotifications(notification.key, notification.claimToken, [], now);
+      if (!completed) throw new ConflictException('采购全流程入库通知任务不存在');
+      return;
+    }
     const stage = resolvePurchaseStage(record.status);
     if (stage === 'terminated') {
       await this.store.completeInboundCompletedResolutionAndEnqueueNotifications(
@@ -1872,8 +1991,10 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       normalizedRecordId,
       session.accessToken,
     );
+    if (session.acceptedFulfillment?.proof.lifecycleAuthority) this.assertLifecycleFulfillmentAuthority(action, record, session);
     if(session.acceptedFulfillment){const current=purchaseAuthorityTarget(record);if(session.acceptedFulfillment.building!==(current?.building||record.building)||session.acceptedFulfillment.specialty&&session.acceptedFulfillment.specialty!==current?.specialty)throw new ConflictException('原受理采购范围已变化，请核对原命令');}
-    assertBuildingAdministratorWorkflowScope(record, session);
+    assertBuildingAdministratorWorkflowScope(record, (action === 'order' || action === 'receive' || action === 'start') && session.permissionPrincipal ? { ...session, permissionPrincipal: { ...session.permissionPrincipal, permissionContext: { module: 'purchase', action: action === 'start' ? 'create' : action }, permissionRequirements: undefined } } : session);
+    if ((action === 'order' || action === 'receive' || action === 'start' && !!session.platformProof) && session.platformSession && !session.acceptedFulfillment && !this.hasCurrentPlatformAction(record, session, action)) throw new ForbiddenException('采购办理需要有效实名与对应权限');
     const actor = await this.resolveActor(session, record);
     let prepared: Awaited<ReturnType<typeof prepare>>;
     try {
@@ -1884,6 +2005,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     const expectedResultFingerprint = commandResultFingerprintFromPatch(
       action,
       prepared.patch,
+      record.purchaserOpenId,
     );
 
     const startedAt = new Date().toISOString();
@@ -1902,12 +2024,13 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       action,
       fingerprint,
       expectedResultFingerprint,
-      actorOpenId: session.openId,
+      actorOpenId: (session.platformProof || session.acceptedFulfillment?.platformIdentity) ? (session.platformProof || session.acceptedFulfillment?.platformIdentity)!.actorFeishuOpenId || '' : session.openId,
       accessRole: session.accessRole || 'unknown',
       authenticationMode: session.authenticationMode || 'unknown',
       startedAt,
+      ...((session.platformProof || session.acceptedFulfillment?.platformIdentity) ? { platformIdentity: session.platformProof || session.acceptedFulfillment?.platformIdentity } : {}),
       ...(orderNotice ? { orderNotice } : {}),
-    }, this.accessConfiguration ? () => this.assertCurrentCommandAuthority(action, record, session, actor) : undefined,session.acceptedFulfillment?.proof);
+    }, this.accessConfiguration ? () => session.acceptedFulfillment?.proof.lifecycleAuthority ? this.assertLifecycleFulfillmentAuthority(action, record, session) : this.assertCurrentCommandAuthority(action, record, session, actor) : undefined,session.acceptedFulfillment?.proof);
     if (!claim.claimed) {
       const result = await this.resolveExistingCommand(
         claim.entry,
@@ -1920,6 +2043,26 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       throw new ConflictException('该采购执行正在同步中，请稍后刷新');
     }
 
+    if (session.acceptedFulfillment?.proof.lifecycleAuthority || actor.platformActions?.includes(action)) {
+      // Re-read the authoritative record after the ledger claim and immediately
+      // before writing. This detects drift but is not a remote conditional write.
+      try {
+        const latest = await this.gateway.getExecutionRecord(normalizedRecordId, session.accessToken);
+        if (session.acceptedFulfillment?.proof.lifecycleAuthority) this.assertLifecycleFulfillmentAuthority(action, latest, session);
+        if (actor.platformActions?.includes(action)) {
+          if ((action !== 'order' && action !== 'receive' && action !== 'start') || latest.building !== record.building || (latest.specialty || '') !== (record.specialty || '') || latest.purchaseMethod !== record.purchaseMethod || latest.purchaserOpenId !== record.purchaserOpenId || latest.requesterOpenId !== record.requesterOpenId || latest.status !== record.status) throw new ForbiddenException('采购单据在受理后已变化，请重新核对');
+        }
+        const revalidated = await prepare(latest, actor);
+        if (commandResultFingerprintFromPatch(action, revalidated.patch, latest.purchaserOpenId) !== expectedResultFingerprint) throw new ConflictException('采购记录在受理后发生变化，请核对');
+      } catch (error) {
+        await this.store.releaseCommandClaim(key, fingerprint, claim.entry.platformAttemptId, 'prepared');
+        throw error;
+      }
+    }
+    if (claim.entry.platformIdentity) {
+      if (!claim.entry.platformAttemptId) throw new ConflictException('采购平台命令发送凭据缺失');
+      await this.store.beginPlatformCommandDispatch(key, fingerprint, claim.entry.platformAttemptId);
+    }
     try {
       await this.gateway.updateExecutionRecord(
         normalizedRecordId,
@@ -1937,13 +2080,17 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
         throw error;
       }
       try {
-        await this.store.releaseCommandClaim(key, fingerprint);
+        await this.store.releaseCommandClaim(key, fingerprint, claim.entry.platformAttemptId, 'definite_rejection');
       } catch (releaseError) {
         throw new ServiceUnavailableException(
           `${errorMessage(error)}；采购命令认领释放失败：${errorMessage(releaseError)}`,
         );
       }
       throw error;
+    }
+    if (claim.entry.platformIdentity) {
+      const confirmed = await this.gateway.getExecutionRecord(normalizedRecordId, session.accessToken);
+      if (!doesCommandResultMatchExpected(action, confirmed, expectedResultFingerprint)) throw new ConflictException('采购写入回读不一致，结果待核对');
     }
     this.invalidateDetailCache(normalizedRecordId);
 
@@ -2006,6 +2153,14 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       };
     }
 
+    // A persisted platform command may have reached the external table even if
+    // the response was lost. Its result fields alone do not identify the writer;
+    // do not expire the claim and issue the same external write again.
+    if (existing.platformIdentity) {
+      if (!fingerprintConflicts && existing.platformDispatch === 'prepared' && existing.platformAttemptId && isExpiredCommandClaim(existing.startedAt) && await this.store.releaseCommandClaim(existing.key, existing.fingerprint, existing.platformAttemptId, 'prepared')) return null;
+      throw new ConflictException(existing.platformDispatch === 'prepared' ? '采购办理正在处理中，请稍后查看原任务' : '采购办理结果待核对，请查看原任务');
+    }
+
     const record = await this.gateway.getExecutionRecord(
       normalizedRecordId,
       session.accessToken,
@@ -2055,7 +2210,27 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     throw new ConflictException('该采购执行正在同步中，请稍后刷新');
   }
 
+  private assertLifecycleFulfillmentAuthority(action: PurchaseWorkflowAction, record: PurchaseWorkflowRecord, session: PurchaseWorkflowSession): void {
+    const accepted = session.acceptedFulfillment, authority = accepted?.proof.lifecycleAuthority, config = this.accessConfiguration;
+    const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+    if (!authority || !config || appId !== accepted?.proof.appId || authority.actorOpenId !== session.openId || record.recordId !== authority.recordId || record.approvalBatchId !== authority.batchId || (action !== 'order' && action !== 'receive')) throw new ForbiddenException('采购全流程受理身份或批次已变化');
+    const target = purchaseAuthorityTarget(record);
+    if (!target || target.building !== authority.building || (target.specialty || '') !== (authority.specialty || '')) throw new ForbiddenException('采购全流程楼栋或专业已变化');
+    assertFeishuBusinessIdentity(config, session.openId);
+    const principal = config.feishuPrincipal(session.openId, appId);
+    if (!principal || principal.requiresPasswordChange || !canPerformBusinessAction(principal, { module: 'purchase', action, ...target })) throw new ForbiddenException('采购全流程履约权限已变化');
+    if (action === 'order') {
+      const duties = config.currentDutyRoutePeople(authority.choice === 'building_self' ? 'building_executor' : 'purchase_executor', target);
+      if (record.purchaserOpenId !== session.openId || !duties || !duties.some(person => person.openId === session.openId)) throw new ForbiddenException('采购全流程下单职责已变化');
+    } else if (record.requesterOpenId !== session.openId) throw new ForbiddenException('采购全流程签收职责已变化');
+  }
+
   private assertCurrentCommandAuthority(action: PurchaseWorkflowAction, record: PurchaseWorkflowRecord, session: PurchaseWorkflowSession, actor?: PurchaseWorkflowDutyActor): void {
+    if (session.platformProof) {
+      if (!session.assertPlatformProof) throw new ForbiddenException('采购会话身份不可用');
+      session.assertPlatformProof(action, record);
+      return;
+    }
     const configuration=this.accessConfiguration!;
     const principal=session.permissionPrincipal;
     if (!principal) {
@@ -2065,6 +2240,7 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     }
     const current=configuration.currentPrincipal(principal.accountId,principal.authorizationVersion);
     if (!current || current.role!==principal.role || current.role!==session.accessRole || !canPerformBusinessAction(current,{module:'purchase',action:action==='start'?'create':action,building:record.building,specialty:record.specialty})) throw new ForbiddenException('当前采购操作权限已变化，请重新核对登录和授权');
+    if ((action === 'start' || action === 'order' || action === 'receive') && actor?.platformActions?.includes(action) && !this.hasCurrentPlatformAction(record, session, action)) throw new ForbiddenException('采购人员身份或授权已变化');
     if (action === 'approve' && current.role !== 'admin') {
       const roster = this.webApprovalRoster(record);
       if (actor?.approvalDutyKind !== roster.kind || !roster.openIds.includes(session.openId)) throw new ForbiddenException('当前采购审批岗位已变化，请使用现任人员办理');
@@ -2087,6 +2263,29 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     return { ...actor, approvalDuty: roster.openIds.includes(actor.openId), approvalDutyKind: roster.kind };
   }
 
+  private hasCurrentPlatformAction(record: PurchaseWorkflowRecord, session: PurchaseWorkflowSession, action: 'start' | 'order' | 'receive' | 'approve'): boolean {
+    if (session.platformProof && session.assertPlatformProof) {
+      try { return session.assertPlatformProof(action, record) === undefined; } catch { return false; }
+    }
+    if (action === 'start' || action === 'approve') return false;
+    const config = this.accessConfiguration, principal = session.permissionPrincipal, scope = purchaseAuthorityTarget(record);
+    if (!config || typeof config.snapshot !== 'function' || typeof config.currentPrincipal !== 'function' || !principal?.accountId || !Number.isSafeInteger(principal.authorizationVersion) || principal.impersonation || session.impersonated || !scope || !/^ou_[A-Za-z0-9_-]+$/.test(session.openId)) return false;
+    try {
+    const current = config.currentPrincipal(principal.accountId, principal.authorizationVersion);
+    if (!current || current.requiresPasswordChange || current.impersonation || current.role !== principal.role || current.role !== session.accessRole || !canPerformBusinessAction(current, { module: 'purchase', action, ...scope })) return false;
+    const expectedStage = action === 'order' ? 'ordering' : 'receipt';
+    if (resolvePurchaseStage(record.status) !== expectedStage) return false;
+    const appId = readEnv('FEISHU_APP_ID')?.trim() || '', snapshot = config.snapshot();
+    if (!/^cli_[A-Za-z0-9_-]+$/.test(appId) || snapshot.appId !== appId) return false;
+    const valid = (account: typeof snapshot.accounts[number]) => account.enabled && !account.deleted && !account.permissionsRevoked && account.personnelActive !== false && !account.reactivationRequired;
+    const accounts = snapshot.accounts.filter(account => account.id === principal.accountId && valid(account));
+    if (accounts.length !== 1) return false;
+    const account = accounts[0]!;
+    const linked = account.kind === 'feishu' ? [account] : account.loginMethod === 'personnel-password' && account.siteMember && !account.external && account.personnelIdentity ? snapshot.accounts.filter(row => row.kind === 'feishu' && row.siteMember && !row.external && row.personnelIdentity === account.personnelIdentity && valid(row)) : [];
+    return linked.length === 1 && linked[0]!.appId === appId && linked[0]!.openId === session.openId && snapshot.accounts.filter(row => row.kind === 'feishu' && row.appId === appId && row.openId === session.openId && valid(row)).length === 1;
+    } catch { return false; }
+  }
+
   private async acceptedCardSession(session:PurchaseWorkflowSession,recordId:string,action:'order'|'receive',input:PurchaseWorkflowOrderInput|PurchaseWorkflowReceiptInput,proof:PurchaseFulfillmentClaimProof|undefined):Promise<PurchaseWorkflowSession>{
     if(!proof)return session;
     const accepted=await this.store.readAcceptedFulfillmentCommand(proof,recordId,action,session.openId),context=parsePurchaseBatchFulfillmentCommandContext(accepted.proof.cardContext);
@@ -2101,7 +2300,12 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     session: PurchaseWorkflowSession,
     record?: PurchaseWorkflowRecord,
   ): Promise<PurchaseWorkflowDutyActor> {
-    if(session.acceptedFulfillment)return structuredClone(session.acceptedFulfillment.actor);
+    if(session.acceptedFulfillment)return { ...structuredClone(session.acceptedFulfillment.actor), ...(session.acceptedFulfillment.platformIdentity ? { platformActions: ['receive' as const] } : {}) };
+    if (session.platformProof && session.assertPlatformProof && record) {
+      const actions = (['start', 'order', 'receive', 'approve'] as const).filter(action => this.hasCurrentPlatformAction(record, session, action));
+      return { openId: session.platformProof.actorFeishuOpenId || '', name: session.platformProof.actorDisplayName, positions: [], buildings: [], accessRole: session.accessRole,
+        ...(session.permissionPrincipal ? { permissionPrincipal: session.permissionPrincipal } : {}), platformActions: actions };
+    }
     const actor = await this.gateway.resolveUser(
       requireText(session.openId, '当前飞书用户标识缺失'),
       session.accessToken,
@@ -2117,7 +2321,8 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       accessRole: session.accessRole,
       ...(session.permissionPrincipal ? { permissionPrincipal: session.permissionPrincipal } : {}),
     };
-    const current: PurchaseWorkflowDutyActor = record ? this.withWebApprovalDuty(resolved, record) : resolved;
+    const platformActions: PurchaseWorkflowAction[] = record ? (['start', 'order', 'receive'] as const).filter(action => this.hasCurrentPlatformAction(record, session, action)) : [];
+    const current: PurchaseWorkflowDutyActor = record ? { ...this.withWebApprovalDuty(resolved, record), ...(platformActions.length ? { platformActions } : {}) } : resolved;
     if (session.authenticationMode === 'delegated-app' && !actor.name && !actor.positions.length && !actor.buildings.length && !current.approvalDuty) {
       throw new ServiceUnavailableException('配置的采购工作流操作人未在组织架构表中找到');
     }
@@ -2143,7 +2348,8 @@ function commandFingerprint(
 ): string {
   const normalized = stableCommandValue({
     action,
-    actorOpenId: session.openId,
+    actorOpenId: (session.platformProof || session.acceptedFulfillment?.platformIdentity) ? (session.platformProof || session.acceptedFulfillment?.platformIdentity)!.actorFeishuOpenId || '' : session.openId,
+    ...((session.platformProof || session.acceptedFulfillment?.platformIdentity) ? { platformIdentity: session.platformProof || session.acceptedFulfillment?.platformIdentity } : {}),
     accessRole: session.accessRole || '',
     permissionScope: session.permissionPrincipal ? businessPermissionScopeKey(session.permissionPrincipal) : '',
     authenticationMode: session.authenticationMode || '',
@@ -2197,6 +2403,7 @@ function doesCommandResultMatchExpected(
 function commandResultFingerprintFromPatch(
   action: PurchaseWorkflowAction,
   patch: PurchaseWorkflowFieldPatch,
+  previousPurchaserOpenId = '',
 ): string {
   let result: Record<string, unknown>;
   if (action === 'approve') {
@@ -2208,7 +2415,7 @@ function commandResultFingerprintFromPatch(
     };
   } else if (action === 'start') {
     result = {
-      purchaserOpenId: firstUserOpenId(patch['采购人']),
+      purchaserOpenId: firstUserOpenId(patch['采购人']) || previousPurchaserOpenId,
       warehouseConfirmed: patch['库房确认'] === true,
     };
   } else if (action === 'order') {

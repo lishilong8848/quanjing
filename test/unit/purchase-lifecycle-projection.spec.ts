@@ -28,6 +28,19 @@ const items: PurchaseLifecycleItem[] = [
 ];
 
 describe('purchase lifecycle least-privilege projection', () => {
+  it('reveals only non-sensitive progress for an already authorized record', () => {
+    const source: PurchaseLifecycleItem[] = [{ recordId: 'a', status: '下单完成（待签收）', overallProgress: 'ordered', stages: [
+      { stage: 'application', fields: [{ label: '物品', value: '允许' }] },
+      { stage: 'ordering', fields: [{ label: '金额', value: '不允许' }] },
+    ] }, { recordId: 'b', status: '采购完成（已入库）', overallProgress: 'inbounded', stages: [] }];
+    const result = projectPurchaseLifecycle(source, { kind: 'participant', grants: [
+      { recordId: 'a', visibleStages: ['application'], allowedActions: [], showOverallProgress: true },
+    ] });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ recordId: 'a', overallProgress: 'ordered', currentStage: null });
+    expect(JSON.stringify(result)).not.toContain('不允许');
+    expect(JSON.stringify(result)).not.toContain('inbounded');
+  });
   it('denies records and actions with no grant', () => {
     expect(projectPurchaseLifecycle(items, { kind: 'participant', grants: [] })).toEqual([]);
   });

@@ -12,7 +12,7 @@
   "watchOptions": {
     "excludeDirectories": ["node_modules/**"]
   },
-  "include": ["server/**/*", "shared/*", "shared/*.json"],
+  "include": ["server/**/*", "server/common/purchase-runtime-capabilities.json", "shared/*", "shared/*.json"],
   "exclude": [
     "node_modules",
     "dist",

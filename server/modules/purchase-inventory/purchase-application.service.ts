@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   Optional,
@@ -55,6 +56,9 @@ import { PurchaseManagerApprovalService } from './purchase-manager-approval.serv
 import { comparisonAttachmentIssue } from '../../../shared/purchase-comparison-attachments';
 
 const CATALOG_CACHE_TTL_MS = 4 * 60 * 60 * 1000;
+/** Internal activation remains absent until lifecycle delivery and recovery are ready. */
+export const PURCHASE_LIFECYCLE_NEW_APPLICATIONS = 'PURCHASE_LIFECYCLE_NEW_APPLICATIONS';
+export const PURCHASE_LIFECYCLE_READINESS = 'PURCHASE_LIFECYCLE_READINESS';
 const DEFAULT_ACTIVE_EMPLOYEE_SOURCE_URL =
   'https://vnet.feishu.cn/wiki/AdQmwOqwei6Xr4kag3pcp1Flnmg?table=tblOu75UtJTDNHIM&view=vewrQcypV4';
 const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
@@ -129,6 +133,7 @@ export class PurchaseApplicationService {
       idempotencyKey: string;
       requestFingerprint: string;
       submissionFingerprint: string;
+      flowVersion: 'legacy' | 'lifecycle_v1';
     }
   >();
   private readonly submissionTaskIdsByIdempotencyKey = new Map<
@@ -145,6 +150,12 @@ export class PurchaseApplicationService {
       httpService,
     ),
     private readonly submissionTaskLedger: PurchaseApplicationTaskLedgerStore = new PurchaseApplicationTaskLedgerStore(),
+    @Optional()
+    @Inject(PURCHASE_LIFECYCLE_NEW_APPLICATIONS)
+    private readonly lifecycleNewApplications?: boolean,
+    @Optional()
+    @Inject(PURCHASE_LIFECYCLE_READINESS)
+    private readonly lifecycleReadiness?: { isReady(): boolean },
   ) {}
 
   getOptions(): PurchaseApplicationOptionsResponse {
@@ -345,6 +356,17 @@ export class PurchaseApplicationService {
       return acceptedSubmission(persistedEntry.task);
     }
 
+    if (this.lifecycleNewApplications === true) {
+      let readiness: unknown;
+      try { readiness = this.lifecycleReadiness?.isReady(); } catch { readiness = false; }
+      if (readiness instanceof Promise) void readiness.catch(() => undefined);
+      if (readiness !== true) throw new ServiceUnavailableException('采购全流程卡片尚未完成就绪检查');
+    }
+    if (this.lifecycleNewApplications === true &&
+      (!this.purchaseManagerApprovalService || typeof this.purchaseManagerApprovalService.isEnabled !== 'function' || !this.purchaseManagerApprovalService.isEnabled())) {
+      throw new ServiceUnavailableException('采购全流程审批服务尚未就绪');
+    }
+
     const computedSubmissionFingerprint =
       suppliedFilesFingerprint ||
       buildPurchaseApplicationSubmissionFingerprint(
@@ -377,6 +399,7 @@ export class PurchaseApplicationService {
     };
     const reservation = this.submissionTaskLedger.reserve({
       task,
+      ...(this.lifecycleNewApplications === true ? { flowVersion: 'lifecycle_v1' as const } : {}),
       building: preparedRequest.shared.building,
       principalFingerprint,
       idempotencyKey,
@@ -526,6 +549,7 @@ export class PurchaseApplicationService {
       idempotencyKey: persisted.idempotencyKey,
       requestFingerprint: persisted.requestFingerprint,
       submissionFingerprint: persisted.submissionFingerprint,
+      flowVersion: persisted.flowVersion ?? 'legacy',
     });
     this.submissionTaskIdsByIdempotencyKey.set(
       submissionIdempotencyIndexKey(
@@ -768,6 +792,7 @@ export class PurchaseApplicationService {
           await this.purchaseManagerApprovalService.enqueueApprovalBatch({
             approvalBatchId: taskId,
             requesterOpenId: batchRequesterOpenId,
+            ...(entry.flowVersion === 'lifecycle_v1' ? { flowVersion: entry.flowVersion } : {}),
             recordIds: entry.task.result.created.map(
               (item) => item.executionRecordId || item.recordId,
             ),

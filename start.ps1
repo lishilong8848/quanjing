@@ -1521,6 +1521,26 @@ $cardCallbackHealthUrl = "${scheme}://${hostForUrl}:$configuredPort${clientBaseP
 $displayUrl = if ($publicBaseUrl.Trim()) { $publicBaseUrl.TrimEnd('/') + '/' } else { $appUrl }
 $openUrl = if ($browserOpenUrl.Trim()) { $browserOpenUrl.TrimEnd('/') + '/' } else { $appUrl }
 
+# PURCHASE_LEDGER_COMPATIBILITY_GATE_BEGIN
+$purchaseCompatibilityLedgerPath = if ([string]::IsNullOrWhiteSpace($env:PURCHASE_WORKFLOW_LEDGER_PATH)) { '.runtime/purchase-workflow-ledger.json' } else { $env:PURCHASE_WORKFLOW_LEDGER_PATH }
+$purchaseCompatibilityLedgerPath = Get-DotEnvValue -FilePath $envFile -Name 'PURCHASE_WORKFLOW_LEDGER_PATH' -DefaultValue $purchaseCompatibilityLedgerPath
+$purchaseCompatibilityLedgerPath = Get-DotEnvValue -FilePath $envLocalFile -Name 'PURCHASE_WORKFLOW_LEDGER_PATH' -DefaultValue $purchaseCompatibilityLedgerPath
+if ([string]::IsNullOrWhiteSpace($purchaseCompatibilityLedgerPath)) { $purchaseCompatibilityLedgerPath = '.runtime/purchase-workflow-ledger.json' }
+$purchaseCompatibilityVerifier = Join-Path $appRoot 'scripts/verify-purchase-ledger-compatibility.cjs'
+if (-not (Test-Path -LiteralPath $purchaseCompatibilityVerifier -PathType Leaf)) { throw 'Purchase ledger compatibility verifier is missing; startup stopped before touching processes.' }
+function Confirm-PurchaseRuntimeStartupCapability {
+  # Never trust an inherited/configured proof. Re-derive it from the current runtime and ledger.
+  [Environment]::SetEnvironmentVariable('PURCHASE_LEDGER_RUNTIME_CAPABILITY', $null, 'Process')
+  $proofJson = & $nodePath $purchaseCompatibilityVerifier --app-root $appRoot --runtime-dist (Join-Path $appRoot 'dist') --ledger $purchaseCompatibilityLedgerPath
+  if ($LASTEXITCODE -ne 0) { throw 'Purchase ledger is incompatible with this runtime; startup rejected.' }
+  $proof = $proofJson | ConvertFrom-Json
+  if ($proof.compatible -ne $true) { throw 'Purchase runtime compatibility proof is invalid.' }
+  if ($proof.runtimeCapability -ceq 'purchase-workflow-ledger-v1') {
+    [Environment]::SetEnvironmentVariable('PURCHASE_LEDGER_RUNTIME_CAPABILITY', $proof.runtimeCapability, 'Process')
+  }
+}
+Confirm-PurchaseRuntimeStartupCapability
+# PURCHASE_LEDGER_COMPATIBILITY_GATE_END
 Stop-PidFileProcess -PidFile $pidFile
 Stop-AllScheduleNodeProcesses
 Stop-ListeningProcessesOnPort -Port ([int]$configuredPort)
@@ -1538,6 +1558,7 @@ if ($displayUrl -ne $appUrl) {
 if ($openUrl -ne $appUrl) {
   Write-Host "[INFO] Browser URL: $openUrl"
 }
+Confirm-PurchaseRuntimeStartupCapability
 $process = Start-Process `
   -FilePath $nodePath `
   -ArgumentList @('dist/server/main.js') `

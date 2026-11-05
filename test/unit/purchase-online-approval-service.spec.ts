@@ -355,7 +355,7 @@ describe('PurchaseOnlineApprovalService', () => {
 
     await expect(
       service.decide('rec_execution_1', { decision: 'approved' }),
-    ).rejects.toBe(upstreamError);
+    ).rejects.toThrow('审批写入结果待核对');
     expect(gateway.updateExecutionRecordAsApp).toHaveBeenCalledTimes(1);
   });
 });

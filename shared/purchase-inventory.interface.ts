@@ -187,9 +187,12 @@ export interface PurchaseRecordUpdateResponse {
 }
 
 export type PurchaseOnlineApprovalDecision = 'approved' | 'rejected';
+export type PurchaseOnlineApprovalMethod = '综合采购' | '需求自采' | '需求自采（楼内）';
 
 export interface PurchaseOnlineApprovalRequest {
   decision: PurchaseOnlineApprovalDecision;
+  /** Explicit method for an approval; omitted keeps the record's existing method. */
+  purchaseMethod?: PurchaseOnlineApprovalMethod;
 }
 
 export interface PurchaseOnlineApprovalResponse {

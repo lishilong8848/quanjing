@@ -560,6 +560,7 @@ async function createFixture(options?: {
   candidateConfigurationPreflightExitCode?: number;
   mutateDependencyAfterCandidateStart?: boolean;
   actualRecoveryLauncher?: boolean;
+  purchaseLedgerCapability?: boolean;
 }): Promise<RuntimeFixture> {
   const port = await reservePort();
   const root = mkdtempSync(join(tmpdir(), 'nantong-installer-runtime-'));
@@ -779,6 +780,11 @@ async function createFixture(options?: {
     '// stage integrity target\r\n',
   );
   writeText(join(packageRoot, 'release-root', 'start.ps1'), candidateStart);
+  const purchaseCompatibilityPath = 'scripts/verify-purchase-ledger-compatibility.cjs';
+  writeText(
+    join(packageRoot, 'release-root', purchaseCompatibilityPath),
+    readFileSync(join(ROOT, purchaseCompatibilityPath), 'utf8'),
+  );
   if (options?.candidateConfigurationPreflightExitCode !== undefined) {
     writeText(
       join(
@@ -856,6 +862,13 @@ async function createFixture(options?: {
   );
   writeText(join(packageRoot, 'README.md'), 'runtime fixture hotfix\r\n');
 
+  const capabilityPath = 'dist/server/common/purchase-runtime-capabilities.json';
+  if (options?.purchaseLedgerCapability) {
+    const capabilityBytes = JSON.stringify({ schemaVersion: 1, capabilities: ['purchase-workflow-ledger-v1'] });
+    writeText(join(appRoot, capabilityPath), capabilityBytes);
+    writeText(join(packageRoot, capabilityPath), capabilityBytes);
+  }
+
   const baselinePaths = [
     'package.json',
     'package-lock.json',
@@ -872,6 +885,7 @@ async function createFixture(options?: {
   if (options?.consumerReleaseMarker) {
     baselinePaths.push('.feishu-card-action-consumer-release');
   }
+  if (options?.purchaseLedgerCapability) baselinePaths.push(capabilityPath);
   const serverBaselineFiles = baselinePaths.map((relativePath) =>
     entryFor(appRoot, join(appRoot, ...relativePath.split('/'))),
   );
@@ -891,6 +905,12 @@ async function createFixture(options?: {
   );
   const releaseStartPath = join(packageRoot, 'release-root', 'start.ps1');
   const releaseFiles = [
+    {
+      ...entryFor(packageRoot, join(packageRoot, 'release-root', purchaseCompatibilityPath)),
+      targetPath: purchaseCompatibilityPath,
+      baselineExisted: false,
+      baselineSha256: '',
+    },
     {
       ...entryFor(packageRoot, releaseStartPath),
       targetPath: 'start.ps1',
@@ -2078,6 +2098,41 @@ describeWindows('safe full runtime hotfix installer runtime safety', () => {
       phase: 'finalized',
     });
     expectSentinelsUnchanged(fixture);
+    expectMaintenanceReleased(fixture, result);
+  });
+
+  it.each([
+    ['unsupported ledger capability', JSON.stringify({ version: 2, commands: [], reminders: [], requiredRuntimeCapability: 'purchase-workflow-ledger-v1' })],
+    ['unknown ledger capability', JSON.stringify({ version: 2, commands: [], reminders: [], requiredRuntimeCapability: 'future-ledger' })],
+    ['corrupt ledger', '{broken'],
+  ])('rejects %s before stopping the healthy runtime', async (_label, ledgerBytes) => {
+    const fixture = await createFixture();
+    const oldPid = await startCurrentRuntime(fixture);
+    const ledger = join(fixture.appRoot, '.runtime/purchase-workflow-ledger.json');
+    writeText(ledger, ledgerBytes);
+    const before = snapshotDirectory(join(fixture.appRoot, 'dist'));
+    const result = runInstaller(fixture);
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('Purchase ledger is incompatible');
+    expect(isProcessAlive(oldPid)).toBe(true);
+    await waitForVersion(fixture.endpoint, 'old');
+    expect(snapshotDirectory(join(fixture.appRoot, 'dist'))).toEqual(before);
+    expect(readFileSync(ledger, 'utf8')).toBe(ledgerBytes);
+    expect(existsSync(join(fixture.appRoot, '.candidate-listening'))).toBe(false);
+    expectMaintenanceReleased(fixture, result);
+  });
+
+  it('restores a capability-aware baseline after candidate failure while preserving a marked purchase ledger', async () => {
+    const fixture = await createFixture({ candidateLauncherExitCode: 23, purchaseLedgerCapability: true });
+    await startCurrentRuntime(fixture);
+    const ledger = join(fixture.appRoot, '.runtime/purchase-workflow-ledger.json');
+    const bytes = JSON.stringify({ version: 2, commands: [], reminders: [], requiredRuntimeCapability: 'purchase-workflow-ledger-v1' });
+    writeText(ledger, bytes);
+    const result = runInstaller(fixture);
+    expect(result.status).not.toBe(0);
+    expect(JSON.parse(readFileSync(join(fixture.appRoot, '.hotfix-transaction.json'), 'utf8')).phase).toBe('rolled-back');
+    await waitForVersion(fixture.endpoint, 'old');
+    expect(readFileSync(ledger, 'utf8')).toBe(bytes);
     expectMaintenanceReleased(fixture, result);
   });
 

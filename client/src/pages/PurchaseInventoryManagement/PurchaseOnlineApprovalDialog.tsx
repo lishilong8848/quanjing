@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useAccess } from '@/access/AccessProvider';
 import {
   getPurchaseOnlineApprovalTaskStatus,
+  getPurchaseWorkflowDetail,
   submitPurchaseOnlineApproval,
 } from '@/api';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,8 @@ import type {
   PurchaseInventoryRequestItem,
   PurchaseOnlineApprovalDecision,
 } from '@shared/purchase-inventory.interface';
+import type { PurchaseWorkflowDetail } from '@shared/purchase-workflow.interface';
+import { verifiedPurchaseWorkflowActions } from './purchase-workflow-action.logic';
 import {
   canApprovePurchaseOnline,
   createPurchaseOnlineApprovalSubmissionGate,
@@ -67,6 +70,10 @@ export function PurchaseOnlineApprovalDialog({
   const [submissionGate] = useState(createPurchaseOnlineApprovalSubmissionGate);
   principalRequestGate.syncPrincipal(principalIdentityKey);
   const canApprove = Boolean(item && canApprovePurchaseOnline(principal, item));
+  const detailKey = JSON.stringify([item?.executionRecordId || '', principalIdentityKey]);
+  const [verifiedDetail, setVerifiedDetail] = useState<{ key: string; detail: PurchaseWorkflowDetail } | null>(null);
+  const [detailFailureKey, setDetailFailureKey] = useState('');
+  const [detailAttempt, setDetailAttempt] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -82,10 +89,31 @@ export function PurchaseOnlineApprovalDialog({
     [principalRequestGate],
   );
 
+  useEffect(() => {
+    const recordId = item?.executionRecordId;
+    if (!recordId || !canApprove) {
+      setVerifiedDetail(null);
+      setDetailFailureKey('');
+      return;
+    }
+    let active = true;
+    setVerifiedDetail(null);
+    setDetailFailureKey('');
+    void getPurchaseWorkflowDetail(recordId).then(detail => {
+      if (!active) return;
+      if (!detail?.record || detail.record.recordId !== recordId) throw new Error('采购流程详情无效');
+      setVerifiedDetail({ key: detailKey, detail });
+    }).catch(() => { if (active) setDetailFailureKey(detailKey); });
+    return () => { active = false; };
+  }, [canApprove, detailKey, detailAttempt, item?.executionRecordId]);
+
+  const confirmed = verifiedPurchaseWorkflowActions(principal, verifiedDetail?.detail || null, item?.executionRecordId || null,
+    verifiedDetail?.key || '', detailKey, false, canApprove).includes('approve');
+
   if (!item || !canApprove) return null;
 
   async function decide(decision: PurchaseOnlineApprovalDecision) {
-    if (!canApprove || !item.executionRecordId || !submissionGate.tryStart()) return;
+    if (!confirmed || !item.executionRecordId || !submissionGate.tryStart()) return;
     const requestToken = principalRequestGate.capture();
     setSubmitting(true);
     setError('');
@@ -137,8 +165,8 @@ export function PurchaseOnlineApprovalDialog({
         if (!submitting) onOpenChange(nextOpen);
       }}
     >
-      <DialogContent className="max-w-lg gap-0 overflow-hidden p-0">
-        <DialogHeader className="border-b border-blue-100 bg-blue-50 px-5 py-4 text-left">
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-lg flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-blue-100 bg-blue-50 px-5 py-4 text-left">
           <div className="flex items-start gap-3">
             <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-200">
               <ShieldCheck className="h-5 w-5" />
@@ -154,7 +182,7 @@ export function PurchaseOnlineApprovalDialog({
           </div>
         </DialogHeader>
 
-        <div className="space-y-4 px-5 py-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
             <p className="text-xs font-medium text-slate-400">采购单号</p>
             <p className="mt-1 truncate text-sm font-semibold text-slate-700">
@@ -188,7 +216,7 @@ export function PurchaseOnlineApprovalDialog({
             <ApprovalMeta
               icon={ShieldCheck}
               label="当前审批节点"
-              value={item.approvalTarget || '运维经理'}
+              value={item.approvalTarget || '待确认'}
             />
             <ApprovalMeta
               icon={ShieldCheck}
@@ -204,9 +232,11 @@ export function PurchaseOnlineApprovalDialog({
               {error}
             </p>
           ) : null}
+          {!confirmed && <p role="status" className="text-xs text-slate-600">{detailFailureKey === detailKey ? '无法核验当前审批权限，请重新加载。' : verifiedDetail?.key === detailKey ? '当前账号在此节点没有审批权限。' : '正在核验当前审批权限…'}</p>}
+          {detailFailureKey === detailKey && <Button type="button" variant="outline" onClick={() => setDetailAttempt(value => value + 1)}>重新加载</Button>}
         </div>
 
-        <DialogFooter className="border-t border-slate-100 bg-slate-50 px-5 py-4 sm:justify-between">
+        <DialogFooter className="shrink-0 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:justify-between">
           <Button
             type="button"
             variant="outline"
@@ -219,7 +249,7 @@ export function PurchaseOnlineApprovalDialog({
             <Button
               type="button"
               variant="destructive"
-              disabled={submitting}
+              disabled={submitting || !confirmed}
               onClick={() => void decide('rejected')}
             >
               {submitting ? (
@@ -231,7 +261,7 @@ export function PurchaseOnlineApprovalDialog({
             </Button>
             <Button
               type="button"
-              disabled={submitting}
+              disabled={submitting || !confirmed}
               onClick={() => void decide('approved')}
               className="bg-blue-600 text-white hover:bg-blue-700"
             >

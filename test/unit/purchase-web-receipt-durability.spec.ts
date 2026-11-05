@@ -24,7 +24,9 @@ describe('网页签收原队列持久受理', () => {
     parent = realpathSync(tmpdir()); folder = mkdtempSync(join(parent, 'nt-web-receipt-')); owner = randomUUID();
     writeFileSync(join(folder, '.test-owner'), owner, { flag: 'wx' });
     store = new PurchaseWorkflowStore(join(folder, 'purchase.json')); await store.onModuleInit();
-    jest.spyOn(global, 'setImmediate').mockImplementation((() => ({ unref() {} })) as never);
+    const systemImmediate = global.setImmediate;
+    jest.spyOn(global, 'setImmediate').mockImplementation(((callback: (...args: unknown[]) => void, ...args: unknown[]) =>
+      callback.length === 0 ? ({ unref() {} }) : systemImmediate(callback, ...args)) as never);
   });
   afterEach(async () => {
     await store.onModuleDestroy(); jest.restoreAllMocks();
@@ -148,26 +150,27 @@ describe('网页签收原队列持久受理', () => {
     expect(f.gateway.uploadAttachment).toHaveBeenCalledTimes(1); expect(f.gateway.updateExecutionRecord).not.toHaveBeenCalled();
     expect(await f.service.getReceiptTaskStatus(task.taskId, f.session)).toMatchObject({ task: { status: 'failed', message: expect.stringContaining('待核对') } });
   });
-  it('管理员明确恢复未确认附件，保留已上传步骤，重复请求和重启不重复业务写入',async()=>{
+  it('附件上传结果未知时管理员恢复被阻止，重启不重新上传或写入业务',async()=>{
     const f=await fixture();f.files.receiptPhotos.push({...f.files.receiptPhotos[0],originalname:'second.jpg'});
-    f.gateway.uploadAttachment.mockResolvedValueOnce('synthetic-confirmed-photo').mockRejectedValueOnce(Error('synthetic unknown photo')).mockResolvedValueOnce('synthetic-reuploaded-photo');
+    f.gateway.uploadAttachment.mockResolvedValueOnce('synthetic-confirmed-photo').mockRejectedValueOnce(Error('synthetic unknown photo'));
     const accepted=await f.service.acceptReceipt(f.record.recordId,f.session,f.input,f.files);
     await f.service.runPendingTasks();await f.service.runPendingTasks(Date.now()+2000);
     const task=(await f.service.listRecoveryTasks()).find(row=>row.id===accepted.taskId)!;
     expect(task.status).toBe('failed');
     const request={module:'purchase' as const,taskId:task.id,expectedVersion:task.version,clientMutationId:randomUUID()},actor={id:f.id,name:f.session.userName,authorizationVersion:1};
     const preview=await f.service.previewRecoveryTask(request);
-    expect(preview).toMatchObject({version:task.version,canConfirm:true,choices:[]});
+    expect(preview).toMatchObject({version:task.version,canConfirm:false,choices:[],message:expect.stringContaining('不能直接重新上传')});
     expect(preview.facts.map(row=>row.value)).toEqual([expect.stringContaining('上传已确认'),expect.stringContaining('上传结果待核对')]);
     const guard=()=>{if(f.access.currentPrincipal(f.id,1)?.role!=='admin')throw Error('synthetic current administrator required');};
     const before=readFileSync(join(folder,'purchase.json'),'utf8');
     await expect(f.service.recoverTask({...request,expectedVersion:'0'.repeat(64)},actor,guard)).rejects.toThrow();expect(readFileSync(join(folder,'purchase.json'),'utf8')).toBe(before);
-    expect(await f.service.recoverTask(request,actor,guard)).toMatchObject({status:'pending'});
-    const queued=readFileSync(join(folder,'purchase.json'),'utf8');await f.service.recoverTask(request,actor,guard);expect(readFileSync(join(folder,'purchase.json'),'utf8')).toBe(queued);
+    await expect(f.service.recoverTask(request,actor,guard)).rejects.toThrow('上传结果待核对');
+    expect(readFileSync(join(folder,'purchase.json'),'utf8')).toBe(before);
+    await expect(f.service.recoverTask(request,actor,guard)).rejects.toThrow('上传结果待核对');
     await f.restart();await f.service.runPendingTasks();
-    expect(f.gateway.uploadAttachment).toHaveBeenCalledTimes(3);expect(f.gateway.updateExecutionRecord).toHaveBeenCalledTimes(1);
-    expect((await store.findWebReceipt(task.id))?.status).toBe('completed');expect((await store.findWebReceipt(task.id))?.webReceipt?.recoveries).toHaveLength(1);
-    expect((await store.findWebReceipt(task.id))?.webReceipt?.files.map(file=>file.token)).toEqual(['synthetic-confirmed-photo','synthetic-reuploaded-photo']);
+    expect(f.gateway.uploadAttachment).toHaveBeenCalledTimes(2);expect(f.gateway.updateExecutionRecord).not.toHaveBeenCalled();
+    expect((await store.findWebReceipt(task.id))?.status).toBe('failed');expect((await store.findWebReceipt(task.id))?.webReceipt?.recoveries || []).toHaveLength(0);
+    expect((await store.findWebReceipt(task.id))?.webReceipt?.files.map(file=>file.token)).toEqual(['synthetic-confirmed-photo','']);
   });
 
   it('附件被篡改不能执行签收', async () => {

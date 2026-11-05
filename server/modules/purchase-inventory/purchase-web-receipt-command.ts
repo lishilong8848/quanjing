@@ -4,6 +4,8 @@ import type { PurchaseWorkflowReceiptInput, PurchaseWorkflowUser } from '../../.
 import { normalizePurchaseAuthorityTarget, type PurchaseAuthorityTarget } from './purchase-authority-target';
 import type { PersonnelRecoveryAudit } from '../../../shared/personnel-task-recovery.interface';
 import { validRecoveryAudits } from '../../common/access/personnel-task-recovery.validation';
+import { normalizeAccessDisplayName } from '../../common/access/access-display-name';
+import type { PurchasePlatformIdentityProof } from './purchase-platform-identity-proof';
 
 export type WebReceiptInput = Omit<PurchaseWorkflowReceiptInput, 'receiptPhotoTokens' | 'invoiceTokens' | 'clientMutationId'>;
 export interface WebReceiptFile {
@@ -23,6 +25,8 @@ export interface PurchaseWebReceiptCommand {
   appId: string;
   mutationId: string;
   fingerprint: string;
+  /** Snapshot is meaningful only when accepted under the store lock with a verified session. */
+  platformIdentity?: PurchasePlatformIdentityProof;
   actor: Pick<PurchaseWorkflowUser, 'openId' | 'name' | 'positions' | 'buildings' | 'accessRole'>;
   scope: PurchaseAuthorityTarget;
   input: WebReceiptInput;
@@ -42,13 +46,14 @@ export function normalizeWebReceiptCommand(value: unknown): PurchaseWebReceiptCo
   const fail = (): never => { throw new ServiceUnavailableException('网页签收任务内容无效'); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail();
   const row = value as PurchaseWebReceiptCommand;
-  if (Object.keys(row).filter(key=>key!=='recoveries').sort().join(',') !== 'actor,appId,files,filesRemoved,fingerprint,input,mutationId,notificationWarnings,ownerId,recordId,scope,taskId' || !validRecoveryAudits(row.recoveries) ||
+  if (Object.keys(row).filter(key=>key!=='recoveries' && key!=='platformIdentity').sort().join(',') !== 'actor,appId,files,filesRemoved,fingerprint,input,mutationId,notificationWarnings,ownerId,recordId,scope,taskId' || !validRecoveryAudits(row.recoveries) ||
     !/^rec[A-Za-z0-9_-]+$/.test(row.recordId) ||
     !/^purchase-receipt-[a-f0-9]{64}$/.test(row.taskId) || !/^cli_[A-Za-z0-9_-]+$/.test(row.appId) ||
     !/^[A-Za-z0-9:_-]{1,180}$/.test(row.ownerId) || !/^[A-Za-z0-9_-]{1,80}$/.test(row.mutationId) ||
     !/^[a-f0-9]{64}$/.test(row.fingerprint) || typeof row.filesRemoved !== 'boolean') return fail();
   const scope = normalizePurchaseAuthorityTarget(row.scope);
-  if (!scope || !row.actor || !/^ou_[A-Za-z0-9_-]+$/.test(row.actor.openId) || typeof row.actor.name !== 'string' || row.actor.name.length > 200 ||
+  const identity = row.platformIdentity === undefined ? undefined : normalizeReceiptPlatformIdentity(row.platformIdentity);
+  if (!scope || !row.actor || (identity ? row.actor.openId !== (identity.actorFeishuOpenId || '') || row.actor.name !== identity.actorDisplayName : !/^ou_[A-Za-z0-9_-]+$/.test(row.actor.openId)) || typeof row.actor.name !== 'string' || row.actor.name.length > 200 ||
     Object.keys(row.actor).some(key => !['openId', 'name', 'positions', 'buildings', 'accessRole'].includes(key)) ||
     !Array.isArray(row.actor.positions) || !Array.isArray(row.actor.buildings) ||
     [...row.actor.positions, ...row.actor.buildings].some(text => typeof text !== 'string' || text.length > 100) ||
@@ -67,12 +72,36 @@ export function normalizeWebReceiptCommand(value: unknown): PurchaseWebReceiptCo
     row.files.reduce((sum, file) => sum + file.size, 0) > 100 * 1024 * 1024 ||
     !Array.isArray(row.notificationWarnings) || row.notificationWarnings.length > 30 || row.notificationWarnings.some(text => typeof text !== 'string' || text.length > 1000)) return fail();
   if (webReceiptFingerprint(row) !== row.fingerprint || row.taskId !== `purchase-receipt-${webReceiptHash([row.appId, row.ownerId, row.mutationId])}`) return fail();
-  return structuredClone({ ...row, scope });
+  return structuredClone({ ...row, scope, ...(identity ? { platformIdentity: identity } : {}) });
 }
 
-export function webReceiptFingerprint(row: Pick<PurchaseWebReceiptCommand, 'recordId' | 'ownerId' | 'appId' | 'mutationId' | 'actor' | 'scope' | 'input' | 'files'>): string {
-  return webReceiptHash([row.recordId, row.ownerId, row.appId, row.mutationId, row.actor, row.scope, row.input,
-    row.files.map(({ token: _token, uploadStartedAt: _startedAt, ...file }) => file)]);
+export function webReceiptFingerprint(row: Pick<PurchaseWebReceiptCommand, 'recordId' | 'ownerId' | 'appId' | 'mutationId' | 'actor' | 'scope' | 'input' | 'files' | 'platformIdentity'>): string {
+  const values: unknown[] = [row.recordId, row.ownerId, row.appId, row.mutationId, row.actor, row.scope, row.input,
+    row.files.map(({ token: _token, uploadStartedAt: _startedAt, ...file }) => file)];
+  if (row.platformIdentity !== undefined) values.push(normalizeReceiptPlatformIdentity(row.platformIdentity));
+  return webReceiptHash(values);
+}
+
+/** Structural validation is not authentication; the store must verify the live proof at acceptance. */
+export function normalizeReceiptPlatformIdentity(value: unknown): PurchasePlatformIdentityProof {
+  const fail = (): never => { throw new ServiceUnavailableException('网页签收平台身份无效'); };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail();
+  const v = value as Record<string, unknown>;
+  const keys = ['source', 'actorAccountId', 'actorDisplayName', 'actorAuthorizationVersion', 'subjectAccountId', 'subjectDisplayName', 'subjectAuthorizationVersion', 'sessionFamilyFingerprint', 'expiresAt', 'actorFeishuOpenId'];
+  const id = (x: unknown) => typeof x === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(x);
+  const name = (x: unknown) => typeof x === 'string' && !!x && x.length <= 128 && normalizeAccessDisplayName(x) === x;
+  const version = (x: unknown) => Number.isSafeInteger(x) && Number(x) > 0;
+  if (Object.keys(v).some(k => !keys.includes(k)) || !['platform', 'impersonation'].includes(String(v.source)) ||
+      !id(v.actorAccountId) || !id(v.subjectAccountId) || !name(v.actorDisplayName) || !name(v.subjectDisplayName) ||
+      !version(v.actorAuthorizationVersion) || !version(v.subjectAuthorizationVersion) || !version(v.expiresAt) ||
+      typeof v.sessionFamilyFingerprint !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(v.sessionFamilyFingerprint) ||
+      v.actorFeishuOpenId !== undefined && (typeof v.actorFeishuOpenId !== 'string' || !/^ou_[A-Za-z0-9_-]+$/.test(v.actorFeishuOpenId)) ||
+      v.source === 'platform' && (v.actorAccountId !== v.subjectAccountId || v.actorDisplayName !== v.subjectDisplayName || v.actorAuthorizationVersion !== v.subjectAuthorizationVersion) ||
+      v.source === 'impersonation' && v.actorAccountId === v.subjectAccountId) return fail();
+  return { source: v.source as 'platform' | 'impersonation', actorAccountId: v.actorAccountId as string, actorDisplayName: v.actorDisplayName as string, actorAuthorizationVersion: v.actorAuthorizationVersion as number,
+    subjectAccountId: v.subjectAccountId as string, subjectDisplayName: v.subjectDisplayName as string, subjectAuthorizationVersion: v.subjectAuthorizationVersion as number,
+    sessionFamilyFingerprint: v.sessionFamilyFingerprint as string, expiresAt: v.expiresAt as number,
+    ...(v.actorFeishuOpenId === undefined ? {} : { actorFeishuOpenId: v.actorFeishuOpenId as string }) };
 }
 
 export function webReceiptInput(row: PurchaseWebReceiptCommand): PurchaseWorkflowReceiptInput {

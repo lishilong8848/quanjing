@@ -53,10 +53,8 @@ describe('durable purchase order completion notices', () => {
     service = new PurchaseWorkflowService(gateway as never, store);
     const unrelatedRecovery = service as unknown as {
       recoverMissingWarehouseInboundNotifications(): Promise<number>;
-      recoverMissingCompletionNotifications(): Promise<number>;
     };
     jest.spyOn(unrelatedRecovery, 'recoverMissingWarehouseInboundNotifications').mockResolvedValue(0);
-    jest.spyOn(unrelatedRecovery, 'recoverMissingCompletionNotifications').mockResolvedValue(0);
   });
   afterEach(async () => {
     service.onModuleDestroy();

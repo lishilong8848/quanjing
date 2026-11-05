@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import * as fs from 'node:fs';
+import fs = require('node:fs');
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -467,35 +467,20 @@ describe('PurchaseInboundCategoryTaskLedgerStore', () => {
   });
 
   it('does not permanently poison the ledger after a transient Windows rename failure', async () => {
-    const originalRenameSync = fs.renameSync;
-    let blockLedgerRename = true;
-    const renameSpy = jest
-      .spyOn(fs, 'renameSync')
-      .mockImplementation((source, destination) => {
-        if (
-          blockLedgerRename &&
-          String(source).endsWith('.tmp') &&
-          String(destination) === ledgerPath
-        ) {
-          throw Object.assign(new Error('operation not permitted'), {
-            code: 'EPERM',
-          });
-        }
-        return originalRenameSync(source, destination);
-      });
+    const blocked = blockLedgerRenameWithEperm(ledgerPath);
     const store = new PurchaseInboundCategoryTaskLedgerStore(ledgerPath, {
       lockRetryDelayMs: 1,
     });
 
     try {
       await expect(store.reserve(pendingEntry())).rejects.toThrow('任务台账');
-      blockLedgerRename = false;
+      blocked.release();
 
       await expect(store.reserve(pendingEntry())).resolves.toMatchObject({
         created: true,
       });
     } finally {
-      renameSpy.mockRestore();
+      blocked.restore();
     }
   });
 
@@ -504,37 +489,62 @@ describe('PurchaseInboundCategoryTaskLedgerStore', () => {
       lockRetryDelayMs: 1,
     });
     await store.reserve(pendingEntry());
-    const originalRenameSync = fs.renameSync;
-    let blockLedgerRename = true;
-    const renameSpy = jest
-      .spyOn(fs, 'renameSync')
-      .mockImplementation((source, destination) => {
-        if (
-          blockLedgerRename &&
-          String(source).endsWith('.tmp') &&
-          String(destination) === ledgerPath
-        ) {
-          throw Object.assign(new Error('operation not permitted'), {
-            code: 'EPERM',
-          });
-        }
-        return originalRenameSync(source, destination);
-      });
+    const blocked = blockLedgerRenameWithEperm(ledgerPath);
 
     try {
       await expect(
         store.claimPending('purchase-category-task-1'),
       ).rejects.toThrow();
-      blockLedgerRename = false;
+      blocked.release();
 
       await expect(
         store.claimPending('purchase-category-task-1'),
       ).resolves.toMatchObject({ claimed: true });
     } finally {
-      renameSpy.mockRestore();
+      blocked.restore();
     }
   });
 });
+
+/**
+ * 以“就地替换单个导出函数”的方式模拟 Windows 上 rename 的瞬时 EPERM。
+ *
+ * 不用 jest.spyOn(fs, 'renameSync')：在 esModuleInterop 下，CJS 中被转译的
+ * `import { renameSync } from 'node:fs'` 可能成为对 module.exports 的 getter 绑定，
+ * 命名空间对象属性不可配置，spy 会失效或静默不生效，导致失败场景测试形同虚设。
+ * 这里只替换被测代码实际读取的那一个属性，并在 restore 中写回原值。
+ */
+function blockLedgerRenameWithEperm(ledgerPath: string): {
+  release: () => void;
+  restore: () => void;
+} {
+  const namespace = fs as unknown as Record<string, unknown>;
+  const originalRenameSync = fs.renameSync;
+  let blocked = true;
+  const patched = ((source: string, destination: string) => {
+    if (
+      blocked &&
+      String(source).endsWith('.tmp') &&
+      String(destination) === ledgerPath
+    ) {
+      throw Object.assign(new Error('operation not permitted'), {
+        code: 'EPERM',
+      });
+    }
+    return originalRenameSync(source, destination);
+  }) as typeof fs.renameSync;
+  namespace.renameSync = patched;
+  return {
+    release: () => {
+      blocked = false;
+    },
+    restore: () => {
+      if (namespace.renameSync === patched) {
+        namespace.renameSync = originalRenameSync;
+      }
+    },
+  };
+}
 
 function pendingEntry(
   request: PurchaseInboundCategoryPrepareRequest = REQUEST,

@@ -1709,7 +1709,7 @@ export async function getPurchaseWorkflowOperationalStatus(): Promise<PurchaseWo
 export async function approvePurchaseWorkflow(
   recordId: string,
   input: PurchaseWorkflowApprovalInput,
-): Promise<PurchaseWorkflowCommandResult> {
+): Promise<PurchaseOnlineApprovalAcceptedResponse> {
   const response = await axiosForBackend({
     url: `/api/purchase-inventory/workflows/${encodeURIComponent(recordId)}/approve`,
     method: 'POST',

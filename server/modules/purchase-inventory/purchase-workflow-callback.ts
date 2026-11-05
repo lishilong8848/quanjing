@@ -8,6 +8,7 @@ import {
   parsePurchaseBatchFulfillmentSubmitName,
   purchaseBatchReceiptFieldName,
 } from './purchase-batch-fulfillment-card';
+import { parsePurchaseLifecycleFormSubmitName } from './purchase-lifecycle-form';
 
 const MAX_CLOCK_SKEW_SECONDS = 300;
 const MAX_EVENT_ID_LENGTH = 128;
@@ -20,6 +21,7 @@ const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
 const BATCH_ID_PATTERN = /^[A-Za-z0-9_-]{8,160}$/;
 const OPEN_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
+const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]{1,128}$/;
 const CARD_UPDATE_TOKEN_PATTERN = /^c-[A-Za-z0-9_-]{1,512}$/;
 const BASE64_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -51,8 +53,10 @@ export type PurchaseManagerCardAction =
   | 'open_reject'
   | 'submit_reject';
 
-export type PurchaseCardCallbackResult =
+export type PurchaseCardCallbackResult = (
   | { kind: 'challenge'; challenge: string }
+  | { kind: 'lifecycle_page_action'; eventId: string; operatorOpenId: string; messageId: string; approvalBatchId: string; page: number; lifecycle: { cardRevision: number } }
+  | { kind: 'lifecycle_form_action'; eventId: string; operatorOpenId: string; messageId: string; formToken: string; formAction: JsonObject }
   | {
       kind: 'legacy_action';
       messageId?: string;
@@ -97,7 +101,7 @@ export type PurchaseCardCallbackResult =
       eventId: string;
       operatorOpenId: string;
       messageId: string;
-      action: 'open_item_reject';
+      action: 'open_item_reject' | 'approve_item_comprehensive' | 'approve_item_building_self';
       approvalBatchId: string;
       executionRecordId: string;
       rejectionReason?: never;
@@ -127,6 +131,7 @@ export type PurchaseCardCallbackResult =
       approvalBatchId: string;
       executionRecordId: string;
       updateToken?: string;
+      authenticatedChatId?: string;
     }
   | {
       kind: 'purchase_batch_fulfillment_action';
@@ -151,7 +156,7 @@ export type PurchaseCardCallbackResult =
       signerOpenId: string;
       receiptTime: number;
       note: string;
-    };
+    }) & { lifecycle?: { cardRevision: number; formToken?: string } };
 
 export function parsePurchaseCardCallback(
   input: PurchaseCardCallbackInput,
@@ -162,6 +167,7 @@ export function parsePurchaseCardCallback(
   const encryptKey = config.encryptKey;
   let payload: JsonObject;
   let unsignedEncryptedChallengeOnly = false;
+  let authenticatedChatContext = false;
 
   if (encryptKey) {
     const timestamp = optionalHeader(input.headers, 'x-lark-request-timestamp');
@@ -179,6 +185,7 @@ export function parsePurchaseCardCallback(
         encryptKey,
         rawBody: input.rawBody,
       });
+      authenticatedChatContext = true;
     } else if (signatureHeaderCount === 0) {
       unsignedEncryptedChallengeOnly = true;
     } else {
@@ -200,7 +207,7 @@ export function parsePurchaseCardCallback(
   if (unsignedEncryptedChallengeOnly) {
     throw new UnauthorizedException('未签名加密回调仅允许网址验证');
   }
-  return parseAction(payload, config);
+  return parseAction(payload, config, authenticatedChatContext);
 }
 
 export function parsePurchaseLongConnectionCardAction(
@@ -229,7 +236,7 @@ export function parsePurchaseLongConnectionCardAction(
         '飞书采购卡片长连接回调事件标识无效',
       )
     : undefined;
-  const parsed = parseAuthorizedAction(flattened, '', config);
+  const parsed = parseAuthorizedAction(flattened, '', config, true);
   const eventId = deriveLongConnectionEventId(upstreamEventId, parsed);
   return { ...parsed, eventId };
 }
@@ -261,6 +268,7 @@ function parseChallenge(payload: JsonObject): PurchaseCardCallbackResult {
 function parseAction(
   payload: JsonObject,
   config: PurchaseCardCallbackConfig,
+  authenticatedChatContext: boolean,
 ): PurchaseCardCallbackResult {
   if (payload.schema !== '2.0') {
     throw new BadRequestException('回调协议版本无效');
@@ -275,13 +283,14 @@ function parseAction(
     '回调事件标识无效',
   );
   const event = requireObject(payload.event, '回调事件格式无效');
-  return parseAuthorizedAction(event, eventId, config);
+  return parseAuthorizedAction(event, eventId, config, authenticatedChatContext);
 }
 
 function parseAuthorizedAction(
   event: JsonObject,
   eventId: string,
   config: PurchaseCardCallbackConfig,
+  authenticatedChatContext: boolean,
 ): Exclude<PurchaseCardCallbackResult, { kind: 'challenge' }> {
   const operator = requireObject(event.operator, '回调操作人无效');
   const operatorOpenId = protocolIdentifier(
@@ -290,9 +299,30 @@ function parseAuthorizedAction(
     '回调操作人无效',
   );
   const action = requireObject(event.action, '回调操作格式无效');
-  const parsedAction = parseProtocolAction(action);
+  const lifecycleFormToken = parsePurchaseLifecycleFormSubmitName(action.name);
+  if (lifecycleFormToken) {
+    if (action.tag !== 'button' || !isObject(action.form_value) || Object.prototype.hasOwnProperty.call(action, 'value')) throw new BadRequestException('采购全流程表单格式无效');
+    return { kind: 'lifecycle_form_action', eventId, operatorOpenId, messageId: parseManagerMessageId(event), formToken: lifecycleFormToken, formAction: action };
+  }
+  if (isObject(action.value) && action.value.version === 5) {
+    const value = action.value;
+    const keys = ['version', 'workflowType', 'action', 'approvalBatchId', 'flowVersion', 'cardRevision', 'page'].sort();
+    if (action.tag !== 'button' || Object.prototype.hasOwnProperty.call(action, 'form_value') ||
+        JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(keys) || value.workflowType !== 'purchase_lifecycle_page' ||
+        value.action !== 'page' || value.flowVersion !== 'lifecycle_v1' || typeof value.approvalBatchId !== 'string' ||
+        !BATCH_ID_PATTERN.test(value.approvalBatchId) || !Number.isSafeInteger(value.cardRevision) || Number(value.cardRevision) < 1 ||
+        !Number.isSafeInteger(value.page) || Number(value.page) < 1 || Number(value.page) > 200) throw new BadRequestException('采购全流程翻页参数无效');
+    return { kind: 'lifecycle_page_action', eventId, operatorOpenId, messageId: parseManagerMessageId(event),
+      approvalBatchId: value.approvalBatchId, page: Number(value.page), lifecycle: { cardRevision: Number(value.cardRevision) } };
+  }
+  const normalized = parseLifecycleButtonMetadata(action);
+  const parsedAction = parseProtocolAction(normalized.action, !!normalized.lifecycle);
+  if (normalized.lifecycle && parsedAction.kind !== 'fulfillment' && parsedAction.kind !== 'manager_batch') {
+    throw new BadRequestException('该采购卡片操作不支持全流程标识');
+  }
 
   if (parsedAction.kind === 'legacy') {
+    if (normalized.lifecycle) throw new BadRequestException('旧采购卡片不能携带全流程标识');
     if (!config.authorizeFromDeliverySnapshot) assertLegacyApprover(operatorOpenId, config.legacyApproverOpenIds);
     return {
       kind: 'legacy_action',
@@ -306,6 +336,14 @@ function parseAuthorizedAction(
 
   const messageId = parseManagerMessageId(event);
   if (parsedAction.kind === 'fulfillment') {
+    const receiptUpload = !!normalized.lifecycle && (parsedAction.action.action === 'prepare_receipt_photo' || parsedAction.action.action === 'prepare_invoice');
+    let authenticatedChatId: string | undefined;
+    if (receiptUpload) {
+      if (!authenticatedChatContext || !OPEN_ID_PATTERN.test(operatorOpenId)) throw new UnauthorizedException('采购签收附件会话身份无法核对');
+      const context = requireObject(event.context, '采购签收附件会话上下文无效');
+      if (typeof context.open_chat_id !== 'string' || !CHAT_ID_PATTERN.test(context.open_chat_id)) throw new BadRequestException('采购签收附件会话标识无效');
+      authenticatedChatId = context.open_chat_id;
+    }
     const updateToken = isFulfillmentNavigation(parsedAction.action.action)
       ? optionalCardUpdateToken(event.token)
       : undefined;
@@ -315,6 +353,8 @@ function parseAuthorizedAction(
       operatorOpenId,
       messageId,
       ...parsedAction.action,
+      ...(normalized.lifecycle ? { lifecycle: normalized.lifecycle } : {}),
+      ...(authenticatedChatId ? { authenticatedChatId } : {}),
       ...(updateToken ? { updateToken } : {}),
     } as Exclude<PurchaseCardCallbackResult, { kind: 'challenge' }>;
   }
@@ -337,12 +377,14 @@ function parseAuthorizedAction(
       messageId,
       action: parsedAction.action,
       approvalBatchId: parsedAction.approvalBatchId,
+      ...(normalized.lifecycle ? { lifecycle: normalized.lifecycle } : {}),
       ...(parsedAction.executionRecordId
         ? { executionRecordId: parsedAction.executionRecordId }
         : {}),
     } as Exclude<PurchaseCardCallbackResult, { kind: 'challenge' }>;
   }
   if (parsedAction.kind === 'manager_batch_reject') {
+    if (normalized.lifecycle) throw new BadRequestException('驳回表单暂不支持全流程标识');
     return {
       kind: 'manager_batch_action',
       eventId,
@@ -367,7 +409,11 @@ function deriveLongConnectionEventId(
   action: Exclude<PurchaseCardCallbackResult, { kind: 'challenge' }>,
 ): string {
   const identity =
-    action.kind === 'legacy_action'
+    action.kind === 'lifecycle_form_action'
+      ? [upstreamEventId ?? null, action.kind, action.operatorOpenId, action.messageId, action.formToken, action.formAction]
+    : action.kind === 'lifecycle_page_action'
+      ? [upstreamEventId ?? null, action.kind, action.operatorOpenId, action.messageId, action.approvalBatchId, action.page]
+    : action.kind === 'legacy_action'
       ? [
           upstreamEventId ?? null,
           action.kind,
@@ -418,7 +464,20 @@ function deriveLongConnectionEventId(
                 action.action,
                 action.executionRecordId,
               ];
-  return `ws_${createHash('sha256').update(JSON.stringify(identity)).digest('hex')}`;
+  const scopedIdentity = action.lifecycle ? [...identity, 'lifecycle_v1', action.lifecycle.cardRevision] : identity;
+  if (action.kind === 'purchase_batch_fulfillment_action' && 'authenticatedChatId' in action && action.authenticatedChatId) scopedIdentity.push(action.authenticatedChatId);
+  return `ws_${createHash('sha256').update(JSON.stringify(scopedIdentity)).digest('hex')}`;
+}
+
+/** Only button metadata is parsed here; a form needs its own authenticated binding. */
+function parseLifecycleButtonMetadata(action: JsonObject): { action: JsonObject; lifecycle?: { cardRevision: number } } {
+  const value = isObject(action.value) ? action.value : null;
+  if (!value || (!Object.prototype.hasOwnProperty.call(value, 'flowVersion') && !Object.prototype.hasOwnProperty.call(value, 'cardRevision'))) return { action };
+  if (action.tag !== 'button' || Object.prototype.hasOwnProperty.call(action, 'form_value') ||
+      value.flowVersion !== 'lifecycle_v1' || !Number.isSafeInteger(value.cardRevision) || Number(value.cardRevision) < 1 ||
+      (value.version !== 3 && value.version !== 4)) throw new BadRequestException('采购全流程卡片版本无效');
+  const { flowVersion: _flowVersion, cardRevision, ...legacyValue } = value;
+  return { action: { ...action, value: legacyValue }, lifecycle: { cardRevision: cardRevision as number } };
 }
 
 type ParsedProtocolAction =
@@ -441,6 +500,8 @@ type ParsedProtocolAction =
       action:
         | 'approve_pending_comprehensive'
         | 'approve_pending_building_self'
+        | 'approve_item_comprehensive'
+        | 'approve_item_building_self'
         | 'open_item_reject'
         | 'cancel_item_reject';
       approvalBatchId: string;
@@ -481,7 +542,7 @@ type ParsedProtocolAction =
           };
     };
 
-function parseProtocolAction(action: JsonObject): ParsedProtocolAction {
+function parseProtocolAction(action: JsonObject, lifecycle = false): ParsedProtocolAction {
   const hasFormValue = Object.prototype.hasOwnProperty.call(
     action,
     'form_value',
@@ -534,7 +595,7 @@ function parseProtocolAction(action: JsonObject): ParsedProtocolAction {
     assertManagerButton(action);
     return {
       kind: 'manager_batch',
-      ...parseManagerBatchActionValue(value),
+      ...parseManagerBatchActionValue(value, lifecycle),
     };
   }
   if (value.version === 4) {
@@ -785,10 +846,12 @@ function parseManagerActionValue(value: JsonObject): {
   return { action, executionRecordId };
 }
 
-function parseManagerBatchActionValue(value: JsonObject): {
+function parseManagerBatchActionValue(value: JsonObject, lifecycle: boolean): {
   action:
     | 'approve_pending_comprehensive'
     | 'approve_pending_building_self'
+    | 'approve_item_comprehensive'
+    | 'approve_item_building_self'
     | 'open_item_reject'
     | 'cancel_item_reject';
   approvalBatchId: string;
@@ -797,7 +860,8 @@ function parseManagerBatchActionValue(value: JsonObject): {
   const action = value.action;
   const approvalBatchId = value.approvalBatchId;
   const executionRecordId = value.executionRecordId;
-  const expectsRecordId = action === 'open_item_reject';
+  const itemApproval = action === 'approve_item_comprehensive' || action === 'approve_item_building_self';
+  const expectsRecordId = action === 'open_item_reject' || itemApproval;
   const expectedKeys = expectsRecordId
     ? ['action', 'approvalBatchId', 'executionRecordId', 'version']
     : ['action', 'approvalBatchId', 'version'];
@@ -807,6 +871,7 @@ function parseManagerBatchActionValue(value: JsonObject): {
     value.version !== 3 ||
     (action !== 'approve_pending_comprehensive' &&
       action !== 'approve_pending_building_self' &&
+      !(lifecycle && itemApproval) &&
       action !== 'open_item_reject' &&
       action !== 'cancel_item_reject') ||
     typeof approvalBatchId !== 'string' ||

@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Inject,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -20,12 +21,16 @@ import { PurchaseWorkflowGateway } from './purchase-workflow.gateway';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
 import { businessAuthorizationIdentityKey } from '../../../shared/business-permissions';
 import { PurchaseWorkflowService, type PurchaseWebApprovalAuthority, type PurchaseWorkflowSession } from './purchase-workflow.service';
+import { PURCHASE_PLATFORM_APPROVAL_RUNTIME, type PurchasePlatformApprovalRuntime } from './purchase-platform-approval-runtime';
 
 const RECORD_ID_PATTERN = /^rec[A-Za-z0-9_-]+$/;
 const PURCHASE_METHOD_FIELD = '1️⃣物品采购方式';
 const WORKFLOW_STATUS_FIELD = '采购流程';
 const MAX_RETAINED_TASKS = 200;
 const MAX_SYNC_ATTEMPTS = 3;
+class ApprovalWriteUncertain extends Error {
+  constructor() { super('审批写入结果待核对，请勿重复提交'); }
+}
 const RETRY_DELAYS_MS = [250, 1_000] as const;
 const APPROVED_METHODS = new Set<PurchaseWorkflowMethod>([
   '综合采购',
@@ -40,23 +45,27 @@ export class PurchaseOnlineApprovalService {
   private readonly decisionTasks = new Map<string, PurchaseOnlineApprovalTask>();
   private readonly taskBuildingScopes = new Map<string, string>();
   private readonly taskAuthorities = new Map<string, PurchaseWebApprovalAuthority>();
+  private readonly uncertainTasks = new Set<string>();
 
-  constructor(private readonly gateway: PurchaseWorkflowGateway, @Optional() private readonly workflow?: PurchaseWorkflowService) {}
+  constructor(private readonly gateway: PurchaseWorkflowGateway, @Optional() private readonly workflow?: PurchaseWorkflowService, @Optional() @Inject(PURCHASE_PLATFORM_APPROVAL_RUNTIME) private readonly platformRuntime?: PurchasePlatformApprovalRuntime) {}
 
   async acceptAuthorizedDecision(recordIdValue: string, input: PurchaseOnlineApprovalRequest, session: PurchaseWorkflowSession): Promise<PurchaseOnlineApprovalAcceptedResponse> {
-    const recordId = normalizeRecordId(recordIdValue), decision = normalizeDecision(input?.decision);
-    if (!this.workflow || !session.permissionPrincipal?.accountId) throw new ForbiddenException('采购审批登录身份不可用');
-    const prior = [...this.decisionTasks.values()].reverse().find(task => task.recordId === recordId && ['pending', 'running', 'completed'].includes(task.status));
-    if (prior) {
-      this.assertTaskOwner(prior.id, session.permissionPrincipal, session.openId);
-      if (prior.decision !== decision) throw new ConflictException('该采购申请已有相反审批决定');
-      return accepted(prior);
+    const recordId = normalizeRecordId(recordIdValue);
+    normalizeDecision(input?.decision);
+    if (session.platformProof) {
+      if (!this.platformRuntime) throw new ForbiddenException('平台采购审批统一处理尚未就绪');
+      return this.platformRuntime.accept(recordId, input, session);
     }
-    const authority = await this.workflow.prepareWebApprovalAuthority(recordId, session);
-    return this.acceptDecision(recordId, input, authority.scope.building, authority);
+    // No HTTP caller may re-enter the independent in-memory writer, including
+    // a misconfigured module that forgot to register the durable runtime.
+    throw new ForbiddenException('请使用本人有效账号办理采购审批');
   }
 
-  getAuthorizedDecisionTaskStatus(taskId: string, principal: AccessPrincipal): PurchaseOnlineApprovalTaskStatusResponse {
+  getAuthorizedDecisionTaskStatus(taskId: string, principal: AccessPrincipal, session?: PurchaseWorkflowSession): PurchaseOnlineApprovalTaskStatusResponse | Promise<PurchaseOnlineApprovalTaskStatusResponse> {
+    if (session?.platformProof) {
+      if (!this.platformRuntime) throw new ForbiddenException('平台采购审批统一处理尚未就绪');
+      return this.platformRuntime.status(taskId, session);
+    }
     const normalized = clean(taskId);
     this.assertTaskOwner(normalized, principal);
     return this.getDecisionTaskStatus(normalized);
@@ -79,7 +88,7 @@ export class PurchaseOnlineApprovalService {
     const activeTask = [...this.decisionTasks.values()].find(
       (task) =>
         task.recordId === recordId &&
-        (task.status === 'pending' || task.status === 'running'),
+        (task.status === 'pending' || task.status === 'running' || this.uncertainTasks.has(task.id)),
     );
     if (activeTask) {
       if (authority) this.assertTaskOwner(activeTask.id, authority.principal, authority.actorOpenId);
@@ -176,7 +185,12 @@ export class PurchaseOnlineApprovalService {
       if (!this.workflow) throw new ForbiddenException('采购审批当前授权端口未配置');
       this.workflow.assertWebApprovalAuthority(authority, record);
     }
-    await this.gateway.updateExecutionRecordAsApp(recordId, fields);
+    try {
+      await this.gateway.updateExecutionRecordAsApp(recordId, fields);
+    } catch {
+      // The remote server may have committed even if its response was lost.
+      throw new ApprovalWriteUncertain();
+    }
 
     return result(recordId, decision, false, startedAt);
   }
@@ -223,6 +237,24 @@ export class PurchaseOnlineApprovalService {
         task.completedAt = new Date().toISOString();
         return;
       } catch (error) {
+        if (error instanceof ApprovalWriteUncertain) {
+          this.uncertainTasks.add(task.id);
+          // Reconcile by reading only. Never re-enter decide(), which could
+          // issue another write against a stale or lagging remote snapshot.
+          try {
+            const observed = await this.gateway.getExecutionRecordAsApp(task.recordId);
+            const building = this.taskBuildingScopes.get(task.id);
+            if (observed.recordId === task.recordId && (!building || observed.building === building) &&
+                resolveCompletedDecision(observed.status, observed.approvalCompleted, observed.purchaseMethod) === task.decision) {
+              task.result = result(task.recordId, task.decision, true, Date.now());
+              task.status = 'completed';
+              task.message = `采购申请${task.result.resultLabel}`;
+              task.completedAt = new Date().toISOString();
+              this.uncertainTasks.delete(task.id);
+              return;
+            }
+          } catch { /* An unavailable read must not release the uncertain task. */ }
+        }
         if (attempt < MAX_SYNC_ATTEMPTS && isRetryable(error)) {
           task.message = `飞书同步暂时失败，正在进行第 ${attempt + 1} 次尝试`;
           await delay(RETRY_DELAYS_MS[attempt - 1] ?? 1_000);
@@ -243,6 +275,7 @@ export class PurchaseOnlineApprovalService {
     if (this.decisionTasks.size <= MAX_RETAINED_TASKS) return;
     for (const [taskId, task] of this.decisionTasks) {
       if (task.status === 'pending' || task.status === 'running') continue;
+      if (this.uncertainTasks.has(taskId)) continue;
       this.decisionTasks.delete(taskId);
       this.taskBuildingScopes.delete(taskId);
       this.taskAuthorities.delete(taskId);
@@ -269,7 +302,7 @@ function cloneTask(task: PurchaseOnlineApprovalTask): PurchaseOnlineApprovalTask
 }
 
 function isRetryable(error: unknown): boolean {
-  return !(error instanceof BadRequestException || error instanceof ConflictException || error instanceof ForbiddenException);
+  return !(error instanceof ApprovalWriteUncertain || error instanceof BadRequestException || error instanceof ConflictException || error instanceof ForbiddenException);
 }
 
 function approvalErrorMessage(error: unknown): string {

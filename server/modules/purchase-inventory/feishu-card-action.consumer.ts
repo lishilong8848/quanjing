@@ -39,6 +39,8 @@ export class FeishuCardActionConsumer
   private destroyed = false;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private pendingClose?: Promise<void>;
+  private pendingConnect?: Promise<void>;
+  private explicitlyRequested = false;
 
   constructor(
     private readonly router: FeishuCardActionRouter,
@@ -47,9 +49,8 @@ export class FeishuCardActionConsumer
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    if (this.bootstrapStarted) return;
+    if (this.bootstrapStarted || this.destroyed) return;
     this.bootstrapStarted = true;
-    this.destroyed = false;
     if (!isFeishuCardActionConsumerEnabled()) {
       this.logger.log(
         'Feishu shared card callback consumer: DISABLED for this runtime role',
@@ -59,7 +60,7 @@ export class FeishuCardActionConsumer
     if (!this.router.isAnyEnabled()) return;
 
     try {
-      await this.connect();
+      await this.ensureConnected();
     } catch (error) {
       this.bootstrapStarted = false;
       await this.transport.close();
@@ -70,13 +71,35 @@ export class FeishuCardActionConsumer
   async onModuleDestroy(): Promise<void> {
     this.destroyed = true;
     this.bootstrapStarted = false;
+    this.explicitlyRequested = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
+    await this.pendingConnect?.catch(() => undefined);
     await this.pendingClose?.catch(() => undefined);
     this.pendingClose = undefined;
     await this.transport.close();
+  }
+
+  /** The lifecycle owner can request the same shared connection while draining
+   * existing work, before image runtime readiness becomes available. Runtime-role
+   * isolation still applies; this never creates a second transport. */
+  async ensureConnected(): Promise<void> {
+    if (this.destroyed || !isFeishuCardActionConsumerEnabled()) return;
+    this.explicitlyRequested = true;
+    if (this.pendingConnect) return this.pendingConnect;
+    if (this.transport.isReady()) return;
+    const operation = (async () => {
+      await this.pendingClose;
+      this.pendingClose = undefined;
+      if (this.destroyed || !isFeishuCardActionConsumerEnabled()) return;
+      await this.connect();
+      if (this.destroyed) await this.transport.close();
+    })();
+    this.pendingConnect = operation;
+    try { await operation; }
+    finally { if (this.pendingConnect === operation) this.pendingConnect = undefined; }
   }
 
   private async connect(): Promise<void> {
@@ -109,14 +132,12 @@ export class FeishuCardActionConsumer
     if (
       this.destroyed ||
       !isFeishuCardActionConsumerEnabled() ||
-      !this.router.isAnyEnabled()
+      (!this.explicitlyRequested && !this.router.isAnyEnabled())
     ) {
       return;
     }
     try {
-      await this.pendingClose;
-      this.pendingClose = undefined;
-      await this.connect();
+      await this.ensureConnected();
     } catch (error) {
       this.logger.error(
         `Feishu shared card callback reconnect failed: ${safeErrorMessage(error)}`,

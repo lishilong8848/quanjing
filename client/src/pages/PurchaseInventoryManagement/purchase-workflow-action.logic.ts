@@ -2,10 +2,22 @@ import type { AccessPrincipal } from '@shared/access-control.interface';
 import type { PurchaseWorkflowAction } from '@shared/purchase-workflow.interface';
 import { canManageProfessionalRecord } from '@shared/professional-access';
 
+/** The list stage is only a cached preview; fresh details and permissions decide actions. */
+export function canCheckPurchaseWorkflowActions(item:{executionRecordId:string|null;pendingSync?:boolean}|null):boolean {
+  return !!item?.executionRecordId && !item.pendingSync;
+}
+
 export function permittedPurchaseWorkflowActions(principal:AccessPrincipal, offered:readonly PurchaseWorkflowAction[],
   scope:{building:string;specialty?:string}|null, canOperate:boolean):PurchaseWorkflowAction[] {
   if(!canOperate || !scope) return [];
   return offered.filter(action=>canManageProfessionalRecord(principal,scope.specialty,scope.building,{module:'purchase',action:action === 'start'?'create':action}));
+}
+
+/** A dashboard preview never establishes the current record's duties or permissions. */
+export function verifiedPurchaseWorkflowActions(principal: AccessPrincipal, detail: { record: { recordId: string; building: string; specialty?: string }; allowedActions: readonly PurchaseWorkflowAction[] } | null,
+  recordId: string | null, verifiedKey: string, currentKey: string, loading: boolean, canOperate: boolean): PurchaseWorkflowAction[] {
+  if (loading || !recordId || !verifiedKey || verifiedKey !== currentKey || !detail || detail.record.recordId !== recordId) return [];
+  return permittedPurchaseWorkflowActions(principal, detail.allowedActions, detail.record, canOperate);
 }
 
 export interface ActionButtonStateInput {

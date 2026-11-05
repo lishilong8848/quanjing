@@ -85,6 +85,8 @@ const TodayFocusChecklistPage = React.lazy(
 const APP_BROWSER_TITLE = '世纪互联-南通基地';
 const SystemConfigurationPage = React.lazy(() => import('./pages/SystemConfiguration'));
 const PersonalCenterPage = React.lazy(() => import('./pages/PersonalCenter'));
+const PurchaseLifecycleAttachmentPage = React.lazy(() => import('./pages/PurchaseLifecycleAttachment'));
+const PurchaseLifecyclePaymentUploadPage = React.lazy(() => import('./pages/PurchaseLifecyclePaymentUpload'));
 
 function RouteLoadingFallback() {
   return (
@@ -284,6 +286,12 @@ const RoutesComponent = () => {
             path="/overtime-confirmation"
             element={<OvertimeConfirmationPage />}
           />
+        </Route>
+        <Route element={<GlobalAppShell />}>
+          <Route element={<RouteContentBoundary />}>
+            <Route path="/purchase-lifecycle-attachment" element={<PurchaseLifecycleAttachmentPage />} />
+            <Route path="/purchase-lifecycle-payment-upload" element={<PurchaseLifecyclePaymentUploadPage />} />
+          </Route>
         </Route>
         <Route element={<RouteAccessGuard />}>
           <Route element={<GlobalAppShell />}>

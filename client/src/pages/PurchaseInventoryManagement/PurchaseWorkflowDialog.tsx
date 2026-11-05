@@ -18,6 +18,7 @@ import { useAccess } from '@/access/AccessProvider';
 
 import {
   approvePurchaseWorkflow,
+  getPurchaseOnlineApprovalTaskStatus,
   getPurchaseWorkflowDetail,
   getPurchaseWorkflowReceiptTaskStatus,
   searchPurchaseApplicationApplicants,
@@ -37,7 +38,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { PurchaseApplicationApplicant } from '@shared/purchase-application.interface';
-import type { PurchaseInventoryRequestItem } from '@shared/purchase-inventory.interface';
+import type { PurchaseInventoryRequestItem, PurchaseOnlineApprovalAcceptedResponse } from '@shared/purchase-inventory.interface';
+import { monitorAcceptedPurchaseApproval } from './purchase-approval-task-monitor';
 import type {
   PurchaseWorkflowCommandResult,
   PurchaseWorkflowDetail,
@@ -49,9 +51,10 @@ import {
   clearFinishedSubmission,
   resolveActionButtonState,
   runPurchaseOrderSubmission,
-  permittedPurchaseWorkflowActions,
+  verifiedPurchaseWorkflowActions,
 } from './purchase-workflow-action.logic';
 import { createPurchaseWorkflowPreviewDetail } from './purchase-workflow-center.logic';
+import { purchaseUiPrincipalKey } from './purchase-ui-principal';
 
 interface PurchaseWorkflowDialogProps {
   open: boolean;
@@ -90,6 +93,11 @@ export function PurchaseWorkflowDialog({
 }: PurchaseWorkflowDialogProps) {
   const principal=useAccess();
   const [detail, setDetail] = useState<PurchaseWorkflowDetail | null>(null);
+  const [verifiedDetailKey, setVerifiedDetailKey] = useState('');
+  const detailKey = JSON.stringify([recordId, purchaseUiPrincipalKey(principal)]);
+  const activeActionKey = JSON.stringify([open, detailKey]);
+  const activeActionRef = useRef(activeActionKey);
+  activeActionRef.current = activeActionKey;
   const [loading, setLoading] = useState(false);
   const [submittingRecordId, setSubmittingRecordId] = useState<string | null>(
     null,
@@ -126,15 +134,17 @@ export function PurchaseWorkflowDialog({
       ? createPurchaseWorkflowPreviewDetail(item, canOperate)
       : null;
     const requestVersion = ++detailRequestVersion.current;
+    setVerifiedDetailKey('');
     setLoading(true);
     setError('');
     try {
       const loaded = await getPurchaseWorkflowDetail(recordId);
       if (requestVersion !== detailRequestVersion.current) return;
-      if (!loaded?.record) {
+      if (!loaded?.record || loaded.record.recordId !== recordId) {
         throw new Error('采购流程详情响应为空');
       }
       setDetail(loaded);
+      setVerifiedDetailKey(detailKey);
       setActualQuantity(
         loaded.record.actualQuantity === null
           ? ''
@@ -155,7 +165,7 @@ export function PurchaseWorkflowDialog({
     } finally {
       if (requestVersion === detailRequestVersion.current) setLoading(false);
     }
-  }, [canOperate, item, recordId]);
+  }, [canOperate, detailKey, item, recordId]);
 
   useEffect(() => {
     if (open && recordId) {
@@ -191,6 +201,7 @@ export function PurchaseWorkflowDialog({
         signerSearchTimer.current = null;
       }
       setDetail(null);
+      setVerifiedDetailKey('');
       setError('');
     }
   }, [canOperate, item, loadDetail, open, recordId]);
@@ -254,21 +265,35 @@ export function PurchaseWorkflowDialog({
 
   async function runAction(
     action:'approve'|'start',
-    operation: () => Promise<PurchaseWorkflowCommandResult>,
+    operation: () => Promise<PurchaseWorkflowCommandResult | PurchaseOnlineApprovalAcceptedResponse>,
     successMessage: string,
   ) {
     if (!allowedActions.includes(action) || !recordId) return;
     const submissionRecordId = recordId;
+    const submissionContext = activeActionRef.current;
+    const isCurrent = () => activeActionRef.current === submissionContext;
     if (!submissionGateRef.current.begin(submissionRecordId)) return;
     setSubmittingRecordId(submissionRecordId);
     setError('');
     try {
       const result = await operation();
+      if (!isCurrent()) return;
+      if ('pending' in result && result.pending) {
+        toast.info(result.message);
+        const outcome = await monitorAcceptedPurchaseApproval({taskId:result.taskId,recordId:submissionRecordId,current:isCurrent,
+          read:getPurchaseOnlineApprovalTaskStatus,wait:() => new Promise(resolve => window.setTimeout(resolve,2000))});
+        if (!isCurrent() || outcome.state === 'cancelled') return;
+        if (outcome.state === 'completed') { await loadDetail(); onUpdated(); toast.success(outcome.message); }
+        else { setError(outcome.message); toast.warning(outcome.message); }
+        return;
+      }
+      if (!('detail' in result)) throw new Error('采购流程响应无效，请核对原操作结果');
       setDetail(result.detail);
       onUpdated();
       toast.success(successMessage);
       result.notificationWarnings.forEach((warning) => toast.warning(warning));
     } catch (actionError) {
+      if (!isCurrent()) return;
       const message = apiError(actionError, '采购流程操作失败');
       setError(message);
       toast.error(message);
@@ -406,8 +431,9 @@ export function PurchaseWorkflowDialog({
     }, 0);
   }
 
-  const allowedActions = permittedPurchaseWorkflowActions(principal,detail?.allowedActions ?? [],item || detail?.record || null,canOperate);
-  const actionDisabled = !canOperate;
+  const detailVerified = Boolean(recordId && verifiedDetailKey === detailKey && !loading);
+  const allowedActions = verifiedPurchaseWorkflowActions(principal, detail, recordId, verifiedDetailKey, detailKey, loading, canOperate);
+  const actionDisabled = !canOperate || !detailVerified;
   const actionLoading = Boolean(
     recordId && submittingRecordId === recordId,
   );
@@ -522,8 +548,9 @@ export function PurchaseWorkflowDialog({
                   </div>
                 )}
                 {error && (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                    {error}
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <span>{error}</span>
+                    {!detailVerified && <Button type="button" variant="outline" onClick={() => void loadDetail()}>重新加载</Button>}
                   </div>
                 )}
 
@@ -533,7 +560,7 @@ export function PurchaseWorkflowDialog({
                   </h3>
                   {!allowedActions.length ? (
                     <p className="mt-3 text-sm text-slate-500">
-                      当前账号在此节点没有待处理操作。
+                      {loading ? '正在核验当前节点权限…' : !detailVerified ? '未能确认当前节点权限，请重新加载。' : '当前账号在此节点没有待处理操作。'}
                     </p>
                   ) : (
                     <div className="mt-4">
@@ -582,6 +609,8 @@ export function PurchaseWorkflowDialog({
                         />
                       )}
                       {allowedActions.includes('order') && (
+                        <>
+                        <p className="mb-4 text-sm text-slate-600">指定采购人：{detail.record.purchaserName || '待分配'}。当前账号有权办理时可提交，提交后仍保留原采购人。</p>
                         <OrderForm
                           quantity={actualQuantity}
                           amount={actualAmount}
@@ -595,6 +624,7 @@ export function PurchaseWorkflowDialog({
                           onFiles={setPaymentAttachments}
                           onSubmit={() => void runOrderAction()}
                         />
+                        </>
                       )}
                       {allowedActions.includes('receive') && (
                         <ReceiptForm

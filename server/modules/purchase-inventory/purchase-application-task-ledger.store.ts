@@ -30,6 +30,7 @@ export const PURCHASE_APPLICATION_TASK_LEDGER_OPTIONS =
   'PURCHASE_APPLICATION_TASK_LEDGER_OPTIONS';
 
 const LEDGER_VERSION = 2;
+const LIFECYCLE_LEDGER_VERSION = 3;
 const LOCK_VERSION = 1;
 const DEFAULT_RETENTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_ENTRIES = 5_000;
@@ -45,8 +46,11 @@ const RECOVERED_UNCERTAIN_MESSAGE =
   '服务已重启，原任务结果暂不确定；系统不会重复执行，请使用原幂等号查询并核对采购清单';
 
 export type PurchaseApplicationLedgerTask = PurchaseApplicationSubmissionTask;
+export type PurchaseApplicationFlowVersion = 'legacy' | 'lifecycle_v1';
 
 export interface PurchaseApplicationTaskLedgerEntry {
+  /** Omitted only by older callers; persisted v3 entries must explicitly specify it. */
+  flowVersion?: PurchaseApplicationFlowVersion;
   building: string;
   principalFingerprint: string;
   idempotencyKey: string;
@@ -56,12 +60,13 @@ export interface PurchaseApplicationTaskLedgerEntry {
 }
 
 interface PersistedPurchaseApplicationTaskLedgerEntry extends PurchaseApplicationTaskLedgerEntry {
+  flowVersion: PurchaseApplicationFlowVersion;
   retainedUntil: string;
   owner?: LedgerLockOwner;
 }
 
 interface PersistedPurchaseApplicationTaskLedger {
-  version: 2;
+  version: 2 | 3;
   updatedAt: string;
   entries: PersistedPurchaseApplicationTaskLedgerEntry[];
 }
@@ -75,6 +80,8 @@ interface LedgerLockOwner {
 }
 
 export interface PurchaseApplicationTaskLedgerStoreOptions {
+  /** Disabled by default until the entire lifecycle and rollback guard are ready. */
+  allowLifecycleReservations?: boolean;
   retentionTtlMs?: number;
   maxEntries?: number;
   now?: () => Date;
@@ -93,6 +100,8 @@ export class PurchaseApplicationTaskLedgerStore {
   private readonly lockTimeoutMs: number;
   private readonly staleLockMs: number;
   private readonly lockRetryDelayMs: number;
+  private readonly allowLifecycleReservations: boolean;
+  private loadedLedgerVersion: 2 | 3 = LEDGER_VERSION;
   private readonly taskOwnerToken = randomUUID();
   private readonly entriesByTaskId = new Map<
     string,
@@ -109,6 +118,7 @@ export class PurchaseApplicationTaskLedgerStore {
     @Inject(PURCHASE_APPLICATION_TASK_LEDGER_OPTIONS)
     options: PurchaseApplicationTaskLedgerStoreOptions = {},
   ) {
+    this.allowLifecycleReservations = options.allowLifecycleReservations === true;
     this.ledgerPath = resolve(
       ledgerPathValue?.trim() ||
         join(
@@ -158,6 +168,20 @@ export class PurchaseApplicationTaskLedgerStore {
       if (existing) {
         if (changed) this.persistLocked();
         return { created: false, entry: cloneEntry(existing) };
+      }
+      if (
+        entry.flowVersion === 'lifecycle_v1' &&
+        !this.allowLifecycleReservations
+      ) {
+        throw new ServiceUnavailableException('采购全流程卡片尚未启用');
+      }
+      if (
+        entry.flowVersion === 'lifecycle_v1' &&
+        [...this.entriesByTaskId.values()].filter(
+          (row) => row.flowVersion === 'lifecycle_v1',
+        ).length >= this.maxEntries
+      ) {
+        throw new ServiceUnavailableException('采购全流程任务账本已满，需要先安全归档');
       }
       if (this.entriesByTaskId.has(entry.task.id)) {
         throw this.failClosed(new Error('持久任务编号与幂等身份冲突'));
@@ -265,6 +289,7 @@ export class PurchaseApplicationTaskLedgerStore {
     try {
       if (existsSync(this.ledgerPath)) {
         const state = parseLedger(readFileSync(this.ledgerPath, 'utf8'));
+        this.loadedLedgerVersion = state.version;
         for (const entry of state.entries) {
           const identity = identityKey(
             entry.building,
@@ -280,6 +305,8 @@ export class PurchaseApplicationTaskLedgerStore {
           this.entriesByTaskId.set(entry.task.id, entry);
           this.taskIdsByIdentity.set(identity, entry.task.id);
         }
+      } else {
+        this.loadedLedgerVersion = LEDGER_VERSION;
       }
       let changed = false;
       const recoveredAt = this.now().toISOString();
@@ -332,6 +359,9 @@ export class PurchaseApplicationTaskLedgerStore {
     const now = this.now().getTime();
     let changed = false;
     for (const entry of [...this.entriesByTaskId.values()]) {
+      // These entries are the durable source for distinguishing new flows from
+      // historical recovery. Never trim them until an explicit archive exists.
+      if (entry.flowVersion === 'lifecycle_v1') continue;
       if (!isTerminal(entry.task.status)) continue;
       if (Date.parse(entry.retainedUntil) > now) continue;
       this.deleteInMemory(entry);
@@ -339,7 +369,9 @@ export class PurchaseApplicationTaskLedgerStore {
     }
 
     const terminalEntries = [...this.entriesByTaskId.values()]
-      .filter((entry) => isTerminal(entry.task.status))
+      .filter(
+        (entry) => entry.flowVersion === 'legacy' && isTerminal(entry.task.status),
+      )
       .sort(
         (left, right) => terminalTimestamp(left) - terminalTimestamp(right),
       );
@@ -366,7 +398,13 @@ export class PurchaseApplicationTaskLedgerStore {
   private persistLocked(): void {
     if (this.failed) throw this.failed;
     const state: PersistedPurchaseApplicationTaskLedger = {
-      version: LEDGER_VERSION,
+      version:
+        this.loadedLedgerVersion === LIFECYCLE_LEDGER_VERSION ||
+        [...this.entriesByTaskId.values()].some(
+          (entry) => entry.flowVersion === 'lifecycle_v1',
+        )
+          ? LIFECYCLE_LEDGER_VERSION
+          : LEDGER_VERSION,
       updatedAt: this.now().toISOString(),
       entries: [...this.entriesByTaskId.values()].map(clonePersistedEntry),
     };
@@ -599,26 +637,45 @@ export class PurchaseApplicationTaskLedgerStore {
 
 function parseLedger(value: string): PersistedPurchaseApplicationTaskLedger {
   const parsed = JSON.parse(value) as unknown;
-  if (!isRecord(parsed) || parsed.version !== LEDGER_VERSION) {
+  if (
+    !isRecord(parsed) ||
+    (parsed.version !== LEDGER_VERSION && parsed.version !== LIFECYCLE_LEDGER_VERSION)
+  ) {
     throw new Error(
-      `账本版本不受支持：${isRecord(parsed) ? String(parsed.version) : '未知'}；需要显式迁移到 v${LEDGER_VERSION}`,
+      `账本版本不受支持：${isRecord(parsed) ? String(parsed.version) : '未知'}；仅支持 v${LEDGER_VERSION} 或 v${LIFECYCLE_LEDGER_VERSION}`,
     );
   }
   if (!validTimestamp(parsed.updatedAt) || !Array.isArray(parsed.entries)) {
     throw new Error('账本结构无效');
   }
   return {
-    version: LEDGER_VERSION,
+    version: parsed.version,
     updatedAt: parsed.updatedAt,
-    entries: parsed.entries.map((entry) => normalizePersistedEntry(entry)),
+    entries: parsed.entries.map((entry) =>
+      normalizePersistedEntry(entry, parsed.version),
+    ),
   };
 }
 
 function normalizePersistedEntry(
   value: unknown,
+  ledgerVersion: 2 | 3,
 ): PersistedPurchaseApplicationTaskLedgerEntry {
   if (!isRecord(value) || !validTimestamp(value.retainedUntil)) {
     throw new Error('账本任务结构无效');
+  }
+  if (
+    ledgerVersion === LIFECYCLE_LEDGER_VERSION &&
+    value.flowVersion === undefined
+  ) {
+    throw new Error('采购申请流程版本缺失');
+  }
+  if (
+    ledgerVersion === LEDGER_VERSION &&
+    value.flowVersion !== undefined &&
+    value.flowVersion !== 'legacy'
+  ) {
+    throw new Error('旧版采购申请账本包含不受支持的流程版本');
   }
   const entry = normalizeEntry(
     {
@@ -627,6 +684,7 @@ function normalizePersistedEntry(
       idempotencyKey: value.idempotencyKey as string,
       requestFingerprint: value.requestFingerprint as string,
       submissionFingerprint: value.submissionFingerprint as string,
+      flowVersion: value.flowVersion as PurchaseApplicationFlowVersion | undefined,
       task: value.task as PurchaseApplicationLedgerTask,
     },
     value.retainedUntil,
@@ -640,6 +698,11 @@ function normalizeEntry(
   value: PurchaseApplicationTaskLedgerEntry,
   retainedUntil: string,
 ): PersistedPurchaseApplicationTaskLedgerEntry {
+  const flowVersion =
+    value?.flowVersion === undefined ? 'legacy' : value.flowVersion;
+  if (flowVersion !== 'legacy' && flowVersion !== 'lifecycle_v1') {
+    throw new Error('采购申请流程版本无效');
+  }
   const building = clean(value?.building);
   const principalFingerprint = clean(value?.principalFingerprint);
   const idempotencyKey = clean(value?.idempotencyKey);
@@ -660,6 +723,7 @@ function normalizeEntry(
     throw new Error('账本任务幂等信息无效');
   }
   return {
+    flowVersion,
     building,
     principalFingerprint,
     idempotencyKey,

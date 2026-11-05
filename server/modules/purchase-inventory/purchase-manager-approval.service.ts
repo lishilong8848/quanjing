@@ -8,6 +8,13 @@ import {
   Optional,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { canPerformBusinessAction } from '../../../shared/business-permissions';
+import { additionalReadonlyCardTargets } from '../../common/feishu-card-copy/targets';
+import { purchaseLifecycleAuthorizationFingerprint } from './purchase-lifecycle-authorization-fingerprint';
+import { isBuildingSelfPurchaseAllowed } from './purchase-procurement-method-policy';
+import { parsePurchaseLifecycleFormAction } from './purchase-lifecycle-form';
+import { readEnv } from '../../common/config/external-services.config';
+import { lifecyclePaymentUploadSourceFingerprint } from './purchase-lifecycle-payment-upload-gateway';
 import { AccessConfigurationService } from '../../common/access/access-configuration.service';
 import { assertFeishuBusinessIdentity } from '../../common/access/feishu-business-identity';
 import { purchaseAuthorityTarget } from './purchase-authority-target';
@@ -88,10 +95,19 @@ import {
   type PurchaseManagerApprovalActionEntry,
   type PurchaseManagerApprovalBatchActionEntry,
   type PurchaseManagerApprovalBatchEntry,
+  type PurchaseManagerApprovalBatchItemEntry,
   type PurchaseManagerApprovalCardEntry,
   type PurchaseWorkflowNotificationInput,
   type PurchaseWorkflowNotificationEntry,
 } from './purchase-workflow.store';
+import type { LifecycleReceiptPrepareInput } from './purchase-lifecycle-receipt-prepare-coordinator';
+
+/** Explicitly unregistered until the full receipt image chain is ready. */
+export const PURCHASE_LIFECYCLE_RECEIPT_PREPARE_RUNTIME='PURCHASE_LIFECYCLE_RECEIPT_PREPARE_RUNTIME';
+export interface LifecycleReceiptPrepareRuntime {
+  accept(input:LifecycleReceiptPrepareInput,authorize:(batch:PurchaseManagerApprovalBatchEntry,item:PurchaseManagerApprovalBatchItemEntry)=>void):Promise<{taskId:string;status:'pending'|'ready'|'failed'}>;
+  schedule(taskId:string):void;
+}
 
 const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
 const TASK_MAX_ATTEMPTS = 5;
@@ -157,10 +173,99 @@ export class PurchaseManagerApprovalService {
     private readonly attachmentTicketService?: PurchaseBatchAttachmentTicketService,
     @Inject(AccessConfigurationService)
     private readonly accessConfiguration?: AccessConfigurationService,
+    @Optional() @Inject(PURCHASE_LIFECYCLE_RECEIPT_PREPARE_RUNTIME)
+    private readonly receiptPrepareRuntime?: LifecycleReceiptPrepareRuntime,
   ) {}
 
   isEnabled(): boolean {
     return isPurchaseManagerApprovalEnabled();
+  }
+
+  async handleLifecyclePrepareReceiptImage(result:PurchaseBatchFulfillmentCallbackAction):Promise<{status:'pending'|'ready'|'failed'}> {
+    if (!this.isEnabled() || !this.accessConfiguration || !this.receiptPrepareRuntime || !result.lifecycle || (result.action!=='prepare_receipt_photo' && result.action!=='prepare_invoice') || !result.authenticatedChatId) throw new ForbiddenException('采购全流程签收附件尚未就绪');
+    const appId=readEnv('FEISHU_APP_ID')?.trim() || '';
+    const input:LifecycleReceiptPrepareInput={appId,actorOpenId:result.operatorOpenId,chatId:result.authenticatedChatId,cardMessageId:result.messageId,eventId:result.eventId,approvalBatchId:result.approvalBatchId,executionRecordId:result.executionRecordId,cardRevision:result.lifecycle.cardRevision,materialType:result.action==='prepare_invoice'?'invoice':'receipt_photo'};
+    const accepted=await this.receiptPrepareRuntime.accept(input,(batch,item)=>{
+      const target=item.authorityTarget;
+      if (!target || batch.requesterOpenId!==result.operatorOpenId || item.status!=='approved') throw new ForbiddenException('采购签收权限不可用');
+      assertFeishuBusinessIdentity(this.accessConfiguration,result.operatorOpenId);
+      const principal=this.accessConfiguration!.feishuPrincipal(result.operatorOpenId,appId);
+      if (!principal || principal.requiresPasswordChange || !canPerformBusinessAction(principal,{module:'purchase',action:'receive',...target})) throw new ForbiddenException('采购签收权限已变化');
+    });
+    if (accepted.status==='pending') {
+      try { this.receiptPrepareRuntime.schedule(accepted.taskId); }
+      catch { this.logger.warn('签收附件准备任务已保存，等待后台恢复'); }
+    }
+    return {status:accepted.status};
+  }
+
+  async handleLifecyclePage(result: Extract<PurchaseCardCallbackResult, { kind: 'lifecycle_page_action' }>): Promise<{ queued: boolean }> {
+    if (!this.isEnabled() || !this.accessConfiguration) throw new ForbiddenException('采购全流程分页暂不可用');
+    const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+    const identity = { appId, batchId: result.approvalBatchId, recipientOpenId: result.operatorOpenId };
+    const outcome = await this.store.queueLifecyclePage(identity, result.messageId, result.lifecycle.cardRevision, result.eventId, result.page,
+      (batch, _replica, _page, proof) => {
+        assertFeishuBusinessIdentity(this.accessConfiguration, result.operatorOpenId);
+        const fingerprint = purchaseLifecycleAuthorizationFingerprint(this.accessConfiguration!, identity, batch, process.env, appId);
+        if (fingerprint !== proof.authorizationFingerprint) throw new ForbiddenException('采购卡片权限已变化，请等待更新');
+      });
+    return { queued: outcome.queued };
+  }
+
+  async handleLifecycleOpen(result: Extract<PurchaseCardCallbackResult, { kind: 'manager_batch_action' | 'purchase_batch_fulfillment_action' }>): Promise<{ queued: boolean }> {
+    if (!this.isEnabled() || !this.accessConfiguration || !result.lifecycle || !('executionRecordId' in result) || !result.executionRecordId || !('approvalBatchId' in result) || !result.approvalBatchId) throw new ForbiddenException('采购表单暂不可用');
+    const kind = result.action === 'open_item_reject' ? 'reject' : result.action === 'open_order' ? 'order' : result.action === 'open_receipt' ? 'receipt' : null;
+    if (!kind) throw new ConflictException('采购表单操作不支持');
+    const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+    const identity = { appId, batchId: result.approvalBatchId, recipientOpenId: result.operatorOpenId };
+    return this.store.queueLifecycleFormView(identity, result.messageId, result.lifecycle.cardRevision, result.eventId, { kind, recordId: result.executionRecordId }, (batch, item) => {
+      const target = item.authorityTarget;
+      if (!target) throw new ForbiddenException('采购明细授权范围缺失');
+      assertFeishuBusinessIdentity(this.accessConfiguration, result.operatorOpenId);
+      const principal = this.accessConfiguration!.feishuPrincipal(result.operatorOpenId, appId);
+      if (!principal || principal.requiresPasswordChange) throw new ForbiddenException('采购人员权限不可用');
+      if (kind === 'reject') {
+        if (item.status !== 'pending') throw new ConflictException('采购明细已处理');
+        this.assertCurrentManagerActor(result.operatorOpenId, target.building, 'purchase_manager', target.specialty);
+        if (!canPerformBusinessAction(principal, { module: 'purchase', action: 'approve', ...target })) throw new ForbiddenException('采购审批权限已变化');
+      } else if (kind === 'order') {
+        if (item.status !== 'approved' || item.purchaserOpenId !== result.operatorOpenId) throw new ForbiddenException('当前人员不是采购人');
+        this.assertCurrentManagerActor(result.operatorOpenId, target.building, item.choice === 'building_self' ? 'building_executor' : 'purchase_executor', target.specialty);
+        if (!canPerformBusinessAction(principal, { module: 'purchase', action: 'order', ...target })) throw new ForbiddenException('采购下单权限已变化');
+      } else {
+        if (item.status !== 'approved' || batch.requesterOpenId !== result.operatorOpenId || !canPerformBusinessAction(principal, { module: 'purchase', action: 'receive', ...target })) throw new ForbiddenException('采购签收权限已变化');
+      }
+    });
+  }
+
+  async handleLifecycleForm(result: Extract<PurchaseCardCallbackResult, { kind: 'lifecycle_form_action' }>): Promise<{ claimed: boolean; card: Record<string, unknown> }> {
+    if (!this.isEnabled() || !this.accessConfiguration) throw new ForbiddenException('采购全流程表单暂不可用');
+    const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+    assertFeishuBusinessIdentity(this.accessConfiguration, result.operatorOpenId);
+    const identity = { appId, actorOpenId: result.operatorOpenId, messageId: result.messageId };
+    const binding = await this.store.lookupLifecycleFormCredential(result.formToken, identity);
+    const parsed = parsePurchaseLifecycleFormAction(result.formAction, { token: result.formToken, binding });
+    if (!parsed) throw new ConflictException('采购全流程表单绑定不存在');
+    if (binding.action === 'submit_item_reject') {
+      const claim = await this.store.claimManagerApprovalBatchItemReject({ approvalBatchId: binding.approvalBatchId,
+        actorOpenId: result.operatorOpenId, messageId: result.messageId, executionRecordId: binding.executionRecordId,
+        eventId: result.eventId, rejectionReason: String(parsed.rejectionReason),
+        lifecycle: { appId, cardRevision: binding.cardRevision, formToken: result.formToken },
+      }, new Date(), batch => {
+        const item = batch.items.find(row => row.executionRecordId === binding.executionRecordId), target = item?.authorityTarget;
+        if (!target) throw new ForbiddenException('采购审批明细授权范围缺失');
+        this.assertCurrentManagerActor(result.operatorOpenId, target.building, 'purchase_manager', target.specialty);
+        const principal = this.accessConfiguration!.feishuPrincipal(result.operatorOpenId, appId);
+        if (!principal || principal.requiresPasswordChange || !canPerformBusinessAction(principal, { module: 'purchase', action: 'approve', ...target })) throw new ForbiddenException('采购审批权限已变化');
+      });
+      return { claimed: claim.claimed, card: lifecycleProcessingCard(claim.claimed) };
+    }
+    const base = { kind: 'purchase_batch_fulfillment_action' as const, eventId: result.eventId, operatorOpenId: result.operatorOpenId,
+      messageId: result.messageId, approvalBatchId: binding.approvalBatchId, executionRecordId: binding.executionRecordId,
+      lifecycle: { cardRevision: binding.cardRevision, formToken: result.formToken } };
+    if (binding.action === 'submit_order') return this.handlePurchaseBatchFulfillmentCardAction({ ...base, action: 'submit_order', actualQuantity: Number(parsed.actualQuantity), actualAmount: Number(parsed.actualAmount), note: String(parsed.note) });
+    if (binding.action === 'submit_receipt') return this.handlePurchaseBatchFulfillmentCardAction({ ...base, action: 'submit_receipt', signerOpenId: String(parsed.signerOpenId), receiptTime: Number(parsed.receiptTime), note: String(parsed.note) });
+    throw new ConflictException('采购全流程表单操作不支持');
   }
 
   async patchPurchaseBatchFulfillmentCardView(
@@ -200,15 +305,74 @@ export class PurchaseManagerApprovalService {
     approvalBatchId: string;
     requesterOpenId: string;
     recordIds: string[];
+    flowVersion?: 'legacy' | 'lifecycle_v1';
   }): Promise<void> {
-    if (!this.isEnabled()) return;
+    if (!this.isEnabled()) {
+      if (input.flowVersion === 'lifecycle_v1') throw new ConflictException('采购全流程卡功能尚未启用');
+      return;
+    }
     const managers = readPurchaseManagerApprovers();
+    if (input.flowVersion === 'lifecycle_v1') {
+      const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+      const copyAppId = process.env.FEISHU_CARD_READONLY_COPY_APP_ID?.trim() || '';
+      const configuration = this.accessConfiguration;
+      if (!configuration || !/^cli_[A-Za-z0-9_-]+$/.test(appId) || copyAppId !== appId ||
+          process.env.FEISHU_CARD_READONLY_COPY_ENABLED !== 'true') throw new ConflictException('采购全流程卡身份配置尚未就绪');
+      const observers = [{ name: process.env.FEISHU_CARD_READONLY_COPY_NAME?.trim() || '', openId: process.env.FEISHU_CARD_READONLY_COPY_OPEN_ID?.trim() || '' },
+        ...additionalReadonlyCardTargets(process.env.FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS)]
+        .filter(target => ['李世龙', '刘小杏'].includes(target.name));
+      if (observers.length !== 2 || new Set(observers.map(target => target.name)).size !== 2 ||
+          new Set(observers.map(target => target.openId)).size !== 2 || observers.some(target => !/^ou_[A-Za-z0-9_-]+$/.test(target.openId))) {
+        throw new ConflictException('采购全流程只读接收人尚未确认');
+      }
+      const records = await Promise.all(input.recordIds.map(id => this.gateway.getExecutionRecordAsApp(id)));
+      if (records.length !== input.recordIds.length || records.some((record, index) => record.recordId !== input.recordIds[index] || record.requesterOpenId !== input.requesterOpenId || resolvePurchaseStage(record.status) !== 'application')) {
+        throw new ConflictException('采购全流程初始记录不一致');
+      }
+      const authorityTargets = records.map(record => {
+        const target = purchaseAuthorityTarget(record);
+        if (!target || (record.specialty?.trim() && !target.specialty)) throw new ConflictException('采购全流程明细授权范围不明确');
+        return { recordId: record.recordId, target };
+      });
+      const managerEligible = (openId: string): boolean => {
+        try {
+          assertFeishuBusinessIdentity(configuration, openId);
+          const principal = configuration.feishuPrincipal(openId, appId);
+          return !!principal && !principal.requiresPasswordChange && records.some(record => {
+            const target = purchaseAuthorityTarget(record);
+            if (!target) return false;
+            const duties = configuration.currentDutyRoutePeople('purchase_manager', target);
+            return !!duties && duties.some(person => person.openId === openId) && canPerformBusinessAction(principal, { module: 'purchase', action: 'approve', ...target });
+          });
+        } catch { return false; }
+      };
+      const eligibleManagers = managers.filter(manager => managerEligible(manager.openId));
+      if (!eligibleManagers.length) throw new ConflictException('采购全流程缺少有权限的审批人');
+      const managerIds = new Set(eligibleManagers.map(manager => manager.openId));
+      const recipients = [...eligibleManagers.map(manager => ({ openId: manager.openId, fullView: false })), ...observers.map(observer => ({ openId: observer.openId, fullView: true }))];
+      await this.store.registerManagerApprovalBatch({ approvalBatchId: input.approvalBatchId, requesterOpenId: input.requesterOpenId,
+        recipientOpenId: eligibleManagers[0]!.openId, managers: eligibleManagers, recordIds: input.recordIds, flowVersion: 'lifecycle_v1' }, new Date(), {
+        appId, recipients, authorityTargets, authorize: recipient => {
+          assertFeishuBusinessIdentity(configuration, recipient.openId);
+          if (recipient.fullView) {
+            const observer = observers.find(person => person.openId === recipient.openId);
+            if (!observer || !configuration.isCurrentReadonlyCardRecipient({ appId, name: observer.name,
+              identityHash: createHash('sha256').update(`${appId}\0${recipient.openId}`).digest('hex') })) throw new ForbiddenException('采购只读接收人身份已变化');
+          }
+          if (managerIds.has(recipient.openId)) {
+            if (!managerEligible(recipient.openId)) throw new ForbiddenException('采购审批人员权限或岗位已变化');
+          } else if (!recipient.fullView) throw new ForbiddenException('采购接收人身份无效');
+        },
+      });
+      return;
+    }
     await this.store.registerManagerApprovalBatch({
       approvalBatchId: input.approvalBatchId,
       requesterOpenId: input.requesterOpenId,
       recipientOpenId: managers[0]!.openId,
       managers,
       recordIds: input.recordIds,
+      ...(input.flowVersion ? { flowVersion: input.flowVersion } : {}),
     });
   }
 
@@ -274,6 +438,50 @@ export class PurchaseManagerApprovalService {
     if (!this.isEnabled()) {
       throw new ConflictException('采购批次审批卡功能未启用');
     }
+    if (result.lifecycle) {
+      if (result.action === 'approve_pending_comprehensive' || result.action === 'approve_pending_building_self') {
+        const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+        const choice = result.action === 'approve_pending_comprehensive' ? 'comprehensive' : 'building_self';
+        const claim = await this.store.claimManagerApprovalBatchPendingApproval({ eventId: result.eventId, approvalBatchId: result.approvalBatchId,
+          actorOpenId: result.operatorOpenId, messageId: result.messageId, choice,
+          lifecycle: { appId, cardRevision: result.lifecycle.cardRevision } }, new Date(), batch => {
+          const principal = this.accessConfiguration?.feishuPrincipal(result.operatorOpenId, appId);
+          const replayItems = batch.items.filter(item => item.actionEventId === result.eventId && item.actorOpenId === result.operatorOpenId);
+          const pending = replayItems.length ? replayItems : batch.items.filter(item => item.status === 'pending');
+          if (!principal || principal.requiresPasswordChange || !pending.length) throw new ForbiddenException('采购审批权限不可用');
+          for (const item of pending) {
+            const target = item.authorityTarget;
+            if (!target || (choice === 'building_self' && !isBuildingSelfPurchaseAllowed(target.building))) throw new ForbiddenException('采购明细审批范围不可用');
+            this.assertCurrentManagerActor(result.operatorOpenId, target.building, 'purchase_manager', target.specialty);
+            if (!canPerformBusinessAction(principal, { module: 'purchase', action: 'approve', ...target })) throw new ForbiddenException('采购明细超出审批权限');
+          }
+        });
+        return lifecycleProcessingCard(claim.claimed);
+      }
+      if (result.action !== 'approve_item_comprehensive' && result.action !== 'approve_item_building_self') {
+        throw new ConflictException('采购全流程卡该操作暂未就绪');
+      }
+      const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+      const claimed = await this.store.claimManagerApprovalBatchItemApproval({
+        eventId: result.eventId, approvalBatchId: result.approvalBatchId, executionRecordId: result.executionRecordId,
+        actorOpenId: result.operatorOpenId, messageId: result.messageId,
+        choice: result.action === 'approve_item_comprehensive' ? 'comprehensive' : 'building_self',
+        lifecycle: { appId, cardRevision: result.lifecycle.cardRevision },
+      }, new Date(), (batch, item) => {
+        const target = item.authorityTarget;
+        if (!target || item.executionRecordId !== result.executionRecordId) throw new ForbiddenException('采购审批明细授权范围缺失');
+        this.assertCurrentManagerActor(result.operatorOpenId, target.building, 'purchase_manager', target.specialty);
+        const principal = this.accessConfiguration?.feishuPrincipal(result.operatorOpenId, appId);
+        if (!principal || principal.requiresPasswordChange || !batch.recordIds.includes(item.executionRecordId) ||
+            !canPerformBusinessAction(principal, { module: 'purchase', action: 'approve', ...target })) {
+          throw new ForbiddenException('采购审批权限或明细已变化');
+        }
+      });
+      return { schema: '2.0', config: { update_multi: true, enable_forward: false },
+        header: { template: 'blue', title: { tag: 'plain_text', content: '采购全流程' } },
+        body: { elements: [{ tag: 'div', text: { tag: 'plain_text', content: claimed.claimed ? '审批处理中，请稍后查看卡片状态' : '该审批操作已受理，请稍后查看卡片状态' } }] } };
+    }
+    if (result.action === 'approve_item_comprehensive' || result.action === 'approve_item_building_self') throw new ConflictException('旧采购卡不支持逐项审批');
     let current = await this.store.findManagerApprovalBatchCard(
       result.messageId,
       result.operatorOpenId,
@@ -371,6 +579,8 @@ export class PurchaseManagerApprovalService {
       messageId: result.messageId,
       actorOpenId: result.operatorOpenId,
       role,
+      ...(result.lifecycle ? { lifecycle: { appId: readEnv('FEISHU_APP_ID')?.trim() || '', cardRevision: result.lifecycle.cardRevision,
+        ...(result.lifecycle.formToken ? { formToken: result.lifecycle.formToken } : {}) } } : {}),
     } as const;
     if (result.action === 'submit_order') {
       const claim = await this.store.claimPurchaseBatchFulfillmentCommand(
@@ -393,14 +603,22 @@ export class PurchaseManagerApprovalService {
         result.eventId,
         new Date(),
         (current, currentItem) =>
-          this.assertCurrentManagerActor(
+          { this.assertCurrentManagerActor(
             result.operatorOpenId,
             currentItem.authorityTarget?.building ||
               parsePurchaseManagerBatchApprovalCardContext(current.cardContext).building,
             currentItem.choice === 'building_self' ? 'building_executor' : 'purchase_executor',
             currentItem.authorityTarget?.specialty,
-          ),
+          );
+          if (result.lifecycle) {
+            const target = currentItem.authorityTarget, appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+            const principal = this.accessConfiguration?.feishuPrincipal(result.operatorOpenId, appId);
+            const duties = target && this.accessConfiguration?.currentDutyRoutePeople(currentItem.choice === 'building_self' ? 'building_executor' : 'purchase_executor', target);
+            if (!target || !principal || principal.requiresPasswordChange || !canPerformBusinessAction(principal, { module: 'purchase', action: 'order', ...target })) throw new ForbiddenException('采购下单权限已变化');
+            if (!duties || !duties.some(person => person.openId === result.operatorOpenId)) throw new ForbiddenException('采购下单岗位已变化');
+          } },
       );
+      if (result.lifecycle) return { claimed: claim.claimed, card: lifecycleProcessingCard(claim.claimed) };
       const renderStartedAt = Date.now();
       const card = await this.renderPurchaseBatchPurchaserCard(
         claim.batch,
@@ -451,8 +669,16 @@ export class PurchaseManagerApprovalService {
         },
         result.eventId,
         new Date(),
-        () => assertFeishuBusinessIdentity(this.accessConfiguration, result.operatorOpenId),
+        (_current, currentItem) => {
+          assertFeishuBusinessIdentity(this.accessConfiguration, result.operatorOpenId);
+          if (result.lifecycle) {
+            const target = currentItem.authorityTarget, appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+            const principal = this.accessConfiguration?.feishuPrincipal(result.operatorOpenId, appId);
+            if (!target || !principal || principal.requiresPasswordChange || !canPerformBusinessAction(principal, { module: 'purchase', action: 'receive', ...target })) throw new ForbiddenException('采购签收权限已变化');
+          }
+        },
       );
+      if (result.lifecycle) return { claimed: claim.claimed, card: lifecycleProcessingCard(claim.claimed) };
       const renderStartedAt = Date.now();
       const card = await this.renderPurchaseBatchReceiptCard(
         claim.batch,
@@ -917,6 +1143,7 @@ export class PurchaseManagerApprovalService {
           approvalBatchId: entry.task.id,
           requesterOpenId: first.requesterOpenId,
           recordIds,
+          ...(entry.flowVersion === 'lifecycle_v1' ? { flowVersion: entry.flowVersion } : {}),
         });
         registered.add(entry.task.id);
       } catch (error) {
@@ -974,6 +1201,13 @@ export class PurchaseManagerApprovalService {
         resolvePurchaseStage(record.status) !== 'receipt' ||
         record.receiptConfirmed
       ) {
+        continue;
+      }
+      try {
+        if (await this.isKnownLifecycleRecoveryBatch(record.approvalBatchId) ||
+            await this.isKnownLifecycleRecoveryBatch(record.receiptCardBatchId)) continue;
+      } catch (error) {
+        recordTaskFailure(result, `purchase-receipt-base-origin:${record.recordId}`, error);
         continue;
       }
       const requesterOpenId = record.requesterOpenId.trim();
@@ -1189,6 +1423,12 @@ export class PurchaseManagerApprovalService {
     for (const record of records) {
       if (!isBaseReconciliationCandidate(record, now)) continue;
       const approvalBatchId = record.approvalBatchId?.trim() || '';
+      try {
+        if (await this.isKnownLifecycleRecoveryBatch(approvalBatchId)) continue;
+      } catch (error) {
+        recordTaskFailure(result, `manager-approval-base-origin:${record.recordId}`, error);
+        continue;
+      }
       if (approvalBatchId && this.submissionTaskLedger) {
         let isInFlight = inFlightSubmissionBatches.get(approvalBatchId);
         if (isInFlight === undefined) {
@@ -1331,6 +1571,16 @@ export class PurchaseManagerApprovalService {
         }
       }
     }
+  }
+
+  /** A known new-flow batch must never be rebuilt by the legacy recovery path. */
+  private async isKnownLifecycleRecoveryBatch(value: string | undefined): Promise<boolean> {
+    const batchId = value?.trim() || '';
+    if (!batchId) return false;
+    const task = this.submissionTaskLedger?.findByTaskId(batchId);
+    if (task?.flowVersion === 'lifecycle_v1') return true;
+    const batch = await this.store.findManagerApprovalBatch(batchId);
+    return batch?.flowVersion === 'lifecycle_v1';
   }
 
   private async ensureInitialCallbackCard(
@@ -1509,6 +1759,7 @@ export class PurchaseManagerApprovalService {
     result: PurchaseManagerApprovalTaskRunResult,
   ): Promise<boolean> {
     let recordAttempts = action.attempts;
+    let sourceGuard: (()=>Promise<void>) | undefined;
     for (const recordId of action.recordIds) {
       const batch = await this.store.findManagerApprovalBatch(
         action.approvalBatchId,
@@ -1533,7 +1784,22 @@ export class PurchaseManagerApprovalService {
 
       let latest: PurchaseWorkflowRecord;
       try {
-        latest = await this.getManagerDecisionRecord(recordId);
+        if(batch.flowVersion==='lifecycle_v1' && !sourceGuard){
+          const appId=batch.lifecycleAppId,fingerprint=lifecyclePaymentUploadSourceFingerprint();
+          sourceGuard=async()=>{
+            if(!appId || readEnv('FEISHU_APP_ID')!==appId || lifecyclePaymentUploadSourceFingerprint()!==fingerprint)throw new ConflictException('采购审批持久来源已变化');
+            await this.store.verifyLifecycleReceiptImageSource(appId,fingerprint);
+            if(readEnv('FEISHU_APP_ID')!==appId || lifecyclePaymentUploadSourceFingerprint()!==fingerprint)throw new ConflictException('采购审批持久来源已变化');
+          };
+        }
+        latest = await this.getManagerDecisionRecord(recordId,sourceGuard);
+        if (batch.flowVersion === 'lifecycle_v1' && latest.status === DECISION_PRE_STATE) {
+          const actual = purchaseAuthorityTarget(latest);
+          if (latest.approvalBatchId !== batch.approvalBatchId || !item.authorityTarget || !actual || (latest.specialty?.trim() && !actual.specialty) ||
+              actual.building !== item.authorityTarget.building || actual.specialty !== item.authorityTarget.specialty) {
+            throw new ConflictException('采购明细授权范围已变化，需要重新核对');
+          }
+        }
       } catch (error) {
         if (recordAttempts < TASK_MAX_ATTEMPTS) {
           await this.store.rescheduleManagerApprovalBatchAction(
@@ -1599,6 +1865,20 @@ export class PurchaseManagerApprovalService {
       };
       let patch: Record<string, unknown>;
       try {
+        if (batch.flowVersion === 'lifecycle_v1') {
+          const alreadyApplied = isManagerApprovalTargetApplied(latest, decision);
+          if (alreadyApplied) {
+            if (latest.approvalActionId !== action.eventId || latest.approvalBatchId !== batch.approvalBatchId) {
+              throw new ConflictException('采购审批已有相似结果，但动作来源未确认');
+            }
+          } else {
+            const target = item.authorityTarget;
+            if (!target || latest.recordId !== recordId || latest.status !== DECISION_PRE_STATE) throw new ConflictException('采购审批明细状态已变化');
+            // The action was already authorized and durably claimed under the
+            // ledger lock. Later role changes do not turn it into a new action.
+            // The current record/batch/scope checks above still apply.
+          }
+        }
         patch = {
           ...buildPurchaseManagerApprovalPatch(latest, decision),
           ...buildPurchaseManagerResolvedFields({
@@ -1641,7 +1921,11 @@ export class PurchaseManagerApprovalService {
       }
 
       try {
-        await this.updateManagerDecisionRecord(recordId, patch);
+        await this.updateManagerDecisionRecord(recordId, patch,sourceGuard);
+        if (batch.flowVersion === 'lifecycle_v1') {
+          const confirmed = await this.getManagerDecisionRecord(recordId,sourceGuard);
+          if (!isManagerApprovalTargetApplied(confirmed, decision) || confirmed.approvalActionId !== action.eventId || confirmed.approvalBatchId !== batch.approvalBatchId) throw new ConflictException('采购审批写入回读不一致，需核对');
+        }
         await this.store.completeManagerApprovalBatchActionRecord(
           action.key,
           action.claimToken,
@@ -1688,7 +1972,8 @@ export class PurchaseManagerApprovalService {
           recordTaskFailure(result, action.key, ambiguous);
           continue;
         }
-        if (isManagerApprovalTargetApplied(observed, decision)) {
+        if (isManagerApprovalTargetApplied(observed, decision) &&
+            (batch.flowVersion !== 'lifecycle_v1' || (observed.approvalActionId === action.eventId && observed.approvalBatchId === batch.approvalBatchId))) {
           await this.store.completeManagerApprovalBatchActionRecord(
             action.key,
             action.claimToken,
@@ -1792,6 +2077,60 @@ export class PurchaseManagerApprovalService {
   private currentNotificationTime(notification: PurchaseWorkflowNotificationEntry, fallback: Date): Date {
     const clock = this.notificationClocks.get(notification.key);
     return clock?.claimToken === notification.claimToken ? new Date(clock.logical + Date.now() - clock.started) : fallback;
+  }
+
+  private authorizeLifecycleStage(batch: PurchaseManagerApprovalBatchEntry, notification: PurchaseWorkflowNotificationEntry): void {
+    const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+    if (batch.flowVersion !== 'lifecycle_v1' || batch.lifecycleAppId !== appId || !this.accessConfiguration) throw new ForbiddenException('采购全流程授权不可用');
+    const openId = notification.recipientOpenId;
+    assertFeishuBusinessIdentity(this.accessConfiguration, openId);
+    const principal = this.accessConfiguration.feishuPrincipal(openId, appId);
+    if (!principal || principal.requiresPasswordChange) throw new ForbiddenException('采购接收人权限不可用');
+    const item = batch.items.find(row => row.executionRecordId === notification.recordId);
+    const target = item?.authorityTarget;
+    if (!target) throw new ForbiddenException('采购明细授权范围缺失');
+    if (notification.kind === 'manager_batch_approval_requested' || notification.kind === 'manager_batch_approval_refresh') {
+      const permitted = batch.items.some(candidate => {
+        const scope = candidate.authorityTarget;
+        if (!scope) return false;
+        try { this.assertCurrentManagerActor(openId, scope.building, 'purchase_manager', scope.specialty); }
+        catch { return false; }
+        return canPerformBusinessAction(principal, { module: 'purchase', action: 'approve', ...scope });
+      });
+      if (!permitted) throw new ForbiddenException('采购审批权限已变化');
+    } else if (notification.kind === 'manager_batch_purchase_assigned' || notification.kind === 'manager_batch_purchase_refresh') {
+      this.assertCurrentManagerActor(openId, target.building, item!.choice === 'building_self' ? 'building_executor' : 'purchase_executor', target.specialty);
+      if (!canPerformBusinessAction(principal, { module: 'purchase', action: 'order', ...target })) throw new ForbiddenException('采购下单权限已变化');
+    } else if (notification.kind === 'manager_batch_receipt_requested' || notification.kind === 'manager_batch_receipt_refresh') {
+      if (!canPerformBusinessAction(principal, { module: 'purchase', action: 'receive', ...target })) throw new ForbiddenException('采购签收权限已变化');
+    } else if (notification.kind === 'manager_batch_approval_result') {
+      if (!canPerformBusinessAction(principal, { module: 'purchase', action: 'read', ...target })) throw new ForbiddenException('采购查看权限已变化');
+    } else throw new ConflictException('采购阶段通知暂不支持全流程绑定');
+  }
+
+  private async processLifecycleStageNotification(notification: PurchaseWorkflowNotificationEntry, now: Date): Promise<boolean> {
+    const authorize = (batch: PurchaseManagerApprovalBatchEntry, task: PurchaseWorkflowNotificationEntry) => this.authorizeLifecycleStage(batch, task);
+    const entry = await this.store.enrollLifecycleRecipientFromNotification(notification.key, notification.claimToken, authorize);
+    if (entry.replica.state !== 'delivered' || entry.replica.appliedRevision < entry.stageTargetRevision) {
+      await this.store.rescheduleNotification(notification.key, notification.claimToken, new Error('采购全流程卡片正在同步'), new Date(now.getTime() + 5000), now);
+      return false;
+    }
+    let context: string | undefined;
+    if (notification.kind === 'manager_batch_approval_requested') {
+      const batch = await this.store.findManagerApprovalBatch(entry.replica.batchId);
+      if (!batch) throw new ConflictException('采购全流程审批批次不存在');
+      context = batch.cardContext || notification.cardContext;
+      if (!context) {
+        const records = await Promise.all(batch.recordIds.map(id => this.gateway.getExecutionRecordAsApp(id)));
+        if (records.some(record => record.status !== DECISION_PRE_STATE)) throw new ConflictException('采购申请状态已变化');
+        const input = toManagerBatchApprovalCardInput(batch, records, this.submissionTaskLedger?.findByTaskId(batch.approvalBatchId)?.task.createdAt || batch.createdAt);
+        const comparisonRecords = records.filter(record => record.procurementForm === '三方比价');
+        if (comparisonRecords.length) input.comparisonEvidence = await this.gateway.prepareManagerComparisonBatchEvidence(comparisonRecords);
+        context = serializePurchaseManagerBatchApprovalCardContext(input);
+      }
+    }
+    await this.store.completeLifecycleStageNotification(notification.key, notification.claimToken, entry.stageTargetRevision, context, authorize, now);
+    return true;
   }
 
   private async dispatchNotification(
@@ -1955,6 +2294,7 @@ export class PurchaseManagerApprovalService {
         'manager_batch_approval_requested',
       );
       const canonical = await this.store.findManagerApprovalBatch(approvalBatchId);
+      if (canonical?.flowVersion === 'lifecycle_v1') return await this.processLifecycleStageNotification(notification, now);
       const batch = canonical && managerBatchCardView(canonical, notification.recipientOpenId);
       if (!batch || batch.messageId || batch.sourceNotificationKey !== notification.key) {
         throw new ConflictException('采购批次审批发卡台账状态异常');
@@ -2218,6 +2558,9 @@ export class PurchaseManagerApprovalService {
         context.approvalBatchId,
       );
       if (!batch) throw new ConflictException('采购批次审批台账不存在');
+      if (batch.flowVersion === 'lifecycle_v1') {
+        return await this.processLifecycleStageNotification(notification, now);
+      }
       const view = notification.kind === 'manager_batch_approval_result' ? batch : managerBatchCardView(batch, notification.recipientOpenId);
       const card = renderManagerApprovalBatch(view);
       if (notification.kind === 'manager_batch_approval_result') {
@@ -2313,6 +2656,12 @@ export class PurchaseManagerApprovalService {
         context.approvalBatchId,
       );
       if (!batch) throw new ConflictException('采购履约批次不存在');
+      if (batch.flowVersion === 'lifecycle_v1') {
+        // Business commands are not delivery notifications. The lifecycle
+        // worker must revalidate current duty and scoped authority before any
+        // remote write; keep the operation closed until that path is wired.
+        throw new ConflictException('采购全流程履约安全处理尚未就绪');
+      }
       failureRefresh = {
         businessEventId: `${
           context.action === 'order'
@@ -2482,6 +2831,11 @@ export class PurchaseManagerApprovalService {
         context.approvalBatchId,
       );
       if (!batch) throw new ConflictException('采购履约批次不存在');
+      if (batch.flowVersion === 'lifecycle_v1') {
+        // A lifecycle batch must update the existing recipient replica. Never
+        // fall through to the legacy path that sends a fresh message.
+        throw new ConflictException('采购全流程签收结果同步尚未就绪');
+      }
       const batchItem = batch.items.find(
         (item) =>
           item.executionRecordId === notification.recordId &&
@@ -2999,35 +3353,44 @@ export class PurchaseManagerApprovalService {
 
   private async getManagerDecisionRecord(
     recordId: string,
+    sourceGuard?:()=>Promise<void>,
   ): Promise<PurchaseWorkflowRecord> {
     const fastRead = (
       this.gateway as unknown as {
         getManagerApprovalDecisionRecordAsApp?: (
           recordId: string,
+          sourceGuard?:()=>Promise<void>,
         ) => Promise<PurchaseWorkflowRecord>;
       }
     ).getManagerApprovalDecisionRecordAsApp;
-    return typeof fastRead === 'function'
-      ? fastRead.call(this.gateway, recordId)
-      : this.gateway.getExecutionRecordAsApp(recordId);
+    if(sourceGuard)await sourceGuard();
+    if(sourceGuard && typeof fastRead!=='function')throw new ConflictException('采购审批来源保护未接入');
+    const record=typeof fastRead === 'function' ? await (sourceGuard ? fastRead.call(this.gateway,recordId,sourceGuard) : fastRead.call(this.gateway,recordId)) : await this.gateway.getExecutionRecordAsApp(recordId);
+    if(sourceGuard)await sourceGuard();
+    return record;
   }
 
   private async updateManagerDecisionRecord(
     recordId: string,
     fields: Record<string, unknown>,
+    sourceGuard?:()=>Promise<void>,
   ): Promise<void> {
     const fastWrite = (
       this.gateway as unknown as {
         updateManagerApprovalDecisionRecordAsApp?: (
           recordId: string,
           fields: Record<string, unknown>,
+          sourceGuard?:()=>Promise<void>,
         ) => Promise<void>;
       }
     ).updateManagerApprovalDecisionRecordAsApp;
+    if(sourceGuard)await sourceGuard();
     if (typeof fastWrite === 'function') {
-      await fastWrite.call(this.gateway, recordId, fields);
+      if(sourceGuard)await fastWrite.call(this.gateway,recordId,fields,sourceGuard);
+      else await fastWrite.call(this.gateway,recordId,fields);
       return;
     }
+    if(sourceGuard)throw new ConflictException('采购审批来源保护未接入');
     await this.gateway.updateExecutionRecordAsApp(recordId, fields);
   }
 
@@ -3121,12 +3484,21 @@ export class PurchaseManagerApprovalService {
     result: PurchaseManagerApprovalTaskRunResult,
   ): Promise<boolean> {
     try {
-      await this.findNotificationAction(notification);
+      const platformResolution = notification.kind === 'manager_approval_resolved' && notification.businessEventId.startsWith('manager_approval_resolved:platform_')
+        ? await this.store.getVerifiedPlatformLegacyCardResolution(notification.key, notification.claimToken)
+        : null;
+      if (!platformResolution) await this.findNotificationAction(notification);
       parsePurchaseManagerApprovalCardContext(notification.cardContext);
       const messageId = requireMessageId(notification.messageId);
       const current = await this.store.findManagerApprovalCard(messageId, notification.recipientOpenId);
       if (!current) throw new ConflictException('经理审批状态通知的原消息绑定不存在');
-      const card = renderManagerApprovalCard(current);
+      if (platformResolution && (platformResolution.recordId !== notification.recordId || platformResolution.messageId !== messageId || platformResolution.recipientOpenId !== notification.recipientOpenId || current.executionRecordId !== platformResolution.recordId || current.actionEventId !== platformResolution.eventId || current.state !== 'resolved')) throw new ConflictException('平台采购审批原卡身份已变化');
+      const card = platformResolution ? buildResolvedPurchaseManagerApprovalCard(parsePurchaseManagerApprovalCardContext(current.cardContext), {
+        choice: platformResolution.choice,
+        actorName: platformResolution.actorDisplayName === platformResolution.subjectDisplayName ? platformResolution.actorDisplayName : `${platformResolution.actorDisplayName}（代登录：${platformResolution.subjectDisplayName}）`,
+        processedAt: platformResolution.processedAt,
+        rejectionReason: '',
+      }) : renderManagerApprovalCard(current);
       try {
         await this.gateway.updateInteractiveCard(messageId, card);
       } catch (error) {
@@ -4088,6 +4460,11 @@ function handoverDeliveryMetadata(fields: Record<string, unknown>): Record<strin
     PURCHASE_MANAGER_APPROVAL_FIELDS.approvalTime, PURCHASE_MANAGER_APPROVAL_FIELDS.policyVersion,
     PURCHASE_MANAGER_APPROVAL_FIELDS.batchId, PURCHASE_MANAGER_APPROVAL_FIELDS.actionId]) delete result[field];
   return result;
+}
+
+function lifecycleProcessingCard(claimed: boolean): Record<string, unknown> {
+  return { schema: '2.0', config: { update_multi: true, enable_forward: false }, header: { template: 'blue', title: { tag: 'plain_text', content: '采购全流程' } },
+    body: { elements: [{ tag: 'div', text: { tag: 'plain_text', content: claimed ? '操作处理中，请稍后查看卡片状态' : '该操作已受理，请稍后查看卡片状态' } }] } };
 }
 
 function safeErrorMessage(error: unknown): string {

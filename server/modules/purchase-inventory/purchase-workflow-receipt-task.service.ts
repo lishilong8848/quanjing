@@ -4,7 +4,7 @@ import type { PurchaseWorkflowReceiptAcceptedResponse, PurchaseWorkflowReceiptIn
 import { PurchaseWorkflowGateway, type PurchaseWorkflowUploadFile } from './purchase-workflow.gateway';
 import { PurchaseWorkflowService, type PurchaseWorkflowSession } from './purchase-workflow.service';
 import { PurchaseWorkflowStore, type PurchaseWorkflowNotificationEntry } from './purchase-workflow.store';
-import { normalizeWebReceiptCommand, webReceiptFingerprint, webReceiptHash, webReceiptRecoveryVersion, type PurchaseWebReceiptCommand, type WebReceiptFile, type WebReceiptInput } from './purchase-web-receipt-command';
+import { normalizeReceiptPlatformIdentity, normalizeWebReceiptCommand, webReceiptFingerprint, webReceiptHash, webReceiptRecoveryVersion, type PurchaseWebReceiptCommand, type WebReceiptFile, type WebReceiptInput } from './purchase-web-receipt-command';
 import type { PersonnelRecoveryActor, PersonnelRecoveryPreview, PersonnelRecoveryRequest, PersonnelRecoveryResult, PersonnelRecoveryTask } from '../../../shared/personnel-task-recovery.interface';
 import {assertRecoveryRequest} from '../../common/access/personnel-task-recovery.validation';
 import { PurchaseWebReceiptFiles } from './purchase-web-receipt-files';
@@ -60,6 +60,10 @@ export class PurchaseWorkflowReceiptTaskService {
     const existing = await this.store.findWebReceipt(submission.taskId);
     if (existing?.webReceipt) {
       const saved = existing.webReceipt;
+      if (saved.platformIdentity) {
+        if (!session.platformProof || !session.assertPlatformPermission || owner(session) !== saved.ownerId) throw new ForbiddenException('当前登录身份无法查询原签收任务');
+        session.assertPlatformPermission('receive', saved.scope);
+      }
       const replay = { ...saved, input: submission.receipt, files: submission.metadata };
       if (existing.recordId !== recordId || saved.ownerId !== submission.ownerId || webReceiptFingerprint(replay) !== saved.fingerprint) throw new ConflictException('签收提交标识已用于其他内容');
       return accepted(existing);
@@ -72,13 +76,20 @@ export class PurchaseWorkflowReceiptTaskService {
       taskId: submission.taskId, ownerId: submission.ownerId, appId: submission.appId, mutationId: submission.mutationId,
       fingerprint: '', actor: { openId, name, positions: [...positions], buildings: [...buildings], ...(accessRole ? { accessRole } : {}) },
       scope: prepared.scope, input: submission.receipt, files: submission.metadata, notificationWarnings: [], filesRemoved: false,
+      ...(session.platformProof ? { platformIdentity: normalizeReceiptPlatformIdentity(session.platformProof) } : {}),
     };
     payload.fingerprint = webReceiptFingerprint(payload);
     normalizeWebReceiptCommand(payload);
     let task: PurchaseWorkflowNotificationEntry;
     try {
       await this.files.save(payload, uploads);
-      task = await this.store.acceptWebReceipt(recordId, payload, () => this.workflowService.assertReceiptSubmissionCurrent(prepared, session));
+      task = await this.store.acceptWebReceipt(recordId, payload, () => {
+        if (payload.platformIdentity) {
+          if (!session.platformProof || !session.assertPlatformProof) throw new ForbiddenException('采购签收身份不可核对');
+          session.assertPlatformProof('receive', prepared.record);
+        }
+        this.workflowService.assertReceiptSubmissionCurrent(prepared, session);
+      });
     } catch (error) {
       if (!await this.store.findWebReceipt(payload.taskId)) {
         try { await this.files.remove(payload); } catch { this.logger.warn(`未受理签收附件待清理: ${payload.taskId}`); }
@@ -93,12 +104,16 @@ export class PurchaseWorkflowReceiptTaskService {
     if (!/^purchase-receipt-[a-f0-9]{64}$/.test(taskId)) return { success: false, message: '签收后台任务不存在或已过期' };
     const task = await this.store.findWebReceipt(taskId), payload = task?.webReceipt;
     if (!task || !payload || payload.appId !== process.env.FEISHU_APP_ID?.trim() || (payload.ownerId !== owner(session) && session.accessRole !== 'admin')) return { success: false, message: '签收后台任务不存在或已过期' };
+    if (payload.platformIdentity) {
+      if (!session.platformProof || !session.assertPlatformPermission || payload.ownerId !== owner(session)) throw new ForbiddenException('当前登录身份无法查看原签收任务');
+      session.assertPlatformPermission('receive', payload.scope);
+    }
     this.workflowService.assertReceiptTaskReadable(payload.scope, session);
     return { success: true, task: publicTask(task) };
   }
 
   async listRecoveryTasks():Promise<PersonnelRecoveryTask[]>{
-    return(await this.store.listNotifications({kind:'web_receipt_command'})).filter(task=>task.status==='failed'||!!task.webReceipt?.recoveries?.length).map(task=>({module:'purchase',id:task.webReceipt!.taskId,recordId:task.recordId,title:'采购到货签收',actorName:task.webReceipt!.actor.name,createdAt:task.createdAt,status:publicTask(task).status,message:publicTask(task).message,version:webReceiptRecoveryVersion(task),actionLabel:'恢复签收',available:task.webReceipt!.appId===process.env.FEISHU_APP_ID?.trim(),hint:'仅补传未确认附件，保留已完成步骤。未收到回执的上传可能留有未关联文件。'}));
+    return(await this.store.listNotifications({kind:'web_receipt_command'})).filter(task=>task.status==='failed'||!!task.webReceipt?.recoveries?.length).map(task=>({module:'purchase',id:task.webReceipt!.taskId,recordId:task.recordId,title:'采购到货签收',actorName:task.webReceipt!.actor.name,createdAt:task.createdAt,status:publicTask(task).status,message:publicTask(task).message,version:webReceiptRecoveryVersion(task),actionLabel:'恢复签收',available:task.webReceipt!.appId===process.env.FEISHU_APP_ID?.trim(),hint:'保留已确认附件；上传结果不明时需先核对，不会直接重传。'}));
   }
 
   async previewRecoveryTask(input: PersonnelRecoveryRequest): Promise<PersonnelRecoveryPreview> {
@@ -107,11 +122,12 @@ export class PurchaseWorkflowReceiptTaskService {
     if (input.module !== 'purchase' || !original?.webReceipt || original.webReceipt.appId !== process.env.FEISHU_APP_ID?.trim()) throw new ConflictException('原签收任务或应用身份已变化');
     const task = (await this.listRecoveryTasks()).find(task => task.id === input.taskId);
     if (!task) throw new ConflictException('原签收任务无需恢复，请核对进度');
+    const unknownUpload = original.webReceipt.files.some(file => !file.token && !!file.uploadStartedAt);
     return { task, version: webReceiptRecoveryVersion(original),
       facts: original.webReceipt.files.map(file => ({ label: file.group === 'invoices' ? '发票' : '签收照片', value: `${file.name} · ${file.token ? '上传已确认' : file.uploadStartedAt ? '上传结果待核对' : '待上传'}` })),
-      choices: [], canConfirm: task.available && original.status === 'failed',
-      ...(original.status === 'failed' ? {} : { message: task.message }),
-      acknowledgement: '我已核对附件，允许补传尚未确认的文件；已确认的文件保留' };
+      choices: [], canConfirm: task.available && original.status === 'failed' && !unknownUpload,
+      ...(unknownUpload ? { message: '附件上传结果尚未确认，请先核对原任务；不能直接重新上传' } : original.status === 'failed' ? {} : { message: task.message }),
+      acknowledgement: '我已核对附件，允许上传尚未开始的文件；已确认的文件保留' };
   }
 
   async recoverTask(input:PersonnelRecoveryRequest,actor:PersonnelRecoveryActor,authorize:()=>void):Promise<PersonnelRecoveryResult>{
@@ -173,6 +189,10 @@ export class PurchaseWorkflowReceiptTaskService {
 }
 
 function owner(session: PurchaseWorkflowSession): string {
+  if (session.platformProof) {
+    const identity = normalizeReceiptPlatformIdentity(session.platformProof);
+    return `platform:${webReceiptHash([identity.source, identity.actorAccountId, identity.subjectAccountId])}`;
+  }
   const id = session.permissionPrincipal?.accountId || (!session.accessRole ? session.openId : '');
   if (!/^[A-Za-z0-9:_-]{1,180}$/.test(id)) throw new ForbiddenException('当前登录身份无法创建或查询签收任务');
   return id;

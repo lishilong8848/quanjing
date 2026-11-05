@@ -111,5 +111,14 @@ describe('采购比价通知受控恢复', () => {
     expect(() => controller.retryComparisonImageNotifications({ accessPrincipal: { role: 'editor', accountId: 'editor' } } as never, { keys })).toThrow();
     expect(Reflect.getMetadata(AdminOnlyMetadataKey, PurchaseInventoryController.prototype.previewComparisonImageNotifications)).toBe(true);
     expect(() => controller.previewComparisonImageNotifications({ accessPrincipal: { role: 'editor', accountId: 'editor' } } as never, { keys })).toThrow();
+    const previous = process.env.PUBLIC_BASE_URL;
+    process.env.PUBLIC_BASE_URL = 'https://portal.example';
+    try {
+      const admin = { role: 'admin', accountId: 'admin_one' };
+      expect(() => controller.retryComparisonImageNotifications({ accessPrincipal: admin, headers: { origin: 'https://evil.example' } } as never, { keys })).toThrow();
+      expect(() => controller.previewComparisonImageNotifications({ accessPrincipal: admin, headers: {} } as never, { keys })).toThrow();
+      expect(() => controller.previewComparisonImageNotifications({ accessPrincipal: admin, headers: { origin: 'https://portal.example', 'sec-fetch-site': 'cross-site' } } as never, { keys })).toThrow();
+      controller.previewComparisonImageNotifications({ accessPrincipal: admin, headers: { origin: 'https://portal.example' } } as never, { keys });
+    } finally { if (previous === undefined) delete process.env.PUBLIC_BASE_URL; else process.env.PUBLIC_BASE_URL = previous; }
   });
 });

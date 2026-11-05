@@ -41,6 +41,9 @@ describe('purchase inbound confirmation rules', () => {
         submissionRecordId: 'sub-1',
         requestCode: 'PR-001',
         mode: null,
+        // 专业为可选字段，缺失时与 sku 一样返回空字符串；空专业在权限判定中不匹配
+        // 任何专业授权（fail-closed），不会放宽专业范围。
+        specialty: '',
         sku: '',
         itemName: '新型滤芯',
         specification: 'MERV 8',

@@ -36,7 +36,7 @@ describe('purchase workflow UI contract', () => {
     expect(source).toContain('采购完成');
     expect(source).toContain('签收人');
     expect(source).toContain('签收时间');
-    expect(source).not.toContain('useAccess');
+    expect(source).toContain('useAccess');
     expect(source).toContain('canOperate');
     expect(source).not.toContain('getPurchaseApplicationLoginUrl');
     expect(source).not.toContain('飞书登录');
@@ -100,7 +100,7 @@ describe('purchase workflow UI contract', () => {
 
   it('keeps the preview visible when the live detail response is empty', () => {
     const source = readFileSync(dialogPath, 'utf8');
-    expect(source).toContain('if (!loaded?.record)');
+    expect(source).toContain('if (!loaded?.record || loaded.record.recordId !== recordId)');
     expect(source).toContain('采购流程详情响应为空');
     expect(source).toContain('setDetail((current) => current || preview)');
   });

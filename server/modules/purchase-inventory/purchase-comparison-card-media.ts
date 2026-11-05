@@ -125,7 +125,7 @@ function readAttachments(value: unknown, tableId: string, recordId: string): Att
   });
 }
 
-function attachmentDownloadExtra(value: unknown, tableId: string, recordId: string, token: string, allowedTokens: Set<string>): string | undefined {
+export function attachmentDownloadExtra(value: unknown, tableId: string, recordId: string, token: string, allowedTokens: Set<string>): string | undefined {
   if (typeof value !== 'string' || !value.includes('extra=')) return undefined;
   const invalid = () => new BadGatewayException('采购比价附件授权信息无效，请核对原采购单');
   try {

@@ -19,6 +19,8 @@ export type PurchaseWorkflowFieldPatch = Record<string, unknown>;
 export type PurchaseWorkflowDutyActor = PurchaseWorkflowUser & {
   approvalDuty?: boolean;
   approvalDutyKind?: 'purchase_manager' | 'purchase_approver';
+  /** Computed from a verified platform session; never from a request body. */
+  platformActions?: readonly PurchaseWorkflowAction[];
 };
 
 const MANAGER_POSITIONS = new Set(['设施运维经理', '设施运维副经理']);
@@ -115,7 +117,7 @@ export function buildCardApprovalRoutingPatch(
 
 export function buildStartPatch(
   record: PurchaseWorkflowRecord,
-  actor: PurchaseWorkflowUser,
+  actor: PurchaseWorkflowDutyActor,
   comprehensivePurchaser: PurchaseWorkflowUser,
   purchaseMethodOverride?: PurchaseWorkflowMethod,
 ): PurchaseWorkflowFieldPatch {
@@ -124,11 +126,14 @@ export function buildStartPatch(
   const method = normalizeMethod(
     purchaseMethodOverride || record.purchaseMethod,
   );
+  if (method !== '综合采购' && method !== '需求自采') throw new Error('采购申请未填写有效的采购方式');
   if (!canStart(record, actor, method)) {
     throw new Error('无权确认库房并启动采购');
   }
   const purchaserOpenId =
-    method === '需求自采'
+    actor.platformActions?.includes('start') && record.purchaserOpenId
+      ? record.purchaserOpenId
+      : method === '需求自采'
       ? record.requesterOpenId
       : method === '综合采购'
         ? comprehensivePurchaser.openId
@@ -144,7 +149,7 @@ export function buildStartPatch(
 
 export function buildOrderPatch(
   record: PurchaseWorkflowRecord,
-  actor: PurchaseWorkflowUser,
+  actor: PurchaseWorkflowDutyActor,
   input: PurchaseWorkflowOrderInput,
 ): PurchaseWorkflowFieldPatch {
   if (actor.permissionPrincipal && !canPerformBusinessAction(actor.permissionPrincipal, { module: 'purchase', action: 'order', building: record.building, specialty: record.specialty })) throw new Error('当前操作超出个人授权范围');
@@ -212,9 +217,10 @@ export function normalizeMethod(
 
 function canStart(
   record: PurchaseWorkflowRecord,
-  user: PurchaseWorkflowUser,
+  user: PurchaseWorkflowDutyActor,
   method: PurchaseWorkflowMethod = normalizeMethod(record.purchaseMethod),
 ): boolean {
+  if (user.platformActions?.includes('start')) return true;
   if (isSystemAdmin(user) || hasAnyPosition(user, START_POSITIONS)) return true;
   const sameBuilding = user.buildings.some(
     (building) =>
@@ -234,8 +240,9 @@ function canStart(
 
 function canOrder(
   record: PurchaseWorkflowRecord,
-  user: PurchaseWorkflowUser,
+  user: PurchaseWorkflowDutyActor,
 ): boolean {
+  if (user.platformActions?.includes('order')) return true;
   if (user.accessRole === 'purchase_applicant')
     return isSameBuildingSelfPurchaseApplicant(record, user);
   return isManager(user) || user.openId === record.purchaserOpenId;
@@ -243,8 +250,9 @@ function canOrder(
 
 function canReceive(
   record: PurchaseWorkflowRecord,
-  user: PurchaseWorkflowUser,
+  user: PurchaseWorkflowDutyActor,
 ): boolean {
+  if (user.platformActions?.includes('receive')) return true;
   if (user.accessRole === 'purchase_applicant') {
     return isSameBuildingPurchaseApplicant(record, user);
   }
@@ -283,7 +291,7 @@ function isManager(user: PurchaseWorkflowDutyActor): boolean {
 }
 
 function isApprover(user: PurchaseWorkflowDutyActor): boolean {
-  return isSystemAdmin(user) || user.approvalDuty === true;
+  return isSystemAdmin(user) || user.approvalDuty === true || user.platformActions?.includes('approve') === true;
 }
 
 function isSystemAdmin(user: PurchaseWorkflowUser): boolean {

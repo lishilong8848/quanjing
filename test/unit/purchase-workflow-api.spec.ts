@@ -84,11 +84,6 @@ describe('purchase workflow API contract', () => {
       "@Get('workflows/:recordId')",
     ],
     [
-      'approval',
-      "@Post('workflows/:recordId/approve')",
-      "@Post('workflows/:recordId/start')",
-    ],
-    [
       'start',
       "@Post('workflows/:recordId/start')",
       "@Post('workflows/:recordId/order')",
@@ -116,6 +111,14 @@ describe('purchase workflow API contract', () => {
       if (uploadIndex >= 0) expect(guardIndex).toBeLessThan(uploadIndex);
     },
   );
+
+  it('routes the workflow approval form to the same durable approval entry as the list', () => {
+    const method=controllerSource.slice(controllerSource.indexOf("@Post('workflows/:recordId/approve')"),controllerSource.indexOf("@Post('workflows/:recordId/start')"));
+    expect(method).toContain('this.onlineApprovalService.acceptAuthorizedDecision(');
+    expect(method).toContain('this.getWorkflowSession(req)');
+    expect(method).not.toContain('this.workflowService.approve(');
+    expect(method).not.toContain('this.uploadWorkflowFiles(');
+  });
 
   it('keeps order writeback available after the legacy workflow switch is retired', () => {
     const method = controllerSource.slice(

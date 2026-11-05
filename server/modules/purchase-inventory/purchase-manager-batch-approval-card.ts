@@ -97,6 +97,8 @@ export interface PurchaseManagerBatchApprovalItemInput {
   status: PurchaseManagerBatchItemStatus;
   choice: PurchaseManagerBatchApprovalChoice;
   rejectionReason: string;
+  /** Server-ledger result only; never populated from a client request. */
+  decisionSource?: 'platform';
 }
 
 export interface PurchaseManagerBatchApprovalCardInput {
@@ -430,14 +432,15 @@ export function parsePurchaseManagerBatchApprovalCardContext(
   if (!hasExactKeys(parsed, [...CONTEXT_KEYS, ...(Object.hasOwn(parsed, 'comparisonEvidence') ? ['comparisonEvidence'] : [])])) throw invalidContext();
   if (!Array.isArray(parsed.items)) throw invalidContext();
   for (const item of parsed.items) {
+    const sourceKeys = isPlainObject(item) && Object.hasOwn(item, 'decisionSource') ? ['decisionSource'] : [];
     if (
       !isPlainObject(item) ||
-      (!hasExactKeys(item, ITEM_CONTEXT_KEYS) &&
-        !hasExactKeys(item, ITEM_CONTEXT_KEYS_WITH_PURCHASE_LINKS) &&
-        !hasExactKeys(item, ITEM_CONTEXT_KEYS_WITH_PROCUREMENT) &&
+      (!hasExactKeys(item, [...ITEM_CONTEXT_KEYS, ...sourceKeys]) &&
+        !hasExactKeys(item, [...ITEM_CONTEXT_KEYS_WITH_PURCHASE_LINKS, ...sourceKeys]) &&
+        !hasExactKeys(item, [...ITEM_CONTEXT_KEYS_WITH_PROCUREMENT, ...sourceKeys]) &&
         !hasExactKeys(
           item,
-          ITEM_CONTEXT_KEYS_WITH_PURCHASE_LINKS_AND_PROCUREMENT,
+          [...ITEM_CONTEXT_KEYS_WITH_PURCHASE_LINKS_AND_PROCUREMENT, ...sourceKeys],
         ))
     ) {
       throw invalidContext();
@@ -540,7 +543,9 @@ function canonicalizeInput(
     ) {
       throw invalidContext();
     }
-    assertItemDecision(status, choice, rejectionReason);
+    const hasDecisionSource = Object.hasOwn(item, 'decisionSource');
+    if (hasDecisionSource && (item.decisionSource !== 'platform' || status !== 'rejected' || choice !== 'reject' || rejectionReason)) throw invalidContext();
+    assertItemDecision(status, choice, rejectionReason, hasDecisionSource);
     return {
       executionRecordId,
       title: normalizeRequiredText(item.title, BUSINESS_TEXT_LIMIT),
@@ -559,6 +564,7 @@ function canonicalizeInput(
       status,
       choice,
       rejectionReason,
+      ...(hasDecisionSource ? { decisionSource: 'platform' as const } : {}),
     };
   });
   return {
@@ -1021,6 +1027,7 @@ function assertItemDecision(
   status: PurchaseManagerBatchItemStatus,
   choice: PurchaseManagerBatchApprovalChoice,
   rejectionReason: string,
+  platformWithoutReason = false,
 ): void {
   if (status === 'pending' && (choice !== '' || rejectionReason)) {
     throw invalidContext();
@@ -1033,7 +1040,7 @@ function assertItemDecision(
     throw invalidContext();
   }
   if (status === 'approved' && rejectionReason) throw invalidContext();
-  if (status === 'rejected' && (choice !== 'reject' || !rejectionReason)) {
+  if (status === 'rejected' && (choice !== 'reject' || (!rejectionReason && !platformWithoutReason))) {
     throw invalidContext();
   }
   if (

@@ -2486,6 +2486,7 @@ $releaseFileSources = [ordered]@{
   'watchdog.ps1' = 'deploy/watchdog.ps1'
   'scripts/run-with-env.mjs' = 'scripts/run-with-env.mjs'
   'scripts/verify-hotfix-activation.cjs' = 'scripts/verify-hotfix-activation.cjs'
+  'scripts/verify-purchase-ledger-compatibility.cjs' = 'scripts/verify-purchase-ledger-compatibility.cjs'
   'scripts/remove-legacy-contract-ocr.ps1' = 'scripts/remove-legacy-contract-ocr.ps1'
   'scripts/ensure-feishu-card-ws-sdk-patch.mjs' = 'scripts/ensure-feishu-card-ws-sdk-patch.mjs'
   'scripts/postinstall.mjs' = 'scripts/postinstall.mjs'
@@ -6330,6 +6331,24 @@ function Get-TrustedHotfixNodeExecutable {
   throw 'No trusted OpenJS Node.js 22+ executable is available for the hotfix proof gates.'
 }
 
+function Assert-PurchaseLedgerRuntimeCompatibility {
+  param([string]$Root, [string]$RuntimeDist, [string]$VerifierPath = '', [switch]$PassThru)
+  if ([string]::IsNullOrWhiteSpace($VerifierPath)) {
+    $VerifierPath = Join-Path $PSScriptRoot 'release-root\scripts\verify-purchase-ledger-compatibility.cjs'
+  }
+  if (-not (Test-Path -LiteralPath $VerifierPath -PathType Leaf)) {
+    throw 'Purchase ledger compatibility verifier is missing. No runtime switch is permitted.'
+  }
+  $node = Get-TrustedHotfixNodeExecutable -Root $Root
+  $ledger = Get-ConfiguredValue -Root $Root -Name 'PURCHASE_WORKFLOW_LEDGER_PATH' -DefaultValue '.runtime/purchase-workflow-ledger.json'
+  if ([string]::IsNullOrWhiteSpace($ledger)) { $ledger = '.runtime/purchase-workflow-ledger.json' }
+  $proofJson = & $node $VerifierPath --app-root $Root --runtime-dist $RuntimeDist --ledger $ledger
+  if ($LASTEXITCODE -ne 0) { throw 'Purchase ledger is incompatible with the proposed runtime. Runtime was not switched.' }
+  $proof = $proofJson | ConvertFrom-Json
+  if ($proof.compatible -ne $true) { throw 'Purchase runtime compatibility proof is invalid.' }
+  if ($PassThru) { return $proof }
+}
+
 function Invoke-CandidateStartupConfigurationPreflight {
   param(
     [string]$Root,
@@ -7190,6 +7209,11 @@ function Start-App {
   [void]$startInfo.EnvironmentVariables.Remove('NANTONG_ATOMIC_HOTFIX_MODE')
   [void]$startInfo.EnvironmentVariables.Remove('NANTONG_ATOMIC_HOTFIX_DEPENDENCY_PROOF')
   [void]$startInfo.EnvironmentVariables.Remove('NANTONG_HOTFIX_RECOVERY_NODE_PATH')
+  [void]$startInfo.EnvironmentVariables.Remove('PURCHASE_LEDGER_RUNTIME_CAPABILITY')
+  $purchaseStartupProof = Assert-PurchaseLedgerRuntimeCompatibility -Root $Root -RuntimeDist (Join-Path $Root 'dist') -PassThru
+  if ($purchaseStartupProof.runtimeCapability -ceq 'purchase-workflow-ledger-v1') {
+    $startInfo.EnvironmentVariables['PURCHASE_LEDGER_RUNTIME_CAPABILITY'] = $purchaseStartupProof.runtimeCapability
+  }
   if ([string]::IsNullOrWhiteSpace($StartScriptPath)) {
     if ($DependencyProofFingerprint -cnotmatch '^[0-9a-f]{64}$') {
       throw 'The candidate launcher requires a validated dependency physical-tree fingerprint.'
@@ -7708,6 +7732,7 @@ function Start-RecoveredRuntime {
     [AllowNull()]
     [string]$StartScriptPath
   )
+  Assert-PurchaseLedgerRuntimeCompatibility -Root $Root -RuntimeDist (Join-Path $Root 'dist')
   $startedAfterUtc = (Get-Date).ToUniversalTime()
   $launcher = $null
   try {
@@ -7787,6 +7812,7 @@ function Try-CompleteAlreadyRestoredHealthyRollback {
   Assert-FinalPathContainedByRoot -Root $Root -Path $candidateArtifact
   Assert-NoReparsePointsOrAlternateDataStreams -Root $candidateArtifact
 
+  Assert-PurchaseLedgerRuntimeCompatibility -Root $Root -RuntimeDist $currentDist
   $adoptionTimeoutSeconds = [Math]::Max(5, [Math]::Min($TimeoutSeconds, 15))
   if (-not (Wait-AppHealth `
     -TimeoutSeconds $adoptionTimeoutSeconds `
@@ -7907,6 +7933,8 @@ function Rollback-UncommittedHotfixTransaction {
       -Phase 'rolled-back'
   }
 
+  $rollbackRuntime = if (Test-Path -LiteralPath $backupDist -PathType Container) { $backupDist } else { $currentDist }
+  Assert-PurchaseLedgerRuntimeCompatibility -Root $Root -RuntimeDist $rollbackRuntime
   $alreadyRestored = Try-CompleteAlreadyRestoredHealthyRollback `
     -Root $Root `
     -PackageRoot $PackageRoot `
@@ -7932,6 +7960,7 @@ function Rollback-UncommittedHotfixTransaction {
       -Endpoint $Endpoint `
       -AllowNotRunning `
       -AllowStaleOwnedJsonPidRecord
+    Assert-PurchaseLedgerRuntimeCompatibility -Root $Root -RuntimeDist $rollbackRuntime
     if (Test-Path -LiteralPath $backupDist) {
       if (Test-Path -LiteralPath $currentDist) {
         Move-HotfixRecoveryArtifact `
@@ -8670,6 +8699,7 @@ try {
     -Manifest $manifest
   Write-Host '[INFO] Installed production dependency tree proof passed before downtime.'
 
+  Assert-PurchaseLedgerRuntimeCompatibility -Root $appRootPath -RuntimeDist $stageDist
   Invoke-CandidateStartupConfigurationPreflight `
     -Root $appRootPath `
     -StageReleaseRoot $stageReleaseRoot
@@ -8700,6 +8730,7 @@ try {
     }
     Write-Host "[INFO] Current runtime health proof completed in $($deploymentClock.ElapsedMilliseconds) ms."
   }
+  Assert-PurchaseLedgerRuntimeCompatibility -Root $appRootPath -RuntimeDist $stageDist
   $runtimeSwitchStarted = $true
   if ($currentRuntimeProcesses.Count -gt 0) {
     Stop-AppProcesses -Root $appRootPath -Endpoint $HealthEndpoint
@@ -8710,6 +8741,7 @@ try {
     -Phase 'runtime-stopped'
   Invoke-HotfixFaultInjection -Phase 'after-runtime-stopped' -AppRoot $appRootPath
   Write-Host "[INFO] Current runtime stopped in $($deploymentClock.ElapsedMilliseconds) ms."
+  Assert-PurchaseLedgerRuntimeCompatibility -Root $appRootPath -RuntimeDist $stageDist
 
   Assert-ServerMutableBaseline `
     -Root $appRootPath `

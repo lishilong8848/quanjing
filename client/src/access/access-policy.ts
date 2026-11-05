@@ -12,6 +12,8 @@ import type {
 } from '@shared/access-control.interface';
 import type { PurchaseInventoryRequestItem } from '@shared/purchase-inventory.interface';
 import { canManageProfessionalRecord } from '@shared/professional-access';
+import { parsePurchaseAttachmentLocation } from '../pages/PurchaseLifecycleAttachment/location';
+import { parsePaymentTarget } from '../pages/PurchaseLifecyclePaymentUpload/state';
 
 const PROFESSIONAL_PAGES = new Set(['/operations-kb', '/meeting-management', '/system-monthly-report', '/ali-monthly-report', '/risk-inspection-dashboard', '/quality-assessment', '/monthly-alarm-overview', '/equipment-lifecycle-dashboard', '/equipment-ledger-management', '/threshold-management', '/equipment-patrol-dashboard', '/exhaust-valve-map', '/purchase-inventory-management', '/inventory-management', '/operations-tools-management', '/contract-management']);
 export function professionalPageCapabilities(pathname: string, principal?: AccessPrincipal): AccessCapabilities {
@@ -148,6 +150,10 @@ function defaultPostLoginPath(
 }
 
 export function getPostLoginPath(role: AccessRole, currentPath: string, pagePaths?: readonly string[]): string {
+  if (currentPath.startsWith('/purchase-lifecycle-payment-upload?') &&
+      parsePaymentTarget(currentPath.slice('/purchase-lifecycle-payment-upload'.length))) return currentPath;
+  if (currentPath.startsWith('/purchase-lifecycle-attachment?') &&
+      parsePurchaseAttachmentLocation(currentPath.slice('/purchase-lifecycle-attachment'.length))) return currentPath;
   const preferred = defaultPostLoginPath(role, currentPath);
   if (pagePaths === undefined) return preferred;
   if (canAccessPage(role, currentPath, pagePaths)) return normalizePagePath(currentPath);

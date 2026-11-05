@@ -37,7 +37,10 @@ import type { PurchaseExecutorHandover } from './purchase-executor-handover';
 import { resolvePurchaseStage, normalizeMethod } from './purchase-workflow.rules';
 import { PurchaseComparisonCardAssetsStore } from './purchase-comparison-card-assets.store';
 import { preparePurchaseComparisonCardEvidence } from './purchase-comparison-card-media';
+import { resolveLifecycleAttachmentFromRecord, validateLifecycleAttachmentBytes } from './purchase-lifecycle-attachment-media';
+import type { PurchaseLifecycleAttachmentSelector } from './purchase-lifecycle-attachment-view';
 import type { PurchaseComparisonCardEvidence } from './purchase-comparison-card-evidence';
+import type { PlatformApprovalReadback } from './purchase-platform-approval-coordinator';
 import {
   PURCHASE_MANAGER_APPROVAL_FIELD_DEFINITIONS,
   PURCHASE_MANAGER_APPROVAL_FIELDS,
@@ -58,6 +61,7 @@ export interface PurchaseWorkflowRecordRecoveryList {
 }
 
 interface TenantTokenState {
+  credentialKey: string;
   value: string;
   expiresAt: number;
 }
@@ -124,6 +128,7 @@ export class PurchaseWorkflowGateway {
   private readonly comparisonCardAssets = new PurchaseComparisonCardAssetsStore();
   private tenantToken: TenantTokenState | null = null;
   private tenantTokenPromise: Promise<string> | null = null;
+  private tenantTokenPromiseKey = '';
   private managerApprovalFieldsReady = false;
   private managerApprovalFieldsPromise: Promise<void> | null = null;
   private receiptAttachmentFieldName = '';
@@ -153,11 +158,16 @@ export class PurchaseWorkflowGateway {
 
   async getManagerApprovalDecisionRecordAsApp(
     recordId: string,
+    sourceGuard?: () => Promise<void>,
   ): Promise<PurchaseWorkflowRecord> {
+    if(sourceGuard) await sourceGuard();
+    const token=await this.getTenantAccessToken();
+    if(sourceGuard) await sourceGuard();
     return this.getExecutionRecordWithBudget(
       recordId,
-      await this.getTenantAccessToken(),
+      token,
       MANAGER_APPROVAL_DECISION_TIMEOUT_MS,
+      sourceGuard,
     );
   }
 
@@ -165,14 +175,17 @@ export class PurchaseWorkflowGateway {
     recordId: string,
     userAccessToken: string,
     totalTimeoutMs: number,
+    sourceGuard?: () => Promise<void>,
   ): Promise<PurchaseWorkflowRecord> {
     const config = this.config();
     const recordUrl = `${recordsUrl(config.appToken, config.executionTableId)}/${encodeURIComponent(recordId)}`;
     const response = await retryTransientExecutionRecordRead(
-      (timeout) =>
-        this.httpService.axiosRef.get(recordUrl, {
+      async (timeout) => {
+        if(sourceGuard) await sourceGuard();
+        return this.httpService.axiosRef.get(recordUrl, {
           ...requestConfig(userAccessToken, timeout),
-        }),
+        });
+      },
       totalTimeoutMs,
     );
     assertFeishuSuccess(response.data, '读取采购执行记录失败');
@@ -188,6 +201,50 @@ export class PurchaseWorkflowGateway {
     return mapExecutionRecord(await this.readExecutionRecordAsApp(recordId));
   }
 
+  /** One app-authenticated raw record supplies both the business record and its
+   * approval evidence. Missing fields remain missing; they are never guessed. */
+  async getPlatformApprovalReadbackAsApp(recordId: string): Promise<PlatformApprovalReadback> {
+    const raw = await this.readExecutionRecordAsApp(recordId);
+    const fields = raw.fields || {}, result: PlatformApprovalReadback = mapExecutionRecord(raw);
+    const has = (name: string) => Object.prototype.hasOwnProperty.call(fields, name);
+    if (!has(PURCHASE_MANAGER_APPROVAL_FIELDS.state)) delete result.approvalWorkflowStatus;
+    if (has(PURCHASE_MANAGER_APPROVAL_FIELDS.approvalTime)) {
+      const value = fields[PURCHASE_MANAGER_APPROVAL_FIELDS.approvalTime];
+      if (value === null || value === '') result.platformApprovalTimeMs = undefined;
+      else if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) result.platformApprovalTimeMs = value;
+      else throw new BadGatewayException('采购审批时间回读无效');
+    }
+    if (has(PURCHASE_MANAGER_APPROVAL_FIELDS.currentApprover)) result.platformCurrentApproverOpenIds = strictPlatformApprovalUsers(fields[PURCHASE_MANAGER_APPROVAL_FIELDS.currentApprover]);
+    if (has(PURCHASE_MANAGER_APPROVAL_FIELDS.actualApprover)) result.platformActualApproverOpenIds = strictPlatformApprovalUsers(fields[PURCHASE_MANAGER_APPROVAL_FIELDS.actualApprover]);
+    return result;
+  }
+
+  /** Internal only: the identifier is never returned by an HTTP route. */
+  async identifyLifecycleAttachment(target: PurchaseLifecycleAttachmentSelector): Promise<string> {
+    if (readEnv('FEISHU_APP_ID') !== target.appId) throw new BadGatewayException('采购附件应用身份不匹配');
+    const config = this.config();
+    const raw = await this.readExecutionRecordAsApp(target.recordId);
+    return resolveLifecycleAttachmentFromRecord(raw, config.executionTableId, target).fileToken;
+  }
+
+  /** Re-read the same field and download only from the official Feishu media endpoint. */
+  async downloadLifecycleAttachment(target: PurchaseLifecycleAttachmentSelector, expectedId: string): Promise<{ data: Buffer; contentType: string }> {
+    if (readEnv('FEISHU_APP_ID') !== target.appId) throw new BadGatewayException('采购附件应用身份不匹配');
+    const config = this.config();
+    const raw = await this.readExecutionRecordAsApp(target.recordId);
+    const attachment = resolveLifecycleAttachmentFromRecord(raw, config.executionTableId, target);
+    if (attachment.fileToken !== expectedId) throw new BadGatewayException('采购附件已变化，请重新打开');
+    const token = await this.getTenantAccessToken();
+    const response = await this.httpService.axiosRef.get<ArrayBuffer>(
+      `https://open.feishu.cn/open-apis/drive/v1/medias/${encodeURIComponent(attachment.fileToken)}/download`,
+      { headers: { Authorization: `Bearer ${token}` }, responseType: 'arraybuffer', timeout: 15_000, maxRedirects: 0,
+        maxContentLength: 20 * 1024 * 1024, ...(attachment.extra ? { params: { extra: attachment.extra } } : {}) },
+    ).catch(() => { throw new BadGatewayException('采购附件读取失败'); });
+    const data = Buffer.from(response.data);
+    validateLifecycleAttachmentBytes(data, attachment, response.headers?.['content-type']);
+    return { data, contentType: attachment.contentType };
+  }
+
   async prepareManagerComparisonEvidence(expected: PurchaseWorkflowRecord): Promise<PurchaseComparisonCardEvidence> {
     if (expected.procurementForm !== '三方比价') throw new BadRequestException('非三方比价采购不读取比价附件');
     const config = this.config();
@@ -197,6 +254,30 @@ export class PurchaseWorkflowGateway {
       expected, actual: mapExecutionRecord(rawRecord), rawRecord, token: await this.getTenantAccessToken(),
       http: this.httpService, cache: this.comparisonCardAssets,
     });
+  }
+
+  /** Read the entire requested batch, failing closed on missing, duplicate or forbidden records. */
+  async getLifecycleExecutionRecordsAsApp(ids: string[]): Promise<PurchaseWorkflowRecord[]> {
+    if (!Array.isArray(ids) || !ids.length || ids.length > 20 || ids.some(id => typeof id !== 'string' || !id.trim()) || new Set(ids).size !== ids.length) {
+      throw new BadRequestException('采购卡片记录范围无效');
+    }
+    const config = this.config(), token = await this.getTenantAccessToken();
+    const response = await this.httpService.axiosRef.post(`${recordsUrl(config.appToken, config.executionTableId)}/batch_get`,
+      { record_ids: ids }, { ...requestConfig(token, 10_000), maxRedirects: 0 });
+    assertFeishuSuccess(response.data, '读取采购卡片记录失败');
+    const data = response.data?.data;
+    if (!Array.isArray(data?.records) || data.records.length !== ids.length ||
+      (data.absent_record_ids !== undefined && (!Array.isArray(data.absent_record_ids) || data.absent_record_ids.length !== 0)) ||
+      (data.forbidden_record_ids !== undefined && (!Array.isArray(data.forbidden_record_ids) || data.forbidden_record_ids.length !== 0))) throw new BadGatewayException('采购卡片记录不完整');
+    const found = new Map<string, PurchaseWorkflowRecord>();
+    for (const raw of data.records) {
+      const id = isPlainObject(raw) ? getRecordId(raw as BitableRecordItem) : '';
+      if (!ids.includes(id) || found.has(id) || !raw.fields || !isPlainObject(raw.fields)) throw new BadGatewayException('采购卡片记录不一致');
+      const record = mapExecutionRecord(raw as BitableRecordItem);
+      if (record.recordId !== id) throw new BadGatewayException('采购卡片记录不一致');
+      found.set(id, record);
+    }
+    return ids.map(id => found.get(id)!);
   }
 
   async prepareManagerComparisonBatchEvidence(expected: PurchaseWorkflowRecord[]): Promise<PurchaseComparisonCardEvidence[]> {
@@ -346,12 +427,17 @@ export class PurchaseWorkflowGateway {
   async updateManagerApprovalDecisionRecordAsApp(
     recordId: string,
     fields: Record<string, unknown>,
+    sourceGuard?: () => Promise<void>,
   ): Promise<void> {
+    if(sourceGuard) await sourceGuard();
+    const token=await this.getTenantAccessToken();
+    if(sourceGuard) await sourceGuard();
     await this.updateExecutionRecordWithTimeout(
       recordId,
       fields,
-      await this.getTenantAccessToken(),
+      token,
       MANAGER_APPROVAL_DECISION_TIMEOUT_MS,
+      sourceGuard,
     );
   }
 
@@ -360,12 +446,15 @@ export class PurchaseWorkflowGateway {
     fields: Record<string, unknown>,
     userAccessToken: string,
     timeoutMs: number,
+    sourceGuard?: () => Promise<void>,
   ): Promise<void> {
     const config = this.config();
+    if(sourceGuard) await sourceGuard();
     const resolvedFields = await this.resolveExecutionFieldNames(
       fields,
       userAccessToken,
     );
+    if(sourceGuard) await sourceGuard();
     const response = await this.httpService.axiosRef.put(
       `${recordsUrl(config.appToken, config.executionTableId)}/${encodeURIComponent(recordId)}`,
       { fields: resolvedFields },
@@ -1239,6 +1328,64 @@ export class PurchaseWorkflowGateway {
     return messageId;
   }
 
+  /** Dedicated lifecycle transport: observer copies are independently authorized and queued. */
+  async sendLifecycleCard(
+    recipientOpenId: string,
+    card: Record<string, unknown>,
+    uuid: string,
+    expectedAppId: string,
+  ): Promise<{ source: 'feishu_message_readback'; uuid: string; messageId: string; sentAtMs: number }> {
+    if (typeof recipientOpenId !== 'string' || !isOpenId(recipientOpenId) || typeof uuid !== 'string' || !INTERACTIVE_MESSAGE_UUID_PATTERN.test(uuid) ||
+      typeof expectedAppId !== 'string' || !/^cli_[A-Za-z0-9_-]+$/.test(expectedAppId) || readEnv('FEISHU_APP_ID') !== expectedAppId) {
+      throw new BadRequestException('采购全流程卡片收件人或投递标识无效');
+    }
+    if (!isPlainObject(card) || card.schema !== '2.0' || !isPlainObject(card.config) || card.config.update_multi !== true) {
+      throw new BadRequestException('采购全流程卡片需要可更新的共享卡片');
+    }
+    const content = serializeInteractiveCard(card);
+    const token = await this.getTenantAccessToken();
+    const response = await this.httpService.axiosRef.post(
+      'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+      { receive_id: recipientOpenId, msg_type: 'interactive', content, uuid },
+      requestConfig(token),
+    ).catch((error: unknown) => rethrowFeishuResponseError(error, '发送采购全流程卡片失败'));
+    assertFeishuDeliverySuccess(response.data, '发送采购全流程卡片失败', response.status);
+    const messageId = clean(response.data?.data?.message_id);
+    if (!/^om_[A-Za-z0-9_-]+$/.test(messageId)) throw new BadGatewayException('采购全流程卡片发送回执不完整');
+    const readback = await this.httpService.axiosRef.get(
+      `https://open.feishu.cn/open-apis/im/v1/messages/${messageId}`,
+      requestConfig(token),
+    ).catch((error: unknown) => rethrowFeishuResponseError(error, '核对采购全流程卡片失败'));
+    assertFeishuSuccess(readback.data, '核对采购全流程卡片失败');
+    const matches = Array.isArray(readback.data?.data?.items)
+      ? readback.data.data.items.filter((item: Record<string, unknown>) => item?.message_id === messageId)
+      : [];
+    const message = matches.length === 1 ? matches[0] : null;
+    const sentAtMs = Number(message?.create_time);
+    if (!message || message.msg_type !== 'interactive' || message.deleted !== false || message.sender?.id !== expectedAppId ||
+      !Number.isSafeInteger(sentAtMs) || sentAtMs <= 0) {
+      throw new BadGatewayException('采购全流程卡片回执无法核对');
+    }
+    return { source: 'feishu_message_readback', uuid, messageId, sentAtMs };
+  }
+
+  /** Lifecycle replicas own their observer routing; never invoke generic card copying here. */
+  async updateLifecycleCard(messageId: string, card: Record<string, unknown>, expectedAppId: string): Promise<void> {
+    if (typeof messageId !== 'string' || !/^om_[A-Za-z0-9_-]+$/.test(messageId)) throw new BadRequestException('采购全流程卡片消息标识无效');
+    if (typeof expectedAppId !== 'string' || !/^cli_[A-Za-z0-9_-]+$/.test(expectedAppId) || readEnv('FEISHU_APP_ID') !== expectedAppId) throw new BadRequestException('采购全流程卡片应用身份无效');
+    if (!isPlainObject(card) || card.schema !== '2.0' || !isPlainObject(card.config) || card.config.update_multi !== true) {
+      throw new BadRequestException('采购全流程卡片需要可更新的共享卡片');
+    }
+    const content = serializeInteractiveCard(card);
+    const token = await this.getTenantAccessToken();
+    const response = await this.httpService.axiosRef.patch(
+      `https://open.feishu.cn/open-apis/im/v1/messages/${messageId}`,
+      { content },
+      requestConfig(token),
+    ).catch((error: unknown) => rethrowFeishuResponseError(error, '更新采购全流程卡片失败'));
+    assertFeishuSuccess(response.data, '更新采购全流程卡片失败');
+  }
+
   async updateInteractiveCard(
     messageId: string,
     card: Record<string, unknown>,
@@ -1503,36 +1650,27 @@ export class PurchaseWorkflowGateway {
   }
 
   private async getTenantAccessToken(): Promise<string> {
-    if (this.tenantToken && this.tenantToken.expiresAt > Date.now()) {
-      return this.tenantToken.value;
-    }
-    if (this.tenantTokenPromise) return this.tenantTokenPromise;
-    this.tenantTokenPromise = (async () => {
-      const response = await this.httpService.axiosRef.post(
-        'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
-        getFeishuAuthPayload(),
-        { timeout: 30_000 },
-      );
-      assertFeishuSuccess(response.data, '获取飞书租户令牌失败');
-      const value = clean(response.data?.tenant_access_token);
-      if (!value)
-        throw new BadGatewayException('获取飞书租户令牌失败：响应缺少令牌');
-      const seconds = Number(response.data?.expire);
-      this.tenantToken = {
-        value,
-        expiresAt:
-          Date.now() +
-          (Number.isFinite(seconds) ? Math.max(60, seconds - 300) : 5400) *
-            1000,
-      };
+    const credentials={...getFeishuAuthPayload()};
+    const credentialKey=createHash('sha256').update(JSON.stringify([credentials.app_id,credentials.app_secret])).digest('hex');
+    const assertCredentials=()=>{
+      const current=getFeishuAuthPayload();
+      if(current.app_id!==credentials.app_id || current.app_secret!==credentials.app_secret)throw new ConflictException('采购应用认证来源已变化');
+    };
+    if(this.tenantToken?.credentialKey===credentialKey && this.tenantToken.expiresAt>Date.now())return this.tenantToken.value;
+    if(this.tenantTokenPromise && this.tenantTokenPromiseKey===credentialKey){const value=await this.tenantTokenPromise;assertCredentials();return value;}
+    const pending=(async()=>{
+      const response=await this.httpService.axiosRef.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',credentials,{timeout:30_000});
+      assertCredentials();assertFeishuSuccess(response.data,'获取飞书租户令牌失败');
+      const value=clean(response.data?.tenant_access_token);
+      if(!value)throw new BadGatewayException('获取飞书租户令牌失败：响应缺少令牌');
+      const seconds=Number(response.data?.expire);
+      this.tenantToken={credentialKey,value,expiresAt:Date.now()+(Number.isFinite(seconds)?Math.max(60,seconds-300):5400)*1000};
       return value;
     })();
-    try {
-      return await this.tenantTokenPromise;
-    } finally {
-      this.tenantTokenPromise = null;
-    }
+    this.tenantTokenPromise=pending;this.tenantTokenPromiseKey=credentialKey;
+    try{return await pending;}finally{if(this.tenantTokenPromise===pending){this.tenantTokenPromise=null;this.tenantTokenPromiseKey='';}}
   }
+
 }
 
 export function mapExecutionRecord(
@@ -2370,6 +2508,20 @@ function warehouseRecordRoles(fields: Record<string, unknown>): string[] {
 
 function isWarehouseManagerRole(value: string): boolean {
   return /(仓管|库存|库房)/u.test(clean(value));
+}
+
+function strictPlatformApprovalUsers(value: unknown): string[] {
+  if (value === null || value === '') return [];
+  if (!Array.isArray(value)) throw new BadGatewayException('采购审批人员回读无效');
+  const users: string[] = [];
+  for (const item of value) {
+    if (!isPlainObject(item)) throw new BadGatewayException('采购审批人员回读无效');
+    const identifiers = [item.id, item.open_id, item.openId].filter(candidate => candidate !== undefined);
+    if (!identifiers.length || identifiers.some(candidate => typeof candidate !== 'string' || !/^ou_[A-Za-z0-9_-]{1,128}$/.test(candidate)) || new Set(identifiers).size !== 1) throw new BadGatewayException('采购审批人员回读无效');
+    users.push(identifiers[0] as string);
+  }
+  if (new Set(users).size !== users.length) throw new BadGatewayException('采购审批人员回读重复');
+  return users;
 }
 
 function extractUsers(value: unknown): Array<{ openId: string; name: string }> {

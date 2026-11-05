@@ -50,9 +50,8 @@ describe('order notice recovery isolation', () => {
   }
   function createService(gateway: object) {
     service = new PurchaseWorkflowService(gateway as never, store);
-    const port = service as unknown as { recoverMissingWarehouseInboundNotifications(): Promise<number>; recoverMissingCompletionNotifications(): Promise<number> };
+    const port = service as unknown as { recoverMissingWarehouseInboundNotifications(): Promise<number> };
     jest.spyOn(port, 'recoverMissingWarehouseInboundNotifications').mockResolvedValue(0);
-    jest.spyOn(port, 'recoverMissingCompletionNotifications').mockResolvedValue(0);
     return service;
   }
 

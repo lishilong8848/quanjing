@@ -80,7 +80,7 @@ describe('actual online approval service rechecks current identity, roster and s
   }
   it('rejects a fully permitted person outside the current roster, including an old organization manager title', async () => {
     const x = setup(); x.removeManager(); x.gateway.resolveUser.mockResolvedValue({ ...person(), positions: ['设施运维经理'] });
-    await expect(x.online.acceptAuthorizedDecision('recSynthetic', { decision: 'approved' }, x.session)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(x.workflow.prepareWebApprovalAuthority('recSynthetic', x.session)).rejects.toBeInstanceOf(ForbiddenException);
     await jest.runAllTimersAsync(); expect(x.gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();
   });
   it('chooses the actual enabled manager chain or legacy approver chain, rather than merging both lists', async () => {
@@ -100,7 +100,8 @@ describe('actual online approval service rechecks current identity, roster and s
   });
   it.each(['version', 'roster', 'scope'] as const)('rechecks %s after acceptance and current-record read, before the first external write', async reason => {
     const x = setup();
-    const accepted = await x.online.acceptAuthorizedDecision('recSynthetic', { decision: 'approved' }, x.session);
+    const authority = await x.workflow.prepareWebApprovalAuthority('recSynthetic', x.session);
+    const accepted = x.online.acceptDecision('recSynthetic', { decision: 'approved' }, authority.scope.building, authority);
     x.gateway.getExecutionRecordAsApp.mockImplementationOnce(async () => {
       if (reason === 'version') x.revoke();
       if (reason === 'roster') x.removeManager();
@@ -111,13 +112,14 @@ describe('actual online approval service rechecks current identity, roster and s
     expect(x.online.getAuthorizedDecisionTaskStatus(accepted.taskId, x.session.permissionPrincipal!)).toMatchObject({ task: { status: 'failed' } });
     expect(x.gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();
   });
-  it('writes once, returns the same successful task on replay, and binds status to owner/version/full policy', async () => {
+  it('legacy internal task writes once and binds status to owner/version/full policy', async () => {
     const x = setup();
-    const accepted = await x.online.acceptAuthorizedDecision('recSynthetic', { decision: 'approved' }, x.session);
+    const authority = await x.workflow.prepareWebApprovalAuthority('recSynthetic', x.session);
+    const accepted = x.online.acceptDecision('recSynthetic', { decision: 'approved' }, authority.scope.building, authority);
     await jest.runAllTimersAsync();
     const read = { ...x.session.permissionPrincipal!, permissionContext: { module: 'purchase' as const, action: 'read' as const } };
     expect(x.online.getAuthorizedDecisionTaskStatus(accepted.taskId, read)).toMatchObject({ task: { status: 'completed' } });
-    expect((await x.online.acceptAuthorizedDecision('recSynthetic', { decision: 'approved' }, x.session)).taskId).toBe(accepted.taskId);
+    expect(x.online.getAuthorizedDecisionTaskStatus(accepted.taskId, read)).toMatchObject({ task: { id: accepted.taskId, status: 'completed' } });
     expect(x.gateway.updateExecutionRecordAsApp).toHaveBeenCalledTimes(1);
     for (const denied of [{ ...read, accountId: 'another-person' }, { ...read, authorizationVersion: 3 }]) expect(() => x.online.getAuthorizedDecisionTaskStatus(accepted.taskId, denied)).toThrow(ForbiddenException);
   });
@@ -125,7 +127,8 @@ describe('actual online approval service rechecks current identity, roster and s
     const x = setup();
     const write = x.gateway.updateExecutionRecordAsApp.getMockImplementation()!;
     x.gateway.updateExecutionRecordAsApp.mockImplementationOnce(async (...args) => { await write(...args); throw new Error('synthetic response lost'); });
-    const accepted = await x.online.acceptAuthorizedDecision('recSynthetic', { decision: 'approved' }, x.session);
+    const authority = await x.workflow.prepareWebApprovalAuthority('recSynthetic', x.session);
+    const accepted = x.online.acceptDecision('recSynthetic', { decision: 'approved' }, authority.scope.building, authority);
     await jest.runAllTimersAsync();
     expect(x.online.getAuthorizedDecisionTaskStatus(accepted.taskId, x.session.permissionPrincipal!)).toMatchObject({ task: { status: 'completed', result: { idempotent: true } } });
     expect(x.gateway.updateExecutionRecordAsApp).toHaveBeenCalledTimes(1);
