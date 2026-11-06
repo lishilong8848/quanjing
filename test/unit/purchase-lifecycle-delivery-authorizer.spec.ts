@@ -25,6 +25,17 @@ describe('purchase lifecycle server delivery authorization', () => {
   });
   const create = () => new PurchaseLifecycleServerAuthorizer(access, source, () => configured, () => configured.FEISHU_APP_ID || '');
 
+  it('uses configured current card duties for delivery when no rich personnel route exists', async () => {
+    access.currentDutyMembers = jest.fn((kind: string) => duty(kind));
+    access.currentDutyRoutePeople.mockReturnValue(null);
+    const grant = await create().prepare(identity);
+    grant.authorizeBatch(batch, 1);
+    const projection = grant.project(batch, 1);
+    expect(projectPurchaseLifecycle(projection.items, projection.viewer)[0].actions).toEqual(['approve']);
+    expect(access.currentDutyMembers).toHaveBeenCalledWith('purchase_manager', { building: 'A楼' });
+    expect(access.currentDutyRoutePeople).not.toHaveBeenCalled();
+  });
+
   it('uses live principal, current duty and batch binding to limit stages and actions', async () => {
     const grant = await create().prepare(identity);
     grant.assertCurrent();

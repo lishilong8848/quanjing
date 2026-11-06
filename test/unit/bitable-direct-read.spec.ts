@@ -343,10 +343,27 @@ describe('exact persistent snapshot lookup', () => {
     const file = getProjectedCachePath(`${options.appToken}:${options.tableId}:`), original = readFileSync(file);
     items = [{ record_id: 'new', fields: {} }];
     const promises = require('node:fs/promises') as typeof import('node:fs/promises');
-    const rename = jest.spyOn(promises, 'rename').mockRejectedValueOnce(Object.assign(Error('synthetic permission denied'), { code: 'EACCES' }));
+    const rename = jest.spyOn(promises, 'rename').mockRejectedValue(Object.assign(Error('synthetic permission denied'), { code: 'EACCES' }));
     try { await expect(fetchBitableRecords(http as never, options)).rejects.toThrow('本地数据缓存保存失败'); }
     finally { rename.mockRestore(); }
     expect(readFileSync(file)).toEqual(original);
+  });
+
+  (process.platform === 'win32' ? it : it.skip)('persists a strict snapshot after a temporary Windows rename lock', async () => {
+    const options = { appToken: 'strict-persist-temporary-lock', tableId: 'table', tableName: 'synthetic temporary lock', forceRefresh: true, strict: true, requirePersisted: true };
+    let items = [{ record_id: 'old', fields: {} }];
+    const http = createRecordSearchHttpService(() => items);
+    await fetchBitableRecords(http as never, options);
+    items = [{ record_id: 'new', fields: {} }];
+    const promises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const rename = jest.spyOn(promises, 'rename').mockRejectedValueOnce(Object.assign(Error('synthetic temporary lock'), { code: 'EPERM' }));
+    const onPersisted = jest.fn();
+    try {
+      await expect(fetchBitableRecords(http as never, { ...options, onPersisted })).resolves.toEqual(items);
+      expect(rename).toHaveBeenCalledTimes(2);
+      expect(onPersisted).toHaveBeenCalledTimes(1);
+      expect(await readLatestPersistedBitableRecordSnapshot({ ...options, directOnly: true })).toMatchObject({ records: items });
+    } finally { rename.mockRestore(); }
   });
 
   it('binds source start time to the read instead of its late completion time', async () => {
@@ -2522,6 +2539,33 @@ describe('fetchBitableRecords local cache', () => {
     } finally {
       invalidateBitableRecordCache({ appToken, tableId });
       await rm(cachePath, { force: true });
+    }
+  });
+
+  it('publishes independent immutable full schedule snapshots on cold reads and later writes', async () => {
+    const options = { appToken: 'app-immutable-schedule', tableId: 'tbl-immutable-schedule', tableName: '值班排班' };
+    let people = ['旧值'];
+    const httpService = createRecordSearchHttpService(() => [{ record_id: 'rec-immutable', fields: { people: [...people] } }]);
+    try {
+      await fetchBitableRecords(httpService as never, { ...options, forceRefresh: true });
+      const cold = await readLatestPersistedBitableRecordSnapshot(options);
+      expect(cold?.records[0].fields.people).toEqual(['旧值']);
+      expect(Object.isFrozen(cold)).toBe(true);
+      expect(Object.isFrozen(cold?.records)).toBe(true);
+      expect(Object.isFrozen(cold?.records[0].fields.people)).toBe(true);
+      expect(await readLatestPersistedBitableRecordSnapshot(options)).toBe(cold);
+
+      people = ['新值'];
+      const responseRecords = await fetchBitableRecords(httpService as never, { ...options, forceRefresh: true });
+      const refreshed = await readLatestPersistedBitableRecordSnapshot(options);
+      expect(refreshed).not.toBe(cold);
+      expect(refreshed?.records[0].fields.people).toEqual(['新值']);
+      expect(Object.isFrozen(responseRecords[0].fields.people)).toBe(false);
+      (responseRecords[0].fields.people as string[]).push('响应修改');
+      expect(refreshed?.records[0].fields.people).toEqual(['新值']);
+      expect(Object.isFrozen(refreshed?.records[0].fields.people)).toBe(true);
+    } finally {
+      invalidateBitableRecordCache({ appToken: options.appToken, tableId: options.tableId, deletePersisted: true });
     }
   });
 

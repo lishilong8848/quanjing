@@ -378,7 +378,7 @@ export class DutyScheduleAutomationService implements OnApplicationBootstrap {
       {
         key: 'roomSchedule',
         name: '值班排班',
-        run: () => this.dutyScheduleService.syncFromFeishuBase(),
+        run: () => this.dutyScheduleService.syncDutyScheduleToLocalFast(),
       },
       {
         key: 'sealingInfo',
@@ -398,7 +398,7 @@ export class DutyScheduleAutomationService implements OnApplicationBootstrap {
       {
         key: 'nonDutySchedule',
         name: '长白班排班',
-        run: () => this.bitableSyncService.syncNonDutySchedule(),
+        run: () => this.bitableSyncService.syncNonDutyScheduleToLocalFast(),
       },
     ];
 

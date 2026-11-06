@@ -12,6 +12,8 @@ import {
   type PostgresJsDatabase,
 } from '@lark-apaas/fullstack-nestjs-core';
 import { HttpService } from '@nestjs/axios';
+import { synchronizeRollingSchedule, readRollingScheduleRange } from '../duty-schedule/rolling-schedule-sync';
+import { DutyLocalMonthSnapshots, dutyThreeMonthRange } from '../duty-schedule/duty-local-sync.snapshot';
 import {
   appBitableSyncRecords,
   appSyncConfig,
@@ -257,6 +259,12 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   private personProfileRefreshTimer?: NodeJS.Timeout;
   private readonly personProfileRefreshStarted = new Map<string, number>();
   private readonly personProfileSnapshotMetadata = new WeakMap<BitableRecordItem[], { fetchedAt: number; stale: boolean; refreshing: boolean }>();
+  private readonly personProfilePublicSnapshotSignatures = new WeakMap<BitableRecordItem[], string>();
+  private readonly personProfilePublicProjections = new Map<PersonProfileScope, {
+    signature: string;
+    organizations: PersonProfile[];
+    changeRequestSubmitters: string[];
+  }>();
   private readonly personProfileRefreshes = new Map<string, Promise<BitableRecordItem[]>>();
   private cacheRefreshRunning = false;
   private leaveApprovalRefreshRunning = false;
@@ -364,28 +372,20 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async getScheduleSnapshotRevision(): Promise<ScheduleSnapshotRevisionResponse> {
-    const [nonDutySnapshot, scheduleSnapshot, leaveApprovalState] =
-      await Promise.all([
-        readLatestPersistedBitableRecordSnapshot({
-          appToken: this.NON_DUTY_APP_TOKEN || undefined,
-          tableId: this.NON_DUTY_TABLE_ID,
-          tableName: '长白班排班',
-        }),
-        readLatestPersistedBitableRecordSnapshot({
-          appToken: this.SCHEDULE_APP_TOKEN || undefined,
-          tableId: this.SCHEDULE_TABLE_ID,
-          tableName: '值班排班',
-        }),
-        readCachedLeaveApprovalSnapshotState(),
-      ]);
-    const nonDutyFetchedAt = nonDutySnapshot?.fetchedAt ?? null;
-    const scheduleFetchedAt = scheduleSnapshot?.fetchedAt ?? null;
-    const available = nonDutySnapshot !== null && scheduleSnapshot !== null;
+    const range = dutyThreeMonthRange();
+    const [nonDuty, duty, leaveApprovalState] = await Promise.all([
+      readRollingScheduleRange(this.scheduleSource('non-duty'), range.startDate, range.endDate, { display: true }).catch(() => null),
+      readRollingScheduleRange(this.scheduleSource('schedule'), range.startDate, range.endDate, { display: true }).catch(() => null),
+      readCachedLeaveApprovalSnapshotState(),
+    ]);
+    const nonDutyFetchedAt = nonDuty ? Math.max(...nonDuty.map(row => row.snapshot.fetchedAt)) : null;
+    const scheduleFetchedAt = duty ? Math.max(...duty.map(row => row.snapshot.fetchedAt)) : null;
+    const available = nonDuty !== null && duty !== null;
 
     return {
       available,
       token: available
-        ? `${nonDutyFetchedAt}:${scheduleFetchedAt}:${leaveApprovalState.approvalFetchedAt ?? 0}:${leaveApprovalState.shiftDetailFetchedAt ?? 0}`
+        ? JSON.stringify([nonDuty!.map(row => [row.month, row.snapshot.sourceStartedAt ?? row.snapshot.fetchedAt, row.snapshot.fetchedAt, row.revision, row.stale]), duty!.map(row => [row.month, row.snapshot.sourceStartedAt ?? row.snapshot.fetchedAt, row.snapshot.fetchedAt, row.revision, row.stale]), leaveApprovalState.approvalFetchedAt, leaveApprovalState.shiftDetailFetchedAt])
         : null,
       nonDutyFetchedAt,
       scheduleFetchedAt,
@@ -540,20 +540,20 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     this.cacheRefreshRunning = true;
     const refreshTasks: Array<{
       name: string;
-      run: () => Promise<BitableRecordItem[]>;
+      run: () => Promise<number>;
     }> = [
-      { name: 'non-duty', run: () => this.fetchFeishuNonDutyRecords(true) },
-      { name: 'schedule', run: () => this.fetchFeishuScheduleRecords(true) },
+      { name: 'non-duty', run: () => this.refreshRollingScheduleCache('non-duty') },
+      { name: 'schedule', run: () => this.refreshRollingScheduleCache('schedule') },
       {
         name: 'festival-important',
-        run: () => this.fetchFeishuFestivalImportantRecords(true),
+        run: async () => (await this.fetchFeishuFestivalImportantRecords(true)).length,
       },
     ];
 
     if (this.ORG_APP_TOKEN && this.ORG_TABLE_ID) {
       refreshTasks.push({
         name: 'organization',
-        run: () => this.fetchFeishuOrganizationRecords(true),
+        run: async () => (await this.fetchFeishuOrganizationRecords(true)).length,
       });
     }
 
@@ -566,7 +566,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       results.forEach((result, index) => {
         const taskName = refreshTasks[index].name;
         if (result.status === 'fulfilled') {
-          summary.push(`${taskName} ${result.value.length}`);
+          summary.push(`${taskName} ${result.value}`);
         } else {
           const message =
             result.reason instanceof Error
@@ -586,10 +586,64 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private scheduleSource(kind: 'schedule' | 'non-duty') {
+    return kind === 'schedule'
+      ? { appToken: this.SCHEDULE_APP_TOKEN, tableId: this.SCHEDULE_TABLE_ID, tableName: '值班排班' }
+      : { appToken: this.NON_DUTY_APP_TOKEN, tableId: this.NON_DUTY_TABLE_ID, tableName: '长白班排班' };
+  }
+
+  private scheduleRecordDate(record: BitableRecordItem): string | null {
+    return extractFeishuDateValue(pickField(record.fields || {}, ['fldZSaDbGf', '排班日期', '日期', 'schedule_date']));
+  }
+
+  private async refreshRollingScheduleCache(kind: 'schedule' | 'non-duty'): Promise<number> {
+    const source = this.scheduleSource(kind);
+    const result = await synchronizeRollingSchedule({
+      ...source, store: new DutyLocalMonthSnapshots(), dateOf: record => this.scheduleRecordDate(record),
+      approvalReady: async () => (await readCachedLeaveApprovalSnapshot()).verified,
+      load: async (range, persistence) => {
+        const settled = await Promise.allSettled([
+          fetchBitableRecords(this.httpService, { ...source, forceRefresh: true, strict: true, allowStale: false, ...persistence,
+            filter: { conjunction: 'and', conditions: [
+              { field_name: '排班日期', operator: 'isGreater', value: ['ExactDate', String(Date.parse(range.startDate + 'T00:00:00+08:00') - 86400000)] },
+              { field_name: '排班日期', operator: 'isLess', value: ['ExactDate', String(Date.parse(range.endDate + 'T00:00:00+08:00') + 86400000)] },
+            ] } }),
+          fetchLeaveApprovalSnapshot(this.httpService, { forceRefresh: true, strict: true, requirePersisted: true }),
+        ]);
+        if (settled[0].status === 'rejected') throw settled[0].reason;
+        if (settled[1].status === 'rejected') throw settled[1].reason;
+        return enrichScheduleRecordsWithLeaveApproval(settled[0].value, settled[1].value);
+      },
+    });
+    return result.localSynced;
+  }
+
+  async syncNonDutyScheduleToLocalFast() {
+    const total = await this.refreshRollingScheduleCache('non-duty');
+    return { success: true, total, inserted: 0, updated: total, failed: 0, message: `近三个月长白班排班已同步，共 ${total} 条；历史数据保留` };
+  }
+
+  private async readRollingScheduleRecords(kind: 'schedule' | 'non-duty', startDate: string, endDate: string, historical = false, display = false): Promise<BitableRecordItem[]> {
+    const parts = await readRollingScheduleRange(this.scheduleSource(kind), startDate, endDate, { historical, display });
+    const records: BitableRecordItem[] = [], ids = new Set<string>();
+    for (const { month, snapshot } of parts) for (const record of snapshot.records) {
+      const date = this.scheduleRecordDate(record);
+      if (!date || !date.startsWith(month) || date < startDate || date > endDate) continue;
+      const id = getRecordId(record);
+      if (ids.has(id)) throw new ServiceUnavailableException('排班本地缓存记录冲突，请等待后台同步后重试');
+      ids.add(id); records.push(record);
+    }
+    return records;
+  }
+
   private async fetchFeishuNonDutyRecords(
     forceRefresh = false,
     strict = false,
   ): Promise<BitableRecordItem[]> {
+    if (!forceRefresh) {
+      const range = dutyThreeMonthRange();
+      return enrichScheduleRecordsWithLeaveApproval(await this.readRollingScheduleRecords('non-duty', range.startDate, range.endDate, false, true), await readCachedLeaveApprovalSnapshot());
+    }
     const [records, approvalSnapshot] = await Promise.all([
       fetchBitableRecords(this.httpService, {
         appToken: this.NON_DUTY_APP_TOKEN,
@@ -611,6 +665,10 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     forceRefresh = false,
     strict = false,
   ): Promise<BitableRecordItem[]> {
+    if (!forceRefresh) {
+      const range = dutyThreeMonthRange();
+      return enrichScheduleRecordsWithLeaveApproval(await this.readRollingScheduleRecords('schedule', range.startDate, range.endDate, false, true), await readCachedLeaveApprovalSnapshot());
+    }
     const [records, approvalSnapshot] = await Promise.all([
       fetchBitableRecords(this.httpService, {
         appToken: this.SCHEDULE_APP_TOKEN,
@@ -1327,14 +1385,18 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       // A verified display binding lets an existing exact snapshot survive an offline restart.
       // Never resolve the Wiki on the read path before checking that binding.
       const appToken = await readDashboardSourceBinding(binding);
+      let snapshotSourceKey = appToken ? `${sourceKey}:${appToken}` : '';
       let snapshot = appToken
-        ? await readLatestPersistedBitableRecordSnapshot({ appToken, ...plan })
+        ? await readLatestPersistedBitableRecordSnapshot({ appToken, ...plan, directOnly: true })
         : null;
       const detailPlan = !includeDetails ? resolvePersonProfileDetailReadPlan(scope, planOptions) : undefined;
       if (!snapshot && detailPlan) {
         const detailBinding = this.personProfileDisplayBinding(scope, detailPlan.fieldNames);
         const detailApp = await readDashboardSourceBinding(detailBinding);
-        if (detailApp) snapshot = await readLatestPersistedBitableRecordSnapshot({ appToken: detailApp, ...detailPlan });
+        if (detailApp) {
+          snapshot = await readLatestPersistedBitableRecordSnapshot({ appToken: detailApp, ...detailPlan, directOnly: true });
+          snapshotSourceKey = `${dashboardSourceBindingKey(detailBinding)}:${detailApp}`;
+        }
       }
       // Even an explicit Base needs a successful binding for the current application identity.
       // An unbound legacy raw snapshot cannot be trusted merely because Wiki resolution succeeds.
@@ -1347,6 +1409,11 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
           void this.refreshPersonProfileProjection(scope, includeDetails).catch(() => undefined);
         }
         const records = snapshot.records.slice();
+        // Reuse only the public display projection, and only for the same verified
+        // source and exact snapshot contents. Authorization never uses this cache.
+        if (!includeDetails && snapshotSourceKey && snapshot.contentFingerprint) {
+          this.personProfilePublicSnapshotSignatures.set(records, `${snapshotSourceKey}:${snapshot.contentFingerprint}`);
+        }
         this.personProfileSnapshotMetadata.set(records, {
           fetchedAt: snapshot.fetchedAt, stale,
           refreshing: this.personProfileRefreshes.has(refreshKey),
@@ -1367,7 +1434,8 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       team?: string;
     } = {},
   ): Promise<{ schedules: NonDutySchedule[] }> {
-    const records = await this.fetchFeishuNonDutyRecords();
+    const range = dutyThreeMonthRange();
+    const records = enrichScheduleRecordsWithLeaveApproval(await this.readRollingScheduleRecords('non-duty', params.startDate || range.startDate, params.endDate || range.endDate, true, true), await readCachedLeaveApprovalSnapshot());
     const schedules = records
       .map((record) => this.mapFeishuNonDutyRecord(record))
       .filter((schedule): schedule is NonDutySchedule => {
@@ -2029,10 +2097,14 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     date: string,
     forceRefresh = false,
   ): Promise<TodayLeaveStaffResponse> {
-    const [nonDutyRecords, scheduleRecords] = await Promise.all([
-      this.fetchFeishuNonDutyRecords(forceRefresh),
-      this.fetchFeishuScheduleRecords(forceRefresh),
+    if (forceRefresh) await Promise.all([this.refreshRollingScheduleCache('non-duty'), this.refreshRollingScheduleCache('schedule')]);
+    const [nonDutyRows, scheduleRows, approval] = await Promise.all([
+      this.readRollingScheduleRecords('non-duty', date, date, true, true),
+      this.readRollingScheduleRecords('schedule', date, date, true, true),
+      readCachedLeaveApprovalSnapshot(),
     ]);
+    const nonDutyRecords = enrichScheduleRecordsWithLeaveApproval(nonDutyRows, approval);
+    const scheduleRecords = enrichScheduleRecordsWithLeaveApproval(scheduleRows, approval);
     const buildingData = new Map<string, TodayLeaveBuildingData>();
 
     const getBuildingData = (
@@ -3302,18 +3374,24 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       const records = forceRefresh
         ? await this.fetchFeishuPersonProfileRecords(true, scope)
         : await this.readCachedPersonProfileRecords(scope, false);
-      const organizations =
-        this.mapFeishuEmployeeRecordsToPersonProfiles(records);
+      const signature = this.personProfilePublicSnapshotSignatures.get(records);
+      let projection = this.personProfilePublicProjections.get(scope);
+      if (!signature || projection?.signature !== signature) {
+        projection = {
+          signature: signature || '',
+          organizations: this.mapFeishuEmployeeRecordsToPersonProfiles(records),
+          changeRequestSubmitters: scope === 'leave' ? listEligibleChangeRequestSubmitterNames(records) : [],
+        };
+        if (signature) this.personProfilePublicProjections.set(scope, projection);
+        else this.personProfilePublicProjections.delete(scope);
+      }
       this.logger.debug(
-        `${forceRefresh ? '飞书刷新' : '本地缓存读取'}人员资料(${scope}): ${organizations.length} 条`,
+        `${forceRefresh ? '飞书刷新' : '本地缓存读取'}人员资料(${scope}): ${projection.organizations.length} 条`,
       );
       return {
-        organizations,
+        organizations: projection.organizations,
         ...(this.personProfileSnapshotMetadata.has(records) ? { cache: this.personProfileSnapshotMetadata.get(records)! } : {}),
-        changeRequestSubmitters:
-          scope === 'leave'
-            ? listEligibleChangeRequestSubmitterNames(records)
-            : [],
+        changeRequestSubmitters: projection.changeRequestSubmitters,
       };
     } catch (error) {
       this.logger.error(
@@ -3760,19 +3838,12 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     ) {
       throw new ServiceUnavailableException('请休假替班排班日期范围无效');
     }
-    const [nonDutySnapshot, scheduleSnapshot, approvalState] = await Promise.all([
-      readLatestPersistedBitableRecordSnapshot({
-        appToken: this.NON_DUTY_APP_TOKEN || undefined,
-        tableId: this.NON_DUTY_TABLE_ID,
-        tableName: '长白班排班',
-      }),
-      readLatestPersistedBitableRecordSnapshot({
-        appToken: this.SCHEDULE_APP_TOKEN || undefined,
-        tableId: this.SCHEDULE_TABLE_ID,
-        tableName: '值班排班',
-      }),
+    const [nonDutyRows, scheduleRows, approvalState] = await Promise.all([
+      this.readRollingScheduleRecords('non-duty', startDate, endDate),
+      this.readRollingScheduleRecords('schedule', startDate, endDate),
       readCachedLeaveApprovalSnapshotState(),
     ]);
+    const nonDutySnapshot = { records: nonDutyRows }, scheduleSnapshot = { records: scheduleRows };
     if (!nonDutySnapshot || !scheduleSnapshot) {
       throw new ServiceUnavailableException('排班本地缓存暂不可用，请等待后台同步后重试');
     }

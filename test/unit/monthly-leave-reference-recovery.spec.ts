@@ -117,6 +117,13 @@ describe('leave request reference loading and recovery (actual callbacks, no bac
     request.resolve({ organizations: [fixture.old] }); await pending;
     expect(fixture.state.profiles).toEqual([]); expect(fixture.env.personProfileLoadAbortRef.current).toBeNull();
   });
+  it('separates the profile read scope when the authorization version changes', () => {
+    const env = { principalFingerprint: 'same-session', role: 'editor', access: { authorizationVersion: 1 },
+      canReadPublicProfiles: true, canViewPrivateProfile: true };
+    const before = computed('personProfileReadScope', env);
+    env.access.authorizationVersion = 2;
+    expect(computed('personProfileReadScope', env)).not.toBe(before);
+  });
   it('retains metadata from a background cache and marks a stopped stale refresh as unavailable', async () => {
     const fixture = loaderFixture();
     fixture.env.getPersonProfiles.mockResolvedValueOnce({ organizations: [fixture.old], cache: { fetchedAt: 1000, stale: true, refreshing: true } } as any);

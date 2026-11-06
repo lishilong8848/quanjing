@@ -66,7 +66,7 @@ export function planPlatformApproval(input: {
       !/^[A-Za-z0-9_-]{43}$/.test(identity.sessionFamilyFingerprint)) throw new BadRequestException('平台采购审批请求无效');
   if (batch.flowVersion && !['legacy', 'lifecycle_v1'].includes(batch.flowVersion) || batch.flowVersion === 'lifecycle_v1' && input.lifecycleReady !== true) throw new ConflictException('采购流程版本尚未准备好');
   const target = purchaseAuthorityTarget(record);
-  if (!target || (record.specialty?.trim() && !target.specialty)) throw new ConflictException('采购审批记录范围不明确');
+  if (!target) throw new ConflictException('采购审批记录范围不明确');
   const items = batch.items.filter(item => item.executionRecordId === record.recordId);
   if (items.length !== 1 || new Set(batch.items.map(item => item.executionRecordId)).size !== batch.items.length) throw new ConflictException('采购审批明细归属不唯一');
   const item = items[0]!;

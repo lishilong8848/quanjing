@@ -4400,7 +4400,7 @@ function MonthlySchedulePageContent() {
   const changeLoadAbortRef = useRef<AbortController | null>(null);
   const personProfileLoadSeqRef = useRef(0);
   const personProfileLoadAbortRef = useRef<AbortController | null>(null);
-  const personProfileReadScope = `${principalFingerprint || role}:${canReadPublicProfiles}:${canViewPrivateProfile}`;
+  const personProfileReadScope = `${principalFingerprint || 'anonymous'}:${role}:${access.authorizationVersion ?? ''}:${canReadPublicProfiles}:${canViewPrivateProfile}`;
   const activePersonProfileReadScopeRef = useRef(personProfileReadScope);
   activePersonProfileReadScopeRef.current = personProfileReadScope;
   const personProfileInFlightScopeRef = useRef<string | null>(null);

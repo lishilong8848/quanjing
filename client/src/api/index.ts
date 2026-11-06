@@ -3615,7 +3615,7 @@ export async function getPersonProfiles(
         scope,
         ...(forceRefresh ? { forceRefresh: '1' } : {}),
       },
-      timeout: DUTY_PAGE_READ_TIMEOUT_MS,
+      timeout: 60_000,
       signal,
     });
     const publicResponse = response.data as PersonProfileResponse;
@@ -3646,7 +3646,7 @@ export async function getPersonProfiles(
       ...(publicResponse.cache ? { cache: publicResponse.cache } : {}),
     };
   } catch (error) {
-    logger.error('获取人员资料列表失败', error);
+    if (!signal?.aborted) logger.error('获取人员资料列表失败', error);
     throw error;
   }
 }
@@ -3664,12 +3664,12 @@ export async function getPersonProfileDetails(
         scope,
         ...(forceRefresh ? { forceRefresh: '1' } : {}),
       },
-      timeout: DUTY_PAGE_READ_TIMEOUT_MS,
+      timeout: 60_000,
       signal,
     });
     return response.data;
   } catch (error) {
-    logger.error('获取人员详细资料失败', error);
+    if (!signal?.aborted) logger.error('获取人员详细资料失败', error);
     throw error;
   }
 }

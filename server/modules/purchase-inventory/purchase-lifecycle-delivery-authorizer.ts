@@ -1,3 +1,4 @@
+import { purchaseCurrentDutyMembers } from './purchase-duty-members';
 import { createHash } from 'node:crypto';
 import { canPerformBusinessAction } from '../../../shared/business-permissions';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
@@ -27,7 +28,7 @@ export interface PurchaseLifecycleTrustedRecordSource {
   verifyLatest(version: string): Promise<boolean>;
 }
 
-type Access = Pick<AccessConfigurationService, 'snapshot' | 'feishuPrincipal' | 'currentDutyRoutePeople' | 'isCurrentReadonlyCardRecipient'>;
+type Access = Pick<AccessConfigurationService, 'snapshot' | 'feishuPrincipal' | 'currentDutyRoutePeople' | 'isCurrentReadonlyCardRecipient'> & Partial<Pick<AccessConfigurationService, 'currentDutyMembers'>>;
 type CardCopyEnvironment = Record<string, string | undefined> & Partial<Pick<NodeJS.ProcessEnv, 'FEISHU_APP_ID' | 'FEISHU_CARD_READONLY_COPY_ENABLED' | 'FEISHU_CARD_READONLY_COPY_APP_ID' | 'FEISHU_CARD_READONLY_COPY_OPEN_ID' | 'FEISHU_CARD_READONLY_COPY_NAME' | 'FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS'>>;
 const ALL_STAGES: PurchaseWorkflowStage[] = ['application', 'approval', 'ordering', 'receipt', 'inbound', 'completed', 'terminated', 'unknown'];
 const deny = (): never => { throw new Error('采购卡片授权或数据来源无法核对'); };
@@ -45,7 +46,7 @@ function observerName(identity: PurchaseReplicaIdentity, env: CardCopyEnvironmen
 }
 
 function withinDuty(access: Access, kind: 'purchase_manager' | 'purchase_executor' | 'building_executor' | 'warehouse_approver', target: { building: string; specialty?: string }, openId: string): boolean {
-  const people = access.currentDutyRoutePeople(kind, target);
+  const people = purchaseCurrentDutyMembers(access, kind, target);
   if (people === null) return false;
   if (!Array.isArray(people)) return deny();
   return people.filter(person => person?.openId === openId).length === 1;

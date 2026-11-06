@@ -27,6 +27,12 @@ describe('process-local schedule sync task recovery', () => {
     expect(JSON.stringify(tasks.current(id))).not.toContain('synthetic-private-value');
     tasks.start(id, run); expect(run).toHaveBeenCalledTimes(1);
   });
+  it('shows a safe explanation for a known source conflict', async () => {
+    const tasks = new DutyLocalSyncTasks(), id = randomUUID();
+    tasks.start(id, async () => { throw Error('数据在读取期间已变更，请重新读取'); });
+    await settle();
+    expect(tasks.current(id)?.error?.message).toContain('同步期间排班数据发生变化');
+  });
   it('expires only terminal tasks and reports restarted or missing tasks as unknown', async () => {
     let now = 1_000; const tasks = new DutyLocalSyncTasks(() => now, 100), id = randomUUID();
     const task = tasks.start(id, async () => result); await settle(); now += 101;

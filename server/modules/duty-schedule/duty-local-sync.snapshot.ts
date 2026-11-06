@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import type { BigIntStats } from 'node:fs';
-import { readFile, open, mkdir, rename, rm, stat } from 'node:fs/promises';
+import { readFile, open, mkdir, rename, rm, stat, link } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { BitableRecordItem, PersistedBitableRecordSnapshot } from '../../common/feishu/bitable-direct-read';
 
@@ -15,6 +15,8 @@ export interface DutyMonthSnapshot extends PersistedBitableRecordSnapshot { sour
 interface Position { month: string | null; sourceStartedAt: number; invalidationToken: string | null; }
 interface Store { version: 1; appToken: string; tableId: string; months: Record<string, DutyMonthSnapshot>; positions: Record<string, Position>; }
 const MAX_BYTES = 64 * 1024 * 1024;
+const MAX_CACHED_FULL_MONTHS = 24;
+const sharedSnapshotWrites = new Map<string, Promise<unknown>>();
 
 function fileStamp(stats: BigIntStats): string {
   return [stats.dev, stats.ino, stats.size, stats.mtimeNs, stats.ctimeNs].join(':');
@@ -27,12 +29,43 @@ function freezeParsedSnapshot(value: object): void {
   Object.freeze(value);
 }
 
+/** Only plain, deeply frozen data can safely be reused across requests. */
+function isDeeplyFrozenSnapshot(value: object): boolean {
+  const pending: unknown[] = [value];
+  const seen = new WeakSet<object>();
+  try {
+    while (pending.length) {
+      const current = pending.pop();
+      if (typeof current === 'function' || typeof current === 'symbol') return false;
+      if (!current || typeof current !== 'object') continue;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      if (!Object.isFrozen(current)) return false;
+      const prototype = Object.getPrototypeOf(current);
+      if (Array.isArray(current) ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return false;
+      const descriptors = Object.getOwnPropertyDescriptors(current);
+      for (const key of Reflect.ownKeys(descriptors)) {
+        if (typeof key !== 'string') return false;
+        const descriptor = descriptors[key];
+        if (!descriptor || !('value' in descriptor)) return false;
+        pending.push(descriptor.value);
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Separate month publications never overwrite or truncate the historical full-table cache. */
 export class DutyLocalMonthSnapshots {
-  private writes = new Map<string, Promise<unknown>>();
+  private writes = sharedSnapshotWrites;
   private reads = new Map<string, Promise<Store | null>>();
   private cachedStore?: { file: string; stamp: string; state: Store };
+  private cachedHistory?: { file: string; stamp: string; snapshot: PersistedBitableRecordSnapshot };
   private preferredMonths = new WeakMap<DutyMonthSnapshot, PersistedBitableRecordSnapshot>();
+  private checkedFullSnapshots = new WeakMap<PersistedBitableRecordSnapshot, boolean>();
+  private preferredFull?: { source: PersistedBitableRecordSnapshot; state: Store; invalidationToken: string | null; months: Map<string, PersistedBitableRecordSnapshot> };
   constructor(private readonly directory = resolve(process.env.FEISHU_LOCAL_CACHE_DIR?.trim() || join(process.cwd(), 'data', 'feishu-bitable-cache'), 'duty-local-sync')) {}
   private file(appToken: string, tableId: string): string { return join(this.directory, createHash('sha256').update(appToken + '\0' + tableId).digest('hex') + '.json'); }
   private async read(appToken: string, tableId: string): Promise<Store> {
@@ -56,8 +89,14 @@ export class DutyLocalMonthSnapshots {
       }
       throw new Error('LOCAL_SYNC_SNAPSHOT_CHANGED');
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        if (this.cachedStore?.file === file && this.cachedStore.stamp === 'missing') return this.cachedStore.state;
+        const empty: Store = { version: 1, appToken, tableId, months: {}, positions: {} };
+        freezeParsedSnapshot(empty);
+        this.cachedStore = { file, stamp: 'missing', state: empty };
+        return empty;
+      }
       if (this.cachedStore?.file === file) this.cachedStore = undefined;
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, appToken, tableId, months: {}, positions: {} };
       throw error;
     }
   }
@@ -81,7 +120,48 @@ export class DutyLocalMonthSnapshots {
     return snapshot ? structuredClone(snapshot) : undefined;
   }
 
-  /** An owned month publication has a stable, read-only result while the file is unchanged. */
+  /** Historical baseline is display-only and is never accepted by strict reads. */
+  async preserveHistory(appToken: string, tableId: string, full: PersistedBitableRecordSnapshot | null): Promise<void> {
+    if (!full) return;
+    const file = this.file(appToken, tableId) + '.history.json';
+    if (await this.readHistory(appToken, tableId)) return;
+    const bytes = JSON.stringify({ appToken, tableId, snapshot: full });
+    if (Buffer.byteLength(bytes) > MAX_BYTES) throw new Error('LOCAL_SYNC_SNAPSHOT_TOO_LARGE');
+    await mkdir(this.directory, { recursive: true });
+    const temporary = file + '.' + randomUUID() + '.tmp';
+    try {
+      const handle = await open(temporary, 'wx', 0o600);
+      try { await handle.writeFile(bytes, 'utf8'); await handle.sync(); } finally { await handle.close(); }
+      try { await link(temporary, file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    } finally { await rm(temporary, { force: true }); }
+  }
+
+  async readHistoricalMonth(appToken: string, tableId: string, month: string, full: PersistedBitableRecordSnapshot | null): Promise<PersistedBitableRecordSnapshot | null> {
+    const monthly = (await this.read(appToken, tableId)).months[month];
+    const historical = await this.readHistory(appToken, tableId) || full;
+    return monthly && (!historical || monthly.sourceStartedAt >= (historical.sourceStartedAt ?? historical.fetchedAt)) ? monthly : historical;
+  }
+
+  private async readHistory(appToken: string, tableId: string): Promise<PersistedBitableRecordSnapshot | null> {
+    const file = this.file(appToken, tableId) + '.history.json';
+    try {
+      const stats = await stat(file, { bigint: true });
+      if (stats.size > BigInt(MAX_BYTES)) throw new Error('LOCAL_SYNC_SNAPSHOT_TOO_LARGE');
+      const stamp = fileStamp(stats);
+      if (this.cachedHistory?.file === file && this.cachedHistory.stamp === stamp) return this.cachedHistory.snapshot;
+      const saved = JSON.parse(await readFile(file, 'utf8'));
+      if (fileStamp(await stat(file, { bigint: true })) !== stamp) throw new Error('LOCAL_SYNC_SNAPSHOT_CHANGED');
+      if (saved.appToken !== appToken || saved.tableId !== tableId || !Array.isArray(saved.snapshot?.records) || !Number.isFinite(saved.snapshot?.fetchedAt)) throw new Error('LOCAL_SYNC_SNAPSHOT_INVALID');
+      freezeParsedSnapshot(saved.snapshot);
+      this.cachedHistory = { file, stamp, snapshot: saved.snapshot };
+      return saved.snapshot;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  /** Reuse results only while their complete source and position data are immutable. */
   async readPreferredMonth(appToken: string, tableId: string, month: string, full: PersistedBitableRecordSnapshot | null, invalidationToken: string | null): Promise<PersistedBitableRecordSnapshot | null> {
     const state = await this.read(appToken, tableId);
     const monthSnapshot = state.months[month];
@@ -91,15 +171,41 @@ export class DutyLocalMonthSnapshots {
     const cached = owned ? this.preferredMonths.get(monthSnapshot) : undefined;
     if (cached) return cached;
 
+    let fullCache: typeof this.preferredFull;
+    let frozen = !owned ? this.checkedFullSnapshots.get(selected) : false;
+    if (!owned && frozen === undefined) {
+      frozen = isDeeplyFrozenSnapshot(selected);
+      this.checkedFullSnapshots.set(selected, frozen);
+    }
+    if (!owned && frozen) {
+      fullCache = this.preferredFull;
+      if (!fullCache || fullCache.source !== selected || fullCache.state !== state || fullCache.invalidationToken !== invalidationToken) {
+        fullCache = { source: selected, state, invalidationToken, months: new Map() };
+        this.preferredFull = fullCache;
+      }
+      const previous = fullCache.months.get(month);
+      if (previous) {
+        fullCache.months.delete(month);
+        fullCache.months.set(month, previous);
+        return previous;
+      }
+    }
+
     const startedAt = selected.sourceStartedAt ?? selected.fetchedAt;
     const preferred = { ...selected, records: selected.records.filter(record => {
       const position = state.positions[record.record_id || record.id || ''];
       return !position || position.invalidationToken !== invalidationToken || position.sourceStartedAt < startedAt || position.month === month;
     }) };
-    if (owned) {
+    if (owned || fullCache) {
       Object.freeze(preferred.records);
       Object.freeze(preferred);
+    }
+    if (owned) {
       this.preferredMonths.set(monthSnapshot, preferred);
+    }
+    if (fullCache) {
+      fullCache.months.set(month, preferred);
+      if (fullCache.months.size > MAX_CACHED_FULL_MONTHS) fullCache.months.delete(fullCache.months.keys().next().value!);
     }
     return preferred;
   }

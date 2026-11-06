@@ -43,16 +43,16 @@ describe('DutyScheduleAutomationService', () => {
       refreshProgramModifiedDutyStaffFromRules,
     );
     const onApplicationBootstrap = (
-      automation as unknown as { onApplicationBootstrap?: () => void }
+      automation as unknown as { onApplicationBootstrap?: () => Promise<void> }
     ).onApplicationBootstrap;
 
     expect(onApplicationBootstrap).toEqual(expect.any(Function));
-    onApplicationBootstrap?.call(automation);
-    onApplicationBootstrap?.call(automation);
+    await onApplicationBootstrap?.call(automation);
+    await onApplicationBootstrap?.call(automation);
 
     expect(refreshProgramModifiedDutyStaffFromRules).not.toHaveBeenCalled();
 
-    jest.runOnlyPendingTimers();
+    await jest.runOnlyPendingTimersAsync();
     await Promise.resolve();
 
     expect(refreshProgramModifiedDutyStaffFromRules).toHaveBeenCalledTimes(1);
@@ -73,8 +73,8 @@ describe('DutyScheduleAutomationService', () => {
       refreshProgramModifiedDutyStaffFromRules,
     );
 
-    automation.onApplicationBootstrap();
-    jest.runOnlyPendingTimers();
+    await automation.onApplicationBootstrap();
+    await jest.runOnlyPendingTimersAsync();
     await Promise.resolve();
     void automation.autoRefreshProgramModifiedDutyStaffEvery4Hours();
 
@@ -90,8 +90,8 @@ describe('DutyScheduleAutomationService', () => {
       refreshProgramModifiedDutyStaffFromRules,
     );
 
-    expect(() => automation.onApplicationBootstrap()).not.toThrow();
-    jest.runOnlyPendingTimers();
+    await expect(automation.onApplicationBootstrap()).resolves.toBeUndefined();
+    await jest.runOnlyPendingTimersAsync();
     await Promise.resolve();
     await Promise.resolve();
 

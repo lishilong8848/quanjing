@@ -1,3 +1,4 @@
+import { purchaseCurrentDutyMembers } from './purchase-duty-members';
 import { createHash } from 'node:crypto';
 import type { AccessConfigurationService } from '../../common/access/access-configuration.service';
 import { additionalReadonlyCardTargets } from '../../common/feishu-card-copy/targets';
@@ -5,7 +6,7 @@ import { normalizePurchaseAuthorityTarget } from './purchase-authority-target';
 import type { PurchaseReplicaIdentity } from './purchase-lifecycle-replica';
 import type { PurchaseManagerApprovalBatchEntry } from './purchase-workflow.store';
 
-type Access = Pick<AccessConfigurationService, 'snapshot' | 'feishuPrincipal' | 'currentDutyRoutePeople' | 'isCurrentReadonlyCardRecipient'>;
+type Access = Pick<AccessConfigurationService, 'snapshot' | 'feishuPrincipal' | 'currentDutyRoutePeople' | 'isCurrentReadonlyCardRecipient'> & Partial<Pick<AccessConfigurationService, 'currentDutyMembers'>>;
 type Environment = Record<string, string | undefined> & Partial<Pick<NodeJS.ProcessEnv, 'FEISHU_CARD_READONLY_COPY_ENABLED' | 'FEISHU_CARD_READONLY_COPY_APP_ID' | 'FEISHU_CARD_READONLY_COPY_OPEN_ID' | 'FEISHU_CARD_READONLY_COPY_NAME' | 'FEISHU_CARD_READONLY_COPY_ADDITIONAL_RECIPIENTS'>>;
 const deny = (): never => { throw new Error('采购卡片同步授权状态无法核对'); };
 function stable(value: unknown): unknown {
@@ -49,7 +50,7 @@ export function purchaseLifecycleAuthorizationFingerprint(access: Access, identi
     const currentTarget = normalizePurchaseAuthorityTarget(item.authorityTarget || sourceTargets[0]!.target);
     if (!target || !currentTarget || JSON.stringify(target) !== JSON.stringify(currentTarget)) return deny();
     const duties = (['purchase_manager', 'purchase_executor', 'building_executor', 'warehouse_approver'] as const).map(kind => {
-      const list = synchronous(access.currentDutyRoutePeople(kind, target));
+      const list = synchronous(purchaseCurrentDutyMembers(access, kind, target));
       if (list === null) return { kind, members: null };
       if (!Array.isArray(list)) return deny();
       return { kind, members: list.map(row => JSON.stringify(stable(row))).sort() };

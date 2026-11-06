@@ -10,6 +10,7 @@ jest.mock('../../common/feishu/leave-approval-source', () => ({
 import { readLatestPersistedBitableRecordSnapshot } from '../../common/feishu/bitable-direct-read';
 import { readCachedLeaveApprovalSnapshotState } from '../../common/feishu/leave-approval-source';
 import { BitableSyncService } from './bitable-sync.service';
+import { dutyThreeMonthRange } from '../duty-schedule/duty-local-sync.snapshot';
 
 interface ScheduleSnapshotRevisionResponseContract {
   available: boolean;
@@ -26,7 +27,7 @@ function persistedSnapshot(fetchedAt: number) {
   return {
     records: [],
     fetchedAt,
-    expiresAt: fetchedAt + 60_000,
+    expiresAt: Date.now() + 60_000,
   };
 }
 
@@ -94,12 +95,18 @@ describe('BitableSyncService schedule snapshot revision', () => {
       service,
     } = createServiceHarness();
 
-    await expect(readRevision(service)).resolves.toEqual({
+    const revision = await readRevision(service);
+    expect(revision).toEqual({
       available: true,
-      token: '1725000000100:1725000000900:1725000001100:1725000001200',
+      token: expect.any(String),
       nonDutyFetchedAt: 1_725_000_000_100,
       scheduleFetchedAt: 1_725_000_000_900,
     });
+    expect(JSON.parse(revision.token!)).toEqual([
+      dutyThreeMonthRange().months.map(month => [month, 1725000000100, 1725000000100, null, false]),
+      dutyThreeMonthRange().months.map(month => [month, 1725000000900, 1725000000900, null, false]),
+      1725000001100, 1725000001200,
+    ]);
     expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenNthCalledWith(
       1,
       {

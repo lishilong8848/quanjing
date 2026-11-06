@@ -48,8 +48,7 @@ function assertIdentity(claim: PlatformLegacyApprovalClaim, record: RelevantReco
       !['approved', 'rejected'].includes(claim.decision) ||
       record.recordId !== claim.recordId || (record.approvalBatchId || '') !== claim.originalBatchId ||
       record.requesterOpenId !== claim.originalRequesterOpenId || !target ||
-      target.building !== claim.authorityTarget?.building || target.specialty !== claim.authorityTarget?.specialty ||
-      (record.specialty && !target.specialty)) throw new Error('采购审批原记录或受理凭据不匹配');
+      target.building !== claim.authorityTarget?.building || target.specialty !== claim.authorityTarget?.specialty) throw new Error('采购审批原记录或受理凭据不匹配');
 }
 
 /** The method the claim writes and confirms; throws when the stored selection is invalid. */

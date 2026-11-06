@@ -3576,7 +3576,7 @@ export class PurchaseWorkflowStore {
     if (!input || !/^cli_[A-Za-z0-9_-]+$/.test(input.appId) || !/^[a-f0-9]{64}$/.test(input.sourceFingerprint) || !/^[A-Za-z0-9_-]{16,64}$/.test(input.requestId) || !['approved','rejected'].includes(input.decision) ||
       (input.purchaseMethod !== undefined && (input.decision !== 'approved' || !isSelectablePlatformLegacyPurchaseMethod(input.purchaseMethod))) || typeof authorize !== 'function') throw new BadRequestException('平台采购审批请求无效');
     const record = structuredClone(input.record), identity = sanitizePlatformCommandIdentity(input.identity), target = purchaseAuthorityTarget(record);
-    if (!record || !/^rec[A-Za-z0-9_-]+$/.test(record.recordId) || !target || (record.specialty?.trim() && !target.specialty) || (record.approvalBatchId && !BATCH_ID_PATTERN.test(record.approvalBatchId)) || typeof record.requesterOpenId !== 'string' || (record.requesterOpenId !== '' && !OPEN_ID_PATTERN.test(record.requesterOpenId))) throw new ConflictException('采购原记录不明确');
+    if (!record || !/^rec[A-Za-z0-9_-]+$/.test(record.recordId) || !target || (record.approvalBatchId && !BATCH_ID_PATTERN.test(record.approvalBatchId)) || typeof record.requesterOpenId !== 'string' || (record.requesterOpenId !== '' && !OPEN_ID_PATTERN.test(record.requesterOpenId))) throw new ConflictException('采购原记录不明确');
     const eventId = `platform_${input.requestId}`, selected = input.purchaseMethod;
     if (selected !== undefined && (input.decision !== 'approved' || !isSelectablePlatformLegacyPurchaseMethod(selected))) throw new BadRequestException('采购方式选择与审批决定冲突');
     // The fingerprint binds both the original snapshot and the explicit choice, so a

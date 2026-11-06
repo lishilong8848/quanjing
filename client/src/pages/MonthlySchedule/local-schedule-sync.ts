@@ -21,7 +21,7 @@ export interface LocalSyncPorts {
 }
 export const EMPTY_LOCAL_SYNC_STATE: LocalSyncState = { phase: 'idle', busy: false, message: '' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const phaseLabels: Record<string, string> = { fetching_sources: '读取排班数据', validating_snapshot: '核对近三个月数据', writing_local_database: '更新本地排班', publishing_snapshot: '更新页面快照', completed: '已完成', failed: '未完成' };
+const phaseLabels: Record<string, string> = { fetching_sources: '读取排班及请休假数据', retrying_sources: '正在重新核对数据', validating_snapshot: '核对近三个月数据', writing_local_database: '更新本地排班', publishing_snapshot: '更新页面快照', completed: '已完成', failed: '未完成' };
 const statusOf = (error: unknown) => Number((error as { response?: { status?: number } })?.response?.status);
 
 /** A synchronous action gate plus recoverable observation; browser cancellation never cancels the server task. */

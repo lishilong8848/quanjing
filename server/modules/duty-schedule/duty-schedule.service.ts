@@ -1,8 +1,9 @@
 import { businessAuthorizationSnapshot, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import { assertBusinessOperation } from '../../common/access/assert-business-operation';
 import type { DutyLocalSyncResult, DutyLocalSyncTaskResponse } from '../../../shared/duty-local-sync.interface';
-import { DutyLocalSyncTasks, validDutyLocalSyncId } from './duty-local-sync.task';
+import { describeDutyLocalSyncFailure, DutyLocalSyncTasks, validDutyLocalSyncId } from './duty-local-sync.task';
 import { DutyLocalMonthSnapshots, dutyThreeMonthRange } from './duty-local-sync.snapshot';
+import { synchronizeRollingSchedule } from './rolling-schedule-sync';
 import {
   BadGatewayException,
   BadRequestException,
@@ -2096,7 +2097,7 @@ export class DutyScheduleService {
       new Date(bounds.start + 8 * 60 * 60 * 1000).toISOString().slice(0, 10) !== dateRange!.startDate ||
       new Date(bounds.end + 8 * 60 * 60 * 1000).toISOString().slice(0, 10) !== dateRange!.endDate
     )) throw new BadRequestException('排班查询日期范围无效');
-    const [records, approvalSnapshot] = await Promise.all([
+    const sources = [
       fetchBitableRecords(this.httpService, {
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
@@ -2121,7 +2122,19 @@ export class DutyScheduleService {
           strict,
           ...(persistence ? { requirePersisted: persistence.requirePersisted } : {}),
         }),
-    ]);
+    ] as const;
+    let records: BitableRecordItem[];
+    let approvalSnapshot: LeaveApprovalSnapshot;
+    if (persistence?.requirePersisted) {
+      // A retry must not overlap a still-running read from the previous attempt.
+      const settled = await Promise.allSettled(sources);
+      if (settled[0].status === 'rejected') throw settled[0].reason;
+      if (settled[1].status === 'rejected') throw settled[1].reason;
+      records = settled[0].value;
+      approvalSnapshot = settled[1].value;
+    } else {
+      [records, approvalSnapshot] = await Promise.all(sources);
+    }
     return enrichScheduleRecordsWithLeaveApproval(records, approvalSnapshot);
   }
 
@@ -5666,13 +5679,22 @@ export class DutyScheduleService {
       throw new Error('endDate 不能早于 startDate');
     }
 
-    const records = await this.fetchFeishuScheduleRecords(true, true);
-    const result = await this.refreshProgramModifiedDutyStaffRecords(records, {
-      startDate,
-      endDate,
-    });
+    const rollingRange = source === 'auto-4h' || source === 'startup' ? dutyThreeMonthRange() : undefined;
+    const records = await this.fetchFeishuScheduleRecords(true, true, undefined, rollingRange);
+    let result: DutyProgramModifiedRefreshRecordsResult;
+    try {
+      result = await this.refreshProgramModifiedDutyStaffRecords(records, { startDate, endDate });
+    } catch (error) {
+      // A partly completed rule write can invalidate the entire source. Re-read,
+      // never re-label an older snapshot with the new invalidation token.
+      if (rollingRange) await this.syncDutyScheduleToLocalFast().catch(() => {
+        this.logger.warn('规则写入后的三个月排班核源尚未完成，保留历史展示并阻止未核验业务操作');
+      });
+      throw error;
+    }
+    if (rollingRange) await this.syncDutyScheduleToLocalFast();
     if (!isDatabaseDisabled()) {
-      await this.replaceLocalScheduleRecords(records, result.finalValues);
+      await this.replaceLocalScheduleRecords(records, result.finalValues, rollingRange);
     }
 
     return {
@@ -5874,6 +5896,7 @@ export class DutyScheduleService {
   private async replaceLocalScheduleRecords(
     records: BitableRecordItem[],
     refreshedValues: Map<string, string>,
+    range?: { startDate: string; endDate: string },
   ): Promise<number> {
     if (isDatabaseDisabled()) {
       return 0;
@@ -5929,10 +5952,13 @@ export class DutyScheduleService {
           personText: schedule.personText || '',
         };
       })
-      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+      .filter((row): row is NonNullable<typeof row> => Boolean(row) && (!range || Boolean(row?.scheduleDate && row.scheduleDate >= range.startDate && row.scheduleDate <= range.endDate)));
 
     await this.db.transaction(async (transaction) => {
-      await transaction.delete(appRoomScheduleEnhanced);
+      if (range) await transaction.delete(appRoomScheduleEnhanced).where(and(
+        gte(appRoomScheduleEnhanced.scheduleDate, range.startDate), lte(appRoomScheduleEnhanced.scheduleDate, range.endDate),
+      ));
+      else await transaction.delete(appRoomScheduleEnhanced);
       for (let index = 0; index < localRows.length; index += 500) {
         await transaction
           .insert(appRoomScheduleEnhanced)
@@ -5950,10 +5976,13 @@ export class DutyScheduleService {
   startDutyLocalSyncTask(requestId: string): DutyLocalSyncTaskResponse {
     if (!validDutyLocalSyncId(requestId)) throw new BadRequestException('同步请求编号无效');
     try {
-      return this.localScheduleSyncTasks.start(requestId, phase => this.syncThreeMonthScheduleSnapshots(phase).catch(error => {
-        this.logger.warn(`近三个月排班同步未完成：${error instanceof Error ? error.name : 'Error'}`);
-        throw error;
-      }));
+      return this.localScheduleSyncTasks.start(requestId, phase => {
+        let currentPhase = 'starting';
+        return this.syncThreeMonthScheduleSnapshots(value => { currentPhase = value; phase(value); }).catch(error => {
+          this.logger.warn(`近三个月排班同步未完成：阶段=${currentPhase}，类型=${describeDutyLocalSyncFailure(error).kind}`);
+          throw error;
+        });
+      });
     } catch { throw new ServiceUnavailableException('同步请求较多，请稍后重试'); }
   }
 
@@ -5973,7 +6002,7 @@ export class DutyScheduleService {
 
   private syncThreeMonthScheduleSnapshots(phase: (value: string) => void, now = new Date()): Promise<DutyLocalSyncResult> {
     if (!this.threeMonthLocalSyncPromise) {
-      const operation = this.performThreeMonthScheduleSync(phase, now).finally(() => {
+      const operation = this.performThreeMonthScheduleSyncWithRetry(phase, now).finally(() => {
         if (this.threeMonthLocalSyncPromise === operation) this.threeMonthLocalSyncPromise = undefined;
       });
       this.threeMonthLocalSyncPromise = operation;
@@ -5981,27 +6010,30 @@ export class DutyScheduleService {
     return this.threeMonthLocalSyncPromise;
   }
 
+  private async performThreeMonthScheduleSyncWithRetry(phase: (value: string) => void, now: Date): Promise<DutyLocalSyncResult> {
+    const startedAt = Date.now();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const result = await this.performThreeMonthScheduleSync(phase, now);
+        return { ...result, durationMs: Date.now() - startedAt };
+      } catch (error) {
+        const failure = describeDutyLocalSyncFailure(error);
+        if (attempt >= 1 || !failure.retryable) throw error;
+        this.logger.warn(`近三个月排班读取遇到${failure.kind}，将重新核对一次`);
+        phase('retrying_sources');
+        await new Promise<void>(resolve => setTimeout(resolve, 250));
+      }
+    }
+  }
+
   private async performThreeMonthScheduleSync(phase: (value: string) => void, now: Date): Promise<DutyLocalSyncResult> {
-    const startedAt = Date.now(), range = dutyThreeMonthRange(now);
-    let sourceStartedAt: number | undefined;
-    let invalidationToken: string | null = null;
-    const initialRevision = await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId);
-    phase('fetching_sources');
-    const records = await this.fetchFeishuScheduleRecords(true, true, undefined, range, {
-      requirePersisted: true, onPersisted: snapshot => { sourceStartedAt = snapshot.sourceStartedAt; invalidationToken = snapshot.invalidationToken; },
+    return synchronizeRollingSchedule({
+      appToken: this.scheduleAppToken, tableId: this.scheduleTableId, tableName: '值班排班', now,
+      store: this.localMonthSnapshots, phase,
+      dateOf: record => this.extractScheduleDateFromFields(record.fields || {}),
+      load: (range, persistence) => this.fetchFeishuScheduleRecords(true, true, undefined, range, persistence),
+      approvalReady: async () => (await readCachedLeaveApprovalSnapshot()).verified,
     });
-    phase('validating_snapshot');
-    if (sourceStartedAt === undefined || !(await readCachedLeaveApprovalSnapshot()).verified) throw new ServiceUnavailableException('排班及审批快照尚未完整保存');
-    if (initialRevision !== invalidationToken || await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== invalidationToken) throw new ConflictException('排班来源已变化，请重新同步');
-    phase('publishing_snapshot');
-    await this.localMonthSnapshots.publish(this.scheduleAppToken, this.scheduleTableId, range, records, sourceStartedAt, invalidationToken,
-      record => this.extractScheduleDateFromFields(record.fields || {}));
-    const published = await Promise.all(range.months.map(month => this.localMonthSnapshots.readMonth(this.scheduleAppToken, this.scheduleTableId, month)));
-    if (published.some(snapshot => !snapshot || snapshot.sourceStartedAt !== sourceStartedAt) || published.reduce((sum, snapshot) => sum + snapshot!.records.length, 0) !== records.length) throw new ServiceUnavailableException('排班本地快照核对失败');
-    if (await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== invalidationToken) throw new ConflictException('排班来源已变化，请重新同步');
-    return { success: true, total: records.length, reset: 0, ruleUpdated: 0, localSynced: records.length, failed: 0, failures: [],
-      durationMs: Date.now() - startedAt, message: `近三个月排班已同步，共 ${records.length} 条；其它月份缓存已保留`,
-      scope: 'three_months', range: { startDate: range.startDate, endDate: range.endDate }, rangeCount: records.length, storageMode: 'snapshot' };
   }
 
   async updateVacancySubstitutes(
@@ -6590,7 +6622,7 @@ export class DutyScheduleService {
     const year = 2026;
     const forceRefresh = options.forceRefresh !== false;
     const [scheduleRecords, leaveRecordsResult] = await Promise.all([
-      this.fetchFeishuScheduleRecords(forceRefresh, true),
+      this.fetchFeishuScheduleRecords(forceRefresh, true, undefined, { startDate, endDate }),
       this.fetchLeaveSubstituteRecords(forceRefresh),
     ]);
 
@@ -21430,21 +21462,60 @@ export class DutyScheduleService {
   private async getMonthlySchedulesFromLocalCache(
     startDate: string,
     endDate: string,
+    historical = false,
   ): Promise<MonthlySchedule[]> {
+    const revision = await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId);
     const fullSnapshot = await readLatestPersistedBitableRecordSnapshot({
       appToken: this.scheduleAppToken || undefined,
       tableId: this.scheduleTableId,
       tableName: '值班排班',
     });
-    const snapshot = await this.localMonthSnapshots.readPreferredMonth(this.scheduleAppToken, this.scheduleTableId, startDate.slice(0, 7), fullSnapshot,
-      await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId)).catch(() => fullSnapshot);
-    if (!snapshot) {
+    const startMonth = startDate.slice(0, 7), endMonth = endDate.slice(0, 7);
+    let snapshot: PersistedBitableRecordSnapshot | null;
+    if (startMonth === endMonth) {
+      snapshot = historical && !dutyThreeMonthRange().months.includes(startMonth)
+        ? await this.localMonthSnapshots.readHistoricalMonth(this.scheduleAppToken, this.scheduleTableId, startMonth, fullSnapshot)
+        : await this.localMonthSnapshots.readPreferredMonth(this.scheduleAppToken, this.scheduleTableId, startMonth, fullSnapshot, revision).catch(error => { if (historical) return fullSnapshot; throw error; });
+    } else {
+      // Overtime validation may span a month boundary. Read each month from its
+      // own preferred snapshot; the first month's snapshot is not the full range.
+      const cursor = new Date(`${startMonth}-01T00:00:00.000Z`);
+      const last = new Date(`${endMonth}-01T00:00:00.000Z`);
+      if (!Number.isFinite(cursor.getTime()) || !Number.isFinite(last.getTime()) || cursor > last) throw new BadRequestException('排班查询日期范围无效');
+      const months: string[] = [];
+      while (cursor <= last) {
+        months.push(cursor.toISOString().slice(0, 7));
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      }
+      const snapshots = await Promise.all(months.map(month => this.localMonthSnapshots.readPreferredMonth(
+        this.scheduleAppToken, this.scheduleTableId, month, fullSnapshot, revision,
+      )));
+      if (snapshots.some(row => !row)) throw new ServiceUnavailableException('本地排班缓存尚未覆盖完整日期范围');
+      if (await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== revision) throw new ConflictException('排班来源已变化，请重新读取');
+      const records: BitableRecordItem[] = [];
+      const ids = new Set<string>();
+      for (let index = 0; index < months.length; index++) {
+        for (const record of snapshots[index]!.records) {
+          const date = this.extractScheduleDateFromFields(record.fields || {});
+          if (!date || !date.startsWith(months[index]) || date < startDate || date > endDate) continue;
+          const id = getRecordId(record);
+          if (id && ids.has(id)) throw new ServiceUnavailableException('本地排班记录跨月冲突，请重新同步');
+          if (id) ids.add(id);
+          records.push(record);
+        }
+      }
+      snapshot = { records, fetchedAt: Math.min(...snapshots.map(row => row!.fetchedAt)), expiresAt: Math.min(...snapshots.map(row => row!.expiresAt)) };
+    }
+    if (historical && !snapshot && startMonth === endMonth) snapshot = await this.localMonthSnapshots.readMonth(this.scheduleAppToken, this.scheduleTableId, startMonth) || null;
+    if (!snapshot || !historical && (!Number.isFinite(snapshot.expiresAt) || snapshot.expiresAt <= Date.now())) {
       throw new ServiceUnavailableException(
         '本地排班缓存尚未准备完成，请稍后重试',
       );
     }
 
     const approvalSnapshot = await readCachedLeaveApprovalSnapshot();
+    if (!historical && await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== revision) throw new ConflictException('排班来源已变化，请重新读取');
+    if (!historical && !approvalSnapshot.verified) throw new ServiceUnavailableException('请休假审批缓存尚未核验，暂不能办理，请稍后重试');
     const prepared = this.preparedMonthlySchedules.get(snapshot);
     if (
       approvalSnapshot.verified &&
@@ -22159,7 +22230,7 @@ export class DutyScheduleService {
         this.requiresApprovalAwareScheduleSourceRead() ||
         isDatabaseDisabled()
       ) {
-        return this.getMonthlySchedulesFromLocalCache(startDate, endDate);
+        return this.getMonthlySchedulesFromLocalCache(startDate, endDate, true);
       }
 
       const results = await this.db

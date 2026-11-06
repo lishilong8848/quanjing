@@ -22,7 +22,7 @@ import { copyHandoverPreview, permissionTemplateFingerprint } from './personnel-
 import { accountPermissionTemplate, previewPermissionInheritance } from './personnel-handover.preview';
 import { handoverItemMutationId } from './personnel-handover.store';
 import { CARD_PERSONNEL_DUTIES, personnelDutyAssignmentFingerprint, removePersonnelDutyCardOverride } from './personnel-duty-routing';
-import { readCurrentPersonnelDutyMembers, resolveCurrentPersonnelDutyRoutePeople } from './personnel-duty-current';
+import { readCurrentPersonnelDutyMembers, resolveCurrentPersonnelDutyMembers, resolveCurrentPersonnelDutyRoutePeople } from './personnel-duty-current';
 import { splitHandoverPermissionGrants } from './personnel-handover.ownership';
 import { acknowledgePersonnelSourceAssignments, markPersonnelSourceError, reconcilePersonnelSource } from './personnel-source.policy';
 import { sourceOwnsCardRole } from '../../../shared/personnel-source.interface';
@@ -214,6 +214,10 @@ export class AccessConfigurationService implements OnModuleInit {
   currentDutyRoutePeople(kind: import('../../../shared/personnel-authority.interface').AuthorityDutyKind, target: { building?: unknown; specialty?: unknown }) {
     const state = this.store.read(), appId = process.env.FEISHU_APP_ID?.trim() || '';
     return resolveCurrentPersonnelDutyRoutePeople(state, appId, kind, target);
+  }
+  currentDutyMembers(kind: import('../../../shared/personnel-authority.interface').AuthorityDutyKind, target: { building?: unknown; specialty?: unknown }) {
+    const state = this.store.read(), appId = process.env.FEISHU_APP_ID?.trim() || '';
+    return resolveCurrentPersonnelDutyMembers(state, appId, kind, target);
   }
   localTargets(): { hash: string; principal: TrustedAccessPrincipal; credentialRole?: PrivilegedAccessPrincipal['role']; credentialBuilding?: StoredAccount['building'] }[] {
     return Object.values(this.accounts()).filter(account => account.kind === 'local' && account.loginMethod === undefined &&

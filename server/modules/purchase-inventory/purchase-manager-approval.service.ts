@@ -1,3 +1,4 @@
+import { purchaseCurrentDutyMembers } from './purchase-duty-members';
 import {
   BadRequestException,
   ConflictException,
@@ -331,7 +332,7 @@ export class PurchaseManagerApprovalService {
       }
       const authorityTargets = records.map(record => {
         const target = purchaseAuthorityTarget(record);
-        if (!target || (record.specialty?.trim() && !target.specialty)) throw new ConflictException('采购全流程明细授权范围不明确');
+        if (!target) throw new ConflictException('采购全流程明细授权范围不明确');
         return { recordId: record.recordId, target };
       });
       const managerEligible = (openId: string): boolean => {
@@ -341,7 +342,7 @@ export class PurchaseManagerApprovalService {
           return !!principal && !principal.requiresPasswordChange && records.some(record => {
             const target = purchaseAuthorityTarget(record);
             if (!target) return false;
-            const duties = configuration.currentDutyRoutePeople('purchase_manager', target);
+            const duties = purchaseCurrentDutyMembers(configuration, 'purchase_manager', target);
             return !!duties && duties.some(person => person.openId === openId) && canPerformBusinessAction(principal, { module: 'purchase', action: 'approve', ...target });
           });
         } catch { return false; }
@@ -561,7 +562,7 @@ export class PurchaseManagerApprovalService {
 
   private assertCurrentManagerActor(openId:string,building:string,kind:'purchase_manager'|'purchase_executor'|'building_executor'='purchase_manager',specialty?:string):void {
     assertFeishuBusinessIdentity(this.accessConfiguration,openId);
-    const members=typeof this.accessConfiguration?.currentDutyRoutePeople==='function'?this.accessConfiguration.currentDutyRoutePeople(kind,{building,...(specialty?{specialty}:{})}):null;
+    const members=typeof this.accessConfiguration?.currentDutyRoutePeople==='function'?purchaseCurrentDutyMembers(this.accessConfiguration,kind,{building,...(specialty?{specialty}:{})}):null;
     if(members!==null&&!members.some(person=>person.openId===openId))throw new ForbiddenException('当前采购岗位已变化，请使用现任人员的新卡片办理');
   }
 
@@ -613,7 +614,7 @@ export class PurchaseManagerApprovalService {
           if (result.lifecycle) {
             const target = currentItem.authorityTarget, appId = readEnv('FEISHU_APP_ID')?.trim() || '';
             const principal = this.accessConfiguration?.feishuPrincipal(result.operatorOpenId, appId);
-            const duties = target && this.accessConfiguration?.currentDutyRoutePeople(currentItem.choice === 'building_self' ? 'building_executor' : 'purchase_executor', target);
+            const duties = target && this.accessConfiguration && purchaseCurrentDutyMembers(this.accessConfiguration, currentItem.choice === 'building_self' ? 'building_executor' : 'purchase_executor', target);
             if (!target || !principal || principal.requiresPasswordChange || !canPerformBusinessAction(principal, { module: 'purchase', action: 'order', ...target })) throw new ForbiddenException('采购下单权限已变化');
             if (!duties || !duties.some(person => person.openId === result.operatorOpenId)) throw new ForbiddenException('采购下单岗位已变化');
           } },

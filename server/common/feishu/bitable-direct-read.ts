@@ -5,7 +5,6 @@ import {
   mkdir,
   readFile,
   readdir,
-  rename,
   rm,
   writeFile,
 } from 'node:fs/promises';
@@ -14,6 +13,7 @@ import {
   assertBitableTableConfig,
   getFeishuAuthPayload,
 } from '@server/common/config/external-services.config';
+import { replaceCacheFile } from './cache-file-replacement';
 
 export interface BitableRecordItem {
   id?: string;
@@ -1466,6 +1466,36 @@ function normalizeLatestPersistedBitableRecordQuery(
   };
 }
 
+/** Keep the indexed full schedule independent of mutable response objects. */
+function createIndexedRecordSnapshot(
+  candidate: PersistedBitableRecordCache,
+  persistedBytes?: string,
+): PersistedBitableRecordSnapshot {
+  const query = normalizeLatestPersistedBitableRecordQuery(candidate);
+  const isFullSchedule = query.tableName === '值班排班' && !query.viewId &&
+    !query.automaticFields && query.fieldNames.length === 0 && !query.querySignature;
+  // A fresh disk parse is already private. For a just-written response, make a
+  // separate copy from the exact persisted bytes before exposing it to readers.
+  const records = isFullSchedule && persistedBytes
+    ? (JSON.parse(persistedBytes) as PersistedBitableRecordCache).records
+    : candidate.records;
+  const snapshot: PersistedBitableRecordSnapshot = {
+    records,
+    sourceStartedAt: candidate.sourceStartedAt,
+    fetchedAt: candidate.fetchedAt,
+    expiresAt: candidate.expiresAt,
+  };
+  if (isFullSchedule) {
+    const freeze = (value: unknown): void => {
+      if (!value || typeof value !== 'object') return;
+      for (const child of Object.values(value)) freeze(child);
+      Object.freeze(value);
+    };
+    freeze(snapshot);
+  }
+  return snapshot;
+}
+
 function createLatestPersistedBitableRecordQueryVariants(
   options: ReadLatestPersistedBitableRecordsOptions,
 ): NormalizedLatestPersistedBitableRecordQuery[] {
@@ -1654,12 +1684,7 @@ async function readIndexedPersistedBitableRecordSnapshot(
       });
       if (candidateQuery.key !== query.key) return cached?.snapshot ?? null;
 
-      const snapshot: PersistedBitableRecordSnapshot = {
-        records: candidate.records,
-        sourceStartedAt: candidate.sourceStartedAt,
-        fetchedAt: candidate.fetchedAt,
-        expiresAt: candidate.expiresAt,
-      };
+      const snapshot = createIndexedRecordSnapshot(candidate);
       const currentFile = latestPersistedBitableRecordFileIndex.get(query.key);
       if (
         generation === latestPersistedBitableRecordIndexGeneration &&
@@ -1816,6 +1841,7 @@ async function isPersistedBitableRecordCacheCurrent(
 function updateLatestPersistedBitableRecordIndexAfterWrite(
   cachePath: string,
   payload: PersistedBitableRecordCache,
+  persistedBytes: string,
 ): void {
   const file: LatestPersistedBitableRecordFileIndexEntry = {
     ...(payload.appToken ? { appToken: payload.appToken } : {}),
@@ -1824,6 +1850,7 @@ function updateLatestPersistedBitableRecordIndexAfterWrite(
     fetchedAt: payload.fetchedAt,
     tableId: payload.tableId,
   };
+  let snapshot: PersistedBitableRecordSnapshot | undefined;
   for (const query of createLatestPersistedBitableRecordQueryVariants(
     payload,
   )) {
@@ -1833,14 +1860,10 @@ function updateLatestPersistedBitableRecordIndexAfterWrite(
 
     const cached = latestPersistedBitableRecordSnapshotIndex.get(query.key);
     if (cached && cached.snapshot.fetchedAt <= payload.fetchedAt) {
+      snapshot ??= createIndexedRecordSnapshot(payload, persistedBytes);
       latestPersistedBitableRecordSnapshotIndex.set(query.key, {
         file,
-        snapshot: {
-          records: payload.records,
-          sourceStartedAt: payload.sourceStartedAt,
-          fetchedAt: payload.fetchedAt,
-          expiresAt: payload.expiresAt,
-        },
+        snapshot,
       });
     }
   }
@@ -1901,7 +1924,7 @@ async function writePersistedBitableRecordCache(
           assertCurrentRead();
           await writeFile(tempFile, bytes, 'utf8');
           assertCurrentRead();
-          await rename(tempFile, cacheFile);
+          await replaceCacheFile(tempFile, cacheFile, { strict: options.requirePersisted === true, assertCurrentRead });
           try {
             assertCurrentRead();
           } catch (error) {
@@ -1936,7 +1959,7 @@ async function writePersistedBitableRecordCache(
           cacheFile,
           invalidationToken,
         );
-        updateLatestPersistedBitableRecordIndexAfterWrite(cacheFile, payload);
+        updateLatestPersistedBitableRecordIndexAfterWrite(cacheFile, payload, bytes);
         options.onPersisted?.({ fetchedAt, sourceStartedAt, invalidationToken });
       });
     persistedBitableRecordWriteTails.set(cacheFile, writeRequest);

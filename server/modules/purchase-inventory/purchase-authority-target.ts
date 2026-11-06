@@ -7,6 +7,8 @@ import type { PurchaseWorkflowRecord } from '../../../shared/purchase-workflow.i
 export interface PurchaseAuthorityTarget { building: BuildingAdminBuilding; specialty?: ProfessionalSpecialty; }
 export function purchaseAuthorityTarget(record: Pick<PurchaseWorkflowRecord,'building'|'specialty'>):PurchaseAuthorityTarget|undefined{
   const buildings=normalizedBusinessBuildings(record.building),specialties=normalizeProfessionalScope(record.specialty);
+  const specialty = record.specialty?.trim();
+  if (specialty && specialty !== '其他' && (specialties.length !== 1 || specialty.split(/[、,，;；/]/u).filter(value => value.trim()).length !== 1)) return undefined;
   return buildings.length===1?{building:buildings[0],...(specialties.length===1?{specialty:specialties[0]}:{})}:undefined;
 }
 export function normalizePurchaseAuthorityTarget(value:unknown):PurchaseAuthorityTarget|undefined{

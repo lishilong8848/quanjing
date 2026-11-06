@@ -5,6 +5,13 @@ import { DutyLocalMonthSnapshots, dutyThreeMonthRange, preferDutyMonthSnapshot }
 import type { BitableRecordItem } from '../../server/common/feishu/bitable-direct-read';
 const row = (id: string, date: string): BitableRecordItem => ({ record_id: id, fields: { date } });
 const dateOf = (record: BitableRecordItem) => String(record.fields?.date || '') || null;
+function freezeSnapshot<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.values(value).forEach(freezeSnapshot);
+    Object.freeze(value);
+  }
+  return value;
+}
 describe('three-month publication with complete historical retention', () => {
   let folder: string, store: DutyLocalMonthSnapshots;
   beforeEach(async () => { folder = await files.mkdtemp(join(tmpdir(), 'duty-local-months-')); store = new DutyLocalMonthSnapshots(folder); });
@@ -40,7 +47,98 @@ describe('three-month publication with complete historical retention', () => {
     expect(first?.records).toEqual([original]);
   });
 
-  it.each(['replacement', 'in-place update'])('reloads a same-size %s with identical modified time', async (mode) => {
+  it('reuses immutable full snapshots only for the same month and source version', async () => {
+    const full = freezeSnapshot({ records: [row('history', '2026-08-01')], sourceStartedAt: 10, fetchedAt: 20, expiresAt: 30 });
+    const read = (month: string, source = full) => store.readPreferredMonth('app', 'table', month, source, null);
+    const first = await read('2026-08');
+    expect(await read('2026-08')).toBe(first);
+    expect(await read('2026-09')).not.toBe(first);
+    expect(await read('2026-08')).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first?.records)).toBe(true);
+    expect(() => first!.records.push(row('changed', '2026-08-02'))).toThrow();
+
+    const newer = freezeSnapshot({ records: [row('new', '2026-08-02')], sourceStartedAt: 11, fetchedAt: 21, expiresAt: 31 });
+    const changed = await read('2026-08', newer);
+    expect(changed).not.toBe(first);
+    expect(changed?.records).toEqual([row('new', '2026-08-02')]);
+  });
+
+  it('does not reuse a full snapshot if any nested data can change', async () => {
+    const record = row('history', '2026-08-01');
+    const full = Object.freeze({ records: Object.freeze([record]) as unknown as BitableRecordItem[], sourceStartedAt: 10, fetchedAt: 20, expiresAt: 30 });
+    const read = () => store.readPreferredMonth('app', 'table', '2026-08', full, null);
+    const inspection = jest.spyOn(Object, 'isFrozen');
+    const first = await read();
+    const initialChecks = inspection.mock.calls.length;
+    expect(initialChecks).toBeGreaterThan(0);
+    expect(await read()).not.toBe(first);
+    record.fields!.date = '2026-08-02';
+    expect((await read())?.records[0].fields?.date).toBe('2026-08-02');
+    expect(inspection).toHaveBeenCalledTimes(initialChecks);
+    inspection.mockRestore();
+    expect(Object.isFrozen(record)).toBe(false);
+  });
+
+  it('checks deep immutability once per source, not on every cache hit', async () => {
+    const full = freezeSnapshot({ records: [row('history', '2026-08-01')], sourceStartedAt: 10, fetchedAt: 20, expiresAt: 30 });
+    const read = () => store.readPreferredMonth('app', 'table', '2026-08', full, null);
+    const inspection = jest.spyOn(Object, 'isFrozen');
+    const first = await read();
+    const initialChecks = inspection.mock.calls.length;
+    expect(initialChecks).toBeGreaterThan(1);
+    expect(await read()).toBe(first);
+    expect(await read()).toBe(first);
+    expect(inspection).toHaveBeenCalledTimes(initialChecks);
+  });
+
+  it('treats frozen containers with mutable Map contents as unsafe to cache', async () => {
+    const details = new Map([['state', 'old']]);
+    const full = freezeSnapshot({ records: [{ record_id: 'history', fields: { details } }], sourceStartedAt: 10, fetchedAt: 20, expiresAt: 30 });
+    const read = () => store.readPreferredMonth('app', 'table', '2026-08', full, null);
+    const first = await read();
+    details.set('state', 'new');
+    const after = await read();
+    expect(after).not.toBe(first);
+    expect((after?.records[0].fields?.details as Map<string, string>).get('state')).toBe('new');
+  });
+
+  it('recalculates the full snapshot when positions or the source invalidation version change', async () => {
+    const moved = row('moved', '2026-08-15');
+    const full = freezeSnapshot({ records: [moved, row('kept', '2026-08-16')], sourceStartedAt: 50, fetchedAt: 60, expiresAt: 70 });
+    const read = (token: string | null) => store.readPreferredMonth('app', 'table', '2026-08', full, token);
+    const before = await read(null);
+    expect(before?.records).toEqual(full.records);
+    await store.publish('app', 'table', dutyThreeMonthRange(new Date('2026-10-10')), [row('moved', '2026-10-15')], 200, 'current', dateOf);
+    const afterPublish = await read('current');
+    expect(afterPublish).not.toBe(before);
+    expect(afterPublish?.records).toEqual([row('kept', '2026-08-16')]);
+    expect(await read('current')).toBe(afterPublish);
+    const afterInvalidation = await read('other');
+    expect(afterInvalidation).not.toBe(afterPublish);
+    expect(afterInvalidation?.records).toEqual(full.records);
+  });
+
+  it('keeps the number of remembered full-snapshot months bounded', async () => {
+    const full = freezeSnapshot({ records: [row('history', '2026-08-01')], sourceStartedAt: 10, fetchedAt: 20, expiresAt: 30 });
+    const months = Array.from({ length: 25 }, (_, index) => `${2024 + Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`);
+    const read = (month: string) => store.readPreferredMonth('app', 'table', month, full, null);
+    const oldest = await read(months[0]);
+    for (const month of months.slice(1)) await read(month);
+    const reread = await read(months[0]);
+    expect(reread).not.toBe(oldest);
+    expect(reread?.records).toEqual(full.records);
+  });
+
+  it('does not mix full-snapshot results across table scopes', async () => {
+    const full = freezeSnapshot({ records: [row('moved', '2026-08-15')], sourceStartedAt: 50, fetchedAt: 60, expiresAt: 70 });
+    await store.publish('app-a', 'table', dutyThreeMonthRange(new Date('2026-10-10')), [row('moved', '2026-10-15')], 200, 'current', dateOf);
+    expect((await store.readPreferredMonth('app-a', 'table', '2026-08', full, 'current'))?.records).toEqual([]);
+    expect((await store.readPreferredMonth('app-b', 'table', '2026-08', full, 'current'))?.records).toEqual(full.records);
+    expect((await store.readPreferredMonth('app-a', 'table', '2026-08', full, 'current'))?.records).toEqual([]);
+  });
+
+  it.each(['replacement', 'in-place update'])('reloads a same-size %s with identical modified time and an observable file-stamp change', async (mode) => {
     const range = dutyThreeMonthRange(new Date('2026-10-10'));
     await store.publish('app', 'table', range, [row('old', '2026-10-01')], 100, null, dateOf);
     const [name] = await files.readdir(folder);
@@ -57,12 +155,23 @@ describe('three-month publication with complete historical retention', () => {
     const after = await files.stat(file, { bigint: true });
     expect(after.size).toBe(before.size);
     expect(after.mtimeNs).toBe(before.mtimeNs);
-    if (mode === 'in-place update') expect(after.ino).toBe(before.ino);
+    if (mode === 'replacement') expect(after.ino).not.toBe(before.ino);
+    else expect(after.ino).toBe(before.ino);
 
-    const latest = await store.readPreferredMonth('app', 'table', '2026-10', null, null);
-    expect(latest).not.toBe(first);
-    expect(latest?.records).toEqual([row('new', '2026-10-01')]);
-    expect(await store.readPreferredMonth('app', 'table', '2026-10', null, null)).toBe(latest);
+    // A rapid in-place write can share the same Windows ctime tick. Model an
+    // observable ctime advance explicitly instead of relying on wall-clock
+    // resolution. Stat alone cannot detect external edits preserving every
+    // fingerprint field; production publications use atomic replacement.
+    const statSpy = mode === 'in-place update'
+      ? jest.spyOn(require('node:fs/promises') as typeof files, 'stat')
+        .mockResolvedValue({ ...after, ctimeNs: before.ctimeNs + 1n } as never)
+      : undefined;
+    try {
+      const latest = await store.readPreferredMonth('app', 'table', '2026-10', null, null);
+      expect(latest).not.toBe(first);
+      expect(latest?.records).toEqual([row('new', '2026-10-01')]);
+      expect(await store.readPreferredMonth('app', 'table', '2026-10', null, null)).toBe(latest);
+    } finally { statSpy?.mockRestore(); }
   });
 
   it('retries with the new file when another publisher replaces it during a cold read', async () => {

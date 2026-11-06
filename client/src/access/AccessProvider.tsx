@@ -68,6 +68,7 @@ import {
   canApplyPagePermissionSnapshot,
   isConfirmedLoginSession,
 } from './session-commit-coordinator';
+import { isTransientSessionReadError, readSessionWithTransientRetry } from './session-refresh';
 
 export { getAccessRoleLabel };
 
@@ -151,6 +152,9 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   loginDialogRef.current = dialog;
   const activeLoginRequestKey = React.useRef(0);
   const refreshPromise = React.useRef<Promise<void> | null>(null);
+  const refreshLifecycle = React.useRef<AbortController | null>(null);
+  if (!refreshLifecycle.current) refreshLifecycle.current = new AbortController();
+  const refreshRequestLifecycle = React.useRef<AbortController | null>(null);
   const [sessionCommitCoordinator] = React.useState(
     createSessionCommitCoordinator,
   );
@@ -202,18 +206,43 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   );
 
   const refreshSession = React.useCallback((silent = false): Promise<void> => {
-    if (requiresFeishuIdentityRef.current || feishuConfirmation.isPending() || logoutPendingRef.current || impersonationPendingRef.current) return Promise.resolve();
-    if (refreshPromise.current) return refreshPromise.current;
+    const lifecycle = refreshLifecycle.current!;
+    if (lifecycle.signal.aborted || requiresFeishuIdentityRef.current || feishuConfirmation.isPending() || logoutPendingRef.current || impersonationPendingRef.current) return Promise.resolve();
+    if (refreshPromise.current) {
+      // A remount waits for the old read to settle before starting its own.
+      if (refreshRequestLifecycle.current?.signal.aborted) return refreshPromise.current.then(() => refreshSession(silent));
+      return refreshPromise.current;
+    }
 
     const refreshToken = sessionCommitCoordinator.captureRefresh();
     const invalidationVersion = accessInvalidationVersionRef.current;
     const previousSession = sessionRef.current;
     const requestKey = activeLoginRequestKey.current;
     if (!silent) setIsLoading(true);
-    const pending = getAccessSession()
+    const mayRetry = () => {
+      const current = sessionRef.current;
+      return silent && sessionCommitCoordinator.canCommit(refreshToken) &&
+        accessInvalidationVersionRef.current === invalidationVersion &&
+        !sessionErrorRef.current && !reauthenticationPendingRef.current &&
+        !requiresFeishuIdentityRef.current && !feishuConfirmation.isPending() &&
+        !logoutPendingRef.current && !impersonationPendingRef.current &&
+        Boolean(previousSession.principalFingerprint) &&
+        current.principalFingerprint === previousSession.principalFingerprint &&
+        hasAuthenticatedAccessIdentity(current) && typeof current.expiresAt === 'number' && current.expiresAt > Date.now();
+    };
+    refreshRequestLifecycle.current = lifecycle;
+    const pending = readSessionWithTransientRetry(getAccessSession, mayRetry, lifecycle.signal)
       .then((nextSession) => {
+        if (lifecycle.signal.aborted) return;
         if (!sessionCommitCoordinator.canCommit(refreshToken)) return;
+        if (accessInvalidationVersionRef.current !== invalidationVersion) return;
         const normalizedSession = normalizeAccessSession(nextSession);
+        if (typeof normalizedSession.expiresAt === 'number' && normalizedSession.expiresAt <= Date.now()) {
+          markReauthenticationPending();
+          clearBackgroundSessionWarning();
+          setSessionError('登录会话已失效，请重新登录。');
+          return;
+        }
         if (previousSession.principalFingerprint && hasAuthenticatedAccessIdentity(previousSession) &&
           !hasAuthenticatedAccessIdentity(normalizedSession) && permissionChangeNoticeRef.current !== previousSession.principalFingerprint) {
           permissionChangeNoticeRef.current = previousSession.principalFingerprint;
@@ -239,11 +268,10 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
         clearBackgroundSessionWarning();
       })
       .catch((error: unknown) => {
+        if (lifecycle.signal.aborted) return;
         if (!sessionCommitCoordinator.canCommit(refreshToken)) return;
-        const failure = error as { code?: string; response?: { status?: number } } | null;
-        const status = failure?.response?.status;
-        const transientFailure = status !== 401 && status !== 403 && (failure?.code === 'ERR_NETWORK' || failure?.code === 'ECONNABORTED' || failure?.code === 'ETIMEDOUT' ||
-          (typeof status === 'number' && status >= 500 && status < 600));
+        if (accessInvalidationVersionRef.current !== invalidationVersion) return;
+        const transientFailure = isTransientSessionReadError(error);
         const current = sessionRef.current;
         if (silent && transientFailure && !sessionErrorRef.current && !reauthenticationPendingRef.current &&
           accessInvalidationVersionRef.current === invalidationVersion && hasAuthenticatedAccessIdentity(current) &&
@@ -258,12 +286,18 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
         setSessionError(getIdentityRequestError(error));
       })
       .finally(() => {
+        if (refreshPromise.current === pending) refreshPromise.current = null;
+        if (refreshRequestLifecycle.current === lifecycle) refreshRequestLifecycle.current = null;
+        if (lifecycle.signal.aborted) return;
         if (sessionCommitCoordinator.canCommit(refreshToken)) setIsLoading(false);
-        refreshPromise.current = null;
+        // A protected request may reject while an older read is in flight. The
+        // old response cannot settle that invalidation; start a fresh read.
+        if (sessionCommitCoordinator.canCommit(refreshToken) && accessInvalidationVersionRef.current !== invalidationVersion)
+          void refreshSession();
       });
     refreshPromise.current = pending;
     return pending;
-  }, [clearBackgroundSessionWarning, feishuConfirmation, rememberReauthenticationLogin, sessionCommitCoordinator]);
+  }, [clearBackgroundSessionWarning, feishuConfirmation, markReauthenticationPending, rememberReauthenticationLogin, sessionCommitCoordinator]);
 
   const confirmFeishuSession = React.useCallback(async () => {
     const requestKey = activeLoginRequestKey.current;
@@ -320,6 +354,8 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
     }
   }, [callbackLocation, confirmFeishuSession, feishuAuthStatus, feishuConfirmation, location.hash, location.pathname, location.search, navigate, refreshSession, sessionCommitCoordinator]);
   React.useEffect(() => {
+    if (refreshLifecycle.current!.signal.aborted) refreshLifecycle.current = new AbortController();
+    const lifecycle = refreshLifecycle.current!;
     const removeInterceptor =
       installUnifiedAccessResponseInterceptor(axiosForBackend);
     const changingIdentityInterceptor = axiosForBackend.interceptors.request.use(config => {
@@ -356,13 +392,21 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
       if (requiresFeishuIdentityRef.current) void retrySession();
       else void refreshSession(true);
     };
+    const handleOnline = () => {
+      if (document.visibilityState !== 'visible') return;
+      lastCheck = Date.now();
+      void refreshSession(true);
+    };
     window.addEventListener('pageshow', handlePageShow);
     window.addEventListener('focus', checkPermissions);
+    window.addEventListener('online', handleOnline);
     document.addEventListener('visibilitychange', checkPermissions);
     return () => {
+      lifecycle.abort();
       window.clearInterval(timer);
       window.removeEventListener('pageshow', handlePageShow);
       window.removeEventListener('focus', checkPermissions);
+      window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', checkPermissions);
       removeInterceptor();
       axiosForBackend.interceptors.request.eject(changingIdentityInterceptor);

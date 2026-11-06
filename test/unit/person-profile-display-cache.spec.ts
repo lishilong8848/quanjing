@@ -86,8 +86,32 @@ describe('personnel display cache recovery', () => {
     (readLatestPersistedBitableRecordSnapshot as jest.Mock).mockResolvedValue({ records: rows, fetchedAt: Date.now(), expiresAt: Date.now() + 60_000 });
     await expect(service.getPersonProfiles()).resolves.toMatchObject({ organizations: [{ supervisorText: '测试人员' }], cache: { stale: false } });
     expect(resolveBitableAppToken).not.toHaveBeenCalled();
-    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledWith(expect.objectContaining({ appToken: 'verified-base' }));
+    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledWith(expect.objectContaining({ appToken: 'verified-base', directOnly: true }));
     expect(internals.fetchFeishuPersonProfileRecords).not.toHaveBeenCalled();
+  });
+
+  it('reuses only the public projection of the exact bound snapshot and recomputes on source or content changes', async () => {
+    const { service, internals } = setup();
+    let fingerprint = 'snapshot-a';
+    (readLatestPersistedBitableRecordSnapshot as jest.Mock).mockImplementation(async () => ({
+      records: rows, fetchedAt: 1000, expiresAt: Date.now() + 60_000, contentFingerprint: fingerprint,
+    }));
+    const publicMapping = jest.spyOn(internals, 'mapFeishuEmployeeRecordsToPersonProfiles');
+    const privateMapping = jest.spyOn(internals, 'mapFeishuEmployeeRecordsToPersonProfileDetails');
+    const first = await service.getPersonProfiles();
+    const second = await service.getPersonProfiles();
+    expect(second).toEqual(first);
+    expect(publicMapping).toHaveBeenCalledTimes(1);
+    fingerprint = 'snapshot-b';
+    await service.getPersonProfiles();
+    expect(publicMapping).toHaveBeenCalledTimes(2);
+    internals.LEAVE_PERSON_PROFILE_WIKI_TOKEN = 'different-source';
+    await service.getPersonProfiles();
+    expect(publicMapping).toHaveBeenCalledTimes(3);
+    await service.getPersonProfileDetails();
+    await service.getPersonProfileDetails();
+    expect(privateMapping).toHaveBeenCalledTimes(2);
+    expect((readLatestPersistedBitableRecordSnapshot as jest.Mock).mock.calls.every(([query]) => query.directOnly === true)).toBe(true);
   });
 
   it('can use the separately bound detail projection for public fields without leaking private data', async () => {
@@ -97,7 +121,7 @@ describe('personnel display cache recovery', () => {
     const response = await service.getPersonProfiles();
     expect(resolveBitableAppToken).not.toHaveBeenCalled();
     expect(JSON.stringify(response)).not.toContain('PRIVATE_SENTINEL');
-    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledWith(expect.objectContaining({ appToken: 'detail-base', fieldNames: expect.arrayContaining(['照片']) }));
+    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledWith(expect.objectContaining({ appToken: 'detail-base', directOnly: true, fieldNames: expect.arrayContaining(['照片']) }));
   });
 
   it('publishes the exact binding only after a successful fresh projected read', async () => {

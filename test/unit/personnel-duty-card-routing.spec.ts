@@ -38,6 +38,20 @@ describe('统一岗位与既有卡片人员入口',()=>{
     expect(readConfiguredCardMembers('contract_notify',null)).toEqual([{openId:'ou_old',name:'合成前任'}]);
     expect(readConfiguredCardMembers('warehouse_notify','B楼')).toBeNull();
   });
+  it('采购成员接口读取明确卡片名单，不要求额外建立人员来源路由', async () => {
+    await store.mutate(store.read().revision,'seed-purchase-manager-card','seed',state=>{
+      state.cardRules['purchase_manager:all']={appId,code:'purchase_manager',building:null,members:[{openId:'ou_old',name:'合成经理'}],version:1};
+    });
+    const service=new AccessConfigurationService();
+    expect(service.currentDutyRoutePeople('purchase_manager',{building:'B楼'})).toBeNull();
+    expect(service.currentDutyMembers('purchase_manager',{building:'B楼'})).toEqual([{openId:'ou_old',name:'合成经理'}]);
+  });
+  it('采购成员接口拒绝暂停来源，不能恢复旧卡片名单', async () => {
+    await store.mutate(store.read().revision,'pause-current-duty-source','pause',state=>{
+      state.personnelSource={status:'paused',source:{appId,appToken:'syntheticBase',tableId:'tblPeople',dutyTableId:'tblDuties'},directoryVersion:'a'.repeat(64),activatedAt:Date.now(),lastSuccessAt:Date.now(),routes:{...state.personnelDutyAssignments},pending:[]};
+    });
+    expect(()=>new AccessConfigurationService().currentDutyMembers('warehouse_approver',{building:'B楼'})).toThrow('暂停');
+  });
   it('管理员之后调整卡片人员立即生效，只覆盖所选楼栋，保留其他楼栋归属',async()=>{
     const service=new AccessConfigurationService();await service.saveCardRule({expectedRevision:1,clientMutationId:'synthetic-manual-card-rule',code:'warehouse_responsible',building:'B楼',members:[{openId:'ou_manual',name:'合成人工指定'}]}, {role:'admin',purchaseBuilding:null});
     expect(readConfiguredCardMembers('warehouse_responsible','B楼')).toEqual([{openId:'ou_manual',name:'合成人工指定'}]);
@@ -51,6 +65,7 @@ describe('统一岗位与既有卡片人员入口',()=>{
     await store.mutate(store.read().revision,'synthetic-inactive-duty-members','seed',state=>{state.personnelEmployment={appId,snapshotAt:Date.now(),inactive:{[`feishu-${feishuIdentityFingerprint(appId,'ou_current')}`]:true,[`feishu-${feishuIdentityFingerprint(appId,'ou_old')}`]:true}};});
     expect(readConfiguredCardMembers('warehouse_responsible','B楼')).toEqual([]);expect(readConfiguredCardMembers('contract_notify',null)).toEqual([]);
     expect(new AccessConfigurationService().currentDutyRoutePeople('warehouse_approver',{building:'B楼'})).toEqual([]);
+    expect(new AccessConfigurationService().currentDutyMembers('warehouse_approver',{building:'B楼'})).toEqual([]);
   });
   it('实际请休假服务使用同一权限配置生成主管和经理新路由，稳定记录ID不丢失',async()=>{
     await store.mutate(store.read().revision,'seed-current-leave-role','seed-leave',state=>{

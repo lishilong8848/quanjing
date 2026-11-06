@@ -5681,6 +5681,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     expect(service.getMonthlySchedulesFromLocalCache).toHaveBeenCalledWith(
       '2026-08-01',
       '2026-08-31',
+      true,
     );
     expect(service.getMonthlySchedulesFromFeishu).not.toHaveBeenCalled();
 
