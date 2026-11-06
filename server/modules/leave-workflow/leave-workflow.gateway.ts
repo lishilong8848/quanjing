@@ -304,6 +304,7 @@ export class LeaveWorkflowGateway {
     invalidateBitableRecordCache({
       appToken: config.appToken,
       tableId: config.tableId,
+      deletePersisted: true,
     });
   }
 

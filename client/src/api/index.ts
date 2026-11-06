@@ -3606,7 +3606,7 @@ export async function getPersonProfiles(
   forceRefresh = false,
   scope: PersonProfileScope = 'leave',
   signal?: AbortSignal,
-): Promise<NantongOrganizationResponse> {
+): Promise<NantongOrganizationResponse & { cache?: PersonProfileResponse['cache'] }> {
   try {
     const response = await axiosForBackend({
       url: '/api/bitable/person-profiles',
@@ -3643,6 +3643,7 @@ export async function getPersonProfiles(
         },
       ),
       changeRequestSubmitters: publicResponse.changeRequestSubmitters || [],
+      ...(publicResponse.cache ? { cache: publicResponse.cache } : {}),
     };
   } catch (error) {
     logger.error('获取人员资料列表失败', error);

@@ -1,14 +1,16 @@
+jest.mock('../../common/feishu/dashboard-source-binding-cache', () => ({ ...jest.requireActual('../../common/feishu/dashboard-source-binding-cache'), readDashboardSourceBinding: jest.fn().mockResolvedValue('resolved-certificate-app-token'), writeDashboardSourceBinding: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../../common/feishu/bitable-direct-read', () => ({
   ...jest.requireActual('../../common/feishu/bitable-direct-read'),
   resolveBitableAppToken: jest.fn(),
   fetchBitableRecords: jest.fn(),
-  readLatestPersistedBitableRecords: jest.fn(),
+  readLatestPersistedBitableRecordSnapshot: jest.fn(),
 }));
 
+import { readDashboardSourceBinding, writeDashboardSourceBinding } from '../../common/feishu/dashboard-source-binding-cache';
 import { ServiceUnavailableException } from '@nestjs/common';
 import {
   fetchBitableRecords,
-  readLatestPersistedBitableRecords,
+  readLatestPersistedBitableRecordSnapshot,
   resolveBitableAppToken,
 } from '../../common/feishu/bitable-direct-read';
 import { CertificateDashboardService } from './certificate-dashboard.service';
@@ -49,7 +51,9 @@ describe('CertificateDashboardService', () => {
   );
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    jest.mocked(readDashboardSourceBinding).mockResolvedValue('resolved-certificate-app-token');
+    jest.mocked(writeDashboardSourceBinding).mockResolvedValue(undefined);
     delete process.env.FEISHU_CERTIFICATE_APP_TOKEN;
     delete process.env.FEISHU_CERTIFICATE_WIKI_TOKEN;
     delete process.env.FEISHU_CERTIFICATE_TABLE_ID;
@@ -57,7 +61,7 @@ describe('CertificateDashboardService', () => {
       .mocked(resolveBitableAppToken)
       .mockResolvedValue('resolved-certificate-app-token');
     jest.mocked(fetchBitableRecords).mockResolvedValue([sourceRecord]);
-    jest.mocked(readLatestPersistedBitableRecords).mockResolvedValue(null);
+    jest.mocked(readLatestPersistedBitableRecordSnapshot).mockResolvedValue(null);
   });
 
   afterAll(() => {
@@ -155,36 +159,16 @@ describe('CertificateDashboardService', () => {
     expect(JSON.stringify(stale)).not.toContain('must-not-be-exposed');
   });
 
-  it('returns a persisted fallback as stale when the initial strict refresh fails', async () => {
-    jest
-      .mocked(fetchBitableRecords)
-      .mockRejectedValueOnce(new Error('live source unavailable'))
-      .mockResolvedValueOnce([sourceRecord]);
-    const service = new CertificateDashboardService({
-      axiosRef: {},
-    } as never);
-
-    const stale = await service.getDashboard(false);
-
-    expect(fetchBitableRecords).toHaveBeenNthCalledWith(
-      1,
-      expect.anything(),
-      expect.objectContaining({
-        forceRefresh: true,
-        strict: true,
-      }),
-    );
-    expect(fetchBitableRecords).toHaveBeenNthCalledWith(
-      2,
-      expect.anything(),
-      expect.objectContaining({
-        forceRefresh: false,
-        strict: false,
-      }),
-    );
+  it('returns an exact-source persisted fallback as stale after a forced refresh fails', async () => {
+    jest.mocked(readLatestPersistedBitableRecordSnapshot).mockResolvedValueOnce({ records: [sourceRecord], fetchedAt: 1_000, expiresAt: 2_000 });
+    jest.mocked(fetchBitableRecords).mockRejectedValueOnce(new Error('live source unavailable'));
+    const service = new CertificateDashboardService({ axiosRef: {} } as never);
+    const stale = await service.getDashboard(true);
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(1);
+    expect(fetchBitableRecords).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ forceRefresh: true, strict: true, allowStale: false }));
     expect(stale.people).toHaveLength(1);
+    expect(stale.syncedAt).toBe(new Date(1_000).toISOString());
     expect(stale.sourceStatus).toBe('stale');
-    expect(stale.errorMessage).toBe('源数据同步失败，已展示上次成功结果');
   });
 
   it('loads the exact persisted table snapshot as stale when Wiki resolution fails during cold start', async () => {
@@ -192,16 +176,17 @@ describe('CertificateDashboardService', () => {
       .mocked(resolveBitableAppToken)
       .mockRejectedValueOnce(new Error('wiki unavailable'));
     jest
-      .mocked(readLatestPersistedBitableRecords)
-      .mockResolvedValueOnce([sourceRecord]);
+      .mocked(readLatestPersistedBitableRecordSnapshot)
+      .mockResolvedValueOnce({ records: [sourceRecord], fetchedAt: 1_000, expiresAt: 2_000 });
     const service = new CertificateDashboardService({
       axiosRef: {},
     } as never);
 
-    const stale = await service.getDashboard(false);
+    const stale = await service.getDashboard(true);
 
     expect(fetchBitableRecords).not.toHaveBeenCalled();
-    expect(readLatestPersistedBitableRecords).toHaveBeenCalledWith({
+    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledWith({
+      appToken: 'resolved-certificate-app-token', directOnly: true,
       tableId: 'tbl9NBxImAt3kzx2',
       tableName: '园区持证正式表',
     });
@@ -214,8 +199,8 @@ describe('CertificateDashboardService', () => {
     const persistedRecords = buildSourceRecords(10, '持久人员');
     const truncatedLiveRecords = buildSourceRecords(5, '实时人员');
     jest
-      .mocked(readLatestPersistedBitableRecords)
-      .mockResolvedValueOnce(persistedRecords);
+      .mocked(readLatestPersistedBitableRecordSnapshot)
+      .mockResolvedValueOnce({ records: persistedRecords, fetchedAt: 1_000, expiresAt: 2_000 });
     jest
       .mocked(fetchBitableRecords)
       .mockResolvedValueOnce(truncatedLiveRecords);
@@ -223,9 +208,9 @@ describe('CertificateDashboardService', () => {
       axiosRef: {},
     } as never);
 
-    const result = await service.getDashboard(false);
+    const result = await service.getDashboard(true);
 
-    expect(readLatestPersistedBitableRecords).toHaveBeenCalledTimes(1);
+    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledTimes(1);
     expect(fetchBitableRecords).toHaveBeenCalledTimes(1);
     expect(result.people).toHaveLength(10);
     expect(result.people[0]?.name).toBe('持久人员1');
@@ -234,8 +219,8 @@ describe('CertificateDashboardService', () => {
 
   it('allows a small cold-start decrease relative to the preloaded persisted count', async () => {
     jest
-      .mocked(readLatestPersistedBitableRecords)
-      .mockResolvedValueOnce(buildSourceRecords(10, '持久人员'));
+      .mocked(readLatestPersistedBitableRecordSnapshot)
+      .mockResolvedValueOnce({ records: buildSourceRecords(10, '持久人员'), fetchedAt: 1_000, expiresAt: 2_000 });
     jest
       .mocked(fetchBitableRecords)
       .mockResolvedValueOnce(buildSourceRecords(8, '实时人员'));
@@ -243,9 +228,9 @@ describe('CertificateDashboardService', () => {
       axiosRef: {},
     } as never);
 
-    const result = await service.getDashboard(false);
+    const result = await service.getDashboard(true);
 
-    expect(readLatestPersistedBitableRecords).toHaveBeenCalledTimes(1);
+    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledTimes(1);
     expect(result.people).toHaveLength(8);
     expect(result.people[0]?.name).toBe('实时人员1');
     expect(result.sourceStatus).toBe('fresh');

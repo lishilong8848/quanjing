@@ -84,7 +84,7 @@ describe('purchase lifecycle attachment session access', () => {
     try {
       const service = make();
       const session = { cookieName: 'test_session', readSessionIdentity: jest.fn((cookie: string) => cookie === 'valid' ? { principal, expiresAt: Date.now() + 60_000, principalFingerprint: 'authenticated' } : { principal: { role: 'guest' }, expiresAt: null, principalFingerprint: null }) };
-      const controller = new PurchaseLifecycleAttachmentAccessController(service as any, session as any, { isReady: () => true });
+      const controller = new PurchaseLifecycleAttachmentAccessController(service as any, session as any, { isProcessing: () => true });
       const req = { headers: { cookie: 'test_session=valid', origin: 'https://platform.example' } } as any;
       const issued = await controller.issue(req, request);
       const response = { set: jest.fn(), send: jest.fn() };
@@ -102,7 +102,7 @@ describe('purchase lifecycle attachment session access', () => {
       await expect(controller.download({ headers: { cookie: 'test_session=valid', origin: 'https://platform.example', 'sec-fetch-site': 'cross-site' } } as any, issued, response as any)).rejects.toThrow();
       const disabled = new PurchaseLifecycleAttachmentAccessController(service as any, session as any);
       await expect(disabled.issueCurrent(req, { batchId: request.batchId, recordId: request.recordId, purpose: request.purpose, index: 0, generation: 2 })).rejects.toThrow('暂不可用');
-      const asyncReady = new PurchaseLifecycleAttachmentAccessController(service as any, session as any, { isReady: (() => Promise.reject(new Error('not ready'))) as any });
+      const asyncReady = new PurchaseLifecycleAttachmentAccessController(service as any, session as any, { isProcessing: (() => Promise.reject(new Error('not ready'))) as any });
       await expect(asyncReady.issueCurrent(req, { batchId: request.batchId, recordId: request.recordId, purpose: request.purpose, index: 0, generation: 2 })).rejects.toThrow('暂不可用');
       await expect(controller.issueCurrent({ headers: { cookie: 'test_session=valid' } } as any, { batchId: request.batchId, recordId: request.recordId, purpose: request.purpose, index: 0, generation: 2 })).rejects.toThrow();
     } finally { if (old === undefined) delete process.env.PUBLIC_BASE_URL; else process.env.PUBLIC_BASE_URL = old; }

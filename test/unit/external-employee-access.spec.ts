@@ -134,7 +134,7 @@ describe('外部员工姓名密码登录', () => {
     const credentials = await buildExternalEmployeeCredentials(rows(), process.env.FEISHU_APP_ID!, 'synthetic-base', 'tblSynthetic');
     const actor = configuration.localTargets().find(target => target.principal.role === 'admin')!.principal;
     const session = access.issueTrustedSession(actor);
-    const controller = new AccessConfigurationController(configuration, { read: async () => ({ people: [], externalEmployees: credentials }) } as never, access, {} as never);
+    const controller = new AccessConfigurationController(configuration, { readForDisplay: async () => ({ people: [], externalEmployees: credentials }) } as never, access, {} as never);
     const response = await controller.people({ headers: { cookie: `${access.cookieName}=${session.token}` } } as never);
     expect(JSON.stringify(response)).not.toMatch(/passwordHash|scrypt\$|externalEmployees|synthetic-external-only/);
   });

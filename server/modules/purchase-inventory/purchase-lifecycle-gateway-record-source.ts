@@ -7,7 +7,7 @@ import type { PurchaseComparisonCardEvidence } from './purchase-comparison-card-
 
 type Selector = (batch: PurchaseManagerApprovalBatchEntry, record: PurchaseWorkflowRecord) => boolean;
 type Loaded = { batch: PurchaseManagerApprovalBatchEntry; records: PurchaseWorkflowRecord[]; comparisonImages: Record<string, Array<{ imageKey: string; alt: string }>>; comparisonCounts: Record<string, number> };
-type Entry = { identity: PurchaseReplicaIdentity; selector: Selector; fingerprint: string; expiresAt: number };
+type Entry = { identity: PurchaseReplicaIdentity; selector: Selector; fingerprint: string; expiresAt: number; sourceFingerprint?:string };
 const unavailable = (): never => { throw new Error('采购卡片数据来源无法核对'); };
 const digest = (snapshot: Loaded) => createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
 
@@ -20,23 +20,32 @@ export class PurchaseLifecycleGatewayRecordSource implements PurchaseLifecycleTr
     private readonly currentAppId: () => string,
     private readonly clock: () => number = Date.now,
     private readonly sourceGuard?: () => Promise<void>,
+    private readonly sourceFingerprintProvider?: () => string,
   ) {}
 
   async load(identity: PurchaseReplicaIdentity, includeComparison: Selector): Promise<{ version: string; batchFingerprint: string; records: PurchaseWorkflowRecord[]; comparisonImages: Loaded['comparisonImages']; comparisonCounts: Loaded['comparisonCounts'] }> {
     if (typeof includeComparison !== 'function') return unavailable();
+    const sourceFingerprint=this.currentSourceFingerprint();
     const snapshot = await this.readLatest(identity, includeComparison);
+    if(this.currentSourceFingerprint()!==sourceFingerprint)return unavailable();
     const now = this.clock();
     if (!Number.isSafeInteger(now) || now <= 0) return unavailable();
     for (const [version, entry] of this.snapshots) if (entry.expiresAt <= now) this.snapshots.delete(version);
     if (this.snapshots.size >= 100) return unavailable();
     const version = randomUUID();
-    this.snapshots.set(version, { identity: { ...identity }, selector: includeComparison, fingerprint: digest(snapshot), expiresAt: now + 180_000 });
+    this.snapshots.set(version, { identity: { ...identity }, selector: includeComparison, fingerprint: digest(snapshot), expiresAt: now + 180_000,sourceFingerprint });
     return { version, batchFingerprint: createHash('sha256').update(JSON.stringify(snapshot.batch)).digest('hex'), records: structuredClone(snapshot.records), comparisonImages: structuredClone(snapshot.comparisonImages), comparisonCounts: structuredClone(snapshot.comparisonCounts) };
   }
 
   isLocallyValid(version: string): boolean {
     const entry = this.snapshots.get(version), now = this.clock();
-    return !!entry && Number.isSafeInteger(now) && now > 0 && now < entry.expiresAt && this.currentAppId() === entry.identity.appId;
+    try{return !!entry && Number.isSafeInteger(now) && now > 0 && now < entry.expiresAt && this.currentAppId() === entry.identity.appId && entry.sourceFingerprint===this.currentSourceFingerprint();}catch{return false;}
+  }
+  private currentSourceFingerprint():string|undefined {
+    if(!this.sourceFingerprintProvider)return undefined;
+    const fingerprint=this.sourceFingerprintProvider();
+    if(typeof fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(fingerprint))return unavailable();
+    return fingerprint;
   }
 
   async verifyLatest(version: string): Promise<boolean> {
@@ -52,10 +61,12 @@ export class PurchaseLifecycleGatewayRecordSource implements PurchaseLifecycleTr
     await this.sourceGuard?.();
     if (this.currentAppId() !== identity.appId) return unavailable();
     const batch = await this.store.findManagerApprovalBatch(identity.batchId);
+    await this.sourceGuard?.();
     if (!batch || batch.flowVersion !== 'lifecycle_v1' || batch.approvalBatchId !== identity.batchId ||
       !Array.isArray(batch.recordIds) || !batch.recordIds.length || batch.recordIds.length > 20 ||
       new Set(batch.recordIds).size !== batch.recordIds.length) return unavailable();
     const rows = await this.gateway.getLifecycleExecutionRecordsAsApp([...batch.recordIds]);
+    await this.sourceGuard?.();
     if (!Array.isArray(rows) || rows.length !== batch.recordIds.length) return unavailable();
     const byId = new Map<string, PurchaseWorkflowRecord>();
     for (const row of rows) {

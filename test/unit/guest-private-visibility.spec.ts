@@ -4,7 +4,12 @@ import { GuestReadableMetadataKey } from '../../server/common/access/unified-acc
 import { canAccessPage } from '../../client/src/access/access-policy';
 
 describe('游客私有页面与接口限制', () => {
-  it.each(['/monthly-schedule', '/monthly-schedule/apply/leave', '/today-operations-panorama', '/monthly-operations', '/system-monthly-report', '/operations-kb/documents/test', '/meeting-management', '/ali-monthly-report'])('游客不能访问 %s，授权的子管理员仍可访问', path => {
+  it('游客可访问排班概览，但不因此获得申请入口或私有人事数据权限', () => {
+    expect(canAccessPage('guest', '/monthly-schedule')).toBe(true);
+    expect(canAccessPage('guest', '/monthly-schedule/apply/leave')).toBe(false);
+    expect(canAccessPage('editor', '/monthly-schedule')).toBe(true);
+  });
+  it.each(['/monthly-schedule/apply/leave', '/today-operations-panorama', '/monthly-operations', '/system-monthly-report', '/operations-kb/documents/test', '/meeting-management', '/ali-monthly-report'])('游客不能访问 %s，授权的子管理员仍可访问', path => {
     expect(canAccessPage('guest', path)).toBe(false);
     expect(canAccessPage('editor', path)).toBe(true);
   });

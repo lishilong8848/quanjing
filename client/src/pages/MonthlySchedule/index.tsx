@@ -259,7 +259,7 @@ import { ChangeSummaryReportDialog } from './ChangeSummaryReportDialog';
 import { ThresholdAdjustmentDialog } from './ThresholdAdjustmentDialog';
 import { PersonnelTimeInsightsDialog } from '@/components/personnel-time-insights/PersonnelTimeInsightsDialog';
 import { LeaveRequestHoursSummary } from './LeaveRequestHoursSummary';
-import { LeaveRequestScheduleTimeFields } from './LeaveRequestScheduleTimeFields';
+import { LeaveRequestPersonProfileStatus, LeaveRequestScheduleTimeFields } from './LeaveRequestScheduleTimeFields';
 import { LeaveRequestScreenshotField } from './LeaveRequestScreenshotField';
 import {
   clearLeaveRequestUnknownMutationId,
@@ -4098,12 +4098,18 @@ function MonthlySchedulePageContent() {
   const sealingDetailTriggerRef = useRef<HTMLElement | null>(null);
   const [changes, setChanges] = useState<ChangeInfo[]>([]);
   const [calendarDayDialogController] = useState(createCalendarDayDialogController);
-  const [personProfiles, setPersonProfiles] = useState<NantongOrganization[]>(
+  const [storedPersonProfiles, setPersonProfiles] = useState<NantongOrganization[]>(
     [],
   );
-  const [changeRequestSubmitterOptions, setChangeRequestSubmitterOptions] =
+  const [storedPersonProfileSnapshot, setPersonProfileSnapshot] = useState<{
+    fetchedAt: number | null; stale: boolean; refreshing: boolean;
+  }>({ fetchedAt: null, stale: false, refreshing: false });
+  const [personProfilePollVersion, setPersonProfilePollVersion] = useState(0);
+  const [personProfilePublishedScope, setPersonProfilePublishedScope] = useState('');
+  const [personProfileDetailScope, setPersonProfileDetailScope] = useState('');
+  const [storedChangeRequestSubmitterOptions, setChangeRequestSubmitterOptions] =
     useState<string[]>([]);
-  const [personProfileDetails, setPersonProfileDetails] = useState<
+  const [storedPersonProfileDetails, setPersonProfileDetails] = useState<
     PersonProfileDetail[]
   >([]);
   const [manualScreenshotSending, setManualScreenshotSending] = useState(false);
@@ -4126,13 +4132,18 @@ function MonthlySchedulePageContent() {
   const [repairReplacementPickerOpen, setRepairReplacementPickerOpen] =
     useState(false);
   const [repairSubmitting, setRepairSubmitting] = useState(false);
-  const [travelPersonProfiles, setTravelPersonProfiles] = useState<
+  const [storedTravelPersonProfiles, setTravelPersonProfiles] = useState<
     NantongOrganization[]
   >([]);
   const [travelProfilesStatus, setTravelProfilesStatus] = useState<
     'idle' | 'loading' | 'ready' | 'error'
   >('idle');
   const travelProfilesLoading = travelProfilesStatus === 'loading';
+  const [travelProfilePublishedScope, setTravelProfilePublishedScope] = useState('');
+  const [storedTravelProfileSnapshot, setTravelProfileSnapshot] = useState<{
+    fetchedAt: number | null; stale: boolean; refreshing: boolean;
+  }>({ fetchedAt: null, stale: false, refreshing: false });
+  const [travelProfilePollVersion, setTravelProfilePollVersion] = useState(0);
   const [travelStaffName, setTravelStaffName] = useState('');
   const [travelStaffSearch, setTravelStaffSearch] = useState('');
   const [travelStaffPickerOpen, setTravelStaffPickerOpen] = useState(false);
@@ -4389,7 +4400,22 @@ function MonthlySchedulePageContent() {
   const changeLoadAbortRef = useRef<AbortController | null>(null);
   const personProfileLoadSeqRef = useRef(0);
   const personProfileLoadAbortRef = useRef<AbortController | null>(null);
+  const personProfileReadScope = `${principalFingerprint || role}:${canReadPublicProfiles}:${canViewPrivateProfile}`;
+  const activePersonProfileReadScopeRef = useRef(personProfileReadScope);
+  activePersonProfileReadScopeRef.current = personProfileReadScope;
+  const personProfileInFlightScopeRef = useRef<string | null>(null);
+  const personProfileRefreshDeadlineRef = useRef<number | null>(null);
   const travelProfileLoadSeqRef = useRef(0);
+  const travelProfileLoadAbortRef = useRef<AbortController | null>(null);
+  const travelProfileInFlightScopeRef = useRef<string | null>(null);
+  const travelProfileRefreshDeadlineRef = useRef<number | null>(null);
+  const personProfiles = useMemo(() => canReadPublicProfiles && personProfilePublishedScope === personProfileReadScope ? storedPersonProfiles : [], [canReadPublicProfiles, personProfilePublishedScope, personProfileReadScope, storedPersonProfiles]);
+  const personProfileDetails = useMemo(() => canViewPrivateProfile && personProfileDetailScope === personProfileReadScope ? storedPersonProfileDetails : [], [canViewPrivateProfile, personProfileDetailScope, personProfileReadScope, storedPersonProfileDetails]);
+  const changeRequestSubmitterOptions = useMemo(() => canReadPublicProfiles && personProfilePublishedScope === personProfileReadScope ? storedChangeRequestSubmitterOptions : [], [canReadPublicProfiles, personProfilePublishedScope, personProfileReadScope, storedChangeRequestSubmitterOptions]);
+  const personProfileSnapshot = canReadPublicProfiles && personProfilePublishedScope === personProfileReadScope ? storedPersonProfileSnapshot : { fetchedAt: null, stale: false, refreshing: false };
+  const travelPersonProfiles = useMemo(() => canReadPublicProfiles && travelProfilePublishedScope === personProfileReadScope ? storedTravelPersonProfiles : [], [canReadPublicProfiles, travelProfilePublishedScope, personProfileReadScope, storedTravelPersonProfiles]);
+  const travelProfileSnapshot = canReadPublicProfiles && travelProfilePublishedScope === personProfileReadScope ? storedTravelProfileSnapshot : { fetchedAt: null, stale: false, refreshing: false };
+  const isTravelPersonProfileReady = canReadPublicProfiles && travelProfilePublishedScope === personProfileReadScope && travelProfilesStatus === 'ready' && !travelProfileSnapshot.stale && !travelProfileSnapshot.refreshing;
   const changeRequestSubmittingRef = useRef(false);
   const changeRequestDialogRef = useRef<ChangeRequestDialogHandle>(null);
   const overtimeRequestDialogRef =
@@ -5330,30 +5356,44 @@ function MonthlySchedulePageContent() {
   const loadPersonProfiles = useCallback(
     async (forceRefresh = false) => {
       if (!canReadPublicProfiles && !canViewPrivateProfile) return;
+      const requestScope = personProfileReadScope;
+      if (personProfileLoadAbortRef.current && !personProfileLoadAbortRef.current.signal.aborted &&
+        personProfileInFlightScopeRef.current === requestScope) return;
       const controller = beginLatestDutyOverviewRequest(
         personProfileLoadAbortRef,
       );
+      personProfileInFlightScopeRef.current = requestScope;
       const requestId = personProfileLoadSeqRef.current + 1;
       personProfileLoadSeqRef.current = requestId;
       setScreenshotSectionState('personProfiles', 'loading');
+      setPersonProfileSnapshot(current => ({ ...current, refreshing: true }));
       try {
         await Promise.all([
           canReadPublicProfiles ? getPersonProfiles(forceRefresh && canRefreshPublicProfiles, 'leave', controller.signal)
             .then((data) => {
               if (
                 controller.signal.aborted ||
-                requestId !== personProfileLoadSeqRef.current
+                requestId !== personProfileLoadSeqRef.current ||
+                activePersonProfileReadScopeRef.current !== requestScope
               ) return;
               setPersonProfiles(data.organizations || []);
+              setPersonProfilePublishedScope(requestScope);
               setChangeRequestSubmitterOptions(data.changeRequestSubmitters || []);
-              setScreenshotSectionState('personProfiles', 'ready');
+              const stale = data.cache?.stale === true;
+              const refreshing = data.cache?.refreshing === true;
+              setPersonProfileSnapshot({
+                fetchedAt: typeof data.cache?.fetchedAt === 'number' && Number.isFinite(data.cache.fetchedAt) ? data.cache.fetchedAt : Date.now(),
+                stale, refreshing,
+              });
+              setScreenshotSectionState('personProfiles', stale && !refreshing ? 'error' : 'ready');
             })
             .catch((error) => {
-              if (controller.signal.aborted) return;
+              if (controller.signal.aborted || activePersonProfileReadScopeRef.current !== requestScope) return;
               logger.error('加载人员资料失败', error);
               if (requestId === personProfileLoadSeqRef.current) {
                 setPersonProfileDetails([]);
                 setScreenshotSectionState('personProfiles', 'error');
+                setPersonProfileSnapshot(current => ({ ...current, stale: current.fetchedAt !== null, refreshing: false }));
               }
             }) : Promise.resolve(null),
           canViewPrivateProfile
@@ -5365,18 +5405,21 @@ function MonthlySchedulePageContent() {
                 .then((detailData) => {
                   if (
                     !controller.signal.aborted &&
-                    requestId === personProfileLoadSeqRef.current
+                    requestId === personProfileLoadSeqRef.current &&
+                    activePersonProfileReadScopeRef.current === requestScope
                   ) {
                     setPersonProfileDetails(detailData.organizations || []);
+                        setPersonProfileDetailScope(requestScope);
                   }
                 })
                 .catch((error) => {
-                  if (!controller.signal.aborted) {
+                  if (!controller.signal.aborted && activePersonProfileReadScopeRef.current === requestScope) {
                     logger.warn('加载人员详细资料失败，继续使用公开资料', error);
                   }
                   if (
                     !controller.signal.aborted &&
-                    requestId === personProfileLoadSeqRef.current
+                    requestId === personProfileLoadSeqRef.current &&
+                    activePersonProfileReadScopeRef.current === requestScope
                   ) {
                     setPersonProfileDetails([]);
                   }
@@ -5386,32 +5429,78 @@ function MonthlySchedulePageContent() {
       } finally {
         if (personProfileLoadAbortRef.current === controller) {
           personProfileLoadAbortRef.current = null;
+          personProfileInFlightScopeRef.current = null;
+          if (!controller.signal.aborted && activePersonProfileReadScopeRef.current === requestScope) {
+            setPersonProfilePollVersion(current => current + 1);
+          }
         }
       }
     },
-    [canReadPublicProfiles, canRefreshPublicProfiles, canViewPrivateProfile, canRefreshPrivateProfile, setScreenshotSectionState],
+    [canReadPublicProfiles, canRefreshPublicProfiles, canViewPrivateProfile, canRefreshPrivateProfile, personProfileReadScope, setScreenshotSectionState],
   );
 
   const loadTravelPersonProfiles = useCallback(async (forceRefresh = false) => {
     if (!canReadPublicProfiles) return;
+    const requestScope = personProfileReadScope;
+    if (travelProfileLoadAbortRef.current && !travelProfileLoadAbortRef.current.signal.aborted &&
+      travelProfileInFlightScopeRef.current === requestScope) return;
+    const controller = beginLatestDutyOverviewRequest(travelProfileLoadAbortRef);
+    travelProfileInFlightScopeRef.current = requestScope;
     forceRefresh = forceRefresh && canRefreshPublicProfiles;
     const requestId = travelProfileLoadSeqRef.current + 1;
     travelProfileLoadSeqRef.current = requestId;
     setTravelProfilesStatus('loading');
+    setTravelProfileSnapshot(current => ({ ...current, refreshing: true }));
     try {
-      const data = await getPersonProfiles(forceRefresh, 'travel');
-      if (requestId === travelProfileLoadSeqRef.current) {
+      const data = await getPersonProfiles(forceRefresh, 'travel', controller.signal);
+      if (!controller.signal.aborted && requestId === travelProfileLoadSeqRef.current && activePersonProfileReadScopeRef.current === requestScope) {
         setTravelPersonProfiles(data.organizations || []);
-        setTravelProfilesStatus('ready');
+        setTravelProfilePublishedScope(requestScope);
+        const stale = data.cache?.stale === true;
+        const refreshing = data.cache?.refreshing === true;
+        setTravelProfileSnapshot({ fetchedAt: typeof data.cache?.fetchedAt === 'number' && Number.isFinite(data.cache.fetchedAt) ? data.cache.fetchedAt : Date.now(), stale, refreshing });
+        setTravelProfilesStatus(stale && !refreshing ? 'error' : 'ready');
       }
     } catch (error) {
+      if (controller.signal.aborted || activePersonProfileReadScopeRef.current !== requestScope) return;
       logger.error('加载差旅人员列表失败', error);
       if (requestId === travelProfileLoadSeqRef.current) {
-        setTravelPersonProfiles([]);
+        setTravelProfileSnapshot(current => ({ ...current, stale: current.fetchedAt !== null, refreshing: false }));
         setTravelProfilesStatus('error');
       }
+    } finally {
+      if (travelProfileLoadAbortRef.current === controller) {
+        travelProfileLoadAbortRef.current = null;
+        travelProfileInFlightScopeRef.current = null;
+        if (!controller.signal.aborted && activePersonProfileReadScopeRef.current === requestScope) setTravelProfilePollVersion(current => current + 1);
+      }
     }
-  }, [canReadPublicProfiles, canRefreshPublicProfiles]);
+  }, [canReadPublicProfiles, canRefreshPublicProfiles, personProfileReadScope]);
+
+  const handleRetryTravelPersonProfiles = useCallback(() => {
+    if (travelSubmitting || personnelMovementSubmitting || travelProfileLoadAbortRef.current) return;
+    travelProfileRefreshDeadlineRef.current = null;
+    void loadTravelPersonProfiles(false);
+  }, [loadTravelPersonProfiles, personnelMovementSubmitting, travelSubmitting]);
+
+  useEffect(() => {
+    const pickerOpen = personnelMovementDialogOpen || (vacancyDialogOpen && staffAdjustmentMode === 'travel');
+    if (!pickerOpen || !canReadPublicProfiles || !travelProfileSnapshot.refreshing) {
+      travelProfileRefreshDeadlineRef.current = null;
+      return;
+    }
+    const deadline = travelProfileRefreshDeadlineRef.current ?? Date.now() + 120_000;
+    travelProfileRefreshDeadlineRef.current = deadline;
+    if (travelProfilesStatus === 'loading') return;
+    if (Date.now() >= deadline) {
+      setTravelProfileSnapshot(current => ({ ...current, stale: true, refreshing: false }));
+      setTravelProfilesStatus('error');
+      return;
+    }
+    const timer = window.setTimeout(() => { void loadTravelPersonProfiles(false); }, 5_000);
+    return () => window.clearTimeout(timer);
+  }, [canReadPublicProfiles, personnelMovementDialogOpen, vacancyDialogOpen, staffAdjustmentMode, loadTravelPersonProfiles,
+    travelProfileSnapshot.refreshing, travelProfileSnapshot.fetchedAt, travelProfilePollVersion, travelProfilesStatus]);
 
   useEffect(() => {
     if (!canViewPrivateProfile) {
@@ -5419,8 +5508,34 @@ function MonthlySchedulePageContent() {
     }
   }, [canViewPrivateProfile]);
 
+  useEffect(() => {
+    // Published data is masked synchronously above; clear retained data at every scope boundary.
+    personProfileLoadSeqRef.current += 1;
+    personProfileLoadAbortRef.current?.abort();
+    personProfileLoadAbortRef.current = null;
+    personProfileInFlightScopeRef.current = null;
+    personProfileRefreshDeadlineRef.current = null;
+    setPersonProfiles([]);
+    setChangeRequestSubmitterOptions([]);
+    setPersonProfileDetails([]);
+    setPersonProfilePublishedScope('');
+    setPersonProfileDetailScope('');
+    setPersonProfileSnapshot({ fetchedAt: null, stale: false, refreshing: false });
+    travelProfileLoadSeqRef.current += 1;
+    travelProfileLoadAbortRef.current?.abort();
+    travelProfileLoadAbortRef.current = null;
+    travelProfileInFlightScopeRef.current = null;
+    travelProfileRefreshDeadlineRef.current = null;
+    setTravelPersonProfiles([]);
+    setTravelProfilePublishedScope('');
+    setTravelProfileSnapshot({ fetchedAt: null, stale: false, refreshing: false });
+    setTravelProfilesStatus('idle');
+    return () => { personProfileLoadAbortRef.current?.abort(); travelProfileLoadAbortRef.current?.abort(); };
+  }, [personProfileReadScope]);
+
   const personProfileMap = useMemo(() => {
     const profileMap: StaffProfileMap = new Map();
+    if (!canReadPublicProfiles) return profileMap;
     const detailsByName = new Map(
       personProfileDetails.map((profile) => [
         normalizeStaffProfileKey(profile.supervisorText),
@@ -5443,7 +5558,7 @@ function MonthlySchedulePageContent() {
       });
     });
     return profileMap;
-  }, [canViewPrivateProfile, personProfileDetails, personProfiles]);
+  }, [canReadPublicProfiles, canViewPrivateProfile, personProfileDetails, personProfiles]);
 
   const travelStaffOptions = useMemo(() => {
     const names = travelPersonProfiles
@@ -5470,6 +5585,7 @@ function MonthlySchedulePageContent() {
   }, [personnelMovementStaffSearch, travelStaffOptions]);
 
   const leaveStaffOptions = useMemo(() => {
+    if (!canReadPublicProfiles) return [];
     const names = personProfiles
       .filter((profile) => canSelectWorkforcePerson(access, profile.buildingsSpecialties))
       .map((profile) => profile.supervisorText || profile.code || '')
@@ -5478,12 +5594,37 @@ function MonthlySchedulePageContent() {
     return Array.from(new Set(names)).sort((a, b) =>
       a.localeCompare(b, 'zh-CN'),
     );
-  }, [personProfiles, access.accountId, access.displayName]);
+  }, [canReadPublicProfiles, personProfiles, access.accountId, access.displayName]);
 
   const selectedLeaveStaffProfile = useMemo(
     () => getStaffProfile(personProfileMap, leaveStaffName),
     [leaveStaffName, personProfileMap],
   );
+  const isLeavePersonProfileReady = canReadPublicProfiles && Boolean(selectedLeaveStaffProfile) &&
+    screenshotReadiness.personProfiles === 'ready' && !personProfileSnapshot.stale && !personProfileSnapshot.refreshing;
+  const handleRetryLeavePersonProfiles = useCallback(() => {
+    if (leaveRequestDraftLocked || personProfileLoadAbortRef.current) return;
+    personProfileRefreshDeadlineRef.current = null;
+    void loadPersonProfiles(false);
+  }, [leaveRequestDraftLocked, loadPersonProfiles]);
+
+  useEffect(() => {
+    if (!leaveRequestDialogOpen || !canReadPublicProfiles || !personProfileSnapshot.refreshing) {
+      personProfileRefreshDeadlineRef.current = null;
+      return;
+    }
+    const deadline = personProfileRefreshDeadlineRef.current ?? Date.now() + 120_000;
+    personProfileRefreshDeadlineRef.current = deadline;
+    if (screenshotReadiness.personProfiles === 'loading') return;
+    if (Date.now() >= deadline) {
+      setPersonProfileSnapshot(current => ({ ...current, stale: true, refreshing: false }));
+      setScreenshotSectionState('personProfiles', 'error');
+      return;
+    }
+    const timer = window.setTimeout(() => { void loadPersonProfiles(false); }, 5_000);
+    return () => window.clearTimeout(timer);
+  }, [canReadPublicProfiles, leaveRequestDialogOpen, loadPersonProfiles, personProfileSnapshot.refreshing,
+    personProfileSnapshot.fetchedAt, personProfilePollVersion, screenshotReadiness.personProfiles, setScreenshotSectionState]);
 
   const leaveScheduleMonthDateKeys = useMemo(() => {
     return getLeaveScheduleCoverageDateKeys(
@@ -5510,7 +5651,7 @@ function MonthlySchedulePageContent() {
     const loaded = await ensureSchedulesForLeaveDateRange(
       leaveScheduleCoverageKey.split('|'),
       resolveLeaveScheduleForceRefresh(true, canRefreshMonthlySchedule || selfServiceOnly),
-    );
+    ).catch(() => false);
     if (requestId !== leaveScheduleCoverageLoadSeqRef.current) {
       return;
     }
@@ -6411,7 +6552,7 @@ function MonthlySchedulePageContent() {
       return;
     }
 
-    if (!selectedLeaveStaffProfile) {
+    if (!selectedLeaveStaffProfile || !isLeavePersonProfileReady) {
       leaveScheduleCoverageLoadSeqRef.current += 1;
       setLeaveScheduleCoverageStatus('idle');
       setLeaveScheduleCoverageReadyKey(null);
@@ -6445,6 +6586,11 @@ function MonthlySchedulePageContent() {
           loaded ? leaveScheduleCoverageKey : null,
         );
       },
+      () => {
+        if (!active || requestId !== leaveScheduleCoverageLoadSeqRef.current) return;
+        setLeaveScheduleCoverageStatus('error');
+        setLeaveScheduleCoverageReadyKey(null);
+      },
     );
 
     return () => {
@@ -6457,6 +6603,7 @@ function MonthlySchedulePageContent() {
     leaveScheduleCoverageKey,
     leaveRequestDialogOpen,
     selectedLeaveStaffProfile,
+    isLeavePersonProfileReady,
   ]);
 
   useEffect(() => {
@@ -7003,6 +7150,10 @@ function MonthlySchedulePageContent() {
     if (travelSubmitting) {
       return;
     }
+    if (!isTravelPersonProfileReady) {
+      toast.warning('人员资料尚未核验完成，请重新加载人员资料后提交');
+      return;
+    }
 
     const staffName = travelStaffName.trim();
     if (!staffName) {
@@ -7101,6 +7252,7 @@ function MonthlySchedulePageContent() {
     beginOptimisticScheduleMutation,
     canCreateMonthlySchedule,
     loadTravelDetails,
+    isTravelPersonProfileReady,
     schedules,
     travelEndDate,
     travelStaffName,
@@ -7535,6 +7687,10 @@ function MonthlySchedulePageContent() {
         toast.warning('请从人员表中选择请休假人员');
         return;
       }
+      if (!isLeavePersonProfileReady) {
+        toast.warning('人员资料尚未核验完成，请重新加载人员资料后提交');
+        return;
+      }
       const parsedStartAt = parseShanghaiLocalDateTime(leaveStartAt);
       const parsedEndAt = parseShanghaiLocalDateTime(leaveEndAt);
       if (!parsedStartAt || !parsedEndAt) {
@@ -7828,6 +7984,7 @@ function MonthlySchedulePageContent() {
     leaveScheduleCoverageStatus,
     leaveScheduleCoverageKey,
     isLeaveScheduleCoverageReady,
+    isLeavePersonProfileReady,
     leaveStaffName,
     leaveStartAt,
     leaveEndTimeCandidates.endOptions,
@@ -12096,7 +12253,7 @@ function MonthlySchedulePageContent() {
                 />
                 {personnelMovementStaffPickerOpen ? (
                   <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-lg">
-                    {travelProfilesLoading ? (
+                    {travelProfilesLoading && filteredPersonnelMovementStaffOptions.length === 0 ? (
                       <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         正在加载人员
@@ -12127,7 +12284,7 @@ function MonthlySchedulePageContent() {
                       ))
                     ) : (
                       <div className="px-3 py-2 text-sm text-slate-500">
-                        未匹配到人员，可继续手动输入
+                        {travelProfilesStatus === 'error' ? '人员列表暂不可用，可重试加载' : '未匹配到人员，可继续手动输入'}
                       </div>
                     )}
                   </div>
@@ -12135,6 +12292,13 @@ function MonthlySchedulePageContent() {
               </div>
             </div>
 
+            <LeaveRequestPersonProfileStatus
+              status={travelProfilesStatus === 'idle' ? 'loading' : travelProfilesStatus}
+              stale={travelProfileSnapshot.stale} refreshing={travelProfileSnapshot.refreshing}
+              fetchedAt={travelProfileSnapshot.fetchedAt} hasProfile={travelPersonProfiles.length > 0}
+              hasSelection={false} disabled={personnelMovementSubmitting}
+              onRetry={handleRetryTravelPersonProfiles}
+            />
             <div>
               <div className="mb-2 text-xs font-semibold text-slate-500">
                 异动类型
@@ -12604,6 +12768,13 @@ function MonthlySchedulePageContent() {
                 <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-blue-700">
                   选择差旅人员和日期后，系统会把人员写入“差旅人员”字段，并从对应日期的“值班人员（实际）程序修改”中移除。
                 </div>
+                <LeaveRequestPersonProfileStatus
+                  status={travelProfilesStatus === 'idle' ? 'loading' : travelProfilesStatus}
+                  stale={travelProfileSnapshot.stale} refreshing={travelProfileSnapshot.refreshing}
+                  fetchedAt={travelProfileSnapshot.fetchedAt} hasProfile={travelPersonProfiles.length > 0}
+                  hasSelection={false} disabled={travelSubmitting}
+                  onRetry={handleRetryTravelPersonProfiles}
+                />
 
                 <div className="grid items-start gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[minmax(0,1fr)_160px_160px]">
                   <div>
@@ -12642,7 +12813,7 @@ function MonthlySchedulePageContent() {
                       />
                       {travelStaffPickerOpen ? (
                         <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-lg">
-                          {travelProfilesLoading ? (
+                          {travelProfilesLoading && filteredTravelStaffOptions.length === 0 ? (
                             <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500">
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
                               正在加载人员
@@ -12673,7 +12844,7 @@ function MonthlySchedulePageContent() {
                             ))
                           ) : (
                             <div className="px-3 py-2 text-sm text-slate-500">
-                              未匹配到人员
+                              {travelProfilesStatus === 'error' ? '人员列表暂不可用，可重试加载' : '未匹配到人员'}
                             </div>
                           )}
                         </div>
@@ -13267,6 +13438,7 @@ function MonthlySchedulePageContent() {
                         ? emergencyDutySubmissionIssue !== null
                         : travelSubmitting ||
                           travelActionSubmitting ||
+                          !isTravelPersonProfileReady ||
                           !travelStaffName.trim() ||
                           !travelStartDate ||
                           !travelEndDate)
@@ -13713,8 +13885,17 @@ function MonthlySchedulePageContent() {
               />
             </div>
 
-            {leaveStaffName.trim() ? (
-              selectedLeaveStaffProfile ? (
+            <LeaveRequestPersonProfileStatus
+              status={screenshotReadiness.personProfiles}
+              stale={personProfileSnapshot.stale}
+              refreshing={personProfileSnapshot.refreshing}
+              fetchedAt={personProfileSnapshot.fetchedAt}
+              hasProfile={Boolean(selectedLeaveStaffProfile)}
+              hasSelection={Boolean(leaveStaffName.trim())}
+              disabled={leaveRequestDraftLocked}
+              onRetry={handleRetryLeavePersonProfiles}
+            />
+            {leaveStaffName.trim() && selectedLeaveStaffProfile ? (
                 <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-3 text-xs text-slate-700">
                   <div className="mb-2 font-semibold text-blue-800">
                     人员信息
@@ -13742,17 +13923,6 @@ function MonthlySchedulePageContent() {
                     </div>
                   </div>
                 </div>
-              ) : (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  {leaveApplicant.mode === 'automatic'
-                    ? screenshotReadiness.personProfiles === 'error'
-                      ? '人员资料加载失败，请关闭后重试。'
-                      : screenshotReadiness.personProfiles === 'loading'
-                        ? '正在加载人员资料…'
-                        : '未匹配到登录人员，请联系管理员核对人员资料。'
-                    : '未匹配到该人员，请从下拉列表中选择。'}
-                </div>
-              )
             ) : null}
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -13763,7 +13933,10 @@ function MonthlySchedulePageContent() {
                 endOptions={leaveEndTimeCandidates.endOptions}
                 shiftRanges={leaveTimeCandidates.shiftRanges}
                 disabled={leaveRequestDraftLocked || !selectedLeaveStaffProfile}
-                loading={leaveScheduleCoverageStatus === 'loading'}
+                loading={screenshotReadiness.personProfiles === 'loading' || personProfileSnapshot.refreshing || leaveScheduleCoverageStatus === 'loading'}
+                ready={isLeavePersonProfileReady && isLeaveScheduleCoverageReady}
+                error={isLeavePersonProfileReady && leaveScheduleCoverageStatus === 'error'
+                  ? '排班读取失败，暂不能判断可申请的排班时段。' : undefined}
                 onStartAtChange={handleLeaveStartAtChange}
                 onEndAtChange={setLeaveEndAt}
               />
@@ -13837,7 +14010,7 @@ function MonthlySchedulePageContent() {
               onError={(message) => toast.warning(message)}
             />
 
-            {selectedLeaveStaffProfile ? (
+            {selectedLeaveStaffProfile && isLeavePersonProfileReady ? (
               <LeaveRequestHoursSummary
                 coverageStatus={leaveScheduleCoverageStatus}
                 isCoverageReady={isLeaveScheduleCoverageReady}
@@ -13883,6 +14056,7 @@ function MonthlySchedulePageContent() {
                       !canCreateLeaveRequest ||
                       !leaveStaffName.trim() ||
                       !selectedLeaveStaffProfile ||
+                      !isLeavePersonProfileReady ||
                       !leaveStartAt ||
                       !leaveEndAt ||
                       !leaveTimeCandidates.startOptions.includes(

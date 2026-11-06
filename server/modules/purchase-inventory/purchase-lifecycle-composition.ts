@@ -16,7 +16,10 @@ import { lifecyclePaymentUploadSourceFingerprint } from './purchase-lifecycle-pa
 import { FeishuCardActionConsumer } from './feishu-card-action.consumer';
 
 export function purchaseLifecycleNewApplicationsEnabled(): boolean {
-  return /^(1|true|yes|on)$/i.test(readEnv('PURCHASE_LIFECYCLE_CARD_ENABLED'));
+  // New applications use the new flow after the runtime passes all gates. An
+  // explicit false remains a supported way to stop admission while draining.
+  const configured = readEnv('PURCHASE_LIFECYCLE_CARD_ENABLED').trim();
+  return configured === '' || /^(1|true|yes|on)$/i.test(configured);
 }
 
 /** The single owner starts only after the release is active and the existing
@@ -100,6 +103,7 @@ export class PurchaseLifecycleComposition implements OnApplicationBootstrap, OnM
       attachmentBaseUrl: () => readEnv('PUBLIC_BASE_URL', ['FEISHU_PUBLIC_BASE_URL', 'APP_PUBLIC_URL']),
       receiptUploadReady: () => this.images.isReady(), paymentUploadReady: () => this.isProcessing(),
       sourceGuard: () => this.verifySourceOrThrow(),
+      sourceFingerprint: lifecyclePaymentUploadSourceFingerprint,
       reportFailure: code => this.report(code),
       checks: {
         writerFence: () => this.verifySource(),
@@ -116,11 +120,13 @@ export class PurchaseLifecycleComposition implements OnApplicationBootstrap, OnM
     catch (error) { await factory.stop(); throw error; }
     if (this.destroyed) { await factory.stop(); return; }
     this.factory = factory;
+    this.approvals.setLifecycleReadiness(() => this.isProcessing());
     this.lastFailure = '';
   }
   private async verifySourceOrThrow(): Promise<void> { if (!await this.verifySource()) throw new Error('采购卡片来源已变化'); }
   async onModuleDestroy(): Promise<void> {
     this.destroyed = true;
+    this.approvals.setLifecycleReadiness(() => false);
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     await this.pending;

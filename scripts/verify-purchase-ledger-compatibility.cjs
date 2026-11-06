@@ -40,9 +40,11 @@ function verifyPurchaseLedgerCompatibility({appRoot,runtimeDist,ledgerPath}) {
   const ledger=readJson(path.resolve(root,ledgerPath),true);
   if(!ledger)return {compatible:true,requiredCapability:null,runtimeCapability};
   if(![1,2].includes(ledger.version)||!Array.isArray(ledger.commands)||!Array.isArray(ledger.reminders))fail('PURCHASE_LEDGER_INVALID');
+  // The workflow store persists reminder deduplication keys as strings, not records.
+  if(ledger.reminders.some(reminder=>typeof reminder!=='string'))fail('PURCHASE_LEDGER_INVALID');
   const arrays=['platformApprovalClaims','platformApprovalWork','platformLegacyApprovalClaims','lifecycleOutbox','lifecycleFormCredentials','lifecyclePaymentUploads','lifecyclePaymentBlocks'];
   const object=value=>value&&typeof value==='object'&&!Array.isArray(value);
-  for(const name of ['commands','reminders','notifications','cardActions','managerApprovalActions','managerApprovalCards','managerApprovalBatches','managerApprovalBatchActions',...arrays]) {
+  for(const name of ['commands','notifications','cardActions','managerApprovalActions','managerApprovalCards','managerApprovalBatches','managerApprovalBatchActions',...arrays]) {
     if(ledger[name]!==undefined&&(!Array.isArray(ledger[name])||ledger[name].some(row=>!object(row))))fail('PURCHASE_LEDGER_INVALID');
   }
   if(ledger.lifecycleReceiptPrepareQueue!==undefined&&(!object(ledger.lifecycleReceiptPrepareQueue)||!Array.isArray(ledger.lifecycleReceiptPrepareQueue.tasks)))fail('PURCHASE_LEDGER_INVALID');

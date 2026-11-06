@@ -880,6 +880,12 @@ export class InventoryOutboundApprovalGateway {
         error,
         `${operationName}失败`,
       );
+    } finally {
+      invalidateBitableRecordCache({
+        appToken: config.appToken,
+        tableId: config.tableId,
+        deletePersisted: true,
+      });
     }
 
     let record: InventoryOutboundApprovalBitableRecord;
@@ -904,10 +910,6 @@ export class InventoryOutboundApprovalGateway {
       );
     }
 
-    invalidateBitableRecordCache({
-      appToken: config.appToken,
-      tableId: config.tableId,
-    });
   }
 
   private outboundConfig(): InventoryOutboundBaseConfig {

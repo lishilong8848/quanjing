@@ -45,7 +45,7 @@ export class PersonnelCredentialsService {
         this.checkRate(sourceKey, 40); this.checkRate(accountKey, 10);
         const current = this.local(account.id);
         const record = await this.source(current).catch(error => {
-          if (error instanceof UnauthorizedException) { this.rate(sourceKey, 40); this.rate(accountKey, 10); }
+          if (error instanceof UnauthorizedException || error instanceof ForbiddenException) { this.rate(sourceKey, 40); this.rate(accountKey, 10); }
           throw error;
         });
         if (!await this.matchesSource(password, record)) {
@@ -91,7 +91,9 @@ export class PersonnelCredentialsService {
 
   requiresPasswordChange(principal: AccessPrincipal): boolean {
     const raw = principal.accountId ? this.configuration.getPersonnelCredentialAccount(principal.accountId) : null;
-    const id = raw?.kind === 'feishu' ? raw.personnelIdentity : raw?.loginMethod === 'personnel-password' ? raw.id : undefined;
+    // A linked personnel credential does not make a trusted Feishu session a
+    // password login. Keep the initial-password restriction on the local identity.
+    const id = raw?.kind === 'local' && raw.loginMethod === 'personnel-password' ? raw.id : undefined;
     // Shared recovery administrators are not personnel password accounts. Their
     // sessions must remain available to repair a damaged personnel-only ledger.
     return !!id && /^local-external-[a-f0-9]{64}$/.test(id) && this.security.read().accounts[id]?.requiresPasswordChange === true;
@@ -113,17 +115,13 @@ export class PersonnelCredentialsService {
     const { account } = this.eligible(principal);
     this.rate(`change:${account.id}`, 10);
     return this.bounded(() => this.security.withAccountLock(account.id, async () => {
-      const { account: current, raw } = this.eligible(principal);
+      const { account: current } = this.eligible(principal);
       const source = await this.source(current);
       const recovered = await this.reconcileForVerifiedChange(principal, current, source, request);
       const result = recovered.completed || await this.execute(current, recovered.source, 'change', request, async () => {
         if (!await this.matchesSource(request.currentPassword, recovered.source)) throw new BadRequestException('当前密码不正确');
       });
-      if (raw.id === current.id) return result;
-      const refreshed = this.configuration.getPersonnelCredentialAccount(raw.id);
-      const principalNow = refreshed && this.configuration.currentPrincipal(raw.id, refreshed.version);
-      if (!principalNow) throw new ForbiddenException('账号状态已变化，请重新登录');
-      return principalNow;
+      return result;
     }));
   }
 
@@ -139,11 +137,13 @@ export class PersonnelCredentialsService {
     await this.bounded(async () => {
       const record = await this.gateway.findActive(name);
       if (!record || !safeEqual(record.identityNumber, identity)) throw invalidReset();
+      this.assertPasswordLogin(record);
       let account: StoredAccount;
       try { account = this.local(record.accountId); } catch { throw invalidReset(); }
       await this.security.withAccountLock(account.id, async () => {
         let fresh = await this.gateway.findActive(name);
         if (!fresh || fresh.accountId !== account.id || !safeEqual(fresh.identityNumber, identity)) throw invalidReset();
+        this.assertPasswordLogin(fresh);
         let current: StoredAccount;
         try { current = this.local(account.id); } catch { throw invalidReset(); }
         fresh = await this.reconcileForVerifiedReset(current, fresh, request);
@@ -165,6 +165,7 @@ export class PersonnelCredentialsService {
     if (!pending.length) return { source };
     if (pending.length !== 1) throw new ConflictException('上次密码处理结果待核对，请使用原请求重试');
     const [key, intent] = pending[0], fresh = await this.gateway.fresh(source);
+    this.assertPasswordLogin(fresh);
     const checkCurrent = () => {
       const current = this.eligible(principal).account;
       if (current.id !== account.id || (personnelFingerprint(current.passwordHash || '') !== intent.expectedLocalHashFingerprint &&
@@ -226,6 +227,7 @@ export class PersonnelCredentialsService {
       intent.accountId === account.id && ['prepared', 'written'].includes(intent.status));
     if (!pending.length) return source;
     const fresh = await this.gateway.fresh(source);
+    this.assertPasswordLogin(fresh);
     for (const [key, intent] of pending) {
       const current = this.local(account.id);
       if (fresh.password === intent.newHash) {
@@ -278,6 +280,7 @@ export class PersonnelCredentialsService {
       this.conflict(key);
     }
     let fresh = await this.gateway.fresh(source);
+    this.assertPasswordLogin(fresh);
     if (intent.status === 'completed') {
       if (fresh.password !== intent.newHash || current.passwordHash !== intent.newHash) throw new ConflictException('密码已再次变更，请使用当前密码重新登录');
       return this.configuration.currentPrincipal(current.id, current.version) || (() => { throw invalidLogin(); })();
@@ -287,7 +290,9 @@ export class PersonnelCredentialsService {
       this.local(account.id); // Recheck current revocation immediately before external write.
       try { await this.gateway.writePassword(fresh, intent.newHash); }
       catch { /* An upstream timeout is not proof of failure: always read back before retrying. */ }
-      fresh = await this.gateway.fresh(source);
+      fresh = await this.gateway.fresh(source).catch(() => {
+        throw new ServiceUnavailableException('密码更新结果尚未确认，请保留原请求重试');
+      });
       if (fresh.password !== intent.newHash) {
         if (sourcePasswordFingerprint(fresh.password) !== intent.previousSourceFingerprint) this.conflict(key);
         throw new ServiceUnavailableException('密码更新结果尚未确认，请保留原请求重试');
@@ -304,15 +309,13 @@ export class PersonnelCredentialsService {
     return result;
   }
 
-  private eligible(principal: AccessPrincipal, checkVersion = true): { account: StoredAccount; raw: StoredAccount } {
+  private eligible(principal: AccessPrincipal, checkVersion = true): { account: StoredAccount } {
     if (principal.impersonation || !principal.accountId) throw forbidden();
     const raw = this.configuration.getPersonnelCredentialAccount(principal.accountId);
-    if (!raw || !this.configuration.personnelCredentialEligible(raw.id) ||
+    if (!raw || raw.kind !== 'local' || raw.loginMethod !== 'personnel-password' || !this.configuration.personnelCredentialEligible(raw.id) ||
       !raw.enabled || raw.deleted || raw.personnelActive === false || raw.reactivationRequired || raw.personnelSuspended ||
       (checkVersion && principal.authorizationVersion !== raw.version)) throw forbidden();
-    const id = raw.kind === 'feishu' ? raw.personnelIdentity : raw.id;
-    if (!id) throw forbidden();
-    return { account: this.local(id), raw };
+    return { account: this.local(raw.id) };
   }
   private local(id: string): StoredAccount {
     const account = this.configuration.getPersonnelCredentialAccount(id);
@@ -324,7 +327,11 @@ export class PersonnelCredentialsService {
   private async source(account: StoredAccount): Promise<PersonnelCredentialRecord> {
     const source = await this.gateway.findActive(account.name);
     if (!source || source.accountId !== account.id || (account.personnelAppId && account.personnelAppId !== source.appId)) throw invalidLogin();
+    this.assertPasswordLogin(source);
     return source;
+  }
+  private assertPasswordLogin(source: PersonnelCredentialRecord): void {
+    if (source.loginMethod === 'feishu') throw new ForbiddenException('此账号请使用飞书授权登录');
   }
   private async matchesSource(password: unknown, record: PersonnelCredentialRecord): Promise<boolean> {
     if (typeof password !== 'string' || Array.from(password).length > 128 || Buffer.from(password).toString('utf8') !== password) return false;

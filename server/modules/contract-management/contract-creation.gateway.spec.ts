@@ -175,6 +175,7 @@ describe('ContractCreationGateway', () => {
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-contract',
       tableId: 'tbl-execution',
+      deletePersisted: true,
     });
   });
 

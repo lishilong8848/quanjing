@@ -288,7 +288,7 @@ export class AttendanceAutomationFeishuGateway {
           `${recordsUrl(appToken, tableId)}/batch_delete`,
           { records: batch },
           { headers: { Authorization: `Bearer ${token}` }, timeout: 30_000 },
-        );
+        ).finally(() => invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true }));
         const deleted = new Set<string>(
           (response.data?.data?.records || [])
             .filter((item: { deleted?: boolean }) => item.deleted === true)
@@ -301,7 +301,6 @@ export class AttendanceAutomationFeishuGateway {
           throw new Error('已审批请假缺卡误报删除未全部确认，备份已保留');
         }
       }
-      invalidateBitableRecordCache({ appToken, tableId });
       const verified = await fetchBitableRecords(this.httpService, {
         appToken,
         tableId,
@@ -400,6 +399,7 @@ export class AttendanceAutomationFeishuGateway {
         `${recordsUrl(appToken, tableId)}/batch_create`,
         { records: batch },
         token,
+        { appToken, tableId },
       );
     }
     for (const batch of chunks(updates, 500)) {
@@ -407,10 +407,10 @@ export class AttendanceAutomationFeishuGateway {
         `${recordsUrl(appToken, tableId)}/batch_update`,
         { records: batch },
         token,
+        { appToken, tableId },
       );
     }
 
-    invalidateBitableRecordCache({ appToken, tableId });
     const verified = await fetchBitableRecords(this.httpService, {
       appToken,
       tableId,
@@ -473,7 +473,7 @@ export class AttendanceAutomationFeishuGateway {
         `${recordsUrl(appToken, tableId)}/batch_delete`,
         { records: batch },
         { headers: { Authorization: `Bearer ${token}` }, timeout: 30_000 },
-      );
+      ).finally(() => invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true }));
       const data = response.data;
       const deleted = new Set<string>(
         (data?.data?.records || [])
@@ -486,8 +486,6 @@ export class AttendanceAutomationFeishuGateway {
         );
       }
     }
-    if (reconciliation.duplicates.length)
-      invalidateBitableRecordCache({ appToken, tableId });
     return {
       total: rows.length,
       created: creates.length,
@@ -1232,11 +1230,12 @@ export class AttendanceAutomationFeishuGateway {
     url: string,
     body: Record<string, unknown>,
     token: string,
+    target: { appToken: string; tableId: string },
   ): Promise<void> {
     const response = await this.httpService.axiosRef.post(url, body, {
       headers: { Authorization: `Bearer ${token}` },
       timeout: 30_000,
-    });
+    }).finally(() => invalidateBitableRecordCache({ ...target, deletePersisted: true }));
     assertFeishuSuccess(response.data, '写入飞书考勤归档失败');
   }
 

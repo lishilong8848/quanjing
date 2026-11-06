@@ -80,6 +80,20 @@ describe('personnel credential lifecycle with isolated source/configuration', ()
     expect(service.requiresPasswordChange({ accountId: 'local-admin-all', role: 'admin', purchaseBuilding: null })).toBe(false);
   });
 
+  it.each(['VNET测试人员', 'A', 'B', 'C', 'D', 'E', 'H', '110站'])('does not inherit a personnel password requirement into the Feishu identity %s', name => {
+    const linked = { ...account, id: 'feishu-' + 'b'.repeat(64), name, kind: 'feishu', loginMethod: undefined, personnelIdentity: account.id };
+    configuration.getPersonnelCredentialAccount.mockImplementation((id: string) => id === linked.id ? linked : id === account.id ? account : null);
+    store.update(state => { state.accounts[account.id] = { requiresPasswordChange: true, updatedAt: Date.now() }; });
+    const before = readFileSync(store.filePath);
+    expect(service.requiresPasswordChange({ ...principal(), accountId: linked.id })).toBe(false);
+    expect(service.requiresPasswordChange(principal())).toBe(true);
+    expect(readFileSync(store.filePath)).toEqual(before);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    writeFileSync(store.filePath, '{broken');
+    expect(service.requiresPasswordChange({ ...principal(), accountId: linked.id })).toBe(false);
+    expect(() => service.requiresPasswordChange(principal())).toThrow('安全状态');
+  });
+
   it('does not treat a malformed nonempty encoded password as the initial password', async () => {
     record.password = 'pbkdf2_sha256$broken';
     await expect(service.authenticateLogin(principal(), '31002X')).rejects.toThrow('登录凭据无效');
@@ -216,7 +230,7 @@ describe('personnel credential lifecycle with isolated source/configuration', ()
   it('recovers an interrupted intent after service restart without retaining raw credentials', async () => {
     gateway.fresh.mockImplementationOnce(async () => ({ ...record }));
     gateway.fresh.mockRejectedValueOnce(new Error('read-back timeout'));
-    await expect(service.changePassword(principal(), change())).rejects.toThrow('read-back timeout');
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('尚未确认');
     const restarted = new PersonnelCredentialsService({} as any, configuration, new PersonnelSecurityStore(store.filePath), gateway);
     await restarted.changePassword(principal(), change());
     expect(gateway.writePassword).toHaveBeenCalledTimes(1);
@@ -231,7 +245,7 @@ describe('personnel credential lifecycle with isolated source/configuration', ()
     expect(gateway.writePassword).toHaveBeenCalledTimes(1);
   });
 
-  it('uses explicit Feishu personnelIdentity bindings and returns that refreshed principal', async () => {
+  it('does not offer or perform personnel password changes through a Feishu session', async () => {
     const feishu: StoredAccount = { ...account, id: 'feishu-' + 'b'.repeat(64), kind: 'feishu', appId: 'cliTest', personnelIdentity: ACCOUNT_ID };
     configuration.getPersonnelCredentialAccount.mockImplementation(id => id === feishu.id ? { ...feishu } : id === account.id ? { ...account } : null);
     configuration.currentPrincipal.mockImplementation((id, version) => id === feishu.id && version === feishu.version
@@ -240,13 +254,40 @@ describe('personnel credential lifecycle with isolated source/configuration', ()
     const originalCommit = configuration.commitPersonnelPassword.getMockImplementation();
     configuration.commitPersonnelPassword.mockImplementation(async (...args) => { const result = await originalCommit(...args); feishu.version++; return result; });
     const feishuPrincipal = { ...principal(), accountId: feishu.id, authorizationVersion: feishu.version };
-    expect(await service.profile(feishuPrincipal)).toEqual({ canChangePassword: true, requiresPasswordChange: false });
-    const result = await service.changePassword(feishuPrincipal, change());
-    expect(result.accountId).toBe(feishu.id);
-    expect(result.authorizationVersion).toBe(5);
-    expect(configuration.commitPersonnelPassword.mock.calls[0][0]).toBe(ACCOUNT_ID);
+    expect(await service.profile(feishuPrincipal)).toEqual({ canChangePassword: false, requiresPasswordChange: false });
+    await expect(service.changePassword(feishuPrincipal, change())).rejects.toThrow('当前账号不可修改人员密码');
+    expect(configuration.commitPersonnelPassword).not.toHaveBeenCalled();
+    expect(gateway.writePassword).not.toHaveBeenCalled();
     delete feishu.personnelIdentity;
-    expect(await service.profile({ ...result, authorizationVersion: feishu.version })).toEqual({ canChangePassword: false, requiresPasswordChange: false });
+    expect(await service.profile(feishuPrincipal)).toEqual({ canChangePassword: false, requiresPasswordChange: false });
+  });
+
+  it('requires Feishu for VNET/fixed-duty source records without changing the existing native credentials', async () => {
+    record.loginMethod = 'feishu';
+    const previousHash = account.passwordHash;
+    await expect(service.authenticateLogin(principal(), '31002X')).rejects.toThrow('此账号请使用飞书授权登录');
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('此账号请使用飞书授权登录');
+    await expect(service.resetPassword(reset(), '192.0.2.1')).rejects.toThrow('此账号请使用飞书授权登录');
+    expect(account.passwordHash).toBe(previousHash);
+    expect(store.read().intents).toEqual({});
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+  });
+
+  it.each(['change', 'reset'] as const)('does not mutate recovery state if fresh %s verification now requires Feishu', async kind => {
+    gateway.fresh.mockImplementationOnce(async () => ({ ...record }));
+    gateway.fresh.mockRejectedValueOnce(new Error('read-back lost'));
+    await expect(service.changePassword(principal(), change())).rejects.toThrow('尚未确认');
+    const before = store.read(), localHash = account.passwordHash;
+    gateway.writePassword.mockClear(); configuration.commitPersonnelPassword.mockClear();
+    gateway.fresh.mockResolvedValueOnce({ ...record, loginMethod: 'feishu' });
+    const operation = kind === 'change'
+      ? service.changePassword(principal(), change({ clientMutationId: 'refreshed_policy_123' }))
+      : service.resetPassword(reset(), '192.0.2.1');
+    await expect(operation).rejects.toThrow('此账号请使用飞书授权登录');
+    expect(store.read()).toEqual(before);
+    expect(account.passwordHash).toBe(localHash);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    expect(configuration.commitPersonnelPassword).not.toHaveBeenCalled();
   });
 
   it('supersedes an unwritten intent only after verifying the current password and rejects its later replay', async () => {
@@ -295,7 +336,7 @@ describe('personnel credential lifecycle with isolated source/configuration', ()
     if (status === 'prepared') {
       gateway.fresh.mockImplementationOnce(async () => ({ ...record }));
       gateway.fresh.mockRejectedValueOnce(new Error('readback timeout'));
-      await expect(service.changePassword(principal(), change())).rejects.toThrow('readback timeout');
+      await expect(service.changePassword(principal(), change())).rejects.toThrow('尚未确认');
     } else {
       configuration.commitPersonnelPassword.mockRejectedValueOnce(new Error('local commit interrupted'));
       await expect(service.changePassword(principal(), change())).rejects.toThrow('local commit interrupted');
@@ -485,7 +526,7 @@ describe('personnel credential lifecycle with isolated source/configuration', ()
     if (status === 'prepared') {
       gateway.fresh.mockImplementationOnce(async () => ({ ...record }));
       gateway.fresh.mockRejectedValueOnce(new Error('read-back unavailable'));
-      await expect(service.changePassword(principal(), old)).rejects.toThrow('read-back unavailable');
+      await expect(service.changePassword(principal(), old)).rejects.toThrow('尚未确认');
     } else {
       configuration.commitPersonnelPassword.mockRejectedValueOnce(new Error('local commit interrupted'));
       await expect(service.changePassword(principal(), old)).rejects.toThrow('local commit interrupted');

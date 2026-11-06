@@ -311,18 +311,16 @@ describe('PurchaseInventoryController purchase access gateways', () => {
     expect(editService.updateRecord).not.toHaveBeenCalled();
   });
 
-  it('lets an administrator decide an online purchase approval', async () => {
+  it('does not let an administrator without a signed personal binding enter the legacy writer', async () => {
     const input = { decision: 'approved' };
     const actor = { ...principal('admin'), accountId: 'synthetic-admin', authorizationVersion: 1 };
     const fixture = installApprovalAuthority(controller, actor);
     jest.useFakeTimers();
     try {
-      const accepted = await controller.approveRecord(requestFor(actor), 'rec-approval-1', input);
-      expect(accepted).toMatchObject({ pending: true, taskId: expect.stringMatching(/^purchase-approval-/), message: '审批操作已受理，正在后台同步飞书多维表' });
-      expect(fixture.accept).toHaveBeenCalledWith('rec-approval-1', input, 'A楼', expect.objectContaining({ actorOpenId: 'ou_synthetic_actor', principal: expect.objectContaining({ accountId: actor.accountId, authorizationVersion: 1 }) }));
+      await expect(controller.approveRecord(requestFor(actor), 'rec-approval-1', input)).rejects.toThrow('本人有效账号');
+      expect(fixture.accept).not.toHaveBeenCalled();
       await jest.runAllTimersAsync();
-      expect(fixture.online.getAuthorizedDecisionTaskStatus(accepted.taskId, actor)).toMatchObject({ task: { status: 'completed' } });
-      expect(fixture.gateway.updateExecutionRecordAsApp).toHaveBeenCalledTimes(1);
+      expect(fixture.gateway.updateExecutionRecordAsApp).not.toHaveBeenCalled();
     } finally { jest.clearAllTimers(); jest.useRealTimers(); }
   });
 

@@ -20,7 +20,7 @@ async function request<T>(url: string, data?: unknown, timeout = 15_000): Promis
   }
 }
 export const loadConfiguration = () => request<AccessConfigurationResponse>('');
-export const loadConfigurationPeople = () => request<{ appId: string; people: ConfigurationPerson[]; accounts: ManagedAccount[]; snapshotAt: number; personnelOverview?: PersonnelOverview }>('/people', undefined, PERSONNEL_SOURCE_TIMEOUT_MS);
+export const loadConfigurationPeople = () => request<{ appId: string; people: ConfigurationPerson[]; accounts: ManagedAccount[]; snapshotAt: number; personnelOverview?: PersonnelOverview; displayCache?: { snapshotAt: number; stale: boolean; refreshing: boolean; displayOnly: true } }>('/people', undefined, PERSONNEL_SOURCE_TIMEOUT_MS);
 export const loadPersonnelPreview = (data: PersonnelPreviewRequest) => request<PersonnelReadOnlyPreview>('/personnel-preview', data);
 export const loadHandoverPreview=(data:import('@shared/personnel-handover.interface').HandoverPreviewRequest)=>request<import('@shared/personnel-handover.interface').PersonnelHandoverPreview>('/personnel-handover/preview',data);
 export const confirmHandover=(data:import('@shared/personnel-handover.interface').HandoverConfirmation)=>request<import('@shared/personnel-handover.interface').HandoverBatch>('/personnel-handover/confirm',data);

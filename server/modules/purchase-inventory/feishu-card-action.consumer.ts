@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  Optional,
   ServiceUnavailableException,
   type OnApplicationBootstrap,
   type OnModuleDestroy,
@@ -153,16 +154,21 @@ export class FeishuCardActionHealthController {
     private readonly router: FeishuCardActionRouter,
     @Inject(FEISHU_CARD_ACTION_TRANSPORT)
     private readonly transport: FeishuCardActionTransport,
+    @Optional() @Inject('PURCHASE_LIFECYCLE_READINESS')
+    private readonly lifecycle?: { isReady(): boolean; isProcessing(): boolean },
   ) {}
 
-  health(): { enabled: boolean; ready: boolean } {
+  health(): { enabled: boolean; ready: boolean; purchaseLifecycle?: { processing: boolean; newApplicationsReady: boolean } } {
     const enabled =
       isFeishuCardActionConsumerEnabled() && this.router.isAnyEnabled();
     const ready = enabled && this.transport.isReady();
     if (enabled && !ready) {
       throw new ServiceUnavailableException('飞书卡片回调长连接当前未就绪');
     }
-    return { enabled, ready };
+    return { enabled, ready, ...(this.lifecycle ? { purchaseLifecycle: {
+      processing: this.lifecycle.isProcessing() === true,
+      newApplicationsReady: this.lifecycle.isReady() === true,
+    } } : {}) };
   }
 }
 

@@ -557,7 +557,7 @@ export class RiskInspectionService implements OnModuleInit, OnModuleDestroy {
             ? { ...item, fields: { ...item.fields, 问题补充描述: supplemental } }
             : item,
         ) || null;
-      invalidateBitableRecordCache({ appToken, tableId: source.tableId });
+      invalidateBitableRecordCache({ appToken, tableId: source.tableId, deletePersisted: true });
       return { recordId, supplemental: confirmedText, clientMutationId, syncStatus: 'success' };
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof ForbiddenException ||

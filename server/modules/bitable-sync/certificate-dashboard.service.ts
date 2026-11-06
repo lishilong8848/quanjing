@@ -3,15 +3,21 @@ import {
   Injectable,
   Logger,
   ServiceUnavailableException,
+  type OnModuleInit,
+  type OnModuleDestroy,
 } from '@nestjs/common';
 import type { CampusCertificateDashboardResponse } from '../../../shared/api.interface';
 import { readEnv } from '../../common/config/external-services.config';
 import {
   type BitableRecordItem,
   fetchBitableRecords,
-  readLatestPersistedBitableRecords,
+  readLatestPersistedBitableRecordSnapshot,
   resolveBitableAppToken,
+  createBitableBackgroundRefresh,
+  getBitableRecordCacheGeneration,
 } from '../../common/feishu/bitable-direct-read';
+import { cancelHotfixInitialization, runHotfixInitialization } from '../../common/hotfix-runtime-activation';
+import { dashboardSourceBindingKey, readDashboardSourceBinding, writeDashboardSourceBinding, type DashboardSourceBinding } from '../../common/feishu/dashboard-source-binding-cache';
 import { mapCampusCertificateDashboard } from './certificate-dashboard.mapper';
 
 const DEFAULT_WIKI_TOKEN = 'Rz4GwoB8Fi4WyokVcCPcmWJMnle';
@@ -20,113 +26,145 @@ const SOURCE_NAME = '园区持证正式表';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const STALE_ERROR_MESSAGE = '源数据同步失败，已展示上次成功结果';
 const MIN_LAST_GOOD_RATIO = 0.7;
+const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+const FAILURE_RETRY_MS = 30 * 1000;
+
+interface CertificateReadState {
+  source: DashboardSourceBinding;
+  key: string;
+  appToken?: string;
+  generation?: number;
+  snapshot?: CampusCertificateDashboardResponse;
+  fetchedAt: number;
+  lastFailureAt: number;
+  warm?: Promise<void>;
+  refresh?: Promise<CampusCertificateDashboardResponse>;
+}
 
 @Injectable()
-export class CertificateDashboardService {
+export class CertificateDashboardService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CertificateDashboardService.name);
-  private lastGoodSnapshot: CampusCertificateDashboardResponse | null = null;
-  private activeRefresh: Promise<CampusCertificateDashboardResponse> | null =
-    null;
+  private state?: CertificateReadState;
+  private destroyed = false;
+  private readonly background = createBitableBackgroundRefresh({
+    name: CertificateDashboardService.name,
+    intervalMs: REFRESH_INTERVAL_MS,
+    warm: async () => { await this.getDashboard(); },
+    refresh: async () => { await this.getDashboard(true); },
+  });
 
   constructor(private readonly httpService: HttpService) {}
+
+  async onModuleInit(): Promise<void> {
+    await runHotfixInitialization(this, () => { if (!this.destroyed) this.background.start(); });
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    this.destroyed = true;
+    this.background.stop();
+    await cancelHotfixInitialization(this);
+  }
 
   async getDashboard(
     forceRefresh = false,
   ): Promise<CampusCertificateDashboardResponse> {
-    if (!forceRefresh && this.lastGoodSnapshot) {
-      return this.lastGoodSnapshot;
+    const state = this.currentState();
+    state.warm ??= this.warmSnapshot(state);
+    await state.warm;
+    this.assertCurrent(state);
+    if (forceRefresh || !state.snapshot) return this.refreshState(state);
+    const stale = Date.now() - state.fetchedAt >= REFRESH_INTERVAL_MS || state.lastFailureAt > 0;
+    if (stale && !state.refresh && (!state.lastFailureAt || Date.now() - state.lastFailureAt >= FAILURE_RETRY_MS)) {
+      void this.refreshState(state).catch(() => this.logger.warn('园区持证后台更新暂不可用'));
     }
-    if (this.activeRefresh) {
-      return this.activeRefresh;
-    }
-
-    this.activeRefresh = this.loadDashboard().finally(() => {
-      this.activeRefresh = null;
-    });
-    return this.activeRefresh;
+    return stale ? markSnapshotStale(state.snapshot, state.lastFailureAt > 0) : state.snapshot;
   }
 
   refresh(): Promise<CampusCertificateDashboardResponse> {
     return this.getDashboard(true);
   }
 
-  private async loadDashboard(): Promise<CampusCertificateDashboardResponse> {
-    let appToken = '';
-    const tableId = readEnv('FEISHU_CERTIFICATE_TABLE_ID') || DEFAULT_TABLE_ID;
-    let persistedRecords: BitableRecordItem[] | null = null;
-    if (!this.lastGoodSnapshot) {
-      try {
-        persistedRecords = await readLatestPersistedBitableRecords({
-          tableId,
-          tableName: SOURCE_NAME,
-        });
-      } catch {
-        this.logger.warn('园区持证持久快照不可用');
-      }
+  private source(): DashboardSourceBinding {
+    return {
+      namespace: 'certificate-dashboard', appId: readEnv('FEISHU_APP_ID'),
+      appToken: readEnv('FEISHU_CERTIFICATE_APP_TOKEN'),
+      wikiToken: readEnv('FEISHU_CERTIFICATE_WIKI_TOKEN') || DEFAULT_WIKI_TOKEN,
+      tableId: readEnv('FEISHU_CERTIFICATE_TABLE_ID') || DEFAULT_TABLE_ID,
+    };
+  }
+
+  private currentState(): CertificateReadState {
+    const source = this.source(), key = dashboardSourceBindingKey(source);
+    if (!this.state || this.state.key !== key || (this.state.appToken && this.state.generation !== getBitableRecordCacheGeneration(this.state.appToken, this.state.source.tableId))) {
+      this.state = { source, key, fetchedAt: 0, lastFailureAt: 0 };
     }
-    const previousPeopleCount =
-      this.lastGoodSnapshot?.people.length ?? persistedRecords?.length;
-    const validateRecords = (records: BitableRecordItem[]): void =>
-      assertCertificateRecordsQuality(records, previousPeopleCount);
+    return this.state;
+  }
+
+  private assertCurrent(state: CertificateReadState): void {
+    if (this.destroyed || this.state !== state || dashboardSourceBindingKey(this.source()) !== state.key ||
+      (state.appToken && state.generation !== getBitableRecordCacheGeneration(state.appToken, state.source.tableId))) {
+      throw new ServiceUnavailableException('持证数据源已变化，请重新读取');
+    }
+  }
+
+  private async warmSnapshot(state: CertificateReadState): Promise<void> {
     try {
-      const wikiToken =
-        readEnv('FEISHU_CERTIFICATE_WIKI_TOKEN') || DEFAULT_WIKI_TOKEN;
-      appToken =
-        readEnv('FEISHU_CERTIFICATE_APP_TOKEN') ||
-        (await resolveBitableAppToken(this.httpService, {
-          wikiToken,
-          tableName: SOURCE_NAME,
-        }));
+      const appToken = await readDashboardSourceBinding(state.source);
+      this.assertCurrent(state);
+      if (!appToken) return;
+      state.appToken = appToken;
+      state.generation = getBitableRecordCacheGeneration(appToken, state.source.tableId);
+      const persisted = await readLatestPersistedBitableRecordSnapshot({ appToken, tableId: state.source.tableId, tableName: SOURCE_NAME, directOnly: true });
+      this.assertCurrent(state);
+      if (!persisted || !Number.isFinite(persisted.fetchedAt)) return;
+      state.snapshot = buildCheckedDashboard(persisted.records, undefined, persisted.fetchedAt);
+      state.fetchedAt = persisted.fetchedAt;
+    } catch { this.logger.warn('园区持证本地快照暂不可用'); }
+  }
+
+  private refreshState(state: CertificateReadState): Promise<CampusCertificateDashboardResponse> {
+    if (state.refresh) return state.refresh;
+    const request = this.loadDashboard(state);
+    state.refresh = request;
+    void request.then(() => { if (state.refresh === request) state.refresh = undefined; }, () => { if (state.refresh === request) state.refresh = undefined; });
+    return request;
+  }
+
+  private async loadDashboard(state: CertificateReadState): Promise<CampusCertificateDashboardResponse> {
+    try {
+      const appToken = state.source.appToken || await resolveBitableAppToken(this.httpService, { wikiToken: state.source.wikiToken, tableName: SOURCE_NAME });
+      this.assertCurrent(state);
+      if (state.appToken && state.appToken !== appToken) { state.snapshot = undefined; state.fetchedAt = 0; }
+      state.appToken = appToken;
+      state.generation = getBitableRecordCacheGeneration(appToken, state.source.tableId);
+      const previousPeopleCount = state.snapshot?.people.length;
+      let fetchedAt = 0;
       const records = await fetchBitableRecords(this.httpService, {
         appToken,
-        tableId,
+        tableId: state.source.tableId,
         tableName: SOURCE_NAME,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh: true,
         strict: true,
-        validateRecords,
+        allowStale: false,
+        validateRecords: candidate => assertCertificateRecordsQuality(candidate, previousPeopleCount),
+        onPersisted: snapshot => { fetchedAt = snapshot.fetchedAt; },
       });
-      const dashboard = buildCheckedDashboard(records, previousPeopleCount);
-      this.lastGoodSnapshot = dashboard;
+      this.assertCurrent(state);
+      fetchedAt ||= Date.now();
+      const dashboard = buildCheckedDashboard(records, previousPeopleCount, fetchedAt);
+      await writeDashboardSourceBinding(state.source, appToken).catch(() => this.logger.warn('园区持证来源绑定保存失败'));
+      this.assertCurrent(state);
+      state.snapshot = dashboard;
+      state.fetchedAt = fetchedAt;
+      state.lastFailureAt = 0;
       return dashboard;
     } catch {
+      this.assertCurrent(state);
       this.logger.warn('园区持证数据同步失败');
-      if (this.lastGoodSnapshot) {
-        const stale = markSnapshotStale(this.lastGoodSnapshot);
-        this.lastGoodSnapshot = stale;
-        return stale;
-      }
-      if (persistedRecords) {
-        try {
-          const stale = markSnapshotStale(
-            buildCheckedDashboard(persistedRecords, previousPeopleCount),
-          );
-          this.lastGoodSnapshot = stale;
-          return stale;
-        } catch {
-          this.logger.warn('园区持证持久快照不可用');
-        }
-      }
-      if (appToken) {
-        try {
-          const records = await fetchBitableRecords(this.httpService, {
-            appToken,
-            tableId,
-            tableName: SOURCE_NAME,
-            cacheTtlMs: CACHE_TTL_MS,
-            forceRefresh: false,
-            strict: false,
-            validateRecords,
-          });
-          const stale = markSnapshotStale(
-            buildCheckedDashboard(records, previousPeopleCount),
-          );
-          this.lastGoodSnapshot = stale;
-          return stale;
-        } catch {
-          this.logger.warn('园区持证本地快照不可用');
-        }
-      }
+      state.lastFailureAt = Date.now();
+      if (state.snapshot) return markSnapshotStale(state.snapshot);
       throw new ServiceUnavailableException('园区持证数据同步失败，请稍后重试');
     }
   }
@@ -135,10 +173,11 @@ export class CertificateDashboardService {
 function buildCheckedDashboard(
   records: BitableRecordItem[],
   previousPeopleCount?: number,
+  fetchedAt = Date.now(),
 ): CampusCertificateDashboardResponse {
   const dashboard = mapCampusCertificateDashboard(
     records,
-    new Date().toISOString(),
+    new Date(fetchedAt).toISOString(),
   );
   assertDashboardQuality(dashboard, previousPeopleCount);
   return dashboard;
@@ -173,10 +212,11 @@ function assertDashboardQuality(
 
 function markSnapshotStale(
   snapshot: CampusCertificateDashboardResponse,
+  failed = true,
 ): CampusCertificateDashboardResponse {
   return {
     ...snapshot,
     sourceStatus: 'stale',
-    errorMessage: STALE_ERROR_MESSAGE,
+    errorMessage: failed ? STALE_ERROR_MESSAGE : undefined,
   };
 }

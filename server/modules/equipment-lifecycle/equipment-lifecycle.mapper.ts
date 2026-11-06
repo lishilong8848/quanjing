@@ -25,6 +25,8 @@ import { normalizeLedgerBuilding } from './equipment-ledger.model';
 export interface EquipmentLifecycleSourceInput {
   records: BitableRecordItem[] | null;
   status: EquipmentLifecycleTableStatus;
+  /** Time the source records were fetched, never the time a page opened. */
+  fetchedAt?: number;
 }
 
 export type EquipmentLifecycleSources = Record<

@@ -802,6 +802,7 @@ describe('WeatherWarningRegistrationGateway', () => {
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-actual',
       tableId: 'tblRegistrations',
+      deletePersisted: true,
     });
   });
 

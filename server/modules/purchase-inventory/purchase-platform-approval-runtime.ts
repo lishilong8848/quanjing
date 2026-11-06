@@ -8,12 +8,20 @@ import { createPlatformLegacyApprovalWorker } from './purchase-platform-legacy-a
 import { isSelectablePlatformLegacyPurchaseMethod } from './purchase-platform-legacy-approval-policy';
 import { readEnv } from '../../common/config/external-services.config';
 import { cancelHotfixInitialization, currentHotfixActivation, runHotfixInitialization } from '../../common/hotfix-runtime-activation';
+import { createPlatformApprovalCoordinator } from './purchase-platform-approval-coordinator';
+import { createPlatformApprovalGateway } from './purchase-platform-approval-gateway';
+import type { PurchaseWorkflowGateway } from './purchase-workflow.gateway';
 
 export const PURCHASE_PLATFORM_APPROVAL_RUNTIME = 'PURCHASE_PLATFORM_APPROVAL_RUNTIME';
 /** The real source gateway (app-token reads/writes + empty-cell permission check). */
 export const PURCHASE_PLATFORM_APPROVAL_SOURCE = 'PURCHASE_PLATFORM_APPROVAL_SOURCE';
 /** Explicit recovery switch. Absent/invalid options mean "never scan in background". */
 export const PURCHASE_PLATFORM_RECOVERY_OPTIONS = 'PURCHASE_PLATFORM_RECOVERY_OPTIONS';
+export const PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS = 'PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS';
+export interface PlatformLifecycleApprovalOptions {
+  gateway: PurchaseWorkflowGateway;
+  sourceIdentity(): {appId:string;sourceFingerprint:string};
+}
 export interface PlatformLegacyApprovalSource extends PlatformLegacyApprovalWorkerGateway { sourceIdentity(): { appId: string; sourceFingerprint: string } }
 export type PlatformLegacyApprovalRecoveryOptions = { enabled?: boolean; intervalMs?: number };
 
@@ -27,14 +35,14 @@ function sourceProblem(source: unknown): string | undefined {
 
 /** Only a healthy source may back a durable runtime: a broken gateway would make
  * queued web approvals silently unrecoverable. */
-export function createPurchasePlatformApprovalRuntime(store: PurchaseWorkflowStore, source: PlatformLegacyApprovalSource, recoveryOptions: PlatformLegacyApprovalRecoveryOptions = {}): PurchasePlatformApprovalRuntime {
+export function createPurchasePlatformApprovalRuntime(store: PurchaseWorkflowStore, source: PlatformLegacyApprovalSource, recoveryOptions: PlatformLegacyApprovalRecoveryOptions = {}, lifecycle?: PlatformLifecycleApprovalOptions): PurchasePlatformApprovalRuntime {
   const problem = sourceProblem(source);
   if (problem) throw new ServiceUnavailableException(problem);
   const { enabled, intervalMs } = recoveryOptions || {};
   if (enabled !== undefined && typeof enabled !== 'boolean') throw new ServiceUnavailableException('采购审批恢复配置无效');
   if (intervalMs !== undefined && (!Number.isSafeInteger(intervalMs) || intervalMs < 1000 || intervalMs > 3_600_000)) throw new ServiceUnavailableException('采购审批恢复间隔无效');
   if (store === undefined || store === null) throw new ServiceUnavailableException('采购审批持久账本不可用');
-  return new PurchasePlatformApprovalRuntime(store, source, recoveryOptions);
+  return new PurchasePlatformApprovalRuntime(store, source, recoveryOptions, lifecycle);
 }
 
 /** Recovery starts only when the caller explicitly enables it after readiness
@@ -48,13 +56,43 @@ export class PurchasePlatformApprovalRuntime implements OnApplicationBootstrap, 
   private recoveryCursor = '';
   private recoveryGeneration = 0;
   private destroyed = false;
+  private lifecycleReadiness?:()=>boolean;
+  private lifecycleCursor='';
+  private lifecycleWorker?:ReturnType<typeof createPlatformApprovalCoordinator>;
+  private readonly lifecycleRunning=new Set<Promise<void>>();
   constructor(readonly store: PurchaseWorkflowStore, readonly source: PlatformLegacyApprovalSource,
-    @Optional() @Inject(PURCHASE_PLATFORM_RECOVERY_OPTIONS) readonly recoveryOptions: PlatformLegacyApprovalRecoveryOptions = {}) {
+    @Optional() @Inject(PURCHASE_PLATFORM_RECOVERY_OPTIONS) readonly recoveryOptions: PlatformLegacyApprovalRecoveryOptions = {},
+    @Optional() @Inject(PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS) private readonly lifecycle?:PlatformLifecycleApprovalOptions) {
     this.worker = createPlatformLegacyApprovalWorker(store,{
       verifyMarker: fingerprint => source.verifyMarker(fingerprint),
       readSnapshot: (id,fingerprint) => source.readSnapshot(id,fingerprint),
       writeDecision: (id,fields,fingerprint) => { this.assertActivation(); return source.writeDecision(id,fields,fingerprint); },
     });
+  }
+  setLifecycleReadiness(probe:()=>boolean):void {
+    this.lifecycleReadiness=probe;
+    if(!this.destroyed&&this.lifecycle)this.startRecovery(this.recoveryOptions.intervalMs);
+  }
+  private lifecycleReady():boolean { return !!this.lifecycle&&this.lifecycleReadiness?.()===true; }
+  private async assertLifecycleSource():Promise<{appId:string;sourceFingerprint:string}> {
+    this.assertActivation();
+    if(!this.lifecycleReady())throw new ServiceUnavailableException('采购全流程审批暂未就绪');
+    const bound=this.lifecycle!.sourceIdentity();
+    if(bound.appId!==readEnv('FEISHU_APP_ID')||!/^cli_[A-Za-z0-9_-]+$/.test(bound.appId)||!/^[a-f0-9]{64}$/.test(bound.sourceFingerprint))throw new ForbiddenException('采购审批数据源不可用');
+    await this.store.verifyLifecycleReceiptImageSource(bound.appId,bound.sourceFingerprint);
+    this.assertActivation();
+    const current=this.lifecycle!.sourceIdentity();
+    if(!this.lifecycleReady()||current.appId!==bound.appId||current.sourceFingerprint!==bound.sourceFingerprint)throw new ForbiddenException('采购审批数据源已变化');
+    return bound;
+  }
+  private runLifecycleWorker(eventId:string):Promise<void> {
+    const work=(async()=>{
+      await this.assertLifecycleSource();
+      this.lifecycleWorker ||= createPlatformApprovalCoordinator(this.store.platformApprovalWorkerPort(),createPlatformApprovalGateway(this.lifecycle!.gateway,async()=>{await this.assertLifecycleSource();}));
+      await this.lifecycleWorker.run(eventId);
+    })();
+    this.lifecycleRunning.add(work);
+    return work.finally(()=>{this.lifecycleRunning.delete(work);});
   }
   onApplicationBootstrap(): Promise<void> {
     return runHotfixInitialization(this, () => {
@@ -88,11 +126,17 @@ export class PurchasePlatformApprovalRuntime implements OnApplicationBootstrap, 
     if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
     this.recoveryTimer = undefined;
   }
-  async onModuleDestroy(): Promise<void> { this.destroyed=true;this.stopRecovery(); await cancelHotfixInitialization(this); }
+  async onModuleDestroy(): Promise<void> { this.destroyed=true;this.stopRecovery(); await cancelHotfixInitialization(this);await Promise.allSettled([...this.lifecycleRunning]); }
   async runRecoveryOnce(shouldContinue: () => boolean = () => true): Promise<void> {
     if (this.destroyed || this.recoveryRunning || !currentHotfixActivation().isAcceptingNewWork()) return;
     this.recoveryRunning = true;
     try {
+      if(this.lifecycleReady()) {
+        const ids=await this.store.listRecoverableLifecyclePlatformApprovals(this.lifecycleCursor,20);
+        for(const id of ids){if(!shouldContinue()||!this.lifecycleReady())return;this.lifecycleCursor=id;try{await this.runLifecycleWorker(id);}catch{/* original dispatch fence remains durable */}}
+        if(ids.length<20)this.lifecycleCursor='';
+      }
+      if(this.lifecycleReadiness&&this.recoveryOptions.enabled!==true)return;
       const events = await this.store.listRecoverablePlatformLegacyApprovals(this.recoveryCursor, 20);
       if (!events.length) { this.recoveryCursor = ''; return; }
       for (const eventId of events) {
@@ -121,6 +165,21 @@ export class PurchasePlatformApprovalRuntime implements OnApplicationBootstrap, 
     const recordMethod = snapshot.record.purchaseMethod;
     if (input.purchaseMethod !== undefined && (input.decision !== 'approved' || !isSelectablePlatformLegacyPurchaseMethod(input.purchaseMethod))) throw new ConflictException('采购方式选择与审批决定冲突');
     if (recordMethod !== '驳回' && recordMethod !== '' && !isSelectablePlatformLegacyPurchaseMethod(recordMethod)) throw new ConflictException('采购原方式不可用');
+    if(this.lifecycle&&await this.store.isLifecycleRecord(recordId)) {
+      const bound=await this.assertLifecycleSource(),batchId=snapshot.record.approvalBatchId;
+      if(!batchId)throw new ConflictException('采购审批批次来源不可核对');
+      const method=input.purchaseMethod??recordMethod;
+      if(input.decision==='approved'&&!isSelectablePlatformLegacyPurchaseMethod(method))throw new BadRequestException('请选择采购方式');
+      const requestId=createHash('sha256').update(JSON.stringify(['platform-lifecycle-request-v1',bound.appId,recordId,identity.source,identity.actorAccountId,identity.subjectAccountId])).digest('hex');
+      const claim=await this.store.claimPlatformApprovalItem({approvalBatchId:batchId,record:snapshot.record,identity,lifecycleReady:true,lifecycleSource:bound,
+        request:{requestId,recordId,choice:input.decision==='rejected'?'reject':method==='综合采购'?'comprehensive':'building_self',rejectionReason:''}},(_proof,row,mode)=>{
+          this.assertActivation();const current=this.lifecycle!.sourceIdentity(),legacy=this.source.sourceIdentity();
+          if(!this.lifecycleReady()||readEnv('FEISHU_APP_ID')!==bound.appId||current.appId!==bound.appId||current.sourceFingerprint!==bound.sourceFingerprint||legacy.appId!==origin.appId||legacy.sourceFingerprint!==origin.sourceFingerprint)throw new ForbiddenException('采购审批数据源已变化');
+          if(mode==='new')session.assertPlatformProof!('approve',row);else session.assertPlatformPermission!('approve',{building:row.building,specialty:row.specialty||undefined});return true;
+        });
+      void this.runLifecycleWorker(claim.action.eventId).catch(()=>undefined);
+      return {pending:true,taskId:claim.action.eventId,message:'审批已受理，正在同步'};
+    }
     const requestId=createHash('sha256').update(JSON.stringify(['platform-legacy-request-v1',origin.appId,recordId,identity.source,identity.actorAccountId,identity.subjectAccountId])).digest('hex');
     const claim=await this.store.claimPlatformLegacyApproval({record:snapshot.record,requestId,decision:input.decision,purchaseMethod:input.purchaseMethod,identity,appId:origin.appId,sourceFingerprint:origin.sourceFingerprint},(_proof,row,mode,appId,sourceFingerprint)=>{
       this.assertActivation();
@@ -138,6 +197,13 @@ export class PurchasePlatformApprovalRuntime implements OnApplicationBootstrap, 
     const identity=session.platformProof;
     if (!identity || !session.assertPlatformPermission) throw new ForbiddenException('审批后台任务不存在或无权访问');
     const appId=readEnv('FEISHU_APP_ID');
+    if(this.lifecycle) {
+      const own=await this.store.getLifecyclePlatformApprovalStatus(taskId,appId,identity,target=>{session.assertPlatformPermission!('approve',target);});
+      if(own){
+        if(own.status!=='completed')void this.runLifecycleWorker(taskId).catch(()=>undefined);
+        return {success:true,task:{id:taskId,recordId:own.recordId,decision:own.decision,status:own.status==='manual_reconciliation'?'failed':own.status,message:own.status==='completed'?'采购审批已完成':own.status==='manual_reconciliation'?'审批结果待核对，请勿重复提交':'审批正在同步',createdAt:new Date(own.acceptedAtMs).toISOString()}};
+      }
+    }
     const status=await this.store.getPlatformLegacyApprovalStatus({eventId:taskId,appId,identity},(_proof,target,currentApp)=>{
       if (currentApp !== readEnv('FEISHU_APP_ID')) throw new ForbiddenException('审批后台任务不存在或无权访问');
       session.assertPlatformPermission!('approve',target); return true;

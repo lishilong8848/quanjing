@@ -714,6 +714,10 @@ async function createFixture(options?: {
     'OVERTIME_WORKFLOW_PROGRAM_ENABLED=false\r\n',
   );
   writeText(join(appRoot, '.runtime', 'sentinel.txt'), 'runtime-sentinel\r\n');
+  writeText(
+    join(appRoot, '.runtime', 'purchase-workflow-ledger.json'),
+    JSON.stringify({ version: 2, commands: [], reminders: ['historical-reminder:installer-fixture'] }),
+  );
   writeText(join(appRoot, 'logs', 'sentinel.txt'), 'logs-sentinel\r\n');
   writeText(faultMarkerPath, 'nantong-safe-hotfix-fixture-v1\r\n');
   writeText(join(appRoot, 'dist', 'server', 'main.js'), oldMain);
@@ -2102,8 +2106,8 @@ describeWindows('safe full runtime hotfix installer runtime safety', () => {
   });
 
   it.each([
-    ['unsupported ledger capability', JSON.stringify({ version: 2, commands: [], reminders: [], requiredRuntimeCapability: 'purchase-workflow-ledger-v1' })],
-    ['unknown ledger capability', JSON.stringify({ version: 2, commands: [], reminders: [], requiredRuntimeCapability: 'future-ledger' })],
+    ['unsupported ledger capability', JSON.stringify({ version: 2, commands: [], reminders: ['historical-reminder:installer-fixture'], requiredRuntimeCapability: 'purchase-workflow-ledger-v1' })],
+    ['unknown ledger capability', JSON.stringify({ version: 2, commands: [], reminders: ['historical-reminder:installer-fixture'], requiredRuntimeCapability: 'future-ledger' })],
     ['corrupt ledger', '{broken'],
   ])('rejects %s before stopping the healthy runtime', async (_label, ledgerBytes) => {
     const fixture = await createFixture();
@@ -2126,7 +2130,7 @@ describeWindows('safe full runtime hotfix installer runtime safety', () => {
     const fixture = await createFixture({ candidateLauncherExitCode: 23, purchaseLedgerCapability: true });
     await startCurrentRuntime(fixture);
     const ledger = join(fixture.appRoot, '.runtime/purchase-workflow-ledger.json');
-    const bytes = JSON.stringify({ version: 2, commands: [], reminders: [], requiredRuntimeCapability: 'purchase-workflow-ledger-v1' });
+    const bytes = JSON.stringify({ version: 2, commands: [], reminders: ['historical-reminder:installer-fixture'], requiredRuntimeCapability: 'purchase-workflow-ledger-v1' });
     writeText(ledger, bytes);
     const result = runInstaller(fixture);
     expect(result.status).not.toBe(0);

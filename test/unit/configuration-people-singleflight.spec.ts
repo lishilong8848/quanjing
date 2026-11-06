@@ -30,4 +30,19 @@ describe('configuration people refresh coordination', () => {
     const current = render(); expect(current.data).toEqual(configuration); expect(current.people).toEqual(directory.people);
     expect(current.peopleError).toBe('synthetic timeout'); expect(current.peopleLoading).toBe(false);
   });
+  it('shows cached people without replacing edited account versions and stops refreshing after an error', async () => {
+    const saved = { ...configuration, accounts: [{ id: 'local-one', name: '已保存名称', version: 3 }] };
+    (loadConfiguration as jest.Mock).mockResolvedValue(saved);
+    (loadConfigurationPeople as jest.Mock).mockResolvedValueOnce({ ...directory,
+      accounts: [{ id: 'local-one', name: '旧名称', version: 2 }],
+      displayCache: { snapshotAt: 123, stale: true, refreshing: true, displayOnly: true },
+    }).mockRejectedValueOnce(new Error('读取超时，请重试'));
+    const state = render(); await state.refresh(); await state.refreshPeople();
+    expect(render().people).toEqual(directory.people);
+    expect(render().data?.accounts[0].name).toBe('已保存名称');
+    expect(render().peopleCache).toMatchObject({ snapshotAt: 123, stale: true, refreshing: true });
+    await render().refreshPeople();
+    expect(render().peopleCache).toMatchObject({ snapshotAt: 123, stale: true, refreshing: false });
+    expect(render().people).toEqual(directory.people);
+  });
 });

@@ -2765,6 +2765,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     expect(getInvalidateBitableRecordCacheMock()).toHaveBeenCalledWith({
       appToken: 'changeApp',
       tableId: 'tblBvg6wCYSX3hcg',
+      deletePersisted: true,
     });
     expect(getPersistedBitableRecordSnapshotMock()).toHaveBeenCalledWith({
       appToken: 'leavePersonApp',
@@ -6019,6 +6020,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     expect(getInvalidateBitableRecordCacheMock()).toHaveBeenCalledWith({
       appToken: 'leaveApp',
       tableId: 'tblLeave',
+      deletePersisted: true,
     });
   });
 
@@ -6068,6 +6070,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
     expect(getInvalidateBitableRecordCacheMock()).toHaveBeenCalledWith({
       appToken: 'leaveApp',
       tableId: 'tblLeave',
+      deletePersisted: true,
     });
   });
 
@@ -6642,6 +6645,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       expect(getInvalidateBitableRecordCacheMock()).toHaveBeenCalledWith({
         appToken: 'leaveApp',
         tableId: 'tblLeave',
+        deletePersisted: true,
       });
     },
   );
@@ -7924,15 +7928,9 @@ describe('DutyScheduleService construction crew ledger views', () => {
       recordId: 'recOverview',
       constructionCode: 'SG260605-1031',
     });
-    const earlyResult = await Promise.race([
-      pending,
-      Promise.resolve('still-waiting' as const),
-    ]);
-
-    expect(earlyResult).not.toBe('still-waiting');
-    if (earlyResult === 'still-waiting') {
-      return;
-    }
+    // Admission now awaits the authorization check, but still returns before
+    // the intentionally unresolved background preparation starts.
+    const earlyResult = await pending;
     expect(earlyResult).toMatchObject({
       pending: true,
       taskId: expect.stringMatching(/^construction-/),
@@ -10904,6 +10902,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       }),
       [],
       'administrator',
+      undefined,
     );
     expect(result).toMatchObject({
       success: true,

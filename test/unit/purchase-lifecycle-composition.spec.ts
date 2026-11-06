@@ -1,5 +1,6 @@
 import { PurchaseLifecycleComposition } from '../../server/modules/purchase-inventory/purchase-lifecycle-composition';
 import { PURCHASE_LEDGER_CAPABILITY } from '../../server/modules/purchase-inventory/purchase-ledger-capability';
+import { PurchaseLifecycleAttachmentAccessController } from '../../server/modules/purchase-inventory/purchase-lifecycle-attachment-access.controller';
 let mockActive = true;
 jest.mock('../../server/common/hotfix-runtime-activation', () => ({ currentHotfixActivation: () => ({ isAcceptingNewWork: () => mockActive }), runHotfixInitialization: (_owner: unknown, work: () => unknown) => work(), cancelHotfixInitialization: async () => {} }));
 jest.mock('../../server/common/config/external-services.config', () => ({ ...jest.requireActual('../../server/common/config/external-services.config'), readEnv: (key: string, aliases: string[] = []) => [key, ...aliases].map(name => process.env[name] || '').find(Boolean) || '' }));
@@ -15,7 +16,7 @@ describe('production lifecycle owner composition', () => {
     transport = { isReady: jest.fn(() => true) };
     owner = new PurchaseLifecycleComposition(store, { sendLifecycleCard() {}, updateLifecycleCard() {} } as never,
       { snapshot: () => ({ appId: 'cli_owner', revision: 1, schemaVersion: 2 }) } as never, { isEnabled: () => true } as never,
-      transport, images, prepare, { store } as never, { ensureConnected: async () => {} } as never);
+      transport, images, prepare, { store, setLifecycleReadiness: jest.fn() } as never, { ensureConnected: async () => {} } as never);
   }
   beforeEach(() => {
     saved = { ...process.env }; mockActive = true; jest.useFakeTimers();
@@ -41,6 +42,15 @@ describe('production lifecycle owner composition', () => {
     process.env.PURCHASE_LIFECYCLE_CARD_ENABLED = 'false'; await owner.ensureStarted(); expect(images.start).not.toHaveBeenCalled();
     store.hasExistingLifecycleWork.mockResolvedValue(true); await owner.ensureStarted();
     expect(owner.isReady()).toBe(false); expect(owner.isProcessing()).toBe(true);
+    const service={issue:jest.fn(async()=> 'ticket'),issueCurrent:jest.fn(async()=> 'ticket'),read:jest.fn(async()=>({contentType:'application/pdf',data:Buffer.from('synthetic')}))};
+    const session={cookieName:'test_session',readSessionIdentity:jest.fn(()=>({principal:{accountId:'synthetic',role:'user'},expiresAt:Date.now()+60_000,principalFingerprint:'signed'}))};
+    const controller=new PurchaseLifecycleAttachmentAccessController(service as never,session as never,owner);
+    const req={headers:{cookie:'test_session=valid',origin:'https://example.test'}} as never;
+    expect(await controller.issue(req,{} as never)).toEqual({ticket:'ticket'});
+    expect(await controller.issueCurrent(req,{} as never)).toEqual({ticket:'ticket'});
+    const response={set:jest.fn(),send:jest.fn()};await controller.download(req,{ticket:'ticket'},response as never);
+    expect(response.send).toHaveBeenCalledWith(Buffer.from('synthetic'));
+    mockActive=false;await expect(controller.issue(req,{} as never)).rejects.toThrow('暂不可用');
   });
   it('does not admit before shared connection is ready or when persisted source fails', async () => {
     transport.isReady.mockReturnValue(false); await owner.ensureStarted(); expect(images.start).not.toHaveBeenCalled();

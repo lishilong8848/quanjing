@@ -15,6 +15,7 @@ type PersonalPrivatePath = typeof PRIVATE_PATHS extends Set<infer Path> ? Path :
 const MAX_PHOTO_BYTES = EMPLOYEE_ONBOARDING_PHOTO_FILE_RULE.maxBytesPerFile;
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const PASSWORD_UNCERTAIN = '密码更新结果未确认，可能已更新，请尝试新密码登录；也可保留当前内容，使用原请求重试。';
+const PASSWORD_SOURCE_UNAVAILABLE = '人员密码资料核验暂不可用，请保留当前内容重试';
 const PASSWORD_ALREADY_UPDATED = '上次密码已更新，请使用上次设置的新密码重新登录后再修改';
 const PASSWORD_PENDING_MESSAGES = new Set([
   '上次密码处理结果待核对，请使用原请求重试',
@@ -22,7 +23,7 @@ const PASSWORD_PENDING_MESSAGES = new Set([
   '密码安全状态正在恢复，请稍后重试',
 ]);
 const SAFE_MESSAGES = new Set([
-  '当前密码不正确', '请输入当前密码', '两次输入的新密码不一致', '两次密码不一致', '新密码需为 8 至 128 个字符',
+  '当前密码不正确', '请输入当前密码', '两次输入的新密码不一致', '两次密码不一致', '新密码需为 8 至 128 个字符', '此账号请使用飞书授权登录',
   '新密码不能与当前密码或身份证号码相同', '人员身份核验未通过，暂不能重置密码', '当前账号不可修改人员密码',
   '账号状态已变化，请重新登录', '请先登录个人账号', '代登录时不能修改密码', '请先退出代登录', '请先修改初始密码',
   '密码请求格式无效', '请从本站页面提交', '原请求标识已用于不同内容或已结束，请重新提交', '原请求标识已用于不同内容，请重新提交',
@@ -135,8 +136,11 @@ function privateUrl(path: PersonalPrivatePath): string {
 }
 
 function failureForStatus(status: number, password: boolean, body: unknown, genericFailure: string): PersonalPrivateError {
-  if (password && (status === 401 || status === 408 || status >= 500)) return new PersonalPrivateError(PASSWORD_UNCERTAIN, status, true, status === 401 ? 'login' : 'retry');
   const raw = body && typeof body === 'object' && !Array.isArray(body) ? (body as { message?: unknown }).message : undefined;
+  // Only the server's exact source-check failure is distinct from an unconfirmed write.
+  // Keep the original request available because an earlier attempt may still need recovery.
+  if (password && status === 503 && raw === PASSWORD_SOURCE_UNAVAILABLE) return new PersonalPrivateError(PASSWORD_SOURCE_UNAVAILABLE, status, true, 'retry');
+  if (password && (status === 401 || status === 408 || status >= 500)) return new PersonalPrivateError(PASSWORD_UNCERTAIN, status, true, status === 401 ? 'login' : 'retry');
   if (password && status === 409 && typeof raw === 'string') {
     if (raw === PASSWORD_ALREADY_UPDATED) return new PersonalPrivateError(raw, status, false, 'login');
     if (PASSWORD_PENDING_MESSAGES.has(raw)) return new PersonalPrivateError(raw, status, true, 'retry');

@@ -46,6 +46,34 @@ describe('personal password and permission transport boundaries', () => {
     await jest.advanceTimersByTimeAsync(1); await result;
     expect(privateFetch).toHaveBeenCalledTimes(1); expect(axiosForBackend).not.toHaveBeenCalled();
   });
+  it('keeps a known source-verification outage retryable without implying a password write', async () => {
+    const message = '人员密码资料核验暂不可用，请保留当前内容重试';
+    const body = { currentPassword: 'synthetic-old', newPassword: 'synthetic-new', confirmPassword: 'synthetic-new', clientMutationId: 'same-mutation' };
+    privateFetch.mockResolvedValueOnce(response({ success: false, message, error: { code: 'SERVICE_UNAVAILABLE', message } }, 503))
+      .mockResolvedValueOnce(response({ success: true }));
+    const error = await changePersonalPassword(body).catch(failure => failure);
+    expect(error).toMatchObject({ message, status: 503, uncertain: true, passwordRecovery: 'retry' });
+    expect(error.message).not.toContain('可能已更新');
+    expect(privateFetch).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveProperty('config'); expect(error).not.toHaveProperty('request'); expect(error).not.toHaveProperty('response'); expect(error).not.toHaveProperty('cause');
+    await changePersonalPassword(body);
+    expect(privateFetch.mock.calls[0][1].body).toBe(privateFetch.mock.calls[1][1].body);
+    expect(axiosForBackend).not.toHaveBeenCalled();
+  });
+  it.each([401, 408, 500, 502, 504])('does not treat the source-verification phrase with status %s as a confirmed source-only failure', async status => {
+    privateFetch.mockResolvedValueOnce(response({ message: '人员密码资料核验暂不可用，请保留当前内容重试' }, status));
+    const error = await changePersonalPassword({ currentPassword: 'synthetic-old', newPassword: 'synthetic-new', confirmPassword: 'synthetic-new', clientMutationId: 'same-mutation' }).catch(failure => failure);
+    expect(error).toMatchObject({ status, uncertain: true, passwordRecovery: status === 401 ? 'login' : 'retry' });
+    expect(error.message).toContain('可能已更新');
+  });
+  it.each(['密码更新结果尚未确认，请保留原请求重试', '人员密码资料核验暂不可用，请保留当前内容重试 password=synthetic-private'])('retains uncertainty and filters every other password 503 response', async message => {
+    privateFetch.mockResolvedValueOnce(response({ message }, 503));
+    const error = await changePersonalPassword({ currentPassword: 'synthetic-old', newPassword: 'synthetic-new', confirmPassword: 'synthetic-new', clientMutationId: 'same-mutation' }).catch(failure => failure);
+    expect(error).toMatchObject({ status: 503, uncertain: true, passwordRecovery: 'retry' });
+    expect(error.message).toContain('可能已更新');
+    expect(error.message).not.toContain('synthetic-private');
+    expect(privateFetch).toHaveBeenCalledTimes(1);
+  });
   it.each(['上次密码处理结果待核对，请使用原请求重试', '密码正在处理，请稍后使用原请求重试', '密码安全状态正在恢复，请稍后重试'])(
     'keeps the known unresolved password response recoverable: %s', async message => {
       privateFetch.mockResolvedValueOnce(response({ message }, 409));

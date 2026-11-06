@@ -23,17 +23,30 @@ function loader() {
     pageSource.indexOf('  const loadPersonProfiles = useCallback('),
     pageSource.indexOf('  const loadTravelPersonProfiles = useCallback('),
   );
+  let snapshot = { fetchedAt: null as number | null, stale: false, refreshing: false };
   const context = {
     useCallback: (fn: unknown) => fn,
     beginLatestDutyOverviewRequest,
     personProfileLoadAbortRef: { current: null as AbortController | null },
     personProfileLoadSeqRef: { current: 0 },
+    personProfileReadScope: 'synthetic-a:public:private',
+    activePersonProfileReadScopeRef: { current: 'synthetic-a:public:private' },
+    personProfileInFlightScopeRef: { current: null as string | null },
+    canReadPublicProfiles: true,
+    canRefreshPublicProfiles: false,
+    canRefreshPrivateProfile: false,
     canViewPrivateProfile: true,
     getPersonProfiles: jest.fn(),
     getPersonProfileDetails: jest.fn(),
     setPersonProfiles: jest.fn(),
     setChangeRequestSubmitterOptions: jest.fn(),
     setPersonProfileDetails: jest.fn(),
+    setPersonProfilePublishedScope: jest.fn(),
+    setPersonProfileDetailScope: jest.fn(),
+    setPersonProfilePollVersion: jest.fn(),
+    setPersonProfileSnapshot: jest.fn((value: typeof snapshot | ((previous: typeof snapshot) => typeof snapshot)) => {
+      snapshot = typeof value === 'function' ? value(snapshot) : value;
+    }),
     setScreenshotSectionState: jest.fn(),
     logger: { warn: jest.fn(), error: jest.fn() },
   };
@@ -41,7 +54,10 @@ function loader() {
     compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
   }).outputText;
   const load = runInNewContext(compiled, context) as (force?: boolean) => Promise<void>;
-  return { ...context, load };
+  return { ...context, load, getSnapshot: () => snapshot, switchScope: (scope: string) => {
+    context.personProfileReadScope = scope;
+    context.activePersonProfileReadScopeRef.current = scope;
+  } };
 }
 
 const profiles = [
@@ -117,18 +133,36 @@ describe('排班人员名单独立就绪', () => {
     expect(c.getPersonProfiles).toHaveBeenLastCalledWith(false, 'leave', expect.any(AbortSignal));
     expect(c.setPersonProfiles).toHaveBeenCalledWith(profiles);
     expect(c.setScreenshotSectionState).toHaveBeenLastCalledWith('personProfiles', 'ready');
+    expect(c.getSnapshot()).toMatchObject({ stale: false, refreshing: false });
   });
 
   it('旧请求的名单与详情都不能覆盖新响应', async () => {
     const c = loader(), oldPublic = deferred<unknown>(), oldDetail = deferred<unknown>();
     c.getPersonProfiles.mockReturnValueOnce(oldPublic.promise).mockResolvedValueOnce({ organizations: profiles });
     c.getPersonProfileDetails.mockReturnValueOnce(oldDetail.promise).mockResolvedValueOnce({ organizations: [] });
-    const old = c.load(); await c.load();
+    const old = c.load();
+    c.switchScope('synthetic-b:public:private');
+    await c.load();
     oldPublic.resolve({ organizations: [{ supervisorText: '旧人员' }] });
     oldDetail.resolve({ organizations: [{ supervisorText: '旧详情' }] }); await old;
     expect(c.setPersonProfiles).toHaveBeenCalledTimes(1);
     expect(c.setPersonProfiles).toHaveBeenLastCalledWith(profiles);
     expect(c.setPersonProfileDetails).not.toHaveBeenCalledWith([{ supervisorText: '旧详情' }]);
+    expect(c.setPersonProfilePublishedScope).toHaveBeenLastCalledWith('synthetic-b:public:private');
+  });
+
+  it('同账号同权限重复刷新合并为一次读取，不取消尚未结束的详情', async () => {
+    const c = loader(), details = deferred<{ organizations: unknown[] }>();
+    c.getPersonProfiles.mockResolvedValue({ organizations: profiles });
+    c.getPersonProfileDetails.mockReturnValue(details.promise);
+    const pending = c.load(); await tick();
+    const controller = c.personProfileLoadAbortRef.current;
+    await c.load(true);
+    expect(c.getPersonProfiles).toHaveBeenCalledTimes(1);
+    expect(c.getPersonProfileDetails).toHaveBeenCalledTimes(1);
+    expect(controller?.signal.aborted).toBe(false);
+    details.resolve({ organizations: [] }); await pending;
+    expect(c.personProfileLoadAbortRef.current).toBeNull();
   });
 
   it('名单失败时仍保留未结束详情的取消句柄，离开页面不再回填', async () => {

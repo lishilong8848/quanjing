@@ -25,6 +25,17 @@ describe('purchase lifecycle direct source readback', () => {
     expect(gateway.getLifecycleExecutionRecordsAsApp).toHaveBeenCalledTimes(2);
   });
 
+  it('checks the persistent source before reads and stops before preparing media if it changes during the read', async () => {
+    const sourceGuard=jest.fn(async()=>{});
+    const source=new PurchaseLifecycleGatewayRecordSource(store,gateway,()=>appId,()=>now,sourceGuard);
+    sourceGuard.mockRejectedValueOnce(new Error('source mismatch'));
+    await expect(source.load(identity,()=>true)).rejects.toThrow('source mismatch');
+    expect(gateway.getLifecycleExecutionRecordsAsApp).not.toHaveBeenCalled();
+    gateway.getLifecycleExecutionRecordsAsApp.mockImplementationOnce(async()=>{sourceGuard.mockRejectedValue(new Error('source changed'));return [record];});
+    await expect(source.load(identity,()=>true)).rejects.toThrow('source changed');
+    expect(gateway.prepareManagerComparisonBatchEvidence).not.toHaveBeenCalled();
+  });
+
   it('rechecks permitted comparison evidence and rejects changed record or batch', async () => {
     const source = make(), snapshot = await source.load(identity, () => true);
     expect(snapshot.comparisonImages.rec1).toHaveLength(3);
@@ -34,6 +45,16 @@ describe('purchase lifecycle direct source readback', () => {
     record = { ...record, status: '未开始（待审批）' };
     batch.revision += 1;
     expect(await source.verifyLatest(snapshot.version)).toBe(false);
+  });
+  it('withdraws local proof immediately after a same-app source switch, including after successful remote verification',async()=>{
+    let fingerprint='a'.repeat(64);
+    const source=new PurchaseLifecycleGatewayRecordSource(store,gateway,()=>appId,()=>now,async()=>{},()=>fingerprint);
+    const loaded=await source.load(identity,()=>false);
+    expect(await source.verifyLatest(loaded.version)).toBe(true);
+    fingerprint='b'.repeat(64);
+    expect(source.isLocallyValid(loaded.version)).toBe(false);expect(await source.verifyLatest(loaded.version)).toBe(false);
+    fingerprint='invalid';expect(source.isLocallyValid(loaded.version)).toBe(false);
+    await expect(source.load(identity,()=>false)).rejects.toThrow();
   });
 
   it('never silently drops original-only or missing comparison attachments', async () => {

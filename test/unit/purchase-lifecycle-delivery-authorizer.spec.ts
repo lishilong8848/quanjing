@@ -41,6 +41,17 @@ describe('purchase lifecycle server delivery authorization', () => {
     expect(access.currentDutyRoutePeople).toHaveBeenCalledWith('purchase_manager', { building: 'A楼' });
   });
 
+  it('displays a confirmed platform rejection without inventing a reason or exposing an action', async () => {
+    const rejected={...batch,items:[{...batch.items[0],status:'rejected',choice:'reject',rejectionReason:'',decisionSource:'platform'}]} as PurchaseManagerApprovalBatchEntry;
+    source.load.mockResolvedValue({version:'source-1',batchFingerprint:createHash('sha256').update(JSON.stringify(rejected)).digest('hex'),records:[{...record,status:'驳回申请',purchaseMethod:'驳回',rejectionReason:''}],comparisonImages:{}});
+    const view=(await create().prepare(identity)).project(rejected,2);
+    const items=projectPurchaseLifecycle(view.items,view.viewer);
+    expect(items[0].actions).toEqual([]);
+    const fields=items[0].stages.find(stage=>stage.stage==='approval')!.fields;
+    expect(fields).toContainEqual({label:'审批结果',value:'平台驳回'});
+    expect(fields).toContainEqual({label:'驳回原因',value:''});
+  });
+
   it('rejects absent identity, missing source fence or records that do not match the authoritative batch', async () => {
     principal = null;
     await expect(create().prepare(identity)).rejects.toThrow();

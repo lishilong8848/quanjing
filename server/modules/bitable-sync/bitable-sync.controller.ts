@@ -362,6 +362,7 @@ export class BitableSyncController {
       parsedScope,
     );
     return {organizations:result.organizations.map(({supervisorText,position,buildingsSpecialties,shift})=>({supervisorText,position,buildingsSpecialties,shift})),
+      ...(result.cache ? { cache: { fetchedAt: result.cache.fetchedAt, stale: result.cache.stale, refreshing: result.cache.refreshing } } : {}),
       ...(result.changeRequestSubmitters ? {changeRequestSubmitters:result.changeRequestSubmitters}: {})};
   }
 

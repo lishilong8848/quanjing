@@ -267,10 +267,6 @@ export class ThresholdAdjustmentGateway {
           : thresholdText(actual?.[key]) === expected;
       if (!equal) throw new BadGatewayException(`审批字段“${key}”回读未确认`);
     }
-    invalidateBitableRecordCache({
-      appToken: THRESHOLD_APPROVAL_BASE,
-      tableId: THRESHOLD_APPROVAL_TABLE,
-    });
     return recordId;
   }
   private sign(entry: unknown) {
@@ -321,6 +317,10 @@ export class ThresholdAdjustmentGateway {
     } catch (error) {
       if (error instanceof BadGatewayException) throw error;
       throw new BadGatewayException('阈值审批多维表连接失败，请重试');
+    } finally {
+      if (method !== 'get' && path.startsWith(`${THRESHOLD_APPROVAL_TABLE}/`)) {
+        invalidateBitableRecordCache({ appToken: THRESHOLD_APPROVAL_BASE, tableId: THRESHOLD_APPROVAL_TABLE, deletePersisted: true });
+      }
     }
   }
 }

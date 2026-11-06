@@ -9,8 +9,37 @@ export interface LeaveRequestScheduleTimeFieldsProps {
   shiftRanges?: readonly LeaveRequestShiftRange[];
   disabled: boolean;
   loading: boolean;
+  ready?: boolean;
+  error?: string;
   onStartAtChange: (value: string) => void;
   onEndAtChange: (value: string) => void;
+}
+
+export function LeaveRequestPersonProfileStatus({
+  status, stale, refreshing, fetchedAt, hasProfile, hasSelection, disabled, onRetry,
+}: {
+  status: 'loading' | 'ready' | 'error';
+  stale: boolean;
+  refreshing: boolean;
+  fetchedAt: number | null;
+  hasProfile: boolean;
+  hasSelection: boolean;
+  disabled: boolean;
+  onRetry: () => void;
+}) {
+  const updating = status === 'loading' || refreshing;
+  const failed = status === 'error' || (stale && !updating);
+  const missing = hasSelection && !hasProfile && !updating && !failed;
+  if (!updating && !failed && !missing) return null;
+  const message = failed
+    ? hasProfile ? '人员资料更新失败，当前展示上次成功的数据，请重试后再提交。' : '人员资料加载失败，暂不能判断人员和排班，请重试。'
+    : updating
+      ? hasProfile ? '当前展示上次成功的人员资料，正在后台更新…' : '正在加载人员资料…'
+      : '未匹配到该人员，请重新加载资料或联系管理员核对。';
+  return <div role={failed || missing ? 'alert' : 'status'} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+    <div><p>{message}</p>{fetchedAt !== null && Number.isFinite(fetchedAt) && <p className="mt-1 text-[11px]">上次更新：{new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(fetchedAt)}</p>}</div>
+    {(failed || missing) && <button type="button" disabled={disabled || updating} onClick={onRetry} className="h-9 shrink-0 rounded-md border border-amber-300 bg-white px-3 text-xs font-medium hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">重新加载人员资料</button>}
+  </div>;
 }
 
 export interface ScheduleTimeOption {
@@ -257,11 +286,14 @@ export function LeaveRequestScheduleTimeFields({
   startOptions,
   endOptions,
   shiftRanges = [],
-  disabled,
+  disabled: requestedDisabled,
   loading,
+  ready = true,
+  error,
   onStartAtChange,
   onEndAtChange,
 }: LeaveRequestScheduleTimeFieldsProps) {
+  const disabled = requestedDisabled || loading || !ready || Boolean(error);
   const safeEndOptions = useMemo(
     () => endOptions.filter((option) => option > startAt),
     [endOptions, startAt],
@@ -270,12 +302,20 @@ export function LeaveRequestScheduleTimeFields({
 
   return (
     <div className="grid gap-3 sm:col-span-2" aria-busy={loading}>
-      {loading ? (
+      {error ? (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {error}
+        </div>
+      ) : loading ? (
         <div
           role="status"
           className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700"
         >
           正在读取该人员的排班时段…
+        </div>
+      ) : !ready ? (
+        <div role="status" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          人员和排班资料核验完成后可选择申请时段。
         </div>
       ) : !hasOptions ? (
         <div

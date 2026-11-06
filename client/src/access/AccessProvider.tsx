@@ -790,6 +790,7 @@ function AccessLoginDialog({
     {method === 'employee' && <p className="text-xs leading-5 text-muted-foreground">首次登录，默认密码为本人身份证号后 6 位。</p>}
     {method === 'employee' && <div className="flex justify-end"><Button type="button" variant="link" size="sm" className="h-auto p-0" disabled={busy} onClick={() => { setPassword(''); setForgotPassword(true); }}>忘记密码？</Button></div>}
     {error && submittedMethod === method ? <p className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert"><AlertCircle className="mt-0.5 size-4 shrink-0" /><span>{error}</span></p> : null}
+    {method === 'employee' && submittedMethod === method && error === '此账号请使用飞书授权登录' && <Button type="button" variant="outline" className="w-full" disabled={busy} onClick={() => changeMethod('feishu')}>改用飞书登录</Button>}
     <DialogFooter><Button type="submit" className="h-11 w-full" disabled={!canSubmit} aria-busy={isSubmitting}>{isSubmitting && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}{isSubmitting ? '验证中…' : '登录'}</Button></DialogFooter>
   </form>;
 
@@ -807,7 +808,7 @@ function AccessLoginDialog({
           <TabsTrigger value="feishu" disabled={busy} className="h-full rounded-lg data-[state=active]:bg-primary/5 data-[state=active]:text-primary"><FeishuIcon />飞书授权登录</TabsTrigger>
           <TabsTrigger value="employee" disabled={busy} className="h-full rounded-lg data-[state=active]:bg-primary/5 data-[state=active]:text-primary">姓名登录</TabsTrigger>
         </TabsList>
-        <p className="text-xs leading-5 text-muted-foreground">智航、互联同事请使用飞书授权登录；<br />其他同事请使用姓名和密码登录。</p>
+        <p className="text-xs leading-5 text-muted-foreground">VNET 人员及固定值班账号请使用飞书授权登录；<br />非 VNET 人员请使用姓名和密码登录。</p>
         <TabsContent value="feishu" className="space-y-5">
           <div className="flex flex-col items-center gap-4 py-6"><div className="flex size-20 items-center justify-center rounded-full bg-primary/5"><FeishuIcon className="size-10" /></div><p className="font-medium">使用飞书账号授权</p></div>
           <Button type="button" className="h-11 w-full" disabled={busy} aria-busy={feishuLogin.isPending} onClick={feishuLogin.start}>{feishuLogin.isPending && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}{feishuLogin.isPending ? '正在打开飞书授权…' : '飞书授权登录'}</Button>

@@ -15,6 +15,8 @@ jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn(), warn
 import { isValidElement } from 'react';
 import { AccessProvider } from '../../client/src/access/AccessProvider';
 import { Tabs } from '../../client/src/components/ui/tabs';
+import { Input } from '../../client/src/components/ui/input';
+import { LoginNameField } from '../../client/src/access/LoginNameField';
 
 function nodes(node: ReactNode): ReactElement<any>[] { return Array.isArray(node) ? node.flatMap(nodes) : isValidElement<any>(node) ? [node, ...nodes(node.props.children)] : []; }
 function words(node: ReactNode): string { return typeof node === 'string' || typeof node === 'number' ? String(node) : Array.isArray(node) ? node.map(words).join('') : isValidElement<any>(node) ? words(node.props.children) : ''; }
@@ -48,5 +50,24 @@ describe('password completion keeps its explicit login state', () => {
     const dialog = login(render());
     expect(dialog.props.initialMethod).toBeUndefined(); expect(dialog.props.notice).toBeUndefined();
     expect(dialog.props.reason).toBe('请选择登录方式。');
+  });
+
+  it('offers the Feishu tab after a VNET name-login refusal and clears the entered password', () => {
+    const dialog = login(render());
+    mockSlots.length = 0;
+    const props = { ...dialog.props, open: true, initialMethod: 'employee', error: '此账号请使用飞书授权登录', onSubmit: jest.fn(async () => false) };
+    const show = () => { mockCursor = 0; return (dialog.type as (props: unknown) => ReactNode)(props); };
+    let content = show();
+    nodes(content).find(node => node.type === LoginNameField)!.props.onChange('VNET合成人员');
+    nodes(content).find(node => node.type === Input)!.props.onChange({ target: { value: 'synthetic-password' } });
+    content = show();
+    nodes(content).find(node => node.type === 'form')!.props.onSubmit({ preventDefault() {} });
+    content = show();
+    expect(words(content)).toContain('VNET 人员及固定值班账号');
+    nodes(content).find(node => typeof node.props.onClick === 'function' && words(node) === '改用飞书登录')!.props.onClick();
+    content = show();
+    expect(nodes(content).find(node => node.type === Tabs)!.props.value).toBe('feishu');
+    nodes(content).find(node => node.type === Tabs)!.props.onValueChange('employee');
+    expect(nodes(show()).find(node => node.type === Input)!.props.value).toBe('');
   });
 });

@@ -9,6 +9,8 @@ import {
   Injectable,
   Logger,
   ServiceUnavailableException,
+  type OnModuleInit,
+  type OnModuleDestroy,
 } from '@nestjs/common';
 import type {
   EquipmentLifecycleDashboardResponse,
@@ -21,9 +23,13 @@ import {
 import {
   type BitableRecordItem,
   fetchBitableRecords,
-  readLatestPersistedBitableRecords,
+  readLatestPersistedBitableRecordSnapshot,
   resolveBitableAppToken,
+  createBitableBackgroundRefresh,
+  getBitableRecordCacheGeneration,
 } from '../../common/feishu/bitable-direct-read';
+import { cancelHotfixInitialization, runHotfixInitialization } from '../../common/hotfix-runtime-activation';
+import { dashboardSourceBindingKey, readDashboardSourceBinding, writeDashboardSourceBinding, type DashboardSourceBinding } from '../../common/feishu/dashboard-source-binding-cache';
 import {
   type EquipmentLifecycleSourceInput,
   type EquipmentLifecycleSources,
@@ -136,15 +142,39 @@ interface EquipmentLifecycleLastGoodSnapshot {
   stale: boolean;
 }
 
+interface EquipmentLifecycleReadState {
+  source: DashboardSourceBinding;
+  key: string;
+  appToken?: string;
+  generation?: number;
+  snapshot?: EquipmentLifecycleLastGoodSnapshot;
+  warm?: Promise<void>;
+  refresh?: Promise<EquipmentLifecycleSourceInput>;
+  lastFailureAt: number;
+}
+
 @Injectable()
-export class EquipmentLifecycleService {
+export class EquipmentLifecycleService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EquipmentLifecycleService.name);
-  private readonly lastGoodSnapshots = new Map<
-    EquipmentLifecycleSourceTableKey,
-    EquipmentLifecycleLastGoodSnapshot
-  >();
+  private readonly states = new Map<EquipmentLifecycleSourceTableKey, EquipmentLifecycleReadState>();
+  private destroyed = false;
+  private readonly background = createBitableBackgroundRefresh({
+    name: EquipmentLifecycleService.name, intervalMs: CACHE_TTL_MS,
+    warm: async () => { await this.getDashboard(); },
+    refresh: async () => { await this.getDashboard(true); },
+  });
 
   constructor(private readonly httpService: HttpService) {}
+
+  async onModuleInit(): Promise<void> {
+    await runHotfixInitialization(this, () => { if (!this.destroyed) this.background.start(); });
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    this.destroyed = true;
+    this.background.stop();
+    await cancelHotfixInitialization(this);
+  }
 
   async getDashboard(
     forceRefresh = false,
@@ -152,17 +182,30 @@ export class EquipmentLifecycleService {
     principal?: AccessPrincipal,
   ): Promise<EquipmentLifecycleDashboardResponse> {
     const scopedPrincipal = principal && { ...principal, permissionContext: { module: principal.permissionContext?.module || 'equipment_lifecycle' as const, action: 'read' as const } };
-    const syncedAt = new Date().toISOString();
     const entries = await Promise.all(
       TABLE_CONFIGS.map(
         async (config) =>
           [config.key, await this.loadTable(config, forceRefresh)] as const,
       ),
     );
-    const sources = Object.fromEntries(entries.map(([key, source]) => [key, {
-      ...source,
-      records: source.records === null ? null : filterProfessionalRecords(scopedPrincipal, source.records, record => extractDisplayText(record.fields?.['专业'])).filter(record => !scopedPrincipal || isProfessionalBusinessPrincipal(scopedPrincipal) || accessBuildings(scopedPrincipal) === null || canAccessBuilding(scopedPrincipal, normalizeLedgerBuilding(extractDisplayText(record.fields?.['楼栋'] || record.fields?.['园区楼栋'])))),
-    }])) as EquipmentLifecycleSources;
+    // A table may finish before another table. Recheck its captured source and
+    // generation before combining the results, not just when each read ends.
+    for (const [, source] of entries) source.assertCurrent();
+    const loaded = new Map(entries);
+    const scopedSource = (key: EquipmentLifecycleSourceTableKey): EquipmentLifecycleSourceInput => {
+      const source = loaded.get(key);
+      if (!source) throw new ServiceUnavailableException('设备生命周期来源未完整返回，请重新读取');
+      return {
+        ...source,
+        records: source.records === null ? null : filterProfessionalRecords(scopedPrincipal, source.records, record => extractDisplayText(record.fields?.['专业'])).filter(record => !scopedPrincipal || isProfessionalBusinessPrincipal(scopedPrincipal) || accessBuildings(scopedPrincipal) === null || canAccessBuilding(scopedPrincipal, normalizeLedgerBuilding(extractDisplayText(record.fields?.['楼栋'] || record.fields?.['园区楼栋'])))),
+      };
+    };
+    const sources: EquipmentLifecycleSources = {
+      equipment: scopedSource('equipment'),
+      longTermMaintenance: scopedSource('longTermMaintenance'),
+      keyParts: scopedSource('keyParts'),
+      maintenanceContracts: scopedSource('maintenanceContracts'),
+    };
 
     if (Object.values(sources).every(({ records }) => records === null)) {
       throw new ServiceUnavailableException(
@@ -172,15 +215,13 @@ export class EquipmentLifecycleService {
 
     return mapEquipmentLifecycleDashboard(sources, {
       month: currentShanghaiMonth(),
-      syncedAt,
+      // A cached response must not pretend it was synchronized at page-open time.
+      syncedAt: new Date(Math.min(...entries.flatMap(([, source]) => source.fetchedAt === undefined ? [] : [source.fetchedAt]))).toISOString(),
       building,
     });
   }
 
-  private async loadTable(
-    config: EquipmentLifecycleTableConfig,
-    forceRefresh: boolean,
-  ): Promise<EquipmentLifecycleSourceInput> {
+  private sourceFor(config: EquipmentLifecycleTableConfig): DashboardSourceBinding {
     const source = parseFeishuBitableLink(
       readEnv('FEISHU_EQUIPMENT_LIFECYCLE_SOURCE_URL') || DEFAULT_SOURCE_URL,
     );
@@ -192,72 +233,130 @@ export class EquipmentLifecycleService {
       readEnv(config.viewIdEnv) ||
       (config.key === 'longTermMaintenance' ? source.viewId : '') ||
       config.defaultViewId;
-    const snapshot = this.lastGoodSnapshots.get(config.key);
+    return {
+      namespace: `equipment-lifecycle-${config.key}`, appId: readEnv('FEISHU_APP_ID'),
+      appToken: readEnv('FEISHU_EQUIPMENT_LIFECYCLE_APP_TOKEN') || source.appToken,
+      wikiToken: readEnv('FEISHU_EQUIPMENT_LIFECYCLE_WIKI_TOKEN') || source.wikiToken,
+      tableId, viewId, fieldNames: config.fieldNames,
+    };
+  }
 
-    if (
-      !forceRefresh &&
-      snapshot &&
-      !snapshot.stale &&
-      Date.now() - snapshot.fetchedAt < CACHE_TTL_MS
-    ) {
-      return { records: snapshot.records, status: 'fresh' };
+  private assertCurrent(config: EquipmentLifecycleTableConfig, state: EquipmentLifecycleReadState): void {
+    if (this.destroyed || this.states.get(config.key) !== state || dashboardSourceBindingKey(this.sourceFor(config)) !== state.key ||
+      (state.appToken && state.generation !== getBitableRecordCacheGeneration(state.appToken, state.source.tableId))) {
+      throw new ServiceUnavailableException('设备生命周期数据源已变化，请重新读取');
     }
+  }
 
+  private async loadTable(config: EquipmentLifecycleTableConfig, forceRefresh: boolean): Promise<EquipmentLifecycleSourceInput & { assertCurrent: () => void }> {
+    const source = this.sourceFor(config), key = dashboardSourceBindingKey(source);
+    let state = this.states.get(config.key);
+    if (!state || state.key !== key || (state.appToken && state.generation !== getBitableRecordCacheGeneration(state.appToken, state.source.tableId))) {
+      state = { source, key, lastFailureAt: 0 };
+      this.states.set(config.key, state);
+    }
+    state.warm ??= this.warmSnapshot(config, state);
+    await state.warm;
+    this.assertCurrent(config, state);
+    if (forceRefresh || !state.snapshot) {
+      const result = await this.refreshTable(config, state);
+      return this.bindResult(config, state, result);
+    }
+    const snapshot = state.snapshot;
+    const stale = snapshot.stale || Date.now() - snapshot.fetchedAt >= CACHE_TTL_MS;
+    if (stale && !state.refresh && (!state.lastFailureAt || Date.now() - state.lastFailureAt >= 30_000)) {
+      void this.refreshTable(config, state).catch(() => this.logger.warn(`设备生命周期后台读取暂不可用：${config.tableName}`));
+    }
+    return this.bindResult(config, state, { records: snapshot.records, status: stale ? 'stale' : 'fresh', fetchedAt: snapshot.fetchedAt });
+  }
+
+  private bindResult(config: EquipmentLifecycleTableConfig, state: EquipmentLifecycleReadState, result: EquipmentLifecycleSourceInput): EquipmentLifecycleSourceInput & { assertCurrent: () => void } {
+    const appToken = state.appToken, generation = state.generation;
+    const assertCurrent = () => {
+      this.assertCurrent(config, state);
+      if (state.appToken !== appToken || state.generation !== generation) {
+        throw new ServiceUnavailableException('设备生命周期数据源已变化，请重新读取');
+      }
+    };
+    assertCurrent();
+    return { ...result, assertCurrent };
+  }
+
+  private async warmSnapshot(config: EquipmentLifecycleTableConfig, state: EquipmentLifecycleReadState): Promise<void> {
+    try {
+      const appToken = await readDashboardSourceBinding(state.source);
+      this.assertCurrent(config, state);
+      if (!appToken) return;
+      state.appToken = appToken;
+      state.generation = getBitableRecordCacheGeneration(appToken, state.source.tableId);
+      const persisted = await readLatestPersistedBitableRecordSnapshot({
+        appToken, tableId: state.source.tableId, viewId: state.source.viewId,
+        fieldNames: state.source.fieldNames, tableName: config.tableName, directOnly: true,
+      });
+      this.assertCurrent(config, state);
+      if (!persisted || !Number.isFinite(persisted.fetchedAt)) return;
+      assertTableRecordsQuality(persisted.records, config);
+      state.snapshot = { records: persisted.records, fetchedAt: persisted.fetchedAt, stale: false };
+    } catch { this.logger.warn(`设备生命周期本地快照暂不可用：${config.tableName}`); }
+  }
+
+  private refreshTable(config: EquipmentLifecycleTableConfig, state: EquipmentLifecycleReadState): Promise<EquipmentLifecycleSourceInput> {
+    if (state.refresh) return state.refresh;
+    const request = this.readTable(config, state);
+    state.refresh = request;
+    void request.then(() => { if (state.refresh === request) state.refresh = undefined; }, () => { if (state.refresh === request) state.refresh = undefined; });
+    return request;
+  }
+
+  private async readTable(config: EquipmentLifecycleTableConfig, state: EquipmentLifecycleReadState): Promise<EquipmentLifecycleSourceInput> {
     try {
       const appToken = await resolveBitableAppToken(this.httpService, {
-        appToken:
-          readEnv('FEISHU_EQUIPMENT_LIFECYCLE_APP_TOKEN') || source.appToken,
-        wikiToken:
-          readEnv('FEISHU_EQUIPMENT_LIFECYCLE_WIKI_TOKEN') || source.wikiToken,
+        appToken: state.source.appToken,
+        wikiToken: state.source.wikiToken,
         tableName: config.tableName,
       });
+      this.assertCurrent(config, state);
+      if (state.appToken && state.appToken !== appToken) state.snapshot = undefined;
+      state.appToken = appToken;
+      state.generation = getBitableRecordCacheGeneration(appToken, state.source.tableId);
+      let fetchedAt = 0;
       const records = await fetchBitableRecords(this.httpService, {
         appToken,
-        tableId,
-        viewId,
+        tableId: state.source.tableId,
+        viewId: state.source.viewId,
         fieldNames: config.fieldNames,
         tableName: config.tableName,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh: true,
         strict: true,
+        allowStale: false,
+        onPersisted: snapshot => { fetchedAt = snapshot.fetchedAt; },
         validateRecords: (candidateRecords) =>
           assertTableRecordsQuality(candidateRecords, config),
       });
+      this.assertCurrent(config, state);
       assertTableRecordsQuality(records, config);
-      this.lastGoodSnapshots.set(config.key, {
+      fetchedAt ||= Date.now();
+      await writeDashboardSourceBinding(state.source, appToken).catch(() => this.logger.warn(`设备生命周期来源绑定保存失败：${config.tableName}`));
+      this.assertCurrent(config, state);
+      state.snapshot = {
         records,
-        fetchedAt: Date.now(),
+        fetchedAt,
         stale: false,
-      });
-      return { records, status: 'fresh' };
+      };
+      state.lastFailureAt = 0;
+      return { records, status: 'fresh', fetchedAt };
     } catch {
+      this.assertCurrent(config, state);
       this.logger.warn(`设备生命周期数据源读取失败：${config.tableName}`);
+      state.lastFailureAt = Date.now();
+      const snapshot = state.snapshot;
       if (snapshot) {
-        this.lastGoodSnapshots.set(config.key, {
+        state.snapshot = {
           ...snapshot,
           stale: true,
-        });
-        return { records: snapshot.records, status: 'stale' };
-      }
-
-      try {
-        const persistedRecords = await readLatestPersistedBitableRecords({
-          tableId,
-          tableName: config.tableName,
-          viewId,
-          fieldNames: config.fieldNames,
-        });
-        if (persistedRecords) {
-          assertTableRecordsQuality(persistedRecords, config);
-          this.lastGoodSnapshots.set(config.key, {
-            records: persistedRecords,
-            fetchedAt: 0,
-            stale: true,
-          });
-          return { records: persistedRecords, status: 'stale' };
-        }
-      } catch {
-        this.logger.warn(`设备生命周期持久快照不可用：${config.tableName}`);
+        };
+        return { records: snapshot.records, status: 'stale', fetchedAt: snapshot.fetchedAt };
       }
 
       return { records: null, status: 'failed' };

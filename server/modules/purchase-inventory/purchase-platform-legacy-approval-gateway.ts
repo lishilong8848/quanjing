@@ -139,10 +139,13 @@ export function createPlatformLegacyApprovalGateway(_gateway: Gateway, http: Pic
       // Use the frozen source directly: no await or dynamic config lookup between
       // the final comparison and issuing the request. The caller owns the fence.
       if (!currentHotfixActivation().isAcceptingNewWork()) throw new BadGatewayException('系统更新中，采购审批暂缓写入');
-      const response = await http.axiosRef.put(`${base(s)}/records/${encodeURIComponent(target)}`, { fields: checked }, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000, maxRedirects: 0 }).catch(() => { throw new BadGatewayException('采购审批写入结果待核对'); });
-      responseData(response.data);
-      assertUnchanged(s);
-      invalidateBitableRecordCache({ appToken: s.appToken, tableId: s.tableId });
+      try {
+        const response = await http.axiosRef.put(`${base(s)}/records/${encodeURIComponent(target)}`, { fields: checked }, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000, maxRedirects: 0 }).catch(() => { throw new BadGatewayException('采购审批写入结果待核对'); });
+        responseData(response.data);
+        assertUnchanged(s);
+      } finally {
+          invalidateBitableRecordCache({ appToken: s.appToken, tableId: s.tableId, deletePersisted: true });
+      }
     },
   };
 }

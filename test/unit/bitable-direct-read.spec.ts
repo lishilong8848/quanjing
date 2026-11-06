@@ -29,6 +29,7 @@ const {
   extractDateTimeIso,
   extractDateValue,
   fetchBitableRecords,
+  getBitableRecordCacheGeneration,
   invalidateFeishuTenantAccessTokenCache,
   invalidateBitableRecordCache,
   readLatestPersistedBitableRecordSnapshot,
@@ -99,6 +100,230 @@ function createRecordSearchHttpService(
     },
   };
 }
+
+describe('derived read cache generations', () => {
+  it('registers a scope at zero without file reads, writes or HTTP requests', () => {
+    const fsPromises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const read = jest.spyOn(fsPromises, 'readFile');
+    const write = jest.spyOn(fsPromises, 'writeFile');
+    try {
+      expect(getBitableRecordCacheGeneration('getter-only-base', 'table')).toBe(0);
+      expect(getBitableRecordCacheGeneration('getter-only-base', 'table')).toBe(0);
+      expect(read).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); write.mockRestore(); }
+  });
+
+  it('observes targeted, app-wide and global invalidation after getter-only registration', () => {
+    const selected = () => getBitableRecordCacheGeneration('derived-base', 'selected');
+    const otherTable = () => getBitableRecordCacheGeneration('derived-base', 'other-table');
+    const otherApp = () => getBitableRecordCacheGeneration('other-derived-base', 'selected');
+    expect([selected(), otherTable(), otherApp()]).toEqual([0, 0, 0]);
+    invalidateBitableRecordCache({ appToken: 'derived-base', tableId: 'selected' });
+    expect([selected(), otherTable(), otherApp()]).toEqual([1, 0, 0]);
+    invalidateBitableRecordCache({ appToken: 'derived-base' });
+    expect([selected(), otherTable(), otherApp()]).toEqual([2, 1, 0]);
+    invalidateBitableRecordCache();
+    expect([selected(), otherTable(), otherApp()]).toEqual([3, 2, 1]);
+  });
+});
+
+describe('in-flight read invalidation', () => {
+  it.each([false, true])('rejects the old read and force join after invalidation (deletePersisted=%s)', async deletePersisted => {
+    const options = { appToken: `generation-base-${deletePersisted}`, tableId: 'generation-table', tableName: 'synthetic invalidation', forceRefresh: true, strict: true };
+    const http = createRecordSearchHttpService(() => [{ record_id: 'before-write', fields: {} }]);
+    const original = http.axiosRef.post.getMockImplementation()!;
+    let release!: () => void;
+    http.axiosRef.post.mockImplementation(async (...args) => {
+      if (String(args[0]).endsWith('/records/search')) await new Promise<void>(resolve => { release = resolve; });
+      return original(...args);
+    });
+    const first = fetchBitableRecords(http as never, options);
+    const firstResult = first.then(() => 'fulfilled', error => error.message);
+    for (let i = 0; i < 100 && !release; i++) await new Promise(resolve => setTimeout(resolve, 1));
+    expect(release).toBeDefined();
+    const joined = fetchBitableRecords(http as never, options);
+    const joinedResult = joined.then(() => 'fulfilled', error => error.message);
+    invalidateBitableRecordCache({ ...options, deletePersisted });
+    release();
+    expect(await firstResult).toMatch(/读取期间已变更/);
+    expect(await joinedResult).toMatch(/读取期间已变更/);
+    expect(await readLatestPersistedBitableRecordSnapshot({ ...options, directOnly: true })).toBeNull();
+    http.axiosRef.post.mockImplementation(createRecordSearchHttpService(() => [{ record_id: 'after-write', fields: {} }]).axiosRef.post.getMockImplementation()!);
+    expect(await fetchBitableRecords(http as never, options)).toEqual([{ record_id: 'after-write', fields: {} }]);
+    expect(await fetchBitableRecords(http as never, { ...options, forceRefresh: false })).toEqual([{ record_id: 'after-write', fields: {} }]);
+  });
+
+  it('does not serve the previous snapshot on an invalidated non-strict failed refresh', async () => {
+    const options = { appToken: 'generation-fallback', tableId: 'table', tableName: 'synthetic fallback', forceRefresh: true };
+    const http = createRecordSearchHttpService(() => [{ record_id: 'previous', fields: {} }]);
+    await fetchBitableRecords(http as never, options);
+    const pending = fetchBitableRecords(http as never, { ...options, validateRecords: () => {
+      invalidateBitableRecordCache({ ...options, deletePersisted: true });
+      throw new Error('synthetic source validation failure');
+    } });
+    await expect(pending).rejects.toThrow(/读取期间已变更/);
+  });
+
+  it('does not rename or acknowledge a snapshot invalidated during its temporary disk write', async () => {
+    const options = { appToken: 'generation-disk-write', tableId: 'table', tableName: 'synthetic disk write', forceRefresh: true, requirePersisted: true, strict: true };
+    const http = createRecordSearchHttpService(() => [{ record_id: 'old-network-read', fields: {} }]);
+    const file = getProjectedCachePath(`${options.appToken}:${options.tableId}:`);
+    const fsPromises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const originalWrite = fsPromises.writeFile;
+    const persisted = jest.fn();
+    const spy = jest.spyOn(fsPromises, 'writeFile').mockImplementation(async (...args) => {
+      await originalWrite(...args);
+      if (String(args[0]) === `${file}.${process.pid}.tmp`) invalidateBitableRecordCache({ ...options, deletePersisted: true });
+    });
+    try {
+      await expect(fetchBitableRecords(http as never, { ...options, onPersisted: persisted })).rejects.toThrow(/读取期间已变更/);
+      expect(persisted).not.toHaveBeenCalled();
+      await expectPathToDisappear(file);
+      await expectPathToDisappear(`${file}.${process.pid}.tmp`);
+    } finally { spy.mockRestore(); }
+  });
+
+  it('rejects a disk snapshot invalidated before its read returns', async () => {
+    const options = { appToken: 'generation-disk-read', tableId: 'table', tableName: 'synthetic disk read' };
+    const http = createRecordSearchHttpService(() => [{ record_id: 'previous', fields: {} }]);
+    await fetchBitableRecords(http as never, { ...options, forceRefresh: true });
+    invalidateBitableRecordCache();
+    const file = getProjectedCachePath(`${options.appToken}:${options.tableId}:`);
+    const fsPromises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const originalRead = fsPromises.readFile;
+    const spy = jest.spyOn(fsPromises, 'readFile').mockImplementation(async (...args) => {
+      const bytes = await originalRead(...args);
+      if (String(args[0]) === file) invalidateBitableRecordCache({ ...options, deletePersisted: true });
+      return bytes;
+    });
+    try {
+      await expect(fetchBitableRecords(http as never, options)).rejects.toThrow(/读取期间已变更/);
+    } finally { spy.mockRestore(); }
+  });
+
+  it('removes its own publication invalidated during persistence verification even without deletePersisted', async () => {
+    const options = { appToken: 'generation-disk-verify', tableId: 'table', tableName: 'synthetic disk verification', forceRefresh: true, requirePersisted: true, strict: true };
+    const http = createRecordSearchHttpService(() => [{ record_id: 'obsolete', fields: {} }]);
+    const file = getProjectedCachePath(`${options.appToken}:${options.tableId}:`);
+    const fsPromises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const originalRead = fsPromises.readFile;
+    const persisted = jest.fn();
+    const spy = jest.spyOn(fsPromises, 'readFile').mockImplementation(async (...args) => {
+      const bytes = await originalRead(...args);
+      if (String(args[0]) === file) invalidateBitableRecordCache(options);
+      return bytes;
+    });
+    try {
+      await expect(fetchBitableRecords(http as never, { ...options, onPersisted: persisted })).rejects.toThrow(/读取期间已变更/);
+      expect(persisted).not.toHaveBeenCalled();
+      await expectPathToDisappear(file);
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each(['all', 'app', 'table', 'unrelated'] as const)('respects %s invalidation scope', async scope => {
+    const options = { appToken: `generation-scope-${scope}`, tableId: 'table', tableName: 'synthetic scope', forceRefresh: true };
+    const http = createRecordSearchHttpService(() => [{ record_id: 'result', fields: {} }]);
+    const pending = fetchBitableRecords(http as never, { ...options, validateRecords: () => {
+      invalidateBitableRecordCache(scope === 'all' ? undefined : scope === 'app' ? { appToken: options.appToken } : scope === 'table' ? { tableId: options.tableId } : { appToken: 'different-base', tableId: options.tableId });
+    } });
+    if (scope === 'unrelated') await expect(pending).resolves.toEqual([{ record_id: 'result', fields: {} }]);
+    else await expect(pending).rejects.toThrow(/读取期间已变更/);
+  });
+});
+
+describe('ordinary record pagination completeness', () => {
+  it('accepts an explicitly empty first page without items and persists an empty array for rereads', async () => {
+    const options = { appToken: 'explicit-empty-first', tableId: 'table', tableName: 'synthetic empty', forceRefresh: true, strict: true };
+    const http = createRecordSearchHttpService();
+    const original = http.axiosRef.post.getMockImplementation()!;
+    http.axiosRef.post.mockImplementation(async (...args) => String(args[0]).endsWith('/records/search')
+      ? { data: { code: 0, data: { has_more: false, total: 0 } } } : original(...args));
+    const validateRecords = jest.fn();
+    await expect(fetchBitableRecords(http as never, { ...options, validateRecords })).resolves.toEqual([]);
+    expect(validateRecords).toHaveBeenCalledWith([]);
+    expect(await readLatestPersistedBitableRecordSnapshot({ ...options, directOnly: true })).toMatchObject({ records: [] });
+    invalidateBitableRecordCache();
+    http.axiosRef.post.mockClear();
+    await expect(fetchBitableRecords(http as never, { ...options, forceRefresh: false })).resolves.toEqual([]);
+    expect(http.axiosRef.post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing-total', { has_more: false }], ['positive-total', { has_more: false, total: 1 }],
+    ['string-total', { has_more: false, total: '0' }], ['missing-has-more', { total: 0 }],
+    ['has-more', { has_more: true, total: 0 }], ['null-items', { items: null, has_more: false, total: 0 }],
+    ['next-token', { has_more: false, total: 0, page_token: 'next' }],
+    ['invalid-token', { has_more: false, total: 0, page_token: null }],
+  ])('rejects an ambiguous empty response: %s', async (label, data) => {
+    const options = { appToken: `explicit-empty-invalid-${label}`, tableId: 'table', tableName: 'synthetic invalid empty', forceRefresh: true, strict: true };
+    const http = createRecordSearchHttpService();
+    const original = http.axiosRef.post.getMockImplementation()!;
+    http.axiosRef.post.mockImplementation(async (...args) => String(args[0]).endsWith('/records/search') ? { data: { code: 0, data } } : original(...args));
+    await expect(fetchBitableRecords(http as never, options)).rejects.toThrow('同步来源分页');
+    expect(await readLatestPersistedBitableRecordSnapshot({ ...options, directOnly: true })).toBeNull();
+  });
+
+  it.each([{ initialItems: [] }, { initialItems: [{ record_id: 'partial', fields: {} }] }])('rejects a later page claiming an empty total, regardless of previous item count', async ({ initialItems }) => {
+    const options = { appToken: `explicit-empty-later-${initialItems.length}`, tableId: 'table', tableName: 'synthetic later empty', forceRefresh: true, strict: true };
+    const http = createRecordSearchHttpService();
+    const original = http.axiosRef.post.getMockImplementation()!; let page = 0;
+    http.axiosRef.post.mockImplementation(async (...args) => String(args[0]).endsWith('/records/search')
+      ? { data: { code: 0, data: ++page === 1 ? { items: initialItems, has_more: true, page_token: 'second' } : { has_more: false, total: 0 } } }
+      : original(...args));
+    await expect(fetchBitableRecords(http as never, options)).rejects.toThrow('同步来源分页');
+    expect(await readLatestPersistedBitableRecordSnapshot({ ...options, directOnly: true })).toBeNull();
+  });
+
+  it('still runs the caller empty-directory validator and preserves its prior good snapshot', async () => {
+    const options = { appToken: 'explicit-empty-validation', tableId: 'table', tableName: 'synthetic empty validation', forceRefresh: true, strict: true };
+    const http = createRecordSearchHttpService(() => [{ record_id: 'previous', fields: {} }]);
+    await fetchBitableRecords(http as never, options);
+    const file = getProjectedCachePath(`${options.appToken}:${options.tableId}:`), originalBytes = readFileSync(file);
+    http.axiosRef.post.mockResolvedValue({ data: { code: 0, data: { has_more: false, total: 0, page_token: '' } } });
+    await expect(fetchBitableRecords(http as never, { ...options, validateRecords: records => {
+      expect(records).toEqual([]); throw new Error('directory empty rejected');
+    } })).rejects.toThrow('directory empty rejected');
+    expect(readFileSync(file)).toEqual(originalBytes);
+  });
+
+  it.each([
+    ['missing-items', { has_more: false }],
+    ['null-items', { items: null, has_more: false }],
+    ['string-items', { items: 'partial', has_more: false }],
+    ['object-items', { items: {}, has_more: false }],
+    ['string-has-more', { items: [], has_more: 'false' }],
+    ['number-has-more', { items: [], has_more: 1 }],
+    ['null-has-more', { items: [], has_more: null }],
+    ['missing-next-token', { items: [], has_more: true }],
+    ['empty-next-token', { items: [], has_more: true, page_token: '' }],
+    ['blank-next-token', { items: [], has_more: true, page_token: '  ' }],
+    ['repeated-next-token', { items: [], has_more: true, page_token: 'second-page' }],
+  ])('rejects %s on an ordinary strict read without publishing partial results', async (label, invalidPage) => {
+    const options = { appToken: `ordinary-page-${label}`, tableId: 'table', tableName: 'synthetic pagination', forceRefresh: true, strict: true };
+    const previous = [{ record_id: 'previous-complete', fields: {} }];
+    const http = createRecordSearchHttpService(() => previous);
+    await fetchBitableRecords(http as never, options);
+    const file = getProjectedCachePath(`${options.appToken}:${options.tableId}:`);
+    const original = readFileSync(file);
+    let page = 0;
+    http.axiosRef.post.mockImplementation(async () => ({ data: { code: 0, data: ++page === 1
+      ? { items: [{ record_id: 'new-but-partial', fields: {} }], has_more: true, page_token: 'second-page' }
+      : page === 2 ? invalidPage : { items: [], has_more: false } } }));
+    // The third mocked terminal page bounds the pre-fix reproduction; a correct reader stops at page two.
+    await expect(fetchBitableRecords(http as never, options)).rejects.toThrow('同步来源分页');
+    expect(page).toBe(2);
+    expect(readFileSync(file)).toEqual(original);
+    expect(await fetchBitableRecords(http as never, { ...options, forceRefresh: false })).toEqual(previous);
+  });
+
+  it('accepts the optional false has_more field only when omitted, with an actual items array', async () => {
+    const http = createRecordSearchHttpService();
+    const previous = http.axiosRef.post.getMockImplementation()!;
+    http.axiosRef.post.mockImplementation(async (...args) => String(args[0]).endsWith('/records/search')
+      ? { data: { code: 0, data: { items: [] } } } : previous(...args));
+    await expect(fetchBitableRecords(http as never, { appToken: 'ordinary-page-omitted-false', tableId: 'table', tableName: 'synthetic omitted flag', strict: true, forceRefresh: true })).resolves.toEqual([]);
+  });
+});
 
 describe('exact persistent snapshot lookup', () => {
   it.each(['malformed', 'repeated-token'])('does not publish incomplete %s source pages as a successful refresh', async mode => {

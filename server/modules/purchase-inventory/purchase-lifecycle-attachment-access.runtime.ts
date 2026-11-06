@@ -21,7 +21,7 @@ export class PurchaseLifecycleAttachmentAccessRuntime {
     const key = createHmac('sha256', sourceKey).update('purchase-lifecycle-attachment-view-v1').digest('hex');
     const appId = () => readEnv('FEISHU_APP_ID');
     const source = new PurchaseLifecycleGatewayRecordSource(this.store, this.gateway, appId, Date.now,
-      () => this.store.verifyLifecycleReceiptImageSource(appId(), lifecyclePaymentUploadSourceFingerprint()));
+      () => this.store.verifyLifecycleReceiptImageSource(appId(), lifecyclePaymentUploadSourceFingerprint()),lifecyclePaymentUploadSourceFingerprint);
     const authorizer = new PurchaseLifecycleServerAuthorizer(this.access, source);
     return new PurchaseLifecycleAttachmentAccessService(this.access, this.store, authorizer, this.gateway, key, appId);
   }

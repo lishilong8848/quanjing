@@ -1,5 +1,8 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { DutyLocalMonthSnapshots } from '../../server/modules/duty-schedule/duty-local-sync.snapshot';
 import { Children, createElement, isValidElement } from 'react';
 import type { FunctionComponent, ReactElement, ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -936,7 +939,7 @@ describe('Monthly schedule leave request tool', () => {
       'utf8',
     );
     const dialogStart = source.indexOf('<LeaveRequestScheduleTimeFields');
-    const dialog = source.slice(dialogStart, dialogStart + 800);
+    const dialog = source.slice(dialogStart, source.indexOf('/>', dialogStart) + 2);
 
     expect(source).toContain('const handleLeaveStartAtChange = useCallback');
     expect(source).toContain('selectDefaultLeaveEndAt(');
@@ -988,7 +991,7 @@ describe('Monthly schedule leave request tool', () => {
       /ensureSchedulesForLeaveDateRange\(monthDateKeys, forceRefresh\)/,
     );
     expect(handler).toMatch(
-      /resolveLeaveScheduleForceRefresh\(\s*true,\s*capabilities\.canForceRefresh,?\s*\)/,
+      /resolveLeaveScheduleForceRefresh\(\s*true,\s*canRefreshMonthlySchedule\s*\|\|\s*selfServiceOnly,?\s*\)/,
     );
     expect(handler).not.toContain('loadPersonProfiles(');
     expect(handler).not.toContain('loadSchedules(');
@@ -996,7 +999,7 @@ describe('Monthly schedule leave request tool', () => {
     expect(source).toContain('重新加载排班');
   });
 
-  it('keeps the last successful schedule snapshot when mutations invalidate network cache', () => {
+  it('invalidates the generic schedule record disk cache after a business mutation', () => {
     const source = readFileSync(
       join(
         process.cwd(),
@@ -1006,11 +1009,29 @@ describe('Monthly schedule leave request tool', () => {
     );
 
     expect(source).toMatch(
-      /invalidateBitableRecordCache\(\{\s*appToken: this\.scheduleAppToken,\s*tableId: this\.scheduleTableId,\s*\}\)/,
+      /invalidateBitableRecordCache\(\{\s*appToken: this\.scheduleAppToken,\s*tableId: this\.scheduleTableId,\s*deletePersisted: true,?\s*\}\)/,
     );
-    expect(source).not.toMatch(
-      /appToken: this\.scheduleAppToken,\s*tableId: this\.scheduleTableId,\s*deletePersisted: true/,
-    );
+  });
+
+  it('retains dedicated historical-month files when the generic record cache is invalidated', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'synthetic-history-preservation-'));
+    const previous = process.env.FEISHU_LOCAL_CACHE_DIR;
+    process.env.FEISHU_LOCAL_CACHE_DIR = directory;
+    let reader: typeof import('../../server/common/feishu/bitable-direct-read');
+    jest.isolateModules(() => { reader = require('../../server/common/feishu/bitable-direct-read'); });
+    try {
+      const monthly = new DutyLocalMonthSnapshots(join(directory, 'duty-local-sync'));
+      const records = [{ record_id: 'synthetic-history', fields: { date: '2026-06-15' } }];
+      await monthly.publish('synthetic-app', 'synthetic-table', { startDate: '2026-06-01', endDate: '2026-06-30', months: ['2026-06'] }, records, 1000, null, record => String(record.fields.date));
+      reader!.invalidateBitableRecordCache({ appToken: 'synthetic-app', tableId: 'synthetic-table', deletePersisted: true });
+      await reader!.readBitableCacheScopeRevision('synthetic-app', 'synthetic-table');
+      const after = await new DutyLocalMonthSnapshots(join(directory, 'duty-local-sync')).readMonth('synthetic-app', 'synthetic-table', '2026-06');
+      expect(after?.records).toEqual(records);
+      expect(after?.sourceStartedAt).toBe(1000);
+    } finally {
+      if (previous === undefined) delete process.env.FEISHU_LOCAL_CACHE_DIR; else process.env.FEISHU_LOCAL_CACHE_DIR = previous;
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('filters the local schedule snapshot before approval enrichment', () => {
@@ -2184,7 +2205,7 @@ describe('Monthly schedule leave request tool', () => {
       'const boundSnapshot = mutationBinding.snapshot',
     );
     expect(submitButtonSource).toMatch(
-      /disabled=\{\s*hasLockedLeaveRequestRetry\s*\?\s*leaveRequestSubmitting\s*\|\|\s*!canUseSelfServiceTools\s*:/,
+      /disabled=\{\s*hasLockedLeaveRequestRetry\s*\?\s*leaveRequestSubmitting\s*\|\|\s*!canCreateLeaveRequest\s*:/,
     );
     expect(submitButtonSource).toContain('!isLeaveScheduleCoverageReady');
     expect(submitButtonSource).not.toContain(
@@ -2250,7 +2271,7 @@ describe('Monthly schedule leave request tool', () => {
     const leaveLoader = pageSource.slice(leaveLoaderStart, travelLoaderStart);
     const travelLoader = pageSource.slice(
       travelLoaderStart,
-      pageSource.indexOf('const personProfileMap', travelLoaderStart),
+      pageSource.indexOf('const handleRetryTravelPersonProfiles', travelLoaderStart),
     );
     const personnelMovementHandlerStart = pageSource.indexOf(
       'const handleSubmitPersonnelMovement',
@@ -2264,18 +2285,19 @@ describe('Monthly schedule leave request tool', () => {
     );
 
     expect(leaveLoader).toContain(
-      "getPersonProfiles(forceRefresh, 'leave', controller.signal)",
+      "getPersonProfiles(forceRefresh && canRefreshPublicProfiles, 'leave', controller.signal)",
     );
     expect(leaveLoader).toMatch(
       /catch[\s\S]*setPersonProfileDetails\(\[\]\)[\s\S]*setScreenshotSectionState\('personProfiles', 'error'\)/,
     );
     expect(leaveLoader).not.toContain('setPersonProfiles([])');
-    expect(travelLoader).toContain("getPersonProfiles(forceRefresh, 'travel')");
+    expect(travelLoader).toContain("getPersonProfiles(forceRefresh, 'travel', controller.signal)");
     expect(travelLoader).toContain('travelProfileLoadSeqRef.current');
-    expect(travelLoader).toContain("setTravelProfilesStatus('ready')");
+    expect(travelLoader).toContain("setTravelProfilesStatus(stale && !refreshing ? 'error' : 'ready')");
     expect(travelLoader).toMatch(
-      /catch[\s\S]*setTravelPersonProfiles\(\[\]\)[\s\S]*setTravelProfilesStatus\('error'\)/,
+      /catch[\s\S]*setTravelProfileSnapshot\([\s\S]*stale:[\s\S]*refreshing: false[\s\S]*setTravelProfilesStatus\('error'\)/,
     );
+    expect(travelLoader).not.toContain('setTravelPersonProfiles([])');
     expect(personnelMovementHandler).toContain(
       'void loadTravelPersonProfiles(true)',
     );

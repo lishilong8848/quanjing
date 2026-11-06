@@ -412,17 +412,26 @@ describe('purchase lifecycle delivery worker', () => {
     expect(await worker.run(1)).toMatchObject({ scanned: 0 });
   });
 
-  it('integrates current permission, direct source reread and a real outbox with a fake gateway', async () => {
+  it.each([false,true])('integrates a real outbox and synchronous source proof; switch immediately before dispatch=%s', async changed => {
     const record = { recordId: 'rec_one', status: '未开始（待审批）', building: 'A楼', requestCode: 'CG1', itemName: '物品',
       requesterOpenId: 'ou_requester', requesterName: '申请人', purchaserOpenId: '', purchaserName: '', purchaseMethod: '综合采购',
       requestedQuantity: 1, actualQuantity: null, actualAmount: null, receiptPhotoTokens: [], invoiceTokens: [] } as PurchaseWorkflowRecord;
     const recordGateway = { getLifecycleExecutionRecordsAsApp: jest.fn(async () => [structuredClone(record)]), prepareManagerComparisonBatchEvidence: jest.fn() };
-    const source = new PurchaseLifecycleGatewayRecordSource(store, recordGateway, () => identity.appId, () => now);
+    let fingerprint='a'.repeat(64);
+    const source = new PurchaseLifecycleGatewayRecordSource(store, recordGateway, () => identity.appId, () => now,async()=>{},()=>fingerprint);
     const access = { snapshot: () => ({ revision: 1, appId: identity.appId }), feishuPrincipal: () => ({ role: 'admin', purchaseBuilding: null }),
       currentDutyRoutePeople: (kind: string) => kind === 'purchase_manager' ? [{ openId: identity.recipientOpenId }] : [],
       isCurrentReadonlyCardRecipient: () => false } as any;
     const realAuthorizer = new PurchaseLifecycleServerAuthorizer(access, source, () => ({ FEISHU_APP_ID: identity.appId }), () => identity.appId);
     const worker = new PurchaseLifecycleDeliveryService(store, realAuthorizer, transport, () => now);
+    if(changed){
+      const mark=store.markLifecycleDeliveryDispatched.bind(store);
+      jest.spyOn(store,'markLifecycleDeliveryDispatched').mockImplementation(async(...args)=>{fingerprint='b'.repeat(64);return mark(...args);});
+      expect(await worker.run()).toMatchObject({delivered:0,rejectedBeforeDispatch:1});
+      expect(transport.sendLifecycleCard).not.toHaveBeenCalled();expect(transport.updateLifecycleCard).not.toHaveBeenCalled();
+      expect(recordGateway.getLifecycleExecutionRecordsAsApp).toHaveBeenCalledTimes(2);
+      return;
+    }
     expect(await worker.run()).toMatchObject({ delivered: 1, needsReconciliation: 0 });
     expect(recordGateway.getLifecycleExecutionRecordsAsApp).toHaveBeenCalledTimes(2);
     expect(transport.sendLifecycleCard).toHaveBeenCalledTimes(1);

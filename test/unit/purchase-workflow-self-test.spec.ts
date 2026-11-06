@@ -92,8 +92,9 @@ describe('purchase workflow real Base self-test safety', () => {
     };
     const service = new PurchaseWorkflowService(gateway as never, {} as never);
 
-    const result = await service.selfTest(session);
+    const result = await service.selfTest({...session,accessRole:'admin'});
 
+    expect(result.checks.filter(check=>!check.passed)).toEqual([]);
     expect(result.passed).toBe(true);
     expect(result.createdRecordIds).toEqual([]);
     expect(result.remainingRecordIds).toEqual([]);
@@ -149,8 +150,9 @@ describe('purchase workflow real Base self-test safety', () => {
     };
     const service = new PurchaseWorkflowService(gateway as never, {} as never);
 
-    const result = await service.selfTest(session);
+    const result = await service.selfTest({...session,accessRole:'admin'});
 
+    expect(result.checks.filter(check=>!check.passed)).toEqual([]);
     expect(result.passed).toBe(true);
     expect(gateway.updateExecutionRecord).toHaveBeenCalledTimes(4);
     expect(gateway.deleteExecutionRecord).toHaveBeenCalledWith(

@@ -404,7 +404,7 @@ export class EmergencyDutyService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    invalidateBitableRecordCache({ appToken, tableId: this.tableId });
+    invalidateBitableRecordCache({ appToken, tableId: this.tableId, deletePersisted: true });
     return this.buildUpsertResponse(
       request,
       personnel,
@@ -424,7 +424,7 @@ export class EmergencyDutyService implements OnModuleInit, OnModuleDestroy {
     appToken: string,
     existingRecordId: string,
   ): Promise<EmergencyDutyUpsertResponse> {
-    invalidateBitableRecordCache({ appToken, tableId: this.tableId });
+    invalidateBitableRecordCache({ appToken, tableId: this.tableId, deletePersisted: true });
     let refreshedRecords: BitableRecordItem[];
     try {
       refreshedRecords = await this.fetchRemoteSnapshot(appToken);

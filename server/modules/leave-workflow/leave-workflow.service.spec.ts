@@ -7,6 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConsoleLogger } from '@nestjs/common';
+import { parseLeaveLongConnectionCardAction } from './leave-workflow.callback';
 
 class LeaveWorkflowService extends ActualLeaveWorkflowService {
   constructor(...args: ConstructorParameters<typeof ActualLeaveWorkflowService>) {
@@ -1988,9 +1989,37 @@ describe('LeaveWorkflowService', () => {
         actorOpenId: 'ou_manager',
         view: 'substitute_required',
       });
-      expect(JSON.stringify(requiredCard)).toContain(
-        'leave_substitute_review_submit:rec_leave_manager_direct:manager:1:g1:r1:d1',
-      );
+      const cardNodes = (value: unknown): Array<Record<string, any>> =>
+        Array.isArray(value) ? value.flatMap(cardNodes)
+          : value && typeof value === 'object'
+            ? [value as Record<string, any>, ...Object.values(value).flatMap(cardNodes)] : [];
+      expect(requiredCard.schema).toBe('2.0');
+      const form = cardNodes(requiredCard).find(node => node.tag === 'form' && node.name === 'leave_shift_substitute_approval');
+      expect(form).toBeDefined();
+      const selectors = cardNodes(form).filter(node => node.tag === 'select_static');
+      expect(selectors).toHaveLength(1);
+      const selector = selectors[0];
+      expect(selector).toMatchObject({ required: true, name: expect.stringMatching(/^leave_shift_substitute_/) });
+      const substitute = selector.options.find((option: any) => option.text.content.includes('廖栩'));
+      expect(substitute).toBeDefined();
+      const submit = cardNodes(form).find(node => node.tag === 'button' && node.form_action_type === 'submit');
+      // Both shifts are 长白: substitute selection stays mandatory, while original-post
+      // backfill and the intermediate backfill review are intentionally unnecessary.
+      expect(submit).toMatchObject({ name: expect.stringMatching(/^leave_approve_submit:/), form_action_type: 'submit' });
+      expect(JSON.stringify(requiredCard)).not.toContain('选择原岗补位人员');
+      const callback = (formValue: Record<string, unknown>) => parseLeaveLongConnectionCardAction({
+        event_type: 'card.action.trigger',
+        operator: { open_id: 'ou_manager' },
+        context: { open_message_id: 'om_leave_manager_direct_1' },
+        action: { tag: submit!.tag, name: submit!.name, form_value: formValue },
+      });
+      expect(() => callback({})).toThrow('请为每个班次选择替班人员');
+      expect(() => callback({ [selector.name]: '' })).toThrow('逐班次替班选择无效');
+      const parsed = callback({ [selector.name]: substitute.value });
+      expect(parsed).toMatchObject({ kind: 'approval', action: 'approve', recordId: 'rec_leave_manager_direct', stageKey: 'manager', stageVersion: 1,
+        actorOpenId: 'ou_manager', substituteRequired: true, shiftSelections: [{ substitutePersonRecordId: substitute.value }] });
+      if (parsed.kind !== 'approval') throw new Error('Expected generated approval form callback');
+      expect(parsed.shiftSelections?.[0].backfillPersonRecordId).toBeUndefined();
       expect(JSON.stringify(requiredCard)).toContain('逐班次替班安排');
 
       const noSubstituteCard = await service.renderApprovalCardView({
@@ -2024,6 +2053,17 @@ describe('LeaveWorkflowService', () => {
           messageId: 'om_leave_manager_direct_1',
         }),
       ).rejects.toThrow('请选择是否需要替班');
+      await expect(service.acceptApprovalAction({ ...parsed, eventId: `${parsed.eventId}-missing-selection`, shiftSelections: [], actorName: '马进宇' }))
+        .rejects.toThrow(/替班/);
+      const unauthorized = await service.acceptApprovalAction({ ...parsed, eventId: `${parsed.eventId}-unauthorized`, actorOpenId: 'ou_applicant_e', actorName: '陈凯' });
+      expect(unauthorized.claimed).toBe(false);
+      expect(await store.getStageAction('rec_leave_manager_direct', 'manager', 1)).toBeNull();
+      await expect(service.acceptApprovalAction({ ...parsed, actorName: '马进宇' })).resolves.toMatchObject({ claimed: true });
+      expect(await store.getStageAction('rec_leave_manager_direct', 'manager', 1)).toMatchObject({
+        actorOpenId: 'ou_manager', action: 'approve',
+        shiftAssignments: [{ substitutePersonRecordId: substitute.value }],
+      });
+      await expect(service.acceptApprovalAction({ ...parsed, actorName: '马进宇' })).resolves.toMatchObject({ claimed: false });
     } finally {
       await rm(directoryPath, { recursive: true, force: true });
     }

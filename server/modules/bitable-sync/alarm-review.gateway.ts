@@ -46,11 +46,11 @@ export class AlarmReviewGateway {
     const before = await read();
     if (reviewMatches(before, outcome, userId, customReply)) return before;
     if (reviewVersion(before) !== expectedVersion) throw new ConflictException('该告警人工复核已变更，请重新读取清单后再复核');
-    const response = await this.http.axiosRef.put(url, { fields: buildReviewFields(outcome, userId, customReply) }, config);
+    const response = await this.http.axiosRef.put(url, { fields: buildReviewFields(outcome, userId, customReply) }, config)
+      .finally(() => invalidateBitableRecordCache({ appToken: target.appToken, tableId: target.tableId, deletePersisted: true }));
     if (response.data?.code !== 0) throw new ServiceUnavailableException('复核写入未确认，请核对后重试');
     const after = await read();
     if (!reviewMatches(after, outcome, userId, customReply)) throw new ServiceUnavailableException('复核回读不一致，请核对后重试');
-    invalidateBitableRecordCache({ appToken: target.appToken, tableId: target.tableId });
     return after;
   }
   private async target(): Promise<{ appToken: string; tableId: string; url: string; token: string }> {

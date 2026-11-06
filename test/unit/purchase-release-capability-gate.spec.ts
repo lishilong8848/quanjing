@@ -8,7 +8,7 @@ describe('purchase runtime capability release and rollback gate',()=>{
   const repo=resolve(__dirname,'../..'),capability='purchase-workflow-ledger-v1';
   let root:string,ledger:string,dist:string;
   const json=(file:string,value:unknown)=>{mkdirSync(dirname(file),{recursive:true});writeFileSync(file,JSON.stringify(value));};
-  const original=()=>({version:2,commands:[],reminders:[],notifications:[],managerApprovalBatches:[]});
+  const original=()=>({version:2,commands:[],reminders:['historical-reminder:fixture-one'],notifications:[],managerApprovalBatches:[]});
   const marked=()=>({...original(),requiredRuntimeCapability:capability});
   const declare=(runtime:string)=>json(join(runtime,'server/common/purchase-runtime-capabilities.json'),{schemaVersion:1,capabilities:[capability]});
   const check=(runtime=dist)=>verify({appRoot:root,runtimeDist:runtime,ledgerPath:ledger});
@@ -19,6 +19,15 @@ describe('purchase runtime capability release and rollback gate',()=>{
     expect(check().compatible).toBe(true);json(ledger,original());expect(check().requiredCapability).toBeNull();
     json(ledger,{...original(),notifications:[{webReceipt:{actor:{openId:'ou_legacy'}}}]});expect(check().compatible).toBe(true);
     expect(check().runtimeCapability).toBeNull();declare(dist);expect(check().runtimeCapability).toBe(capability);
+  });
+  it('accepts non-empty historical string reminders without requiring a new runtime capability',()=>{
+    for(const version of [1,2]) {
+      json(ledger,{...original(),version,reminders:['old-reminder:first','old-reminder:second']});
+      expect(check()).toEqual({compatible:true,requiredCapability:null,runtimeCapability:null});
+    }
+  });
+  it.each([{reminders:[{}]},{reminders:[null]},{reminders:[42]},{reminders:['valid-reminder',{}]}])('rejects reminders containing a non-string value: %j',({reminders})=>{
+    json(ledger,{...original(),reminders});expect(()=>check()).toThrow('PURCHASE_LEDGER_INVALID');
   });
   it('rejects invalid JSON, invalid ledger structure and unknown capability instead of treating them as absent',()=>{
     json(ledger,{});expect(()=>check()).toThrow('PURCHASE_LEDGER_INVALID');

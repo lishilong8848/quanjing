@@ -7,7 +7,7 @@ import { readAccessCookie } from '../../common/access/unified-access.guard';
 import { readEnv } from '../../common/config/external-services.config';
 import { PurchaseLifecycleAttachmentAccessRuntime } from './purchase-lifecycle-attachment-access.runtime';
 import type { PurchaseLifecycleAttachmentRequest, PurchaseLifecycleAttachmentCurrentRequest } from './purchase-lifecycle-attachment-access.service';
-import { PURCHASE_LIFECYCLE_READINESS } from './purchase-application.service';
+import { PURCHASE_LIFECYCLE_PROCESSING_PORT } from './purchase-lifecycle-payment.providers';
 
 type AuthenticatedRequest = Request & { accessPrincipal?: AccessPrincipal };
 
@@ -16,7 +16,7 @@ type AuthenticatedRequest = Request & { accessPrincipal?: AccessPrincipal };
 @PublicAccess()
 export class PurchaseLifecycleAttachmentAccessController {
   constructor(private readonly service: PurchaseLifecycleAttachmentAccessRuntime, private readonly access: UnifiedAccessService,
-    @Optional() @Inject(PURCHASE_LIFECYCLE_READINESS) private readonly readiness?: { isReady(): boolean }) {}
+    @Optional() @Inject(PURCHASE_LIFECYCLE_PROCESSING_PORT) private readonly readiness?: { isProcessing(): boolean }) {}
 
   @Post('ticket')
   async issue(@Req() request: AuthenticatedRequest, @Body() body: PurchaseLifecycleAttachmentRequest): Promise<{ ticket: string }> {
@@ -46,7 +46,7 @@ export class PurchaseLifecycleAttachmentAccessController {
 
   private assertReady(): void {
     try {
-      const ready: unknown = this.readiness?.isReady();
+      const ready: unknown = this.readiness?.isProcessing();
       if (ready instanceof Promise) void ready.catch(() => undefined);
       if (ready === true) return;
     } catch { /* fail closed */ }

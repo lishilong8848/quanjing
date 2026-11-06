@@ -25,6 +25,7 @@ import {
   PURCHASE_PLATFORM_APPROVAL_RUNTIME,
   PURCHASE_PLATFORM_APPROVAL_SOURCE,
   PURCHASE_PLATFORM_RECOVERY_OPTIONS,
+  PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS,
   PurchasePlatformApprovalRuntime,
   createPurchasePlatformApprovalRuntime,
 } from '../../server/modules/purchase-inventory/purchase-platform-approval-runtime';
@@ -103,8 +104,13 @@ describe('personal purchase approval DI wiring in a real Nest TestingModule', ()
           useFactory: (gateway: PurchaseWorkflowGateway, http: HttpService) => moduleParity.sourceFactory(gateway, http),
         },
         {
+          provide: PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS,
+          inject: [PurchaseWorkflowGateway],
+          useFactory: (gateway:PurchaseWorkflowGateway)=>({gateway,sourceIdentity:()=>({appId,sourceFingerprint:'a'.repeat(64)})}),
+        },
+        {
           provide: PURCHASE_PLATFORM_APPROVAL_RUNTIME,
-          inject: [PurchaseWorkflowStore, PURCHASE_PLATFORM_APPROVAL_SOURCE, PURCHASE_PLATFORM_RECOVERY_OPTIONS],
+          inject: [PurchaseWorkflowStore, PURCHASE_PLATFORM_APPROVAL_SOURCE, PURCHASE_PLATFORM_RECOVERY_OPTIONS, PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS],
           useFactory: moduleParity.runtimeFactory,
         },
       ],
@@ -185,7 +191,8 @@ describe('personal purchase approval DI wiring in a real Nest TestingModule', ()
       expect.objectContaining({ provide: PURCHASE_PLATFORM_SESSION_BINDING, useExisting: PurchasePlatformSessionBinding }),
       expect.objectContaining({ provide: PURCHASE_PLATFORM_RECOVERY_OPTIONS }),
       expect.objectContaining({ provide: PURCHASE_PLATFORM_APPROVAL_SOURCE, inject: [PurchaseWorkflowGateway, HttpService] }),
-      expect.objectContaining({ provide: PURCHASE_PLATFORM_APPROVAL_RUNTIME, inject: [PurchaseWorkflowStore, PURCHASE_PLATFORM_APPROVAL_SOURCE, PURCHASE_PLATFORM_RECOVERY_OPTIONS] }),
+      expect.objectContaining({ provide: PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS, inject: [PurchaseWorkflowGateway] }),
+      expect.objectContaining({ provide: PURCHASE_PLATFORM_APPROVAL_RUNTIME, inject: [PurchaseWorkflowStore, PURCHASE_PLATFORM_APPROVAL_SOURCE, PURCHASE_PLATFORM_RECOVERY_OPTIONS, PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS] }),
     ]));
     const runtimeFactory = (providers.find(provider => provider?.provide === PURCHASE_PLATFORM_APPROVAL_RUNTIME) as Provider).useFactory;
     const sourceFactory = (providers.find(provider => provider?.provide === PURCHASE_PLATFORM_APPROVAL_SOURCE) as Provider).useFactory;

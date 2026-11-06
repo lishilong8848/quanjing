@@ -75,7 +75,8 @@ describe('ContractExpiryDispositionGateway', () => {
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-contract',
       tableId: 'tbl-contracts',
-    });
+      deletePersisted: true,
+});
   });
 
   it('rejects a non-date contract end field instead of sending an unsafe write', async () => {

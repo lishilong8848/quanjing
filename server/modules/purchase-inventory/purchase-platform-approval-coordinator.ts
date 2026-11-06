@@ -96,7 +96,10 @@ function precondition(record: PurchaseWorkflowRecord): string {
 }
 function confirmed(job: PlatformApprovalWorkerJob, record: PlatformApprovalReadback, selected: PurchaseManagerApprovalDecision): boolean {
   const expectedState = job.action.choice === 'reject' ? '已驳回' : '已通过';
-  return record.approvalActionId === job.action.serverActionId && isManagerApprovalTargetApplied(record, selected) &&
+  const applied = job.action.choice === 'reject' && job.action.rejectionReason === ''
+    ? record.status === '驳回申请' && record.purchaseMethod === '驳回' && record.rejectionReason === ''
+    : isManagerApprovalTargetApplied(record, selected);
+  return record.approvalActionId === job.action.serverActionId && applied &&
     record.approvalWorkflowStatus === expectedState && record.platformApprovalTimeMs === job.action.acceptedAtMs &&
     Array.isArray(record.platformCurrentApproverOpenIds) && record.platformCurrentApproverOpenIds.length === 0 &&
     (!job.action.actorFeishuOpenId || Array.isArray(record.platformActualApproverOpenIds) && record.platformActualApproverOpenIds.length === 1 && record.platformActualApproverOpenIds[0] === job.action.actorFeishuOpenId);
@@ -141,7 +144,12 @@ export function createPlatformApprovalCoordinator(store: PlatformApprovalWorkerS
       // never claimed as our own merely because the visible status resembles ours.
       if (row.status !== '未开始（待审批）' || row.approvalActionId) { await store.markUnknown(job, 'record_not_pending'); return 'manual_reconciliation'; }
       let patch: Record<string, unknown>;
-      try { patch = { ...buildPurchaseManagerApprovalPatch(row, selected), ...buildPurchasePlatformResolvedFields({ choice: job.action.choice, actorFeishuOpenId: job.action.actorFeishuOpenId, eventId: job.action.serverActionId, approvalTime: new Date(job.action.acceptedAtMs) }) }; }
+      try {
+        const decisionPatch = job.action.choice === 'reject' && job.action.rejectionReason === ''
+          ? (() => { if (row.rejectionReason?.trim()) throw new Error('conflicting rejection'); return { '1️⃣物品采购方式':'驳回', 采购流程:'驳回申请', 驳回原因:'' }; })()
+          : buildPurchaseManagerApprovalPatch(row, selected);
+        patch = { ...decisionPatch, ...buildPurchasePlatformResolvedFields({ choice: job.action.choice, actorFeishuOpenId: job.action.actorFeishuOpenId, eventId: job.action.serverActionId, approvalTime: new Date(job.action.acceptedAtMs) }) };
+      }
       catch { await store.markUnknown(job, 'invalid_decision'); return 'manual_reconciliation'; }
       const expected = precondition(row);
       if (!await store.beginDispatch(job, purchaser, hash(patch))) return 'busy';

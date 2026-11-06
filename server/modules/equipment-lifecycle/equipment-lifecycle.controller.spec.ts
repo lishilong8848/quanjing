@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { EquipmentLifecycleModule } from './equipment-lifecycle.module';
 
 const controllerSource = readFileSync(
   join(
@@ -40,10 +41,11 @@ describe('EquipmentLifecycleController', () => {
   });
 
   test('registers the controller and service in a bounded module', () => {
-    expect(moduleSource).toContain(
-      'controllers: [EquipmentLifecycleController]',
-    );
-    expect(moduleSource).toContain('providers: [EquipmentLifecycleService]');
+    const names = (key: string): string[] => Reflect.getMetadata(key, EquipmentLifecycleModule).map((entry: { name: string }) => entry.name).sort();
+    expect(names('controllers')).toEqual(['EquipmentLedgerController', 'EquipmentLifecycleController']);
+    expect(names('providers')).toEqual(['EquipmentHistoryService', 'EquipmentLedgerService', 'EquipmentLifecycleService', 'EquipmentRepairSourceService']);
+    expect(names('exports')).toEqual(['EquipmentLifecycleService']);
+    expect(Reflect.getMetadata('imports', EquipmentLifecycleModule)).toHaveLength(1);
     expect(moduleSource).toContain('HttpModule.register');
   });
 });

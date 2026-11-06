@@ -212,6 +212,27 @@ interface BitableRecordCacheEntry {
 
 const bitableRecordCache = new Map<string, BitableRecordCacheEntry>();
 const persistedBitableRecordWriteTails = new Map<string, Promise<void>>();
+// A read started before a business write must not republish its old result,
+// including when the memory entry was removed while that read was in flight.
+const bitableRecordReadGenerations = new Map<string, number>();
+
+/** Pure in-memory revision for derived readers; registration makes global invalidation observable. */
+export function getBitableRecordCacheGeneration(appToken: string, tableId: string): number {
+  const scopeKey = getPersistedBitableRecordScopeKey(appToken, tableId);
+  const generation = bitableRecordReadGenerations.get(scopeKey) ?? 0;
+  bitableRecordReadGenerations.set(scopeKey, generation);
+  return generation;
+}
+
+function captureBitableRecordReadGuard(appToken: string, tableId: string): () => void {
+  const scopeKey = getPersistedBitableRecordScopeKey(appToken, tableId);
+  const generation = getBitableRecordCacheGeneration(appToken, tableId);
+  return () => {
+    if (bitableRecordReadGenerations.get(scopeKey) !== generation) {
+      throw new Error('数据在读取期间已变更，请重新读取');
+    }
+  };
+}
 
 interface PersistedBitableRecordCache {
   contentFingerprint?: string;
@@ -376,6 +397,13 @@ export function invalidateBitableRecordCache(options?: {
   tableId?: string;
   deletePersisted?: boolean;
 }): void {
+  for (const [scopeKey, generation] of bitableRecordReadGenerations) {
+    const [appToken, tableId] = scopeKey.split('\u001f');
+    if ((!options?.appToken || options.appToken === appToken) &&
+        (!options?.tableId || options.tableId === tableId)) {
+      bitableRecordReadGenerations.set(scopeKey, generation + 1);
+    }
+  }
   const persistedCachePaths = new Set<string>();
   if (options?.deletePersisted && options.appToken && options.tableId) {
     for (const cacheKey of bitableRecordCache.keys()) {
@@ -460,6 +488,7 @@ export async function fetchBitableRecords(
     options.appToken,
     options.tableId,
   );
+  const assertCurrentRead = captureBitableRecordReadGuard(options.appToken, options.tableId);
 
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const rawBaseCacheKey = `${options.appToken}:${options.tableId}:${options.viewId || ''}`;
@@ -481,6 +510,7 @@ export async function fetchBitableRecords(
       cached.promise,
       options,
     );
+    assertCurrentRead();
     const fetchedAt = Date.now();
     const effectiveCacheTtlMs =
       cacheTtlMs > 0 ? cacheTtlMs : DEFAULT_CACHE_TTL_MS;
@@ -491,7 +521,9 @@ export async function fetchBitableRecords(
       fetchedAt,
       fetchedAt + effectiveCacheTtlMs,
       cached.sourceStartedAt ?? fetchedAt,
+      assertCurrentRead,
     );
+    assertCurrentRead();
     const current = bitableRecordCache.get(cacheKey);
     if (
       (!current?.promise || current.promise === cached.promise) &&
@@ -523,12 +555,15 @@ export async function fetchBitableRecords(
       }
     }
     if (cached.promise) {
-      return resolveSharedBitableRecordRequest(cached.promise, options);
+      const records = await resolveSharedBitableRecordRequest(cached.promise, options);
+      assertCurrentRead();
+      return records;
     }
   }
 
   if (!options.forceRefresh && cacheTtlMs > 0) {
     const persisted = await readPersistedBitableRecordCache(cacheKey, options);
+    assertCurrentRead();
     if (persisted) {
       const effectiveExpiresAt = Math.min(
         persisted.expiresAt,
@@ -559,6 +594,7 @@ export async function fetchBitableRecords(
   let previousCache = bitableRecordCache.get(cacheKey);
   if (options.forceRefresh && !previousCache?.records) {
     const persisted = await readPersistedBitableRecordCache(cacheKey, options);
+    assertCurrentRead();
     if (persisted) {
       previousCache = {
         expiresAt: persisted.expiresAt,
@@ -603,17 +639,27 @@ export async function fetchBitableRecords(
       pageSize = successfulPageSize;
 
       const data = response.data.data || {};
-      if (options.requirePersisted && !Array.isArray(data.items)) throw new Error('同步来源分页记录格式无效');
-      records.push(...(data.items || []));
-      pageToken = data.page_token;
-      hasMore = Boolean(data.has_more);
-      if (options.requirePersisted && hasMore) {
-        if (typeof pageToken !== 'string' || !pageToken || seenPageTokens.has(pageToken)) throw new Error('同步来源分页未完整返回');
-        seenPageTokens.add(pageToken);
+      // Official SDKs permit omitted items. Accept only an explicit, unambiguous empty first page.
+      const explicitEmptyFirstPage = pageToken === undefined && records.length === 0 &&
+        !Object.prototype.hasOwnProperty.call(data, 'items') && data.has_more === false && data.total === 0 &&
+        (data.page_token === undefined || data.page_token === '');
+      const pageItems = Array.isArray(data.items) ? data.items : explicitEmptyFirstPage ? [] : undefined;
+      if (!pageItems) throw new Error('同步来源分页记录格式无效');
+      // Feishu can omit the false terminal flag; every explicit value must be boolean.
+      if (data.has_more !== undefined && typeof data.has_more !== 'boolean') throw new Error('同步来源分页状态格式无效');
+      hasMore = data.has_more === true;
+      const nextPageToken = data.page_token;
+      if (hasMore) {
+        if (typeof nextPageToken !== 'string' || !nextPageToken.trim() || seenPageTokens.has(nextPageToken)) throw new Error('同步来源分页未完整返回');
+        seenPageTokens.add(nextPageToken);
       }
+      // Validate the entire page before accepting it; partial scans must never replace a cache.
+      records.push(...pageItems);
+      pageToken = nextPageToken;
     }
 
     options.validateRecords?.(records);
+    assertCurrentRead();
     return records;
   })();
 
@@ -627,6 +673,7 @@ export async function fetchBitableRecords(
 
   try {
     const records = await requestPromise;
+    assertCurrentRead();
     const shouldStoreFreshRecords = cacheTtlMs > 0 || options.forceRefresh;
     if (shouldStoreFreshRecords) {
       const fetchedAt = Date.now();
@@ -639,7 +686,9 @@ export async function fetchBitableRecords(
         fetchedAt,
         fetchedAt + effectiveCacheTtlMs,
         now,
+        assertCurrentRead,
       );
+      assertCurrentRead();
       bitableRecordCache.set(cacheKey, {
         expiresAt: fetchedAt + effectiveCacheTtlMs,
         fetchedAt,
@@ -651,6 +700,8 @@ export async function fetchBitableRecords(
     }
     return records;
   } catch (error) {
+    // Invalidation also forbids restoring/returning the pre-write fallback.
+    assertCurrentRead();
     if (bitableRecordCache.get(cacheKey)?.promise === requestPromise) {
       if (previousCache?.records) {
         bitableRecordCache.set(cacheKey, previousCache);
@@ -1801,11 +1852,13 @@ async function writePersistedBitableRecordCache(
   records: BitableRecordItem[],
   fetchedAt: number,
   expiresAt: number,
-  sourceStartedAt = fetchedAt,
+  sourceStartedAt: number,
+  assertCurrentRead: () => void,
 ): Promise<void> {
   let cacheFile = '';
   let writeRequest: Promise<void> | null = null;
   try {
+    assertCurrentRead();
     const scopeKey = getPersistedBitableRecordScopeKey(
       options.appToken,
       options.tableId,
@@ -1813,6 +1866,7 @@ async function writePersistedBitableRecordCache(
     await waitForPersistedBitableRecordScopeInvalidationWrite(scopeKey);
     const invalidationToken =
       await readPersistedBitableRecordScopeInvalidationToken(scopeKey);
+    assertCurrentRead();
     cacheFile = getPersistedCachePath(cacheKey);
     const viewId = normalizeBitableViewId(options.viewId);
     const fieldNames = normalizeBitableFieldNames(options.fieldNames);
@@ -1839,12 +1893,38 @@ async function writePersistedBitableRecordCache(
     writeRequest = (previousWrite ?? Promise.resolve())
       .catch(() => undefined)
       .then(async () => {
+        assertCurrentRead();
         await mkdir(LOCAL_CACHE_DIR, { recursive: true });
         const tempFile = `${cacheFile}.${process.pid}.tmp`;
         const bytes = JSON.stringify(payload);
-        await writeFile(tempFile, bytes, 'utf8');
-        await rename(tempFile, cacheFile);
-        if (options.requirePersisted && await readFile(cacheFile, 'utf8') !== bytes) throw new Error('LOCAL_SYNC_SNAPSHOT_NOT_PERSISTED');
+        try {
+          assertCurrentRead();
+          await writeFile(tempFile, bytes, 'utf8');
+          assertCurrentRead();
+          await rename(tempFile, cacheFile);
+          try {
+            assertCurrentRead();
+          } catch (error) {
+            // This write still owns the file's serialized write slot. Remove
+            // only its stale publication before a newer write can acquire it.
+            await rm(cacheFile, { force: true });
+            throw error;
+          }
+        } finally {
+          await rm(tempFile, { force: true }).catch(() => undefined);
+        }
+        try {
+          if (options.requirePersisted && await readFile(cacheFile, 'utf8') !== bytes) throw new Error('LOCAL_SYNC_SNAPSHOT_NOT_PERSISTED');
+          assertCurrentRead();
+        } catch (error) {
+          try {
+            assertCurrentRead();
+          } catch (invalidationError) {
+            await rm(cacheFile, { force: true });
+            throw invalidationError;
+          }
+          throw error;
+        }
         const currentInvalidationToken =
           persistedBitableRecordScopeInvalidationTokens.get(scopeKey) ?? null;
         if (currentInvalidationToken !== invalidationToken) {
@@ -1862,6 +1942,7 @@ async function writePersistedBitableRecordCache(
     persistedBitableRecordWriteTails.set(cacheFile, writeRequest);
     await writeRequest;
   } catch (error: unknown) {
+    assertCurrentRead();
     const message = error instanceof Error ? error.message : String(error);
     localCacheLogger.warn(
       `Write Feishu local cache failed for ${options.tableName}: ${message}`,

@@ -26,6 +26,7 @@ export function useConfiguration() {
   const [loading, setLoading] = useState(true);
   const [peopleLoading, setPeopleLoading] = useState(true);
   const [peopleReady, setPeopleReady] = useState(false);
+  const [peopleCache, setPeopleCache] = useState<{ snapshotAt: number; stale: boolean; refreshing: boolean }>();
   const [personnelOverview, setPersonnelOverview] = useState<PersonnelOverview>();
   const sequence = useRef(0);
   const peopleSequence = useRef(0);
@@ -53,12 +54,13 @@ export function useConfiguration() {
       metadata.current = result.accounts;
       setPeople(result.people);
       setPeopleReady(true);
+      setPeopleCache(result.displayCache);
       setPersonnelOverview(result.personnelOverview);
       setData(current => current && current.appId === result.appId ? { ...current, accounts: current.accounts.map(account => {
         const enriched = result.accounts.find(person => person.id === account.id);
         return enriched && account.version === enriched.version ? { ...account, name: enriched.name, openId: enriched.openId } : account;
       }) } : current);
-    } catch (failure) { if (request === peopleSequence.current) setPeopleError((failure as Error).message); }
+    } catch (failure) { if (request === peopleSequence.current) { setPeopleError((failure as Error).message); setPeopleCache(current => current && ({ ...current, refreshing: false })); } }
     finally {
       if (request === peopleSequence.current) setPeopleLoading(false);
       if (peoplePending.current?.sequence === request) peoplePending.current = undefined;
@@ -73,5 +75,11 @@ export function useConfiguration() {
     setLoading(false);
     setData(current => !current || value.revision >= current.revision ? enrich(value) : current);
   }, [enrich]);
-  return { data, people, personnelOverview, error, peopleError, loading, peopleLoading, peopleReady, refresh, refreshPeople, commit };
+  useEffect(() => {
+    if (!peopleCache?.refreshing) return;
+    let tries = 0;
+    const timer = setInterval(() => { if (++tries > 12) { clearInterval(timer); setPeopleCache(current => current && ({ ...current, refreshing: false })); return; } void refreshPeople(); }, 5_000);
+    return () => clearInterval(timer);
+  }, [peopleCache?.refreshing, refreshPeople]);
+  return { data, people, personnelOverview, peopleCache, error, peopleError, loading, peopleLoading, peopleReady, refresh, refreshPeople, commit };
 }

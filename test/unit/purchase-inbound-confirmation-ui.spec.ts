@@ -24,6 +24,7 @@ jest.mock(
   }),
   { virtual: true },
 );
+jest.mock('@/access/AccessProvider', () => ({ useAccess: jest.fn() }));
 for (const moduleName of [
   '@/components/ui/badge',
   '@/components/ui/button',

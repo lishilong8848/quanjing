@@ -4,7 +4,7 @@ import { readEnv } from '../../common/config/external-services.config';
 import { AccessConfigurationService } from '../../common/access/access-configuration.service';
 import { UnifiedAccessService } from '../../common/access/unified-access.service';
 import { PurchaseAccessPolicyService } from './purchase-access-policy.service';
-import { PurchaseApplicationTaskLedgerStore } from './purchase-application-task-ledger.store';
+import { PurchaseApplicationTaskLedgerStore, PURCHASE_APPLICATION_TASK_LEDGER_OPTIONS } from './purchase-application-task-ledger.store';
 import { PurchaseApplicationService, PURCHASE_LIFECYCLE_NEW_APPLICATIONS, PURCHASE_LIFECYCLE_READINESS } from './purchase-application.service';
 import { PurchaseCodeService } from './purchase-code.service';
 import { PurchaseInventoryController } from './purchase-inventory.controller';
@@ -46,6 +46,7 @@ import {
   PURCHASE_PLATFORM_APPROVAL_RUNTIME,
   PURCHASE_PLATFORM_APPROVAL_SOURCE,
   PURCHASE_PLATFORM_RECOVERY_OPTIONS,
+  PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS,
   createPurchasePlatformApprovalRuntime,
 } from './purchase-platform-approval-runtime';
 import { createPlatformLegacyApprovalGateway } from './purchase-platform-legacy-approval-gateway';
@@ -53,6 +54,7 @@ import { PURCHASE_LIFECYCLE_PAYMENT_PROVIDERS, PURCHASE_LIFECYCLE_PAYMENT_CONTRO
 import { PURCHASE_LIFECYCLE_RECEIPT_PROVIDERS } from './purchase-lifecycle-receipt.providers';
 import { PurchaseLifecycleCardTransport } from './purchase-lifecycle-card-transport';
 import { PurchaseLifecycleComposition, purchaseLifecycleNewApplicationsEnabled } from './purchase-lifecycle-composition';
+import { lifecyclePaymentUploadSourceFingerprint } from './purchase-lifecycle-payment-upload-gateway';
 
 /** Background recovery is opt-in only: `/^(1|true|yes|on)$/i` in
  * PURCHASE_PLATFORM_APPROVAL_RECOVERY_ENABLED. Anything else keeps the durable
@@ -83,6 +85,11 @@ function purchasePlatformRecoveryOptions(): { enabled: boolean } {
     ...PURCHASE_LIFECYCLE_RECEIPT_PROVIDERS,
     PurchaseLifecycleComposition,
     { provide: PURCHASE_LIFECYCLE_NEW_APPLICATIONS, useFactory: purchaseLifecycleNewApplicationsEnabled },
+    {
+      provide: PURCHASE_APPLICATION_TASK_LEDGER_OPTIONS,
+      inject: [PURCHASE_LIFECYCLE_NEW_APPLICATIONS],
+      useFactory: (enabled: boolean) => ({ allowLifecycleReservations: enabled === true }),
+    },
     { provide: PURCHASE_LIFECYCLE_READINESS, useExisting: PurchaseLifecycleComposition },
     { provide: PURCHASE_LIFECYCLE_PROCESSING_PORT, useExisting: PurchaseLifecycleComposition },
     PurchaseInventoryService,
@@ -131,8 +138,13 @@ function purchasePlatformRecoveryOptions(): { enabled: boolean } {
       useFactory: createPlatformLegacyApprovalGateway,
     },
     {
+      provide: PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS,
+      inject: [PurchaseWorkflowGateway],
+      useFactory: (gateway: PurchaseWorkflowGateway) => ({ gateway, sourceIdentity: () => ({appId:readEnv('FEISHU_APP_ID'),sourceFingerprint:lifecyclePaymentUploadSourceFingerprint()}) }),
+    },
+    {
       provide: PURCHASE_PLATFORM_APPROVAL_RUNTIME,
-      inject: [PurchaseWorkflowStore, PURCHASE_PLATFORM_APPROVAL_SOURCE, PURCHASE_PLATFORM_RECOVERY_OPTIONS],
+      inject: [PurchaseWorkflowStore, PURCHASE_PLATFORM_APPROVAL_SOURCE, PURCHASE_PLATFORM_RECOVERY_OPTIONS, PURCHASE_PLATFORM_LIFECYCLE_APPROVAL_OPTIONS],
       useFactory: createPurchasePlatformApprovalRuntime,
     },
   ],

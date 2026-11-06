@@ -1,5 +1,6 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import * as ts from 'typescript';
 
 describe('monthly schedule change adjustment UI', () => {
   const page = readFileSync(
@@ -14,7 +15,7 @@ describe('monthly schedule change adjustment UI', () => {
     'utf8',
   );
 
-  it('nests manager-only change adjustment below change request', () => {
+  it('nests change adjustment below change request and guards its page action', () => {
     const tools = page.slice(
       page.indexOf('运维相关'),
       page.indexOf('<ClipboardPlus', page.indexOf('运维相关')),
@@ -24,8 +25,20 @@ describe('monthly schedule change adjustment UI', () => {
     expect(tools.indexOf('变更调整')).toBeGreaterThan(
       tools.indexOf('变更申请'),
     );
-    expect(tools).toContain('{canManageMonthlySchedule && (');
+    expect(tools).toContain('{canUpdateChange && (');
+    expect(page).toContain("canUsePageAction(access, 'change_management', 'update', capabilities.canEdit)");
     expect(tools).toContain('openChangeAdjustmentRequest()');
+  });
+
+  it.each([true, false])('opens the actual adjustment dialog only when update permission is %s', allowed => {
+    const start = page.indexOf('(recordId: string | null = null) => {', page.indexOf('const openChangeAdjustmentRequest'));
+    const end = page.indexOf('\n    },', start) + '\n    }'.length;
+    const setters = { setChangeAdjustmentRequestInitialRecordId: jest.fn(), setChangeAdjustmentRequestServerError: jest.fn(), setChangeAdjustmentRequestOpen: jest.fn() };
+    const env = { canUpdateChange: allowed, changeAdjustmentRequestRetryBinding: null, toast: { info: jest.fn() }, ...setters };
+    const code = ts.transpileModule(`const open = ${page.slice(start, end)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+    new Function(...Object.keys(env), `${code}; open('synthetic-record');`)(...Object.values(env));
+    if (allowed) expect(setters.setChangeAdjustmentRequestOpen).toHaveBeenCalledWith(true);
+    else { expect(setters.setChangeAdjustmentRequestOpen).not.toHaveBeenCalled(); expect(env.toast.info).toHaveBeenCalledWith('当前为只读模式，不能调整变更'); }
   });
 
   it('uses cached change records and enforces lifecycle-specific date editing', () => {

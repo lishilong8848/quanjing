@@ -173,7 +173,10 @@ export class PurchaseApplicationTaskLedgerStore {
         entry.flowVersion === 'lifecycle_v1' &&
         !this.allowLifecycleReservations
       ) {
-        throw new ServiceUnavailableException('采购全流程卡片尚未启用');
+        throw new ServiceUnavailableException({
+          message: '采购全流程卡片尚未启用',
+          writeDisposition: 'definitely-not-written',
+        });
       }
       if (
         entry.flowVersion === 'lifecycle_v1' &&

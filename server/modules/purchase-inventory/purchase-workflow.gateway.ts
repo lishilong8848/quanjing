@@ -455,16 +455,20 @@ export class PurchaseWorkflowGateway {
       userAccessToken,
     );
     if(sourceGuard) await sourceGuard();
-    const response = await this.httpService.axiosRef.put(
-      `${recordsUrl(config.appToken, config.executionTableId)}/${encodeURIComponent(recordId)}`,
-      { fields: resolvedFields },
-      requestConfig(userAccessToken, timeoutMs),
-    );
-    assertFeishuSuccess(response.data, '更新采购执行记录失败');
-    invalidateBitableRecordCache({
-      appToken: config.appToken,
-      tableId: config.executionTableId,
-    });
+    try {
+      const response = await this.httpService.axiosRef.put(
+        `${recordsUrl(config.appToken, config.executionTableId)}/${encodeURIComponent(recordId)}`,
+        { fields: resolvedFields },
+        requestConfig(userAccessToken, timeoutMs),
+      );
+      assertFeishuSuccess(response.data, '更新采购执行记录失败');
+    } finally {
+      invalidateBitableRecordCache({
+        appToken: config.appToken,
+        tableId: config.executionTableId,
+        deletePersisted: true,
+      });
+    }
   }
 
   private async resolveExecutionFieldNames(
@@ -635,16 +639,20 @@ export class PurchaseWorkflowGateway {
     userAccessToken: string,
   ): Promise<void> {
     const config = this.config();
-    const response = await this.httpService.axiosRef.put(
-      `${recordsUrl(config.appToken, config.submissionTableId)}/${encodeURIComponent(recordId)}`,
-      { fields },
-      requestConfig(userAccessToken),
-    );
-    assertFeishuSuccess(response.data, '更新采购提交记录失败');
-    invalidateBitableRecordCache({
-      appToken: config.appToken,
-      tableId: config.submissionTableId,
-    });
+    try {
+      const response = await this.httpService.axiosRef.put(
+        `${recordsUrl(config.appToken, config.submissionTableId)}/${encodeURIComponent(recordId)}`,
+        { fields },
+        requestConfig(userAccessToken),
+      );
+      assertFeishuSuccess(response.data, '更新采购提交记录失败');
+    } finally {
+      invalidateBitableRecordCache({
+        appToken: config.appToken,
+        tableId: config.submissionTableId,
+        deletePersisted: true,
+      });
+    }
   }
 
   async updateSubmissionRecordAsApp(
@@ -1567,7 +1575,7 @@ export class PurchaseWorkflowGateway {
         url,
         definition.payload,
         requestConfig(accessToken),
-      );
+      ).finally(() => invalidateBitableRecordCache({ appToken: config.appToken, tableId: config.executionTableId, deletePersisted: true }));
       assertFeishuSuccess(
         created.data,
         `创建采购程序审批字段失败：${definition.name}`,
@@ -1583,21 +1591,24 @@ export class PurchaseWorkflowGateway {
     tableName: string,
   ): Promise<string> {
     if (!appToken || !tableId) throw new Error(`${tableName}表配置缺失`);
-    const response = await this.httpService.axiosRef.post(
-      recordsUrl(appToken, tableId),
-      { fields },
-      requestConfig(accessToken),
-    );
-    assertFeishuSuccess(response.data, `新增${tableName}记录失败`);
-    const recordId = clean(
-      response.data?.data?.record?.record_id || response.data?.data?.record_id,
-    );
-    if (!recordId)
-      throw new BadGatewayException(
-        `新增${tableName}记录失败：响应缺少 record_id`,
+    try {
+      const response = await this.httpService.axiosRef.post(
+        recordsUrl(appToken, tableId),
+        { fields },
+        requestConfig(accessToken),
       );
-    invalidateBitableRecordCache({ appToken, tableId });
-    return recordId;
+      assertFeishuSuccess(response.data, `新增${tableName}记录失败`);
+      const recordId = clean(
+        response.data?.data?.record?.record_id || response.data?.data?.record_id,
+      );
+      if (!recordId)
+        throw new BadGatewayException(
+          `新增${tableName}记录失败：响应缺少 record_id`,
+        );
+      return recordId;
+    } finally {
+      invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true });
+    }
   }
 
   private async deleteRecord(
@@ -1608,12 +1619,15 @@ export class PurchaseWorkflowGateway {
     tableName: string,
   ): Promise<void> {
     if (!appToken || !tableId) throw new Error(`${tableName}表配置缺失`);
-    const response = await this.httpService.axiosRef.delete(
-      `${recordsUrl(appToken, tableId)}/${encodeURIComponent(recordId)}`,
-      requestConfig(accessToken),
-    );
-    assertFeishuSuccess(response.data, `删除${tableName}记录失败`);
-    invalidateBitableRecordCache({ appToken, tableId });
+    try {
+      const response = await this.httpService.axiosRef.delete(
+        `${recordsUrl(appToken, tableId)}/${encodeURIComponent(recordId)}`,
+        requestConfig(accessToken),
+      );
+      assertFeishuSuccess(response.data, `删除${tableName}记录失败`);
+    } finally {
+      invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true });
+    }
   }
 
   private async batchDeleteRecords(
@@ -1625,13 +1639,16 @@ export class PurchaseWorkflowGateway {
   ): Promise<void> {
     if (!recordIds.length) return;
     if (!appToken || !tableId) throw new Error(`${tableName}表配置缺失`);
-    const response = await this.httpService.axiosRef.post(
-      `${recordsUrl(appToken, tableId)}/batch_delete`,
-      { records: recordIds },
-      requestConfig(accessToken),
-    );
-    assertFeishuSuccess(response.data, `批量删除${tableName}记录失败`);
-    invalidateBitableRecordCache({ appToken, tableId });
+    try {
+      const response = await this.httpService.axiosRef.post(
+        `${recordsUrl(appToken, tableId)}/batch_delete`,
+        { records: recordIds },
+        requestConfig(accessToken),
+      );
+      assertFeishuSuccess(response.data, `批量删除${tableName}记录失败`);
+    } finally {
+      invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true });
+    }
   }
 
   private config(): PurchaseWorkflowConfig {

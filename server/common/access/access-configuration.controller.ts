@@ -173,7 +173,8 @@ export class AccessConfigurationController {
   @Header('Cache-Control', 'private, no-store')
   async people(@Req() request: Request) {
     this.actor(request);
-    const directory = await withPersonnelDirectoryDeadline<Awaited<ReturnType<AccessConfigurationDirectory['read']>>>(this.directory.read());
+    const directory = await withPersonnelDirectoryDeadline(this.directory.readForDisplay());
+    this.actor(request);
     const { externalEmployees: _credentials, ...publicDirectory } = directory;
     const configuration = this.configuration.enrichedSnapshot(directory.people);
     return { ...publicDirectory, accounts: configuration.accounts,

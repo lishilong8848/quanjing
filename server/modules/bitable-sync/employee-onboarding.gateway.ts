@@ -468,6 +468,7 @@ export class EmployeeOnboardingGateway {
     invalidateBitableRecordCache({
       appToken: this.resolvedTarget.appToken,
       tableId: this.resolvedTarget.tableId,
+      deletePersisted: true,
     });
   }
 

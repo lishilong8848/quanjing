@@ -41,8 +41,13 @@ export function createPurchaseLifecycleReadiness(
             (snapshot.schemaVersion !== 1 && snapshot.schemaVersion !== 2)) return false;
         for (const name of PURCHASE_LIFECYCLE_REQUIRED_CHECKS) {
           if (!Object.hasOwn(checks, name) || typeof checks[name] !== 'function') return false;
-          if (await checks[name]() !== true) return false;
         }
+        const probes = [checks.authorizationConfiguration, checks.newApplicationRegistration,
+          checks.recipientAuthorizationAndProjection, checks.durableDeliveryAndIdempotency,
+          checks.cardRenderingAndAttachments, checks.callbackRoutingAndCurrentAuthority,
+          checks.formCredentialAndAtomicClaims, checks.approvalOrderReceiptAndInbound,
+          checks.readOnlyObservers, checks.existingOrderIsolation, checks.expiredCardContinuation, checks.rollbackProtection];
+        for (const probe of probes) if (await probe.call(checks) !== true) return false;
         // The app identity and configuration can change while async checks run.
         const finalSnapshot = access.snapshot();
         if (effectiveAppId() !== appId || finalSnapshot.appId !== appId || finalSnapshot.revision !== snapshot.revision || finalSnapshot.schemaVersion !== snapshot.schemaVersion) return false;

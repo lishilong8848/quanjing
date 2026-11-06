@@ -275,7 +275,7 @@ export function GlobalNavigation() {
       style={{ top: 'var(--access-impersonation-height, 0px)' }}
       className="duty-desktop-utility-nav fixed inset-x-0 top-0 z-40 h-16 border-b border-slate-200/90 bg-slate-50/95 shadow-[0_1px_3px_hsl(220_25%_20%/0.08)] backdrop-blur-xl"
     >
-      <div className="mx-auto flex h-full w-full max-w-[1600px] items-center gap-2 px-3 sm:px-4 lg:px-6">
+      <div className="flex h-full w-full items-center gap-2 px-3 sm:px-4 lg:px-6">
         <button
           type="button"
           aria-label="返回平台门户"
@@ -287,7 +287,7 @@ export function GlobalNavigation() {
             alt="世纪互联 VNET"
             className="h-9 w-[86px] object-contain"
           />
-          <span className="hidden border-l border-slate-200 pl-3 2xl:block">
+          <span className="hidden border-l border-slate-200 pl-3 sm:block">
             <span className="block text-sm font-semibold text-slate-900">
               南通基地运营平台
             </span>
@@ -299,7 +299,7 @@ export function GlobalNavigation() {
 
         <nav
           aria-label="平台业务分类"
-          className="hidden min-w-0 flex-1 items-center justify-center gap-0.5 xl:flex"
+          className="hidden min-w-0 items-center justify-start gap-0.5 xl:ml-4 xl:flex"
         >
           {domains.map((domain) => {
             const active = activeDomainKey === domain.key;

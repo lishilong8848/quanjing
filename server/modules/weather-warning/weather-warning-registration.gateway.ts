@@ -632,6 +632,7 @@ export class WeatherWarningRegistrationGateway {
     invalidateBitableRecordCache({
       appToken: config.appToken,
       tableId: config.tableId,
+      deletePersisted: true,
     });
   }
 }

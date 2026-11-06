@@ -186,6 +186,23 @@ describe('阈值双审批、计划日期与工程师确认', () => {
       action(id, role, stage.approver.openId, message.messageId, 'approve'),
     );
   }
+  function managerSends() {
+    return messages.sendInteractiveCard.mock.calls.filter(call => call[0] === 'ou_qa_manager');
+  }
+  function addLegacyManagerReceipt(id: string) {
+    service.ledger.change(id, entry => {
+      entry.messages.push({ openId: 'ou_qa_manager', messageId: 'om_legacy_manager', uuid: 'legacy-manager', kind: 'approval_result', patchedRevision: 1 });
+      entry.adjustment.revision++;
+      entry.adjustment.syncState = 'pending';
+    });
+  }
+  async function readyForCompletion(id: string) {
+    await approve(id, 'building');
+    await approve(id, 'professional');
+    jest.setSystemTime(new Date('2026-10-09T04:01:00Z'));
+    await service.runPending();
+    return service.ledger.get(id)!.messages.find(message => message.kind === 'confirmation')!;
+  }
   test('重复申请幂等，原值不改变；重复键内容不同拒绝', async () => {
     const a = service.submit(request(), principal('ou_qa_engineer'));
     expect(service.submit(request(), principal('ou_qa_engineer')).id).toBe(
@@ -279,6 +296,98 @@ describe('阈值双审批、计划日期与工程师确认', () => {
       .get(id)!
       .messages.filter((m) => m.openId === 'ou_qa_manager');
     expect(manager).toHaveLength(1);
+    expect(managerSends()).toHaveLength(1);
+    expect(JSON.stringify(managerSends()[0][1])).toContain('已生效');
+  });
+  test('纯知会经理不接收待审批、审批通过和延期确认过程，申请人与工程师照常收到职责卡', async () => {
+    const id = await submit();
+    expect(managerSends()).toHaveLength(0);
+    const confirmation = await readyForCompletion(id);
+    expect(managerSends()).toHaveLength(0);
+    expect(service.ledger.get(id)!.messages.some(m => m.kind === 'approval_result' && m.openId === 'ou_qa_engineer')).toBe(true);
+    await service.handleCardAction(action(id, 'engineer', 'ou_qa_engineer', confirmation.messageId, 'not_completed'));
+    await service.runPending();
+    jest.setSystemTime(new Date('2026-10-10T04:02:00Z'));
+    await service.runPending();
+    expect(service.ledger.get(id)!.messages.filter(m => m.kind === 'confirmation')).toHaveLength(2);
+    expect(managerSends()).toHaveLength(0);
+  });
+  test.each(['pending', 'awaiting_completion', 'rejected', 'conflict'] as const)('旧经理知会卡在%s状态不刷新、不补发', async state => {
+    const id = await submit();
+    if (state === 'awaiting_completion') await readyForCompletion(id);
+    addLegacyManagerReceipt(id);
+    service.ledger.change(id, entry => { entry.adjustment.state = state; });
+    await service.runPending();
+    await service.runPending();
+    expect(managerSends()).toHaveLength(0);
+    expect(messages.patchInteractiveCard.mock.calls.filter(call => call[0] === 'om_legacy_manager')).toHaveLength(0);
+    expect(service.ledger.get(id)!.messages.find(m => m.messageId === 'om_legacy_manager')!.patchedRevision).toBe(1);
+  });
+  test('旧经理知会卡只在调整成功时更新原卡，重跑不新增或重复刷新', async () => {
+    const id = await submit();
+    addLegacyManagerReceipt(id);
+    service.ledger.change(id, entry => {
+      entry.adjustment.managers.push({ openId: 'ou_qa_second_manager', name: '第二位知会经理' });
+      entry.messages.push({ openId: 'ou_qa_second_manager', messageId: 'om_legacy_second_manager', uuid: 'legacy-second-manager', kind: 'approval_result', patchedRevision: 1 });
+    });
+    const confirmation = await readyForCompletion(id);
+    expect(messages.patchInteractiveCard.mock.calls.filter(call => call[0] === 'om_legacy_manager')).toHaveLength(0);
+    await service.handleCardAction(action(id, 'engineer', 'ou_qa_engineer', confirmation.messageId, 'complete'));
+    await service.runPending();
+    await service.runPending();
+    expect(service.ledger.get(id)!.adjustment.state).toBe('completed');
+    expect(managerSends()).toHaveLength(0);
+    const updates = messages.patchInteractiveCard.mock.calls.filter(call => call[0] === 'om_legacy_manager');
+    expect(updates).toHaveLength(1);
+    expect(JSON.stringify(updates[0][1])).toContain('已生效');
+    expect(messages.patchInteractiveCard.mock.calls.filter(call => call[0] === 'om_legacy_second_manager')).toHaveLength(1);
+    expect(messages.sendInteractiveCard.mock.calls.some(call => call[0] === 'ou_qa_second_manager')).toBe(false);
+  });
+  test('参数仍待同步或同步失败时不知会经理，核实成功后仅发送一次完成卡', async () => {
+    const id = await submit(), confirmation = await readyForCompletion(id);
+    (service as any).sync.kick.mockImplementation(() => {});
+    await service.handleCardAction(action(id, 'engineer', 'ou_qa_engineer', confirmation.messageId, 'complete'));
+    await service.runPending();
+    expect(service.ledger.get(id)!.adjustment.state).toBe('applying');
+    expect(managerSends()).toHaveLength(0);
+    const jobs = store.pendingSync(); expect(jobs).toHaveLength(1);
+    store.finishSync(jobs[0].result.clientMutationId, { state: 'error', error: 'synthetic write failure' });
+    await service.runPending();
+    expect(managerSends()).toHaveLength(0);
+    store.finishSync(jobs[0].result.clientMutationId, { state: 'success' });
+    service.retry(id, principal('ou_qa_engineer'));
+    await service.runPending();
+    await service.runPending();
+    expect(service.ledger.get(id)!.adjustment.state).toBe('completed');
+    expect(managerSends()).toHaveLength(1);
+  });
+  test('经理本人是申请人时保留申请结果通知，而非额外知会', async () => {
+    const id = service.submit(request(), principal('ou_qa_manager', 'admin')).id;
+    await service.runPending();
+    await readyForCompletion(id);
+    expect(service.ledger.get(id)!.adjustment.applicant.openId).toBe('ou_qa_manager');
+    expect(managerSends()).toHaveLength(1);
+    expect(service.ledger.get(id)!.messages.find(m => m.openId === 'ou_qa_manager')!.kind).toBe('approval_result');
+  });
+  test('参数同步回执缺失时保持待同步，不能提前通知调整成功', async () => {
+    const id = await submit(), confirmation = await readyForCompletion(id);
+    jest.spyOn(store, 'syncResults').mockReturnValue([]);
+    await service.handleCardAction(action(id, 'engineer', 'ou_qa_engineer', confirmation.messageId, 'complete'));
+    await service.runPending();
+    expect(service.ledger.get(id)!.adjustment.state).toBe('applying');
+    expect(managerSends()).toHaveLength(0);
+  });
+  test.each(['engineer', 'building'] as const)('经理兼任%s职责时保留该职责卡及过程刷新', async role => {
+    const actor = role === 'engineer' ? roles[0] : roles[1];
+    gateway.peekContext.mockReturnValue({ ...context, roles: [...roles, { ...actor, position: '设施运维经理' }] });
+    const id = await submit();
+    const confirmation = await readyForCompletion(id);
+    const receipt = service.ledger.get(id)!.messages.find(m => m.openId === actor.openId)!;
+    expect(receipt).toBeDefined();
+    await service.handleCardAction(action(id, 'engineer', 'ou_qa_engineer', confirmation.messageId, 'not_completed'));
+    await service.runPending();
+    expect(messages.patchInteractiveCard.mock.calls.some(call => call[0] === receipt.messageId)).toBe(true);
+    expect(managerSends()).toHaveLength(0);
   });
   test('尚未完成不更新，旧确认卡不能反悔覆盖；次日提醒有独立幂等键', async () => {
     const id = await submit();

@@ -28,8 +28,8 @@ describe('isolated platform approval ledger planner', () => {
     expect(() => plan({ batch: { ...baseBatch(), flowVersion: 'lifecycle_v1' } })).toThrow();
     expect(plan({ batch: { ...baseBatch(), flowVersion: 'lifecycle_v1' }, lifecycleReady: true })).toMatchObject({ kind: 'claim', recordId: 'recItem1' });
   });
-  it('requires a real reason for rejection, no reason for approval, and blocks H-building self purchase', () => {
-    expect(() => plan({ request: request({ choice: 'reject', rejectionReason: '' }) })).toThrow();
+  it('preserves the existing optional web rejection reason, forbids approval reasons, and blocks H-building self purchase', () => {
+    expect(plan({ request: request({ choice: 'reject', rejectionReason: '' }) })).toMatchObject({kind:'claim',action:{choice:'reject',rejectionReason:''}});
     expect(() => plan({ request: request({ rejectionReason: 'not applicable' }) })).toThrow();
     expect(plan({ request: request({ choice: 'reject', rejectionReason: '信息不完整' }) })).toMatchObject({ kind: 'claim', action: { choice: 'reject', rejectionReason: '信息不完整' } });
     const batch = { ...baseBatch(), items: [{ executionRecordId: 'recItem1', status: 'pending' }] };

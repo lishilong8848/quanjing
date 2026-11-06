@@ -17,6 +17,8 @@ import { UnifiedAccessService, hashAccessPassword } from '../../server/common/ac
 import { PublicAccess } from '../../server/common/access/unified-access.decorators';
 import { buildExternalEmployeeCredentials } from '../../server/common/access/external-employee-directory';
 import { feishuIdentityFingerprint } from '../../server/common/access/feishu-access-approved-grants';
+import { GlobalExceptionFilter } from '../../server/common/filters/exception.filter';
+import { ServiceUnavailableException } from '@nestjs/common';
 
 @Controller('api/credential-public-probe')
 @PublicAccess()
@@ -79,6 +81,7 @@ describe('personnel credential real module/configuration/guard integration', () 
         post: () => { throw new Error('Unexpected outbound HTTP'); }, put: () => { throw new Error('Unexpected outbound HTTP'); } } })
       .compile();
     app = module.createNestApplication({ logger: false });
+    app.useGlobalFilters(new GlobalExceptionFilter());
     await app.listen(0, '127.0.0.1'); url = await app.getUrl(); process.env.PUBLIC_BASE_URL = url;
     access = app.get(UnifiedAccessService); configuration = app.get(AccessConfigurationService);
   });
@@ -114,6 +117,24 @@ describe('personnel credential real module/configuration/guard integration', () 
     expect(store.read().audit.filter(row => row.action === '更新人员密码')).toHaveLength(1);
   });
 
+  it('keeps trusted Feishu login and renewed sessions usable while the linked native login still requires password setup', async () => {
+    const native = await access.login({ employeeName: name, password: '31002X' }, '192.0.2.1');
+    expect(native.principal.requiresPasswordChange).toBe(true);
+    const feishu = access.issueTrustedSession(configuration.currentPrincipal(linkedId, 1)!);
+    expect(feishu.principal.requiresPasswordChange).not.toBe(true);
+    const renewed = access.renew(feishu.token)!;
+    expect(renewed.principal.accountId).toBe(linkedId);
+    expect(renewed.principal.requiresPasswordChange).not.toBe(true);
+    expect((await request('/api/credential-public-probe', { body: {}, cookie: cookie(renewed.token) })).status).toBe(201);
+    const profile = await request('/api/access/personal/profile', { cookie: cookie(renewed.token) });
+    expect(profile.status).toBe(200);
+    expect(profile.body.requiresPasswordChange).toBe(false);
+    expect(profile.body.canChangePassword).toBe(false);
+    expect((await request('/api/access/personal/password/change', { body: passwordBody(), cookie: cookie(renewed.token) })).status).toBe(403);
+    expect(access.renew(native.token)!.principal.requiresPasswordChange).toBe(true);
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+  });
+
   it('supports anonymous full-ID reset, rejects cross-origin writes and invalidates an existing login', async () => {
     const initial = await access.login({ employeeName: name, password: '31002X' }, '192.0.2.1');
     const body = { employeeName: name, identityNumber: identity, newPassword, confirmPassword: newPassword, clientMutationId: randomUUID() };
@@ -123,6 +144,31 @@ describe('personnel credential real module/configuration/guard integration', () 
     expect((await request('/api/access/personal/password/reset', { body })).status).toBe(201);
     expect(access.renew(initial.token)).toBeNull();
     expect((await access.login({ employeeName: name, password: newPassword }, '192.0.2.1')).principal.accountId).toBe(id);
+  });
+
+  it('reports pre-write source verification failures accurately through the real HTTP filter and retries the same request', async () => {
+    const initial = await access.login({ employeeName: name, password: '31002X' }, '192.0.2.1');
+    const before = store.read().accounts[id].passwordHash, body = passwordBody();
+    gateway.findActive.mockRejectedValueOnce(new ServiceUnavailableException('人员密码资料核验暂不可用，请保留当前内容重试'));
+    const failed = await request('/api/access/personal/password/change', { body, cookie: cookie(initial.token) });
+    expect(failed).toMatchObject({ status: 503, body: { message: '人员密码资料核验暂不可用，请保留当前内容重试' } });
+    expect(store.read().accounts[id].passwordHash).toBe(before);
+    expect(app!.get(PersonnelSecurityStore).read().intents).toEqual({});
+    expect(gateway.writePassword).not.toHaveBeenCalled();
+    expect((await request('/api/access/personal/password/change', { body, cookie: cookie(initial.token) })).status).toBe(201);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps post-write readback failure uncertain and finishes the same HTTP request without a second write', async () => {
+    const initial = await access.login({ employeeName: name, password: '31002X' }, '192.0.2.1'), body = passwordBody();
+    gateway.fresh.mockImplementationOnce(async () => ({ ...record }));
+    gateway.fresh.mockRejectedValueOnce(new ServiceUnavailableException('人员密码资料核验暂不可用，请保留当前内容重试'));
+    const unknown = await request('/api/access/personal/password/change', { body, cookie: cookie(initial.token) });
+    expect(unknown).toMatchObject({ status: 503, body: { message: '密码更新结果尚未确认，请保留原请求重试' } });
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+    expect((await request('/api/access/personal/password/change', { body, cookie: cookie(initial.token) })).status).toBe(201);
+    expect(gateway.writePassword).toHaveBeenCalledTimes(1);
+    expect((await access.login({ employeeName: name, password: newPassword }, '192.0.2.1')).principal.requiresPasswordChange).not.toBe(true);
   });
 
   it('configuration commit is idempotent and cannot re-enable a revoked account', async () => {

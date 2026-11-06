@@ -55,7 +55,7 @@ export function planPlatformApproval(input: {
       Object.keys(request).sort().join(',') !== 'choice,recordId,rejectionReason,requestId' ||
       !/^[A-Za-z0-9_-]{16,64}$/.test(request.requestId) || !/^rec[A-Za-z0-9_-]+$/.test(request.recordId) ||
       !['comprehensive', 'building_self', 'reject'].includes(request.choice) || typeof request.rejectionReason !== 'string' ||
-      (request.choice === 'reject' ? !request.rejectionReason.trim() || Array.from(request.rejectionReason.trim()).length > 500 : request.rejectionReason !== '') ||
+      (request.choice === 'reject' ? Array.from(request.rejectionReason.trim()).length > 500 : request.rejectionReason !== '') ||
       !/^[A-Za-z0-9_-]{8,160}$/.test(batch.approvalBatchId) || !Number.isSafeInteger(batch.revision) || batch.revision < 1 ||
       !Array.isArray(batch.items) || batch.items.length === 0 || record.recordId !== request.recordId ||
       !['platform', 'impersonation'].includes(identity.source) || !/^[A-Za-z0-9_-]{1,160}$/.test(identity.actorAccountId) || !/^[A-Za-z0-9_-]{1,160}$/.test(identity.subjectAccountId) ||

@@ -8,7 +8,7 @@ import { PurchaseLifecycleGatewayRecordSource } from './purchase-lifecycle-gatew
 import { PurchaseLifecycleServerAuthorizer } from './purchase-lifecycle-delivery-authorizer';
 import { LifecyclePaymentUploadStoreAdapter } from './purchase-lifecycle-payment-upload-store-adapter';
 import { LifecyclePaymentPerFileStoreAdapter } from './purchase-lifecycle-payment-per-file-store-adapter';
-import { LifecyclePaymentPerFileGatewayAdapter } from './purchase-lifecycle-payment-upload-gateway';
+import { LifecyclePaymentPerFileGatewayAdapter,lifecyclePaymentUploadSourceFingerprint } from './purchase-lifecycle-payment-upload-gateway';
 import {
   LIFECYCLE_PAYMENT_PER_FILE_STORE, LIFECYCLE_PAYMENT_UPLOAD_GATEWAY, LIFECYCLE_PAYMENT_UPLOAD_READINESS, LIFECYCLE_PAYMENT_UPLOAD_STORE,
   LifecyclePaymentUploadIsolatedController, LifecyclePaymentUploadIsolatedService, LifecyclePaymentUploadSessionAccess, LifecyclePaymentUploadSessionGuard,
@@ -25,7 +25,7 @@ const currentAppId = () => readEnv('FEISHU_APP_ID');
 /** Construction only. None of these factories reads remote data or starts a worker. */
 export const PURCHASE_LIFECYCLE_PAYMENT_PROVIDERS: Provider[] = [
   { provide: PURCHASE_LIFECYCLE_PAYMENT_RECORD_SOURCE, inject: [PurchaseWorkflowStore, PurchaseWorkflowGateway],
-    useFactory: (store: PurchaseWorkflowStore, gateway: PurchaseWorkflowGateway) => new PurchaseLifecycleGatewayRecordSource(store, gateway, currentAppId) },
+    useFactory: (store: PurchaseWorkflowStore, gateway: PurchaseWorkflowGateway) => new PurchaseLifecycleGatewayRecordSource(store, gateway, currentAppId,Date.now,()=>store.verifyLifecycleReceiptImageSource(currentAppId(),lifecyclePaymentUploadSourceFingerprint()),lifecyclePaymentUploadSourceFingerprint) },
   { provide: PURCHASE_LIFECYCLE_PAYMENT_AUTHORIZER, inject: [AccessConfigurationService, PURCHASE_LIFECYCLE_PAYMENT_RECORD_SOURCE],
     useFactory: (access: AccessConfigurationService, source: PurchaseLifecycleGatewayRecordSource) => new PurchaseLifecycleServerAuthorizer(access, source, () => ({ ...process.env, FEISHU_APP_ID: currentAppId() }), currentAppId) },
   { provide: LIFECYCLE_PAYMENT_UPLOAD_STORE, inject: [PurchaseWorkflowStore, PURCHASE_LIFECYCLE_PAYMENT_AUTHORIZER, PurchaseWorkflowGateway],

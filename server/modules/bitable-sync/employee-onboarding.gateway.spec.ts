@@ -821,6 +821,7 @@ describe('EmployeeOnboardingGateway', () => {
       expect(mockInvalidateBitableRecordCache).toHaveBeenCalledWith({
         appToken: APP_TOKEN,
         tableId: TABLE_ID,
+        deletePersisted: true,
       });
     });
 
@@ -839,6 +840,7 @@ describe('EmployeeOnboardingGateway', () => {
       expect(mockInvalidateBitableRecordCache).toHaveBeenCalledWith({
         appToken: APP_TOKEN,
         tableId: TABLE_ID,
+        deletePersisted: true,
       });
     });
 
@@ -937,6 +939,7 @@ describe('EmployeeOnboardingGateway', () => {
       expect(mockInvalidateBitableRecordCache).toHaveBeenCalledWith({
         appToken: APP_TOKEN,
         tableId: TABLE_ID,
+        deletePersisted: true,
       });
     });
 

@@ -24,6 +24,11 @@ import {
   EmergencyDutyService,
 } from './emergency-duty.service';
 
+jest.mock('@server/common/config/external-services.config', () => ({
+  ...jest.requireActual('@server/common/config/external-services.config'),
+  getFeishuAuthPayload: () => ({ app_id: 'synthetic-emergency-app', app_secret: 'synthetic-only' }),
+}));
+
 jest.mock('@server/common/feishu/bitable-direct-read', () => {
   const actual = jest.requireActual(
     '@server/common/feishu/bitable-direct-read',
@@ -464,6 +469,7 @@ describe('EmergencyDutyService', () => {
     expect(mockedInvalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-emergency-actual',
       tableId: 'tblnGg3s3lgn6Plq',
+      deletePersisted: true,
     });
   });
 
@@ -1730,7 +1736,10 @@ describe('EmergencyDutyController', () => {
       controller.getSchedules('2026-08-01', '2026-08-31'),
     ).resolves.toBe(scheduleResponse);
     await expect(controller.getOptions()).resolves.toBe(optionsResponse);
-    await expect(controller.upsertSchedule(upsertRequest)).resolves.toBe(
+    const principal = { accountId: 'synthetic-admin', role: 'administrator' } as any;
+    expect(() => controller.upsertSchedule(upsertRequest, undefined as any)).toThrow('请先确认登录身份');
+    expect(emergencyDutyService.upsertSchedule).not.toHaveBeenCalled();
+    await expect(controller.upsertSchedule(upsertRequest, { accessPrincipal: principal } as any)).resolves.toBe(
       upsertResponse,
     );
     expect(emergencyDutyService.getSchedules).toHaveBeenCalledWith(
@@ -1739,6 +1748,7 @@ describe('EmergencyDutyController', () => {
     );
     expect(emergencyDutyService.upsertSchedule).toHaveBeenCalledWith(
       upsertRequest,
+      principal,
     );
   });
 });

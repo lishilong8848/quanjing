@@ -35,6 +35,7 @@ export interface LifecycleIsolatedFactoryOptions {
   paymentUploadReady?: () => boolean;
   receiptUploadReady?: () => boolean;
   sourceGuard?: () => Promise<void>;
+  sourceFingerprint?: () => string;
   checks: LifecycleRuntimeChecks;
   reportFailure: (code: string) => void;
   clock?: () => number;
@@ -52,7 +53,7 @@ export class PurchaseLifecycleIsolatedFactory {
 
   constructor(private readonly options: LifecycleIsolatedFactoryOptions) {
     const clock = options.clock || Date.now;
-    const source = new PurchaseLifecycleGatewayRecordSource(options.store, options.gateway, options.currentAppId, clock, options.sourceGuard);
+    const source = new PurchaseLifecycleGatewayRecordSource(options.store, options.gateway, options.currentAppId, clock, options.sourceGuard, options.sourceFingerprint);
     const authorizer = new PurchaseLifecycleServerAuthorizer(options.access, source, options.environment, options.currentAppId);
     const worker = new PurchaseLifecycleDeliveryService(options.store, authorizer, options.gateway, clock, options.attachmentBaseUrl, options.receiptUploadReady, options.paymentUploadReady);
     this.runtime = new PurchaseLifecycleRuntime(worker, { verify: () => this.verify() }, options.reportFailure, options.intervalMs);
@@ -103,8 +104,9 @@ export class PurchaseLifecycleIsolatedFactory {
       const appId = this.options.currentAppId();
       if (!/^cli_[A-Za-z0-9_-]+$/.test(appId)) return false;
       const checks = this.options.checks;
-      const names: Array<keyof Omit<LifecycleRuntimeChecks, 'hasExistingWork'>> = ['writerFence', 'applicationRecovery', 'callbacksAndMessages', 'attachmentsAndPayments', 'identityAndAuthorization', 'rollbackProtection', 'deliveryAndReconciliation'];
-      for (const name of names) if (typeof checks?.[name] !== 'function' || await checks[name]() !== true) return false;
+      const probes = [checks?.writerFence, checks?.applicationRecovery, checks?.callbacksAndMessages,
+        checks?.attachmentsAndPayments, checks?.identityAndAuthorization, checks?.rollbackProtection, checks?.deliveryAndReconciliation];
+      for (const probe of probes) if (typeof probe !== 'function' || await probe.call(checks) !== true) return false;
       if (await this.existingWork() === 'unknown') return false;
       return this.options.currentAppId() === appId;
     } catch { return false; }

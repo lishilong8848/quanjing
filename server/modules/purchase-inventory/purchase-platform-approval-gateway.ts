@@ -34,7 +34,7 @@ function approvalFields(value: Record<string, unknown>): Record<string, unknown>
       value.采购流程 !== (approved ? '审批通过（待下单）' : '驳回申请') || value[F.state] !== (approved ? '已通过' : '已驳回') ||
       !Array.isArray(value[F.currentApprover]) || (value[F.currentApprover] as unknown[]).length !== 0 ||
       !Number.isSafeInteger(value[F.approvalTime]) || Number(value[F.approvalTime]) <= 0 || typeof value[F.actionId] !== 'string' || !/^pa_[A-Za-z0-9_-]{43}$/.test(value[F.actionId] as string) ||
-      typeof reason !== 'string' || (approved ? reason !== '' : !reason.trim() || reason !== reason.trim() || [...reason].length > 500) ||
+      typeof reason !== 'string' || (approved ? reason !== '' : reason !== reason.trim() || [...reason].length > 500) ||
       (approved && (value.库房确认 !== true || !oneUser(value.采购人))) ||
       (Object.prototype.hasOwnProperty.call(value,F.actualApprover) && !oneUser(value[F.actualApprover]))) throw new BadRequestException('采购审批写入内容无效');
   return structuredClone(value);
@@ -42,11 +42,13 @@ function approvalFields(value: Record<string, unknown>): Record<string, unknown>
 
 /** Uses the same server-side app-token reads, routing and writes as manager cards.
  * The caller must be the fenced coordinator; this adapter performs no retries. */
-export function createPlatformApprovalGateway(gateway: Gateway): PlatformApprovalWorkerGateway {
+export function createPlatformApprovalGateway(gateway: Gateway, sourceGuard?: () => Promise<void>): PlatformApprovalWorkerGateway {
   return {
     async readRecord(recordId) {
       const expected = id(recordId);
+      await sourceGuard?.();
       const record = await gateway.getPlatformApprovalReadbackAsApp(expected);
+      await sourceGuard?.();
       if (!record || record.recordId !== expected) throw new BadGatewayException('采购审批记录回读不一致');
       return record;
     },
@@ -54,14 +56,17 @@ export function createPlatformApprovalGateway(gateway: Gateway): PlatformApprova
       id(record?.recordId);
       const scope = purchaseAuthorityTarget(record);
       if (!scope || (record.specialty?.trim() && !scope.specialty) || !['comprehensive','building_self'].includes(choice)) throw new BadRequestException('采购人路由范围无效');
+      await sourceGuard?.();
       const selected = choice === 'comprehensive'
         ? await gateway.resolvePurchaseAdminAsApp({ building: record.building, specialty: record.specialty })
         : await gateway.resolveBuildingSupervisorAsApp(record.building, record.specialty);
-      return purchaser(selected);
+      await sourceGuard?.(); return purchaser(selected);
     },
     async writeRecord(recordId, fields) {
       const target = id(recordId), checked = approvalFields(fields);
-      await gateway.updateManagerApprovalDecisionRecordAsApp(target, checked);
+      await sourceGuard?.();
+      if(sourceGuard) await gateway.updateManagerApprovalDecisionRecordAsApp(target, checked, sourceGuard);
+      else await gateway.updateManagerApprovalDecisionRecordAsApp(target, checked);
     },
   };
 }

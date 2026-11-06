@@ -1,8 +1,10 @@
+jest.mock('../../common/feishu/dashboard-source-binding-cache', () => ({ ...jest.requireActual('../../common/feishu/dashboard-source-binding-cache'), readDashboardSourceBinding: jest.fn().mockResolvedValue('resolved-certificate-app-token'), writeDashboardSourceBinding: jest.fn().mockResolvedValue(undefined) }));
+import { readDashboardSourceBinding, writeDashboardSourceBinding } from '../../common/feishu/dashboard-source-binding-cache';
 import type { HttpService } from '@nestjs/axios';
 import { ServiceUnavailableException } from '@nestjs/common';
 import {
   fetchBitableRecords,
-  readLatestPersistedBitableRecords,
+  readLatestPersistedBitableRecordSnapshot,
   resolveBitableAppToken,
   type BitableRecordItem,
 } from '../../common/feishu/bitable-direct-read';
@@ -15,13 +17,13 @@ jest.mock('../../common/feishu/bitable-direct-read', () => {
   return {
     ...actual,
     fetchBitableRecords: jest.fn(),
-    readLatestPersistedBitableRecords: jest.fn(),
+    readLatestPersistedBitableRecordSnapshot: jest.fn(),
     resolveBitableAppToken: jest.fn(),
   };
 });
 
 const mockedFetch = jest.mocked(fetchBitableRecords);
-const mockedReadPersisted = jest.mocked(readLatestPersistedBitableRecords);
+const mockedReadPersisted = jest.mocked(readLatestPersistedBitableRecordSnapshot);
 const mockedResolve = jest.mocked(resolveBitableAppToken);
 const httpService = {} as HttpService;
 
@@ -83,7 +85,9 @@ describe('EquipmentLifecycleService', () => {
   );
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    jest.mocked(readDashboardSourceBinding).mockImplementation(async source => source.appToken || null);
+    jest.mocked(writeDashboardSourceBinding).mockResolvedValue(undefined);
     for (const name of relevantEnvNames) {
       delete process.env[name];
     }
@@ -238,7 +242,7 @@ describe('EquipmentLifecycleService', () => {
     });
     mockedReadPersisted.mockImplementation(async (options) =>
       options.tableId === TABLES.equipment
-        ? [recordForTable(TABLES.equipment)]
+        ? { records: [recordForTable(TABLES.equipment)], fetchedAt: 1_000, expiresAt: 2_000 }
         : null,
     );
     const service = new EquipmentLifecycleService(httpService);

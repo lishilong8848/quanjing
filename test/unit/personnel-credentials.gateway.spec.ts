@@ -17,7 +17,7 @@ describe('personnel credential source gateway (no real HTTP)', () => {
     process.env.FEISHU_ORG_VIEW_ID = 'vewActive1';
     (getFeishuAuthPayload as jest.Mock).mockReturnValue({ app_id: 'cliTest', app_secret: 'mock-secret' });
     (readEmployeeOnboardingConfig as jest.Mock).mockReturnValue(source);
-    metadata = ['姓名', '身份证号', '密码'].map(field_name => ({ field_name, type: 1 })).concat([{ field_name: '离职/异动情况', type: 7 }]);
+    metadata = ['姓名', '身份证号', '密码'].map(field_name => ({ field_name, type: 1 })).concat([{ field_name: '离职/异动情况', type: 7 }, { field_name: '账号性质', type: 3 }, { field_name: '人员类型', type: 3 }, { field_name: '岗位', type: 3 }]);
     views = [{ view_id: 'vewActive1' }];
     items = [{ record_id: 'recPerson1', fields: { 姓名: '测试人员', 身份证号: IDENTITY, 密码: '', '离职/异动情况': false } }];
     http = { axiosRef: {
@@ -69,17 +69,17 @@ describe('personnel credential source gateway (no real HTTP)', () => {
     delete items[0].fields['离职/异动情况'];
     expect(await gateway.findActive('测试人员')).not.toBeNull();
     metadata.find(item => item.field_name === '离职/异动情况').type = 1;
-    await expect(gateway.findActive('测试人员')).rejects.toThrow('人员资料核验');
+    await expect(gateway.findActive('测试人员')).rejects.toThrow('人员密码资料核验');
   });
 
   it('rejects mismatched names and missing active views', async () => {
     items[0].fields.姓名 = '另一人员';
     expect(await gateway.findActive('测试人员')).toBeNull();
     views.length = 0;
-    await expect(gateway.findActive('测试人员')).rejects.toThrow('人员资料核验');
+    await expect(gateway.findActive('测试人员')).rejects.toThrow('人员密码资料核验');
   });
 
-  it('writes only the password field using a valid hash, then fresh GETs the record', async () => {
+  it('writes only the password field and confirms through a narrow fresh record search', async () => {
     const record = (await gateway.findActive('测试人员'))!;
     const salt = Buffer.alloc(16, 7);
     const hash = `pbkdf2_sha256$600000$${salt.toString('base64')}$${pbkdf2Sync('new password', salt, 600000, 32, 'sha256').toString('base64')}`;
@@ -87,24 +87,61 @@ describe('personnel credential source gateway (no real HTTP)', () => {
     expect(http.axiosRef.put).toHaveBeenCalledWith(expect.stringContaining('/records/recPerson1'), { fields: { 密码: hash } }, expect.any(Object));
     items[0].fields.密码 = hash;
     expect((await gateway.fresh(record)).password).toBe(hash);
-    expect(http.axiosRef.get.mock.calls.at(-1)[1].headers['Cache-Control']).toBe('no-cache');
-    await expect(gateway.writePassword(record, 'raw-password')).rejects.toThrow('人员资料核验');
+    expect(http.axiosRef.post.mock.calls.at(-1)).toEqual([
+      expect.stringContaining('/records/search'),
+      expect.objectContaining({ view_id: 'vewActive1', field_names: ['姓名', '身份证号', '密码', '离职/异动情况', '账号性质', '人员类型', '岗位'] }),
+      expect.objectContaining({ params: { page_size: 2 }, headers: expect.objectContaining({ 'Cache-Control': 'no-cache' }) }),
+    ]);
+    expect(http.axiosRef.get.mock.calls.some(([url]) => url.includes('/records/'))).toBe(false);
+    await expect(gateway.writePassword(record, 'raw-password')).rejects.toThrow('人员密码资料核验');
     expect(http.axiosRef.put).toHaveBeenCalledTimes(1);
   });
 
   it('rejects identity or employment changes during fresh read-back', async () => {
     const record = (await gateway.findActive('测试人员'))!;
     items[0].fields.身份证号 = 'changed';
-    await expect(gateway.fresh(record)).rejects.toThrow('人员资料核验');
+    await expect(gateway.fresh(record)).rejects.toThrow('人员密码资料核验');
     items[0].fields.身份证号 = IDENTITY;
     items[0].fields['离职/异动情况'] = true;
-    await expect(gateway.fresh(record)).rejects.toThrow('人员资料核验');
+    await expect(gateway.fresh(record)).rejects.toThrow('人员密码资料核验');
+  });
+
+  it.each(['VNET', ' vnet '])('classifies a VNET source independently of password state (%s)', async nature => {
+    items[0].fields.账号性质 = nature;
+    const record = (await gateway.findActive('测试人员'))!;
+    expect(record.loginMethod).toBe('feishu');
+    expect((await gateway.fresh(record)).loginMethod).toBe('feishu');
+  });
+
+  it.each(['', undefined, '外部人员'])('keeps existing active non-VNET name accounts usable (%s)', async nature => {
+    items[0].fields.账号性质 = nature;
+    const record = (await gateway.findActive('测试人员'))!;
+    expect(record.loginMethod).toBe('password');
+    expect((await gateway.fresh(record)).loginMethod).toBe('password');
+  });
+
+  it('requires verified account-nature schema rather than treating a missing source field as external', async () => {
+    metadata = metadata.filter(row => row.field_name !== '账号性质');
+    await expect(gateway.findActive('测试人员')).rejects.toThrow('资料核验');
+    expect(http.axiosRef.put).not.toHaveBeenCalled();
+  });
+
+  it('binds fresh search to original identity and rejects duplicate, truncated or changed results', async () => {
+    const record = (await gateway.findActive('测试人员'))!;
+    items[0].record_id = 'recAnother';
+    await expect(gateway.fresh(record)).rejects.toThrow('资料核验');
+    items[0].record_id = record.recordId;
+    items.push({ ...items[0], record_id: 'recDuplicate' });
+    await expect(gateway.fresh(record)).rejects.toThrow('资料核验');
+    http.axiosRef.post.mockResolvedValueOnce(ok({ items: [items[0]], has_more: true, page_token: 'more' }));
+    await expect(gateway.fresh(record)).rejects.toThrow('资料核验');
+    expect(http.axiosRef.put).not.toHaveBeenCalled();
   });
 
   it('never leaks upstream HTTP messages, request config or response data', async () => {
     http.axiosRef.post.mockRejectedValue({ message: 'identity-and-password-secret', config: { data: 'sensitive' }, response: { data: IDENTITY } });
     const error = await gateway.findActive('测试人员').catch(error => error);
-    expect(error.message).toBe('人员资料核验暂不可用，请稍后重试');
+    expect(error.message).toBe('人员密码资料核验暂不可用，请保留当前内容重试');
     expect(error.config).toBeUndefined();
     expect(error.cause).toBeUndefined();
     expect(JSON.stringify(error)).not.toContain(IDENTITY);
@@ -121,7 +158,7 @@ describe('personnel credential source gateway (no real HTTP)', () => {
       });
       const result = gateway.findActive('测试人员').catch(error => error);
       await jest.advanceTimersByTimeAsync(20_001);
-      expect((await result).message).toBe('人员资料核验暂不可用，请稍后重试');
+      expect((await result).message).toBe('人员密码资料核验暂不可用，请保留当前内容重试');
       expect(signal?.aborted).toBe(true);
     } finally { jest.useRealTimers(); }
   });

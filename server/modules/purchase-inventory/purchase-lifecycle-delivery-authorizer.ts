@@ -55,7 +55,7 @@ function permitted(principal: AccessPrincipal | null, module: 'purchase' | 'inve
   return !!principal && canPerformBusinessAction(principal, { module, action, ...target });
 }
 
-function itemView(record: PurchaseWorkflowRecord, images: ReadonlyArray<{ imageKey: string; alt: string }>, comparisonCount = 0): PurchaseLifecycleItem {
+function itemView(record: PurchaseWorkflowRecord, images: ReadonlyArray<{ imageKey: string; alt: string }>, comparisonCount = 0, platformRejected = false): PurchaseLifecycleItem {
   if (!Number.isSafeInteger(comparisonCount) || comparisonCount < 0 || comparisonCount > 5 ||
     (record.paymentAttachmentTokens?.length || 0) > 20 || record.receiptPhotoTokens.length > 20 || record.invoiceTokens.length > 20) return deny();
   const safe = (value: unknown) => typeof value === 'string' ? value : typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
@@ -65,8 +65,8 @@ function itemView(record: PurchaseWorkflowRecord, images: ReadonlyArray<{ imageK
     stage === 'ordering' ? 'pending_order' : stage === 'receipt' && record.purchaseCompleted === true ? 'ordered' :
     stage === 'inbound' && record.purchaseCompleted === true && record.receiptConfirmed === true ? 'received' :
     stage === 'completed' && record.purchaseCompleted === true && record.receiptConfirmed === true ? 'inbounded' : stage === 'terminated' ? 'terminated' : 'unknown';
-  const rejected = stage === 'terminated' && !!record.rejectionReason;
-  const approvalResult = rejected ? '已驳回' : record.approvalCompleted === true ? '已审批' : '尚未确认';
+  const rejected = stage === 'terminated' && (!!record.rejectionReason || platformRejected);
+  const approvalResult = rejected ? (platformRejected ? '平台驳回' : '已驳回') : record.approvalCompleted === true ? '已审批' : '尚未确认';
   const orderResult = record.purchaseCompleted === true ? '已下单' : ['receipt', 'inbound', 'completed'].includes(stage) ? '待核对' : '尚未确认';
   const receiptResult = record.receiptConfirmed === true ? '已签收' : ['inbound', 'completed'].includes(stage) ? '待核对' : '尚未确认';
   // 库房确认 also occurs during approval; it alone cannot prove inventory inbound.
@@ -175,7 +175,8 @@ export class PurchaseLifecycleServerAuthorizer implements PurchaseLifecycleDeliv
             try { assertPurchaseInboundExecutionScope(principal, target.building); actions.push('inbound'); } catch { /* No inbound action outside scope. */ }
           }
           const images = manager || observer ? snapshot.comparisonImages?.[record.recordId] || [] : [];
-          items.push(itemView(record, images, manager || observer ? snapshot.comparisonCounts?.[record.recordId] || 0 : 0));
+          items.push(itemView(record, images, manager || observer ? snapshot.comparisonCounts?.[record.recordId] || 0 : 0,
+            batchItem.status === 'rejected' && batchItem.decisionSource === 'platform'));
           grants.push({ recordId: record.recordId, visibleStages: observer ? ALL_STAGES : [...stages], allowedActions: actions, showOverallProgress: stages.size > 0 || !!observer });
           const forms: Partial<Record<PurchaseLifecycleFormViewKind, PurchaseLifecycleFormPresentation>> = {};
           if (actions.includes('approve')) forms.reject = {};

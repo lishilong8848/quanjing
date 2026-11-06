@@ -29,6 +29,8 @@ import {
   maskSecret,
   readEnv,
 } from '@server/common/config/external-services.config';
+import { dashboardSourceBindingKey, readDashboardSourceBinding, writeDashboardSourceBinding, type DashboardSourceBinding } from '@server/common/feishu/dashboard-source-binding-cache';
+import { withPersonnelDirectoryDeadline } from '@server/common/access/personnel-directory-deadline';
 import { isDatabaseDisabled } from '@server/common/database/unavailable-database';
 import {
   type BitableRecordItem,
@@ -252,6 +254,10 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   private isSyncing = false;
   private cacheRefreshTimer?: NodeJS.Timeout;
   private leaveApprovalRefreshTimer?: NodeJS.Timeout;
+  private personProfileRefreshTimer?: NodeJS.Timeout;
+  private readonly personProfileRefreshStarted = new Map<string, number>();
+  private readonly personProfileSnapshotMetadata = new WeakMap<BitableRecordItem[], { fetchedAt: number; stale: boolean; refreshing: boolean }>();
+  private readonly personProfileRefreshes = new Map<string, Promise<BitableRecordItem[]>>();
   private cacheRefreshRunning = false;
   private leaveApprovalRefreshRunning = false;
   // 飞书多维表配置 - 封网信息表
@@ -399,12 +405,18 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     }
     await warmLatestPersistedBitableRecordSnapshotIndex();
     await this.warmLeaveFormLocalSnapshots();
+    void this.refreshPersonProfileLocalCache();
     void this.refreshFeishuLocalCache();
     this.cacheRefreshTimer = setInterval(
       () => void this.refreshFeishuLocalCache(),
       this.getLocalCacheRefreshMs(),
     );
     this.cacheRefreshTimer.unref?.();
+    this.personProfileRefreshTimer = setInterval(
+      () => void this.refreshPersonProfileLocalCache(),
+      this.getPersonProfileRefreshMs(),
+    );
+    this.personProfileRefreshTimer.unref?.();
     this.leaveApprovalRefreshTimer = setInterval(
       () => void this.refreshLeaveApprovalCache(),
       this.getLeaveApprovalRefreshMs(),
@@ -413,6 +425,10 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    if (this.personProfileRefreshTimer) {
+      clearInterval(this.personProfileRefreshTimer);
+      this.personProfileRefreshTimer = undefined;
+    }
     if (this.cacheRefreshTimer) {
       clearInterval(this.cacheRefreshTimer);
       this.cacheRefreshTimer = undefined;
@@ -438,15 +454,57 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
   }
 
+  private getPersonProfileRefreshMs(): number {
+    return this.getPositiveNumberEnv('FEISHU_PERSON_PROFILE_REFRESH_MS') || 15 * 60 * 1000;
+  }
+
+  // Display snapshots only. Business submissions retain their separate fresh-source checks.
+  private refreshPersonProfileProjection(
+    scope: PersonProfileScope,
+    includeDetails: boolean,
+  ): Promise<BitableRecordItem[]> {
+    const key = `${scope}:${includeDetails ? 'details' : 'public'}`;
+    const pending = this.personProfileRefreshes.get(key);
+    if (pending) return pending;
+    this.personProfileRefreshStarted.set(key, Date.now());
+    const request = Promise.resolve()
+      .then(() => includeDetails
+        ? this.fetchFeishuPersonProfileRecords(true, scope, true)
+        : this.fetchFeishuPersonProfileRecords(true, scope))
+      .then(records => {
+        this.personProfileSnapshotMetadata.set(records, { fetchedAt: Date.now(), stale: false, refreshing: false });
+        return records;
+      })
+      .finally(() => {
+        if (this.personProfileRefreshes.get(key) === request) this.personProfileRefreshes.delete(key);
+      });
+    this.personProfileRefreshes.set(key, request);
+    return request;
+  }
+
+  private async refreshPersonProfileLocalCache(): Promise<void> {
+    const scopes: PersonProfileScope[] = ['leave'];
+    if (this.ORG_APP_TOKEN && this.ORG_TABLE_ID && this.TRAVEL_PERSON_PROFILE_VIEW_ID) scopes.push('travel');
+    await Promise.all(scopes.flatMap(scope => [false, true].map(async details => {
+      try {
+        await this.refreshPersonProfileProjection(scope, details);
+      } catch {
+        // Never discard a previously successful snapshot or log personnel contents.
+        this.logger.warn(`Person profile display cache refresh failed: ${scope}/${details ? 'details' : 'public'}`);
+      }
+    })));
+  }
+
   private async warmLeaveFormLocalSnapshots(): Promise<void> {
+    // Cold personnel reads may need the source; never hold application startup on them.
+    void this.readCachedPersonProfileRecords('leave', false).catch(() => undefined);
+    void this.readCachedPersonProfileRecords('leave', true).catch(() => undefined);
     await Promise.allSettled([
       readLatestPersistedBitableRecordSnapshot({
         appToken: this.SCHEDULE_APP_TOKEN || undefined,
         tableId: this.SCHEDULE_TABLE_ID,
         tableName: '值班排班',
       }),
-      this.readCachedPersonProfileRecords('leave', false),
-      this.readCachedPersonProfileRecords('leave', true),
       readCachedLeaveApprovalSnapshot(),
     ]);
   }
@@ -475,6 +533,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async refreshFeishuLocalCache(): Promise<void> {
+    void this.refreshPersonProfileLocalCache();
     if (this.cacheRefreshRunning) {
       return;
     }
@@ -497,14 +556,6 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         run: () => this.fetchFeishuOrganizationRecords(true),
       });
     }
-    refreshTasks.push({
-      name: 'person-profile',
-      run: () => this.fetchFeishuPersonProfileRecords(true, 'leave'),
-    });
-    refreshTasks.push({
-      name: 'person-profile-details',
-      run: () => this.fetchFeishuPersonProfileRecords(true, 'leave', true),
-    });
 
     try {
       const results = await Promise.allSettled(
@@ -1193,6 +1244,21 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private personProfileDisplayBinding(
+    scope: PersonProfileScope,
+    fieldNames: readonly string[],
+  ): DashboardSourceBinding {
+    return {
+      namespace: 'person-profile-display',
+      appId: readEnv('FEISHU_APP_ID'),
+      appToken: scope === 'leave' ? this.LEAVE_PERSON_PROFILE_APP_TOKEN : this.ORG_APP_TOKEN,
+      wikiToken: scope === 'leave' ? this.LEAVE_PERSON_PROFILE_WIKI_TOKEN : undefined,
+      tableId: scope === 'leave' ? this.LEAVE_PERSON_PROFILE_TABLE_ID : this.ORG_TABLE_ID,
+      viewId: scope === 'travel' ? this.TRAVEL_PERSON_PROFILE_VIEW_ID : undefined,
+      fieldNames,
+    };
+  }
+
   private async fetchFeishuPersonProfileRecords(
     forceRefresh = false,
     scope: PersonProfileScope = 'leave',
@@ -1206,6 +1272,8 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     const plan = includeDetails
       ? resolvePersonProfileDetailReadPlan(scope, planOptions)
       : resolvePersonProfileReadPlan(scope, planOptions);
+    const binding = this.personProfileDisplayBinding(scope, plan.fieldNames);
+    const sourceKey = dashboardSourceBindingKey(binding);
     const appToken =
       scope === 'leave'
         ? await resolveBitableAppToken(this.httpService, {
@@ -1215,7 +1283,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
           })
         : this.ORG_APP_TOKEN;
 
-    return fetchBitableRecords(this.httpService, {
+    const records = await fetchBitableRecords(this.httpService, {
       appToken,
       tableId: plan.tableId,
       viewId: plan.viewId,
@@ -1226,50 +1294,69 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       strict: plan.strict,
       allowStale: plan.allowStale,
     });
+    if (sourceKey !== dashboardSourceBindingKey(this.personProfileDisplayBinding(scope, plan.fieldNames))) {
+      throw new ServiceUnavailableException('人员数据源已变更，请重试');
+    }
+    // Persist only a successfully resolved, complete projection; never authorize from this binding.
+    await writeDashboardSourceBinding(binding, appToken).catch(() => {
+      this.logger.warn('人员展示来源绑定保存失败');
+    });
+    return records;
   }
 
   private async readCachedPersonProfileRecords(
     scope: PersonProfileScope = 'leave',
     includeDetails = false,
   ): Promise<BitableRecordItem[]> {
-    const planOptions = {
-      leaveTableId: this.LEAVE_PERSON_PROFILE_TABLE_ID,
-      travelTableId: this.ORG_TABLE_ID,
-      travelViewId: this.TRAVEL_PERSON_PROFILE_VIEW_ID,
-    };
-    const plan = includeDetails
-      ? resolvePersonProfileDetailReadPlan(scope, planOptions)
-      : resolvePersonProfileReadPlan(scope, planOptions);
-    let snapshot = await readLatestPersistedBitableRecordSnapshot({
-      appToken:
-        (scope === 'leave'
-          ? this.LEAVE_PERSON_PROFILE_APP_TOKEN
-          : this.ORG_APP_TOKEN) || undefined,
-      tableId: plan.tableId,
-      viewId: plan.viewId,
-      tableName: plan.tableName,
-      fieldNames: plan.fieldNames,
-    });
-
-    // 详情投影包含全部公开字段；公开快照尚未暖机时可安全降级读取详情并在映射时脱敏。
-    if (!snapshot && !includeDetails) {
-      const detailPlan = resolvePersonProfileDetailReadPlan(scope, planOptions);
-      snapshot = await readLatestPersistedBitableRecordSnapshot({
-        appToken:
-          (scope === 'leave'
-            ? this.LEAVE_PERSON_PROFILE_APP_TOKEN
-            : this.ORG_APP_TOKEN) || undefined,
-        tableId: detailPlan.tableId,
-        viewId: detailPlan.viewId,
-        tableName: detailPlan.tableName,
-        fieldNames: detailPlan.fieldNames,
-      });
-    }
-
-    if (!snapshot) {
-      throw new Error('本地人员资料缓存尚未准备完成');
-    }
-    return snapshot.records;
+    return withPersonnelDirectoryDeadline((async () => {
+      const planOptions = {
+        leaveTableId: this.LEAVE_PERSON_PROFILE_TABLE_ID,
+        travelTableId: this.ORG_TABLE_ID,
+        travelViewId: this.TRAVEL_PERSON_PROFILE_VIEW_ID,
+      };
+      const plan = includeDetails
+        ? resolvePersonProfileDetailReadPlan(scope, planOptions)
+        : resolvePersonProfileReadPlan(scope, planOptions);
+      const binding = this.personProfileDisplayBinding(scope, plan.fieldNames);
+      const sourceKey = dashboardSourceBindingKey(binding);
+      const assertSource = () => {
+        if (sourceKey !== dashboardSourceBindingKey(this.personProfileDisplayBinding(scope, plan.fieldNames))) {
+          throw new ServiceUnavailableException('人员数据源已变更，请重试');
+        }
+      };
+      // A verified display binding lets an existing exact snapshot survive an offline restart.
+      // Never resolve the Wiki on the read path before checking that binding.
+      const appToken = await readDashboardSourceBinding(binding);
+      let snapshot = appToken
+        ? await readLatestPersistedBitableRecordSnapshot({ appToken, ...plan })
+        : null;
+      const detailPlan = !includeDetails ? resolvePersonProfileDetailReadPlan(scope, planOptions) : undefined;
+      if (!snapshot && detailPlan) {
+        const detailBinding = this.personProfileDisplayBinding(scope, detailPlan.fieldNames);
+        const detailApp = await readDashboardSourceBinding(detailBinding);
+        if (detailApp) snapshot = await readLatestPersistedBitableRecordSnapshot({ appToken: detailApp, ...detailPlan });
+      }
+      // Even an explicit Base needs a successful binding for the current application identity.
+      // An unbound legacy raw snapshot cannot be trusted merely because Wiki resolution succeeds.
+      assertSource();
+      if (snapshot) {
+        const stale = snapshot.expiresAt <= Date.now();
+        const refreshKey = `${scope}:${includeDetails ? 'details' : 'public'}`;
+        const lastAttempt = this.personProfileRefreshStarted.get(refreshKey);
+        if (stale && (lastAttempt === undefined || Date.now() - lastAttempt >= 30_000)) {
+          void this.refreshPersonProfileProjection(scope, includeDetails).catch(() => undefined);
+        }
+        const records = snapshot.records.slice();
+        this.personProfileSnapshotMetadata.set(records, {
+          fetchedAt: snapshot.fetchedAt, stale,
+          refreshing: this.personProfileRefreshes.has(refreshKey),
+        });
+        return records;
+      }
+      // A cold form waits only for its own projection, never the four-hour bulk refresh.
+      // The deadline limits this viewer; it does not cancel work shared with other viewers.
+      return this.refreshPersonProfileProjection(scope, includeDetails);
+    })());
   }
 
   private async getNonDutySchedulesFromFeishu(
@@ -3222,6 +3309,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       );
       return {
         organizations,
+        ...(this.personProfileSnapshotMetadata.has(records) ? { cache: this.personProfileSnapshotMetadata.get(records)! } : {}),
         changeRequestSubmitters:
           scope === 'leave'
             ? listEligibleChangeRequestSubmitterNames(records)
@@ -3651,6 +3739,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         invalidateBitableRecordCache({
           appToken: source.appToken,
           tableId: source.tableId,
+          deletePersisted: true,
         });
       }),
     );
@@ -3772,6 +3861,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         ? await this.fetchFeishuPersonProfileRecords(true, scope, true)
         : await this.readCachedPersonProfileRecords(scope, true);
       return {
+        ...(this.personProfileSnapshotMetadata.has(records) ? { cache: this.personProfileSnapshotMetadata.get(records)! } : {}),
         organizations: this.mapFeishuEmployeeRecordsToPersonProfileDetails(
           records,
           scope,

@@ -360,11 +360,11 @@ export class PurchaseApplicationService {
       let readiness: unknown;
       try { readiness = this.lifecycleReadiness?.isReady(); } catch { readiness = false; }
       if (readiness instanceof Promise) void readiness.catch(() => undefined);
-      if (readiness !== true) throw new ServiceUnavailableException('采购全流程卡片尚未完成就绪检查');
+      if (readiness !== true) throw new ServiceUnavailableException({ message: '采购全流程卡片尚未完成就绪检查', writeDisposition: 'definitely-not-written' });
     }
     if (this.lifecycleNewApplications === true &&
       (!this.purchaseManagerApprovalService || typeof this.purchaseManagerApprovalService.isEnabled !== 'function' || !this.purchaseManagerApprovalService.isEnabled())) {
-      throw new ServiceUnavailableException('采购全流程审批服务尚未就绪');
+      throw new ServiceUnavailableException({ message: '采购全流程审批服务尚未就绪', writeDisposition: 'definitely-not-written' });
     }
 
     const computedSubmissionFingerprint =
@@ -641,7 +641,6 @@ export class PurchaseApplicationService {
         created.push(createdItem);
       } catch (error) {
         if (error instanceof UncertainApplicationRecordMutationError) {
-          this.invalidateApplicationRecordCache(appToken, executionTableId);
           throw error;
         }
         failed.push({ lineId: item.lineId, message: safeErrorMessage(error) });
@@ -662,9 +661,6 @@ export class PurchaseApplicationService {
       }
     }
 
-    if (created.length) {
-      this.invalidateApplicationRecordCache(appToken, executionTableId);
-    }
     return {
       success: failed.length === 0,
       created,
@@ -873,7 +869,7 @@ export class PurchaseApplicationService {
     tableId: string,
   ): void {
     try {
-      invalidateBitableRecordCache({ appToken, tableId });
+      invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true });
     } catch (error) {
       this.logger.warn(
         `采购申请记录已写入，但缓存失效失败，将等待后续刷新：${safeErrorMessage(error)}`,
@@ -1052,6 +1048,8 @@ export class PurchaseApplicationService {
         );
       }
       throw error;
+    } finally {
+      this.invalidateApplicationRecordCache(appToken, tableId);
     }
     assertFeishuSuccess(responseData, `写入${tableName}失败`);
     const responsePayload = isRecord(responseData) ? responseData : {};
@@ -1125,7 +1123,7 @@ export class PurchaseApplicationService {
           headers: { Authorization: `Bearer ${accessToken}` },
           timeout: 30_000,
         },
-      );
+      ).finally(() => this.invalidateApplicationRecordCache(appToken, tableId));
       assertFeishuSuccess(
         response.data,
         `创建采购执行表字段“${fieldName}”失败`,

@@ -157,11 +157,17 @@ describe('purchase manager card delivery recovery', () => {
       baseTime,
     );
 
-    for (const seconds of [0, 1, 3, 7, 15]) {
-      await service.runPendingTasks(
-        20,
-        new Date(baseTime.getTime() + seconds * 1000),
-      );
+    let runAt=baseTime;
+    for (let attempt=1;attempt<=5;attempt++) {
+      await service.runPendingTasks(20,runAt);
+      const queued=(await store.listNotifications({kind:'manager_batch_approval_requested'}))[0]!;
+      expect(queued.attempts).toBe(attempt);
+      if(attempt<5){
+        // Real processing elapsed time is added to the logical clock. Drive the
+        // next persisted due time rather than assuming every send takes 0 ms.
+        expect(Date.parse(queued.nextAttemptAt)).toBeGreaterThanOrEqual(runAt.getTime()+1000*2**(attempt-1));
+        runAt=new Date(queued.nextAttemptAt);
+      }
     }
 
     const notification = (
@@ -217,11 +223,17 @@ describe('purchase manager card delivery recovery', () => {
       baseTime,
     );
 
-    for (const seconds of [0, 1, 3, 7, 15]) {
-      await service.runPendingTasks(
-        20,
-        new Date(baseTime.getTime() + seconds * 1000),
-      );
+    let runAt=baseTime;
+    for (let attempt=1;attempt<=5;attempt++) {
+      await service.runPendingTasks(20,runAt);
+      const queued=(await store.listNotifications({kind:'manager_batch_approval_requested'}))[0]!;
+      expect(queued.attempts).toBe(attempt);
+      if(attempt<5){
+        // Real processing elapsed time is added to the logical clock. Drive the
+        // next persisted due time rather than assuming every send takes 0 ms.
+        expect(Date.parse(queued.nextAttemptAt)).toBeGreaterThanOrEqual(runAt.getTime()+1000*2**(attempt-1));
+        runAt=new Date(queued.nextAttemptAt);
+      }
     }
 
     const notification = (

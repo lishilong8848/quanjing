@@ -216,6 +216,7 @@ export function normalizePurchaseQuantityInput(value: string | number): number {
 
 export function isUncertainPurchaseSubmissionError(error: unknown): boolean {
   if (!isRecord(error) || !isRecord(error.response)) return true;
+  if (isDefinitelyUnacceptedPurchaseSubmission(error.response.data)) return false;
   const status = Number(error.response.status);
   return (
     !Number.isFinite(status) ||
@@ -224,6 +225,11 @@ export function isUncertainPurchaseSubmissionError(error: unknown): boolean {
     status === 429 ||
     status >= 500
   );
+}
+
+function isDefinitelyUnacceptedPurchaseSubmission(data: unknown): boolean {
+  return isRecord(data) && data.writeDisposition !== 'unknown-result' &&
+    (data.writeDisposition === 'definitely-not-written' || data.definitelyNotWritten === true);
 }
 
 export type PurchaseApplicationAcceptanceReconnectResult =
@@ -268,7 +274,7 @@ export async function reconnectPurchaseApplicationAcceptance(options: {
           : error instanceof Error && error.message.trim()
             ? error.message.trim()
             : lastMessage;
-      if (data.definitelyNotWritten === true) {
+      if (isDefinitelyUnacceptedPurchaseSubmission(data)) {
         return {
           kind: 'definitely-not-written',
           message: responseMessage,

@@ -3762,6 +3762,7 @@ export class PurchaseWorkflowStore {
     request: PlatformApprovalRequest;
     identity: PurchasePlatformIdentityProof;
     lifecycleReady: boolean;
+    lifecycleSource?: {appId:string;sourceFingerprint:string};
   }, authorize: (identity: PurchasePlatformIdentityProof, record: Pick<PurchaseWorkflowRecord, 'recordId' | 'status' | 'building' | 'specialty'>, mode: 'new' | 'replay') => true, now: Date | number = new Date()): Promise<PlatformApprovalPlan> {
     const batchId = normalizeManagerApprovalBatchId(input?.approvalBatchId);
     const record = structuredClone(input.record), request = structuredClone(input.request), identity = input.identity;
@@ -3774,6 +3775,7 @@ export class PurchaseWorkflowStore {
       if ((ledger.platformLegacyApprovalClaims || []).some(claim => claim.recordId === record.recordId || claim.eventId === `platform_${request.requestId}`)) throw new ConflictException('采购明细已有平台审批任务');
       const candidates = ledger.managerApprovalBatches.filter(row => row.approvalBatchId === batchId);
       if (sourceBatches.length !== 1 || candidates.length !== 1 || !isRecord(sourceBatches[0])) throw new ConflictException('采购批次无法唯一核对');
+      if(input.lifecycleSource&&(candidates[0]!.flowVersion!=='lifecycle_v1'||candidates[0]!.lifecycleAppId!==input.lifecycleSource.appId||input.lifecycleSource.appId!==readEnv('FEISHU_APP_ID')||ledger.lifecycleReceiptImageSource?.appId!==input.lifecycleSource.appId||ledger.lifecycleReceiptImageSource?.sourceFingerprint!==input.lifecycleSource.sourceFingerprint))throw new ConflictException('采购审批持久来源已变化');
       const rawRecordOwners = raw.managerApprovalBatches.filter(row => isRecord(row) && Array.isArray(row.recordIds) && row.recordIds.includes(record.recordId));
       if (rawRecordOwners.length !== 1 || rawRecordOwners[0] !== sourceBatches[0]) throw new ConflictException('采购明细批次归属不唯一');
       if ((raw.managerApprovalCards !== undefined && (!Array.isArray(raw.managerApprovalCards) || raw.managerApprovalCards.some(row => !sanitizeManagerApprovalCard(row)))) || (raw.managerApprovalActions !== undefined && (!Array.isArray(raw.managerApprovalActions) || raw.managerApprovalActions.some(row => !sanitizeManagerApprovalAction(row))))) throw new ConflictException('旧采购审批账本损坏');
@@ -3791,7 +3793,8 @@ export class PurchaseWorkflowStore {
       const sourceItems = source.items.filter(row => isRecord(row) && row.executionRecordId === plan.recordId);
       if (sourceItems.length !== 1 || !isRecord(sourceItems[0])) throw new ConflictException('采购批次明细无法唯一核对');
       Object.assign(sourceItems[0], { status: 'processing', choice: plan.action.choice, rejectionReason: plan.action.rejectionReason,
-        actionEventId: plan.action.eventId, actorOpenId: '', processedAt: '', lastError: '' });
+        actionEventId: plan.action.eventId, actorOpenId: '', processedAt: '', lastError: '',
+        ...(plan.action.choice === 'reject' && !plan.action.rejectionReason ? {decisionSource:'platform'} : {}) });
       Object.assign(source, { state: 'processing', selectedRejectRecordId: '', revision: plan.expectedRevision + 1, actorOpenId: '', updatedAt: timestamp });
       if (raw.platformApprovalClaims !== undefined && !Array.isArray(raw.platformApprovalClaims)) throw new ConflictException('平台采购审批账本损坏');
       const rawClaims = (raw.platformApprovalClaims || []) as unknown[];
@@ -3799,8 +3802,44 @@ export class PurchaseWorkflowStore {
       if (claims.some(claim => claim.serverActionId === persisted.serverActionId)) throw new ConflictException('平台采购审批标识冲突');
       rawClaims.push(persisted); raw.platformApprovalClaims = rawClaims;
       replaceRawPlatformApprovalWork(raw, { eventId: persisted.eventId, phase: 'queued', leaseToken: '', leaseStartedAtMs: 0, leaseUntilMs: 0 });
+      if (candidates[0]!.flowVersion === 'lifecycle_v1') {
+        const next = sanitizeVersionedManagerApprovalBatch(source);
+        if (!next) throw new ConflictException('采购审批批次无法核对');
+        queueExistingLifecycleBatchRefresh(ledger,next);
+        raw.lifecycleOutbox = ledger.lifecycleOutbox;
+      }
       await this.writeLifecycleRaw(raw, original);
       return { ...plan, action: persisted };
+    });
+  }
+
+  /** Read-only lifecycle web-task projection; private identity and source never leave this boundary. */
+  async getLifecyclePlatformApprovalStatus(eventId:string,appId:string,identity:PurchasePlatformIdentityProof,
+    authorize:(target:PurchaseAuthorityTarget)=>void):Promise<{recordId:string;decision:'approved'|'rejected';status:'pending'|'running'|'completed'|'manual_reconciliation';acceptedAtMs:number}|null> {
+    if(!/^platform_[A-Za-z0-9_-]{16,64}$/.test(eventId)||appId!==readEnv('FEISHU_APP_ID')||!identity||typeof authorize!=='function')throw new ForbiddenException('采购审批任务身份不可用');
+    return this.enqueueCardRead(async()=>{
+      const ledger=await this.read(),claim=(ledger.platformApprovalClaims||[]).find(row=>row.eventId===eventId);
+      if(!claim)return null;
+      const batch=ledger.managerApprovalBatches.find(row=>row.approvalBatchId===claim.approvalBatchId);
+      if(batch?.flowVersion!=='lifecycle_v1'||batch.lifecycleAppId!==appId||claim.actorAccountId!==identity.actorAccountId||claim.subjectAccountId!==identity.subjectAccountId||claim.identitySource!==identity.source)throw new ForbiddenException('采购审批任务不存在或无权访问');
+      const target=normalizePurchaseAuthorityTarget(claim.authorityTarget);
+      if(!target)throw new ConflictException('采购审批任务授权范围不可核对');
+      assertSynchronousLifecycleAuthorization(()=>authorize(target));
+      const work=(ledger.platformApprovalWork||[]).find(row=>row.eventId===eventId);
+      if(!work)throw new ConflictException('采购审批任务状态不可核对');
+      return {recordId:claim.recordIds[0]!,decision:claim.choice==='reject'?'rejected':'approved',status:work.phase==='completed'?'completed':work.phase==='manual'?'manual_reconciliation':work.phase==='queued'?'pending':'running',acceptedAtMs:claim.acceptedAtMs};
+    });
+  }
+
+  async listRecoverableLifecyclePlatformApprovals(afterEventId='',limit=20):Promise<string[]> {
+    if((afterEventId&&!/^platform_[A-Za-z0-9_-]{16,64}$/.test(afterEventId))||!Number.isSafeInteger(limit)||limit<1||limit>20)throw new BadRequestException('采购审批恢复范围无效');
+    return this.enqueueCardRead(async()=>{
+      const ledger=await this.read(),appId=readEnv('FEISHU_APP_ID'),now=Date.now();
+      return (ledger.platformApprovalWork||[]).filter(work=>work.eventId>afterEventId&&work.phase!=='completed'&&!(work.phase==='manual'&&!work.dispatchStartedAtMs)&&(!work.leaseToken||work.leaseUntilMs<=now)).filter(work=>{
+        const claim=(ledger.platformApprovalClaims||[]).find(row=>row.eventId===work.eventId);
+        const batch=ledger.managerApprovalBatches.find(row=>row.approvalBatchId===claim?.approvalBatchId);
+        return batch?.flowVersion==='lifecycle_v1'&&batch.lifecycleAppId===appId;
+      }).map(work=>work.eventId).sort().slice(0,limit);
     });
   }
 
@@ -7432,8 +7471,9 @@ export class PurchaseWorkflowStore {
         if (work?.dispatchStartedAtMs && (claim.choice === 'reject' ? work.purchaser !== undefined : !validPlatformApprovalPurchaser(work.purchaser))) throw new ConflictException('平台采购审批采购人快照损坏');
       }
       for (const batch of ledger.managerApprovalBatches) for (const item of batch.items.filter(row => row.decisionSource === 'platform')) {
-        const matches = (ledger.platformLegacyApprovalClaims || []).filter(claim => claim.phase === 'completed' && claim.originalBatchId === batch.approvalBatchId && claim.recordId === item.executionRecordId && claim.eventId === item.actionEventId && claim.decision === 'rejected');
-        if (matches.length !== 1) throw new ConflictException('平台采购审批来源无法核对');
+        const legacy = (ledger.platformLegacyApprovalClaims || []).filter(claim => claim.phase === 'completed' && item.status==='rejected' && claim.originalBatchId === batch.approvalBatchId && claim.recordId === item.executionRecordId && claim.eventId === item.actionEventId && claim.decision === 'rejected');
+        const unified = (ledger.platformApprovalClaims || []).filter(claim => claim.approvalBatchId===batch.approvalBatchId&&claim.recordIds.length===1&&claim.recordIds[0]===item.executionRecordId&&claim.eventId===item.actionEventId&&claim.choice==='reject'&&claim.rejectionReason==='');
+        if (legacy.length + unified.length !== 1) throw new ConflictException('平台采购审批来源无法核对');
       }
       for (const work of ledger.platformApprovalWork || []) if ((ledger.platformApprovalClaims || []).filter(claim => claim.eventId === work.eventId).length !== 1) throw new ConflictException('平台采购审批任务来源缺失');
       for (const row of ledger.lifecyclePaymentUploads || []) {
@@ -7655,7 +7695,7 @@ function normalizePlatformApprovalClaims(value: unknown): PlatformApprovalPersis
         typeof raw.approvalBatchId !== 'string' || !BATCH_ID_PATTERN.test(raw.approvalBatchId) || typeof raw.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(raw.fingerprint) || typeof raw.serverActionId !== 'string' || !/^pa_[A-Za-z0-9_-]{43}$/.test(raw.serverActionId) || !Number.isSafeInteger(raw.acceptedAtMs) || Number(raw.acceptedAtMs) < 1 ||
         !Array.isArray(raw.recordIds) || raw.recordIds.length !== 1 || typeof raw.recordIds[0] !== 'string' || !/^rec[A-Za-z0-9_-]+$/.test(raw.recordIds[0]) ||
         (raw.choice !== 'comprehensive' && raw.choice !== 'building_self' && raw.choice !== 'reject') || typeof raw.rejectionReason !== 'string' ||
-        (raw.choice === 'reject' ? !raw.rejectionReason.trim() || Array.from(raw.rejectionReason).length > 500 : raw.rejectionReason !== '') ||
+        (raw.choice === 'reject' ? raw.rejectionReason!==raw.rejectionReason.trim() || Array.from(raw.rejectionReason).length > 500 : raw.rejectionReason !== '') ||
         typeof raw.actorAccountId !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(raw.actorAccountId) || typeof raw.subjectAccountId !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(raw.subjectAccountId) ||
         typeof raw.actorDisplayName !== 'string' || !raw.actorDisplayName || raw.actorDisplayName.length > 128 || normalizeAccessDisplayName(raw.actorDisplayName) !== raw.actorDisplayName || typeof raw.subjectDisplayName !== 'string' || !raw.subjectDisplayName || raw.subjectDisplayName.length > 128 || normalizeAccessDisplayName(raw.subjectDisplayName) !== raw.subjectDisplayName ||
         !Number.isSafeInteger(raw.actorAuthorizationVersion) || Number(raw.actorAuthorizationVersion) < 1 || !Number.isSafeInteger(raw.subjectAuthorizationVersion) || Number(raw.subjectAuthorizationVersion) < 1 ||
@@ -10959,7 +10999,7 @@ function isValidManagerBatchItemDecision(
   rejectionReason: string,
   decisionSource?: unknown,
 ): boolean {
-  if (decisionSource !== undefined && (decisionSource !== 'platform' || status !== 'rejected' || choice !== 'reject' || !!rejectionReason)) return false;
+  if (decisionSource !== undefined && (decisionSource !== 'platform' || !['processing','rejected'].includes(status) || choice !== 'reject' || !!rejectionReason)) return false;
   if (status === 'pending') return choice === '' && !rejectionReason;
   if (status === 'approved') {
     return (
@@ -10974,7 +11014,7 @@ function isValidManagerBatchItemDecision(
     return (
       choice === 'comprehensive' ||
       choice === 'building_self' ||
-      (choice === 'reject' && Boolean(rejectionReason))
+      (choice === 'reject' && (Boolean(rejectionReason) || decisionSource === 'platform'))
     );
   }
   return isManagerBatchTerminalChoice(choice);

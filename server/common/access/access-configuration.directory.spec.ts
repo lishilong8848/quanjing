@@ -51,6 +51,36 @@ describe('application personnel directory', () => {
     await expect(directory.read()).rejects.toThrow('temporary schema failure');
     await expect(directory.read()).resolves.toMatchObject({ people: [] });
   });
+  it('does not reuse the derived directory after its source generation changes', async () => {
+    let revision = 0;
+    const generation = jest.spyOn(require('../feishu/bitable-direct-read'), 'getBitableRecordCacheGeneration').mockImplementation(() => revision);
+    try {
+      (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
+      const directory = new AccessConfigurationDirectory(http());
+      const first = await directory.read();
+      expect(await directory.read()).toBe(first);
+      const count = (fetchBitableRecords as jest.Mock).mock.calls.length;
+      revision++;
+      expect(await directory.read()).not.toBe(first);
+      expect((fetchBitableRecords as jest.Mock).mock.calls.length).toBeGreaterThan(count);
+    } finally { generation.mockRestore(); }
+  });
+  it('rejects a directory assembled across a source mutation instead of publishing mixed generations', async () => {
+    let revision = 0;
+    const generation = jest.spyOn(require('../feishu/bitable-direct-read'), 'getBitableRecordCacheGeneration').mockImplementation(() => revision);
+    let release!: (value: unknown[]) => void;
+    (readExternalEmployeeCredentials as jest.Mock).mockReturnValueOnce(new Promise(done => { release = done; }));
+    (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
+    try {
+      const directory = new AccessConfigurationDirectory(http());
+      const request = directory.read();
+      const rejected = expect(request).rejects.toThrow('人员资料已变更');
+      await new Promise(resolve => setImmediate(resolve));
+      revision++; release([]);
+      await rejected;
+      expect((directory as any).cached).toBeUndefined();
+    } finally { generation.mockRestore(); }
+  });
   it('distinguishes credential failure from a complete empty credential list and recovers on forced read', async () => {
     (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
     (readExternalEmployeeCredentials as jest.Mock).mockRejectedValueOnce(new Error('synthetic credential source failure'));

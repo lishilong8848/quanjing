@@ -554,11 +554,7 @@ export class ThresholdAdjustmentService
     entry = this.ledger.get(id)!;
     if (entry.adjustment.state === 'awaiting_completion') {
       const a = entry.adjustment;
-      for (const person of [
-        ...new Map(
-          [a.applicant, ...a.managers].map((p) => [p.openId, p]),
-        ).values(),
-      ]) {
+      for (const person of [a.applicant]) {
         if (
           this.ledger
             .get(id)!
@@ -649,7 +645,7 @@ export class ThresholdAdjustmentService
           throw new Error(sync.error || '设备参数多维表同步失败');
         if (sync?.state === 'cancelled')
           throw new ConflictException('设备参数同步已取消');
-        if (sync && sync.state !== 'success') return;
+        if (sync?.state !== 'success') return;
         this.ledger.change(id, (e) => {
           e.adjustment.appliedRecord = result.record!;
           e.adjustment.state = 'completed';
@@ -666,8 +662,17 @@ export class ThresholdAdjustmentService
       }
     }
     entry = this.ledger.get(id)!;
+    const participantIds = new Set([
+      entry.adjustment.applicant.openId,
+      entry.adjustment.engineer.openId,
+      ...entry.adjustment.stages.map((stage) => stage.approver.openId),
+    ]);
+    const observerManagerIds = new Set(entry.adjustment.managers
+      .filter((person) => !participantIds.has(person.openId))
+      .map((person) => person.openId));
     for (const receipt of entry.messages.filter(
-      (m) => m.patchedRevision < entry.adjustment.revision,
+      (m) => m.patchedRevision < entry.adjustment.revision &&
+        (entry.adjustment.state === 'completed' || !observerManagerIds.has(m.openId)),
     )) {
       const current = this.ledger.get(id)!;
       const confirmationEnabled =

@@ -1927,7 +1927,13 @@ export interface PersonProfile {
   buildingsSpecialties: string[];
   shift: string | null;
 }
+export interface PersonProfileCacheStatus {
+  fetchedAt: number;
+  stale: boolean;
+  refreshing: boolean;
+}
 export interface PersonProfileResponse {
+  cache?: PersonProfileCacheStatus;
   organizations: PersonProfile[];
   /** Public names only; account identifiers never leave the server. */
   changeRequestSubmitters?: string[];
@@ -1940,6 +1946,7 @@ export interface PersonProfileDetail extends PersonProfile {
   feishuChatUrl: string | null;
 }
 export interface PersonProfileDetailResponse {
+  cache?: PersonProfileCacheStatus;
   organizations: PersonProfileDetail[];
 }
 /**

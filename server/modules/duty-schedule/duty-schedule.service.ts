@@ -5627,6 +5627,7 @@ export class DutyScheduleService {
       invalidateBitableRecordCache({
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
+        deletePersisted: true,
       });
     }
 
@@ -5754,6 +5755,7 @@ export class DutyScheduleService {
       invalidateBitableRecordCache({
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
+        deletePersisted: true,
       });
     }
 
@@ -6132,6 +6134,7 @@ export class DutyScheduleService {
       invalidateBitableRecordCache({
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
+        deletePersisted: true,
       });
     }
 
@@ -6223,6 +6226,7 @@ export class DutyScheduleService {
       invalidateBitableRecordCache({
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
+        deletePersisted: true,
       });
     }
 
@@ -6648,10 +6652,12 @@ export class DutyScheduleService {
       invalidateBitableRecordCache({
         appToken: leaveRecordsResult.appToken,
         tableId: this.leaveSubstituteConfig.tableId,
+        deletePersisted: true,
       });
       invalidateBitableRecordCache({
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
+        deletePersisted: true,
       });
     }
 
@@ -7026,6 +7032,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: config.tableId,
+      deletePersisted: true,
     });
 
     return {
@@ -7091,6 +7098,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.sealingConfig.tableId,
+      deletePersisted: true,
     });
 
     return {
@@ -7490,6 +7498,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.leaveSubstituteConfig.tableId,
+      deletePersisted: true,
     });
     return this.buildPersistedLeaveRequestResponse(
       request,
@@ -9222,6 +9231,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.calendarChangeConfig.tableId,
+      deletePersisted: true,
     });
     return response;
   }
@@ -9435,10 +9445,12 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.changeDrillReportTableId,
+      deletePersisted: true,
     });
     invalidateBitableRecordCache({
       appToken,
       tableId: this.calendarChangeConfig.tableId,
+      deletePersisted: true,
     });
     return response;
   }
@@ -9956,10 +9968,12 @@ export class DutyScheduleService {
         invalidateBitableRecordCache({
           appToken,
           tableId: this.changeDrillReportTableId,
+          deletePersisted: true,
         });
         invalidateBitableRecordCache({
           appToken,
           tableId: this.calendarChangeConfig.tableId,
+          deletePersisted: true,
         });
       },
     };
@@ -11376,6 +11390,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.calendarChangeConfig.tableId,
+      deletePersisted: true,
     });
     const taskId = request.clientMutationId;
     const acceptedRecord = {
@@ -11610,6 +11625,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.calendarChangeConfig.tableId,
+      deletePersisted: true,
     });
     return this.fetchBitableFieldMetas(
       appToken,
@@ -11939,6 +11955,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.calendarChangeConfig.tableId,
+      deletePersisted: true,
     });
     const documentResults = this.buildChangeRequestDocumentSyncResults(
       files,
@@ -13149,6 +13166,7 @@ export class DutyScheduleService {
           invalidateBitableRecordCache({
             appToken: preparedWrite.appToken,
             tableId: preparedWrite.tableId,
+            deletePersisted: true,
           });
           return this.buildPersistedLeaveRequestResponse(
             request,
@@ -13167,6 +13185,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken: preparedWrite.appToken,
       tableId: preparedWrite.tableId,
+      deletePersisted: true,
     });
 
     return this.buildCreatedLeaveRequestResponse(
@@ -13299,6 +13318,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: OVERTIME_REQUEST_TABLE_ID,
+      deletePersisted: true,
     });
     return this.buildOvertimeRequestResponse(
       request,
@@ -13443,6 +13463,7 @@ export class DutyScheduleService {
       invalidateBitableRecordCache({
         appToken,
         tableId: OVERTIME_REQUEST_TABLE_ID,
+        deletePersisted: true,
       });
       return this.buildOvertimeRequestResponse(
         request,
@@ -13676,6 +13697,7 @@ export class DutyScheduleService {
           invalidateBitableRecordCache({
             appToken: preparedWrite.appToken,
             tableId: preparedWrite.tableId,
+            deletePersisted: true,
           });
           return this.buildOvertimeRequestResponse(
             request,
@@ -13700,6 +13722,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken: preparedWrite.appToken,
       tableId: preparedWrite.tableId,
+      deletePersisted: true,
     });
     return this.buildOvertimeRequestResponse(
       request,
@@ -17025,6 +17048,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: config.tableId,
+      deletePersisted: true,
     });
 
     const item = buildExceptionFollowUpItem({
@@ -17163,6 +17187,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: config.tableId,
+      deletePersisted: true,
     });
 
     const item = buildExceptionFollowUpItem({
@@ -17239,6 +17264,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: config.tableId,
+      deletePersisted: true,
     });
 
     return {
@@ -18620,6 +18646,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken: followupAppToken,
       tableId: this.constructionFollowupConfig.tableId,
+      deletePersisted: true,
     });
     return true;
   }
@@ -20660,6 +20687,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.personnelMovementConfig.tableId,
+      deletePersisted: true,
     });
 
     return { updated: true, recordId };
@@ -20909,6 +20937,7 @@ export class DutyScheduleService {
       invalidateBitableRecordCache({
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
+        deletePersisted: true,
       });
     }
 
@@ -21044,6 +21073,7 @@ export class DutyScheduleService {
       invalidateBitableRecordCache({
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
+        deletePersisted: true,
       });
     }
 
@@ -24163,6 +24193,7 @@ export class DutyScheduleService {
     invalidateBitableRecordCache({
       appToken,
       tableId: this.calendarChangeConfig.tableId,
+      deletePersisted: true,
     });
 
     return {

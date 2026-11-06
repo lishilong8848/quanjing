@@ -614,6 +614,7 @@ describe('PurchaseApplicationService catalog reads', () => {
       expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
         appToken: 'app-token',
         tableId: 'tblKmajonrdwW7Z0',
+        deletePersisted: true,
       });
 
       expect(
@@ -1034,6 +1035,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-token',
       tableId: 'tblKmajonrdwW7Z0',
+      deletePersisted: true,
     });
   });
 
@@ -1616,6 +1618,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'app-token',
       tableId: 'tblKmajonrdwW7Z0',
+      deletePersisted: true,
     });
     const uploadCall = httpService.axiosRef.post.mock.calls.find(([url]) =>
       String(url).includes('/drive/v1/medias/upload_all'),

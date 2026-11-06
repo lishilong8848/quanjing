@@ -657,7 +657,7 @@ export class InventoryWorkflowGateway {
         },
       );
       assertFeishuSuccess(response.data, `新增${tableName}字段失败`);
-      invalidateBitableRecordCache({ appToken, tableId });
+      invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true });
       this.fieldsPendingFilterReadiness.add(cacheKey);
       await this.waitForTextFieldFilterAvailability(
         appToken,
@@ -718,7 +718,7 @@ export class InventoryWorkflowGateway {
         },
       );
       assertFeishuSuccess(response.data, `新增${tableName}字段失败`);
-      invalidateBitableRecordCache({ appToken, tableId });
+      invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true });
       this.ensuredNumberFields.add(cacheKey);
     })();
     this.ensuringNumberFields.set(cacheKey, operation);
