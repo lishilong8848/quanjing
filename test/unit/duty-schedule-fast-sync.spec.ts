@@ -259,6 +259,24 @@ describe('duty schedule fast sync', () => {
     await expect(source).rejects.toThrow('数据在读取期间已变更');
   });
 
+  it('risk scan retries only transient source changes and never falls back to cloud reads', async () => {
+    const service = new DutyScheduleService({} as never, { axiosRef: {} } as never) as any;
+    service.getMonthlySchedulesFromFeishu = jest.fn();
+    service.getMonthlySchedulesFromLocalCache = jest.fn()
+      .mockRejectedValueOnce(new Error('数据在读取期间已变更，请重新读取'))
+      .mockResolvedValueOnce([{ scheduleDate: '2026-11-01' }]);
+    await expect(service.getSchedulesForRiskScan('2026-10-31', '2026-11-07')).resolves.toEqual([{ scheduleDate: '2026-11-01' }]);
+    expect(service.getMonthlySchedulesFromLocalCache).toHaveBeenCalledTimes(2);
+    expect(service.getMonthlySchedulesFromLocalCache).toHaveBeenLastCalledWith('2026-10-31', '2026-11-07', false);
+    expect(service.getMonthlySchedulesFromFeishu).not.toHaveBeenCalled();
+    service.getMonthlySchedulesFromLocalCache.mockReset().mockRejectedValue(new Error('排班来源已变化，请重新读取'));
+    await expect(service.getSchedulesForRiskScan('2026-10-31', '2026-11-07')).rejects.toThrow('来源已变化');
+    expect(service.getMonthlySchedulesFromLocalCache).toHaveBeenCalledTimes(3);
+    service.getMonthlySchedulesFromLocalCache.mockReset().mockRejectedValue(new Error('请休假审批缓存尚未核验'));
+    await expect(service.getSchedulesForRiskScan('2026-10-31', '2026-11-07')).rejects.toThrow('尚未核验');
+    expect(service.getMonthlySchedulesFromLocalCache).toHaveBeenCalledTimes(1);
+  });
+
   it('reads both local month snapshots across a month boundary without duplicating the full snapshot', async () => {
     const service = new DutyScheduleService({} as never, { axiosRef: {} } as never) as any;
     const all = [
@@ -270,7 +288,7 @@ describe('duty schedule fast sync', () => {
     service.localMonthSnapshots = { readPreferredMonth: jest.fn(async () => full) };
     service.extractScheduleDateFromFields = jest.fn((fields: { date: string }) => fields.date);
     service.mapFeishuScheduleRecord = jest.fn((record: { record_id: string; fields: { date: string } }) => ({ recordId: record.record_id, scheduleDate: record.fields.date, building: 'A' }));
-    const schedules = await service.getMonthlySchedulesFromLocalCache('2026-09-30', '2026-10-01');
+    const schedules = await service.getSchedulesForRiskScan('2026-09-30', '2026-10-01');
     expect(schedules.map((row: { recordId: string }) => row.recordId)).toEqual(['oct', 'sept']);
     expect(service.localMonthSnapshots.readPreferredMonth.mock.calls.map((call: unknown[]) => call[2])).toEqual(['2026-09', '2026-10']);
   });
@@ -314,7 +332,7 @@ describe('duty schedule fast sync', () => {
         if (mode === 'missing' && month === '2026-10') return null;
         return { records: [{ record_id: 'same', fields: { date: month === '2026-09' ? '2026-09-30' : '2026-10-01' } }], fetchedAt: 10, expiresAt: Date.now() + 60000 };
       }) };
-      await expect(service.getMonthlySchedulesFromLocalCache('2026-09-30', '2026-10-01')).rejects.toThrow();
+      await expect(service.getSchedulesForRiskScan('2026-09-30', '2026-10-01')).rejects.toThrow();
     }
     jest.mocked(readBitableCacheScopeRevision).mockReset().mockResolvedValue(null);
   });
@@ -327,14 +345,14 @@ describe('duty schedule fast sync', () => {
     persisted.mockResolvedValue(stale);
     service.localMonthSnapshots = { readPreferredMonth: jest.fn(async () => stale) };
     try {
-      await expect(service.getMonthlySchedulesFromLocalCache(`${month}-01`, `${month}-02`)).rejects.toThrow('缓存');
+      await expect(service.getSchedulesForRiskScan(`${month}-01`, `${month}-02`)).rejects.toThrow('缓存');
       await expect(service.getMonthlySchedulesFromLocalCache(`${month}-01`, `${month}-02`, true)).resolves.toEqual([]);
       service.localMonthSnapshots.readPreferredMonth.mockRejectedValue(new Error('damaged month'));
       persisted.mockResolvedValue({ ...stale, expiresAt: Date.now() + 60_000 });
-      await expect(service.getMonthlySchedulesFromLocalCache(`${month}-01`, `${month}-02`)).rejects.toThrow('damaged month');
+      await expect(service.getSchedulesForRiskScan(`${month}-01`, `${month}-02`)).rejects.toThrow('damaged month');
       service.localMonthSnapshots.readPreferredMonth.mockResolvedValue({ ...stale, expiresAt: Date.now() + 60_000 });
       jest.mocked(readCachedLeaveApprovalSnapshot).mockResolvedValueOnce({ verified: false, requests: [] });
-      await expect(service.getMonthlySchedulesFromLocalCache(`${month}-01`, `${month}-02`)).rejects.toThrow('审批缓存尚未核验');
+      await expect(service.getSchedulesForRiskScan(`${month}-01`, `${month}-02`)).rejects.toThrow('审批缓存尚未核验');
     } finally { persisted.mockReset().mockResolvedValue(null); }
   });
 

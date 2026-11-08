@@ -21459,6 +21459,23 @@ export class DutyScheduleService {
     return schedules;
   }
 
+  /** Patrol scans use the same verified local schedule and leave snapshots as validation.
+   * Never substitute historical/stale data or fetch full source tables for a scan.
+   */
+  async getSchedulesForRiskScan(startDate: string, endDate: string): Promise<MonthlySchedule[]> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.getMonthlySchedulesFromLocalCache(startDate, endDate, false);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        const changed = message === '数据在读取期间已变更，请重新读取' ||
+          message === '排班来源已变化，请重新读取';
+        if (!changed || attempt >= 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+  }
+
   private async getMonthlySchedulesFromLocalCache(
     startDate: string,
     endDate: string,

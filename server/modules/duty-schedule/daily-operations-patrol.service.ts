@@ -295,13 +295,7 @@ export class DailyOperationsPatrolService {
     startDate: string,
     endDate: string,
   ): Promise<MonthlySchedule[]> {
-    const months = monthsBetween(startDate, endDate);
-    const results = await Promise.all(
-      months.map(({ year, month }) =>
-        this.dutyScheduleService.getMonthlySchedules(year, month, true),
-      ),
-    );
-    return results.flat();
+    return this.dutyScheduleService.getSchedulesForRiskScan(startDate, endDate);
   }
 
   private async loadPlans(
@@ -366,26 +360,6 @@ function countFacilityPoints(response: TodayOperationsKpiResponse): number {
     (sum, metric) => sum + (metric.history?.[0]?.rows.length || 0),
     0,
   );
-}
-
-function monthsBetween(
-  startDate: string,
-  endDate: string,
-): Array<{ year: number; month: number }> {
-  const [startYear, startMonth] = startDate.split('-').map(Number);
-  const [endYear, endMonth] = endDate.split('-').map(Number);
-  const months: Array<{ year: number; month: number }> = [];
-  let year = startYear;
-  let month = startMonth;
-  while (year < endYear || (year === endYear && month <= endMonth)) {
-    months.push({ year, month });
-    month += 1;
-    if (month > 12) {
-      year += 1;
-      month = 1;
-    }
-  }
-  return months;
 }
 
 function yearsBetween(startDate: string, endDate: string): number[] {

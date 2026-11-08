@@ -27,10 +27,9 @@ describe('DailyOperationsPatrolService', () => {
     const card = fixture.gateway.sendCard.mock.calls[0][0];
     expect(JSON.stringify(card)).toContain('南通每日运维巡视同步 · 正常');
     expect(fixture.kpi.getKpisForAnomalyScan).toHaveBeenCalledWith('2026-09-07');
-    expect(fixture.schedule.getMonthlySchedules).toHaveBeenCalledWith(
-      2026,
-      9,
-      true,
+    expect(fixture.schedule.getSchedulesForRiskScan).toHaveBeenCalledWith(
+      '2026-09-06',
+      '2026-09-14',
     );
     expect(fixture.schedule.getYearlyChangeInfo).toHaveBeenCalledWith(
       2026,
@@ -54,6 +53,16 @@ describe('DailyOperationsPatrolService', () => {
     expect(fixture.followUpCards.bindMessage.mock.invocationCallOrder[0]).toBeLessThan(fixture.store.markSent.mock.invocationCallOrder[0]);
     expect(JSON.stringify(card)).toContain('today_operations_followup');
     expect(JSON.stringify(card)).not.toContain('attendance-anomaly-follow-up');
+  });
+
+  it('keeps unavailable local schedule data pending verification rather than reporting no risk', async () => {
+    const fixture = createFixture();
+    fixture.schedule.getSchedulesForRiskScan.mockRejectedValue(new Error('本地排班缓存尚未准备完成，请稍后重试'));
+    const report = await createService(fixture).collectReport('2026-10-31');
+    const check = report.checks.find(row => row.key === 'schedule');
+    expect(JSON.stringify(check)).toContain('本地排班缓存尚未准备完成');
+    expect(fixture.schedule.getSchedulesForRiskScan).toHaveBeenCalledWith('2026-10-30', '2026-11-07');
+    expect(fixture.gateway.sendCard).not.toHaveBeenCalled();
   });
 
   it.each([undefined, '   '])('keeps the configured host and port when PUBLIC_BASE_URL is %p', async (publicUrl) => {
@@ -448,7 +457,7 @@ function createFixture() {
       }),
     },
     schedule: {
-      getMonthlySchedules: jest.fn().mockResolvedValue([]),
+      getSchedulesForRiskScan: jest.fn().mockResolvedValue([]),
       getYearlyChangeInfo: jest
         .fn()
         .mockResolvedValue({ changes: [], total: 0, keyTotal: 0 }),

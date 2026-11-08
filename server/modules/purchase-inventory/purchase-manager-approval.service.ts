@@ -1796,7 +1796,7 @@ export class PurchaseManagerApprovalService {
         latest = await this.getManagerDecisionRecord(recordId,sourceGuard);
         if (batch.flowVersion === 'lifecycle_v1' && latest.status === DECISION_PRE_STATE) {
           const actual = purchaseAuthorityTarget(latest);
-          if (latest.approvalBatchId !== batch.approvalBatchId || !item.authorityTarget || !actual || (latest.specialty?.trim() && !actual.specialty) ||
+          if (latest.approvalBatchId !== batch.approvalBatchId || !item.authorityTarget || !actual ||
               actual.building !== item.authorityTarget.building || actual.specialty !== item.authorityTarget.specialty) {
             throw new ConflictException('采购明细授权范围已变化，需要重新核对');
           }
