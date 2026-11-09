@@ -1,9 +1,10 @@
-import { cancelHotfixInitialization, runHotfixInitialization } from '../../common/hotfix-runtime-activation';
+import { cancelHotfixInitialization, currentHotfixActivation, runHotfixInitialization } from '../../common/hotfix-runtime-activation';
 import {
   BadRequestException,
   HttpException,
   Injectable,
   Logger,
+  Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import {
   createProcessLockOwner,
   processLockOwnerMayBeAlive,
 } from '../../common/process-lock-owner';
+import { InventoryStocktakeReminderService } from './inventory-stocktake-reminder.service';
 import {
   nextStocktakeGenerationAt,
   stocktakeBuildings,
@@ -32,6 +34,7 @@ import {
 } from './inventory-stocktake.store';
 
 const MAX_ATTEMPTS = 3;
+const AUTOMATIC_RECOVERY_INTERVAL_MS = 24 * 3600_000;
 const SYSTEM = { role: 'admin', purchaseBuilding: null } as AccessPrincipal;
 
 @Injectable()
@@ -49,6 +52,7 @@ export class InventoryStocktakeGenerationService
     private readonly store: InventoryStocktakeStore,
     private readonly source: InventoryStocktakeSource,
     private readonly sheets: InventoryStocktakeService,
+    @Optional() private readonly reminders?: InventoryStocktakeReminderService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -182,9 +186,16 @@ export class InventoryStocktakeGenerationService
   }
   runPending(): Promise<void> {
     if (this.running) return this.running;
-    this.running = this.drain().finally(() => {
-      this.running = null;
-    });
+    if (!this.canProcess()) return Promise.resolve();
+    this.running = this.drain()
+      .then(() => {
+        void this.reminders?.runPending(stocktakeMonth()).catch(() =>
+          this.logger.error('盘点提醒处理失败，将在下次调度重试'),
+        );
+      })
+      .finally(() => {
+        this.running = null;
+      });
     return this.running;
   }
 
@@ -280,19 +291,21 @@ export class InventoryStocktakeGenerationService
     let job: StocktakeGenerationJob | null;
     while ((job = this.claim())) {
       const currentJob = job;
+      const state = this.store.read();
+      const missing = job.buildings.filter((entry) =>
+        !state.sheets.some((sheet) =>
+          sheet.month === currentJob.month && sheet.building === entry.building && Boolean(sheet.review),
+        ),
+      );
+      for (const entry of job.buildings) {
+        if (entry.status !== 'done' && !missing.includes(entry))
+          this.updateBuilding(currentJob, entry.building, 'done', '');
+      }
       try {
-        const state = this.store.read();
-        const missing = job.buildings.filter(
-          (b) =>
-            !state.sheets.some(
-              (s) =>
-                s.month === job!.month &&
-                s.building === b.building &&
-                Boolean(s.review),
-            ),
-        );
-        const snapshot = missing.length ? await this.source.snapshot() : null;
-        for (const entry of job.buildings) {
+        const snapshot = missing.length
+          ? await this.source.snapshot(undefined, job.month)
+          : null;
+        for (const entry of missing) {
           try {
             if (snapshot)
               this.sheets.generateMissing(job.month, entry.building, snapshot);
@@ -307,7 +320,7 @@ export class InventoryStocktakeGenerationService
           }
         }
       } catch (error) {
-        for (const entry of job.buildings.filter((b) => b.status !== 'done'))
+        for (const entry of missing)
           this.updateBuilding(
             currentJob,
             entry.building,
@@ -355,15 +368,15 @@ export class InventoryStocktakeGenerationService
   }
   private monthlyTick(): void {
     if (!this.started) return;
+    if (!this.canProcess()) {
+      this.later(() => this.monthlyTick(), 30_000);
+      return;
+    }
     let acceptanceFailed = false;
     try {
       const month = stocktakeMonth();
       if (Date.now() >= stocktakeGenerationDueAt(month).getTime())
-        this.request(
-          { month, clientMutationId: `auto-stocktake-v2-${month}` },
-          SYSTEM,
-          'stocktake-scheduler',
-        );
+        this.requestAutomatic(month);
     } catch {
       acceptanceFailed = true;
       this.logger.error('盘点自动生成受理失败，将在下次调度重试');
@@ -374,8 +387,44 @@ export class InventoryStocktakeGenerationService
       () => this.monthlyTick(),
       acceptanceFailed
         ? 30_000
-        : Math.min(24 * 3600_000, Math.max(1, next.getTime() - Date.now())),
+        : Math.min(
+            AUTOMATIC_RECOVERY_INTERVAL_MS,
+            Math.max(1, next.getTime() - Date.now()),
+          ),
     );
+  }
+
+  private canProcess(): boolean {
+    return !/^(?:1|true|on|yes)$/iu.test(process.env.NANTONG_HOTFIX_SMOKE_MODE || '') &&
+      (process.env.NODE_ENV !== 'production' || currentHotfixActivation().isAcceptingNewWork());
+  }
+
+  private requestAutomatic(month: string): void {
+    const state = this.store.read();
+    const existing = new Set(state.sheets
+      .filter((sheet) => sheet.month === month && sheet.review)
+      .map((sheet) => sheet.building));
+    if (stocktakeBuildings(SYSTEM).every((building) => existing.has(building)))
+      return;
+
+    const initialKey = `auto-stocktake-v2-${month}`;
+    const previous = state.receipts
+      .filter((receipt) =>
+        receipt.key === initialKey || receipt.key.startsWith(`${initialKey}-recovery-`),
+      )
+      .at(-1);
+    let clientMutationId = initialKey;
+    if (previous) {
+      const job = state.generationJobs.find((entry) => entry.id === previous.result);
+      if (job && (
+        job.status === 'queued' || job.status === 'running' || job.retryAt ||
+        Date.now() - Date.parse(job.updatedAt) < AUTOMATIC_RECOVERY_INTERVAL_MS
+      )) return;
+      const day = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+      clientMutationId = `${initialKey}-recovery-${day}`;
+      if (previous.key === clientMutationId) return;
+    }
+    this.request({ month, clientMutationId }, SYSTEM, 'stocktake-scheduler');
   }
   private wake(): void {
     if (!this.started) return;

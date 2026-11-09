@@ -15,6 +15,7 @@ export type TodayAttendanceExternalSyncState = 'syncing' | 'failed';
 export interface TodayAttendanceRunStatus {
   state: 'waiting' | 'not-run' | 'running' | 'failed' | 'completed';
   executionId?: string;
+  resultReady?: boolean;
   task?: TodayAttendanceTask | 'archive-yesterday';
   scheduledAt: string;
   firstAttemptAt?: string;

@@ -225,7 +225,8 @@ describe('AttendanceAutomationCoordinatorService', () => {
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenCalledWith({
       ...run,
-      deferAttendanceArchive: true,
+      manual: true,
+      executionId: expect.any(String),
     });
     expect(service.getRunStatus(run.task, run.date)).toMatchObject({
       state: 'completed',
@@ -462,6 +463,8 @@ describe('AttendanceAutomationCoordinatorService', () => {
       managementSummary: { sent: 1 },
     });
     expect(dingTalkClient.listAttendanceDetails).toHaveBeenCalledTimes(1);
+    expect(feishuGateway.archiveAttendance).not.toHaveBeenCalled();
+    await service.recoverPendingAttendanceArchives();
     expect(feishuGateway.archiveAttendance).toHaveBeenCalledTimes(1);
     expect(patrol.sendMorningBriefCard).toHaveBeenCalledTimes(1);
     expect(patrol.sendMorningBriefCard).toHaveBeenCalledWith(
@@ -538,12 +541,13 @@ describe('AttendanceAutomationCoordinatorService', () => {
       verified: true,
       requests: [],
     });
+    await service.recoverPendingAttendanceArchives();
     expect(
       (gateway.archiveAttendance.mock.calls as any)[0][0].results,
     ).toHaveLength(2);
   });
 
-  it('recomputes the live summary in the same run after correction evidence is archived', async () => {
+  it('applies known corrections to the final summary before background archive and evidence sync', async () => {
     const correctionTime = Date.parse('2026-09-08T18:00:00+08:00');
     const correction = {
       processInstanceId: 'process-overtime-off-duty',
@@ -585,6 +589,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
         },
       ]),
       archiveAttendance: jest.fn().mockResolvedValue({}),
+      readArchivedAttendanceRecheckTargets: jest.fn().mockResolvedValue([]),
       resolvePersonalRecipients: jest.fn().mockResolvedValue([]),
     };
     const store = { mergeLiveCheck: jest.fn().mockResolvedValue(undefined) };
@@ -601,17 +606,7 @@ describe('AttendanceAutomationCoordinatorService', () => {
       scheduledAt: new Date('2026-09-08T18:35:00+08:00'),
     });
 
-    expect(gateway.archiveAttendance).toHaveBeenCalledTimes(2);
-    expect(gateway.archiveAttendance.mock.calls[1][0]).toMatchObject({
-      corrections: [correction],
-      results: expect.arrayContaining([
-        expect.objectContaining({
-          checkType: 'OffDuty',
-          timeResult: 'Normal',
-          correctionEvidenceStatus: 'present',
-        }),
-      ]),
-    });
+    expect(gateway.archiveAttendance).not.toHaveBeenCalled();
     expect(store.mergeLiveCheck).toHaveBeenCalledWith(
       expect.objectContaining({
         normal: expect.arrayContaining([
@@ -622,6 +617,21 @@ describe('AttendanceAutomationCoordinatorService', () => {
         ]),
       }),
     );
+    await service.recoverPendingCorrections();
+    expect(gateway.archiveAttendance).not.toHaveBeenCalled();
+    await service.recoverPendingAttendanceArchives();
+    await service.recoverPendingCorrections();
+    expect(gateway.archiveAttendance).toHaveBeenCalledTimes(2);
+    expect(gateway.archiveAttendance.mock.calls[0][0]).toMatchObject({
+      results: expect.arrayContaining([
+        expect.objectContaining({
+          checkType: 'OffDuty',
+          timeResult: 'Normal',
+          correctionEvidenceStatus: 'present',
+        }),
+      ]),
+    });
+    expect(gateway.archiveAttendance.mock.calls[1][0]).toMatchObject({ corrections: [correction] });
   });
 
   it.each([
@@ -1391,6 +1401,8 @@ describe('AttendanceAutomationCoordinatorService', () => {
     expect(patrol.sendMorningBriefCard).toHaveBeenCalledTimes(1);
     expect(completeCardPosts).toBe(1);
     expect(completeCardUpdates).toBe(0);
+    expect(feishuGateway.archiveAttendance).not.toHaveBeenCalled();
+    await first.recoverPendingAttendanceArchives();
     expect(first.getRunStatus(run.task, run.date)).toMatchObject({
       state: 'completed',
       date: run.date,

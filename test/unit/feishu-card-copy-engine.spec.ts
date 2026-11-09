@@ -43,6 +43,22 @@ describe('readonly mirror orchestration without application or network', () => {
     await engine.flush();
     expect(Object.keys(store.read().groups)).toHaveLength(1); expect(http.post).not.toHaveBeenCalled();
   });
+  it('deduplicates a stocktake navigation card across retry dates without merging distinct weeks', async () => {
+    const notice = { header: { title: { tag: 'plain_text', content: '月度库存盘点提醒' } }, elements: [
+      { tag: 'div', text: { tag: 'plain_text', content: '楼栋：A楼' } },
+      { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '前往库存盘点' }, url: 'https://example.test/inventory-management' }] },
+    ] };
+    const start = { ...source('om_stocktake_first'), source: 'inventory-stocktake', card: notice, logicalDeliveryId: 'stocktake:2026-10:A楼:2026-10-26', startedAt: '2026-10-30T15:59:00.000Z' };
+    await engine.delivered(start);
+    await engine.delivered({ ...start, messageId: 'om_stocktake_retry', recipientId: 'ou_another', startedAt: '2026-10-30T16:01:00.000Z' });
+    await engine.delivered({ ...start, messageId: 'om_stocktake_week', logicalDeliveryId: 'stocktake:2026-11:A楼:2026-11-02' });
+    const scoped = { ...notice, elements: [{ tag: 'div', text: { tag: 'plain_text', content: '楼栋：A楼，盘点数量：2项' } }] };
+    await engine.delivered({ ...start, messageId: 'om_stocktake_scoped', card: scoped });
+    await engine.flush();
+    expect(Object.keys(store.read().groups)).toHaveLength(3);
+    expect(http.post).toHaveBeenCalledTimes(3);
+    expect(http.post.mock.calls[0][1].content).not.toMatch(/https:\/\/|"button"/);
+  });
   it('recalls only its own copy if an original native card arrives later', async () => {
     await engine.delivered(source('om_original1')); await engine.flush(); await engine.delivered(source('om_own', 'ou_copy')); await engine.flush();
     expect(http.delete.mock.calls[0][0]).toBe('https://open.feishu.cn/open-apis/im/v1/messages/om_copy');

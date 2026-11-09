@@ -16,12 +16,44 @@ import { getWarehouseInventoryLocationReadFieldNames } from '../../common/config
 import {
   extractDisplayText,
   extractNumberValue,
+  fetchBitableRecords,
   pickField,
   resolveBitableAppToken,
   type BitableRecordItem,
+  type BitableRecordSearchFilter,
 } from '../../common/feishu/bitable-direct-read';
 import { buildInventoryManagementSnapshot } from './inventory-management.mapper';
+import {
+  offsetStocktakeMonth,
+  stocktakeMonth,
+  validateStocktakeMonth,
+} from './inventory-stocktake.rules';
 import { InventoryWorkflowGateway } from './inventory-workflow.gateway';
+
+const SNAPSHOT_TIMEOUT_MS = 180_000;
+
+function stocktakeMovementFilter(
+  field: string,
+  month: string,
+): BitableRecordSearchFilter {
+  const previous = Date.parse(
+    `${offsetStocktakeMonth(month, -1)}-01T00:00:00+08:00`,
+  );
+  const end = Date.parse(`${month}-01T00:00:00+08:00`);
+  return {
+    conjunction: 'and',
+    conditions: [
+      // Feishu date comparisons can operate on whole days. Include the first
+      // day by comparing with the preceding day and verify the month locally.
+      {
+        field_name: field,
+        operator: 'isGreater',
+        value: ['ExactDate', String(previous - 86_400_000)],
+      },
+      { field_name: field, operator: 'isLess', value: ['ExactDate', String(end)] },
+    ],
+  };
+}
 
 @Injectable()
 export class InventoryStocktakeSource {
@@ -41,25 +73,58 @@ export class InventoryStocktakeSource {
     return { appToken, url };
   }
 
-  async snapshot(building?: WarehouseBuilding) {
+  snapshot(building?: WarehouseBuilding, month = stocktakeMonth()) {
+    validateStocktakeMonth(month);
+    return this.readSnapshot(building, month);
+  }
+
+  private async readSnapshot(building?: WarehouseBuilding, month?: string) {
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(Object.assign(new Error('读取盘点来源超时'), { code: 'ETIMEDOUT' }));
+      }, SNAPSHOT_TIMEOUT_MS);
+    });
+    try {
+      // A shared Feishu page read may still serve other consumers after this job times out.
+      return await Promise.race([
+        this.readSnapshotSources(building, month),
+        deadline,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async readSnapshotSources(
+    building?: WarehouseBuilding,
+    month?: string,
+  ) {
     const config = await this.config();
     const sources = [
       ['inventory', 'FEISHU_WAREHOUSE_INVENTORY_TABLE_ID', '库存台账'],
       ['catalog', 'FEISHU_WAREHOUSE_CATALOG_TABLE_ID', '物品类别'],
-      ['inbound', 'FEISHU_WAREHOUSE_INBOUND_TABLE_ID', '入库填写'],
-      ['outbound', 'FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID', '出库填写'],
+      ['inbound', 'FEISHU_WAREHOUSE_INBOUND_TABLE_ID', '入库填写', '入库日期'],
+      ['outbound', 'FEISHU_WAREHOUSE_OUTBOUND_TABLE_ID', '出库填写', '出库时间'],
     ] as const;
     const entries = await Promise.all(
-      sources.map(async ([key, env, name]) => {
+      sources.map(async ([key, env, name, dateField]) => {
+        if (dateField && !month) return [key, []] as const;
         const tableId = readEnv(env);
         if (!tableId)
           throw new BadRequestException(`${name}未配置，无法生成盘点清单`);
         return [
           key,
-          await this.gateway.listRecords({
+          await fetchBitableRecords(this.http, {
             appToken: config.appToken,
             tableId,
             tableName: name,
+            forceRefresh: true,
+            strict: true,
+            allowStale: false,
+            filter: dateField && month
+              ? stocktakeMovementFilter(dateField, month)
+              : undefined,
           }),
         ] as const;
       }),
@@ -90,12 +155,19 @@ export class InventoryStocktakeSource {
       generatedAt: new Date().toISOString(),
       sectionStatus: status,
     });
+    const inventoryById = new Map(
+      records.inventory.map((record) => [record.record_id || record.id, record]),
+    );
+    const inboundById = new Map(
+      records.inbound.map((record) => [record.record_id || record.id, record]),
+    );
+    const outboundById = new Map(
+      records.outbound.map((record) => [record.record_id || record.id, record]),
+    );
     for (const item of snapshot.items.filter(
       (i) => !building || i.building === building,
     )) {
-      const record = records.inventory.find(
-        (r) => (r.record_id || r.id) === item.recordId,
-      );
+      const record = inventoryById.get(item.recordId);
       if (
         !record ||
         extractNumberValue(pickField(record.fields || {}, ['剩余库存'])) ===
@@ -109,9 +181,8 @@ export class InventoryStocktakeSource {
       ...snapshot.movements.inbound,
       ...snapshot.movements.outbound,
     ].flatMap((movement) => {
-      const raw = (
-        movement.type === 'inbound' ? records.inbound : records.outbound
-      ).find((r) => (r.record_id || r.id) === movement.recordId);
+      const raw = (movement.type === 'inbound' ? inboundById : outboundById)
+        .get(movement.recordId);
       // The dashboard may infer a location from SKU. Sampling requires an explicit
       // location or an unambiguous SKU so distinct stock ledger rows cannot merge.
       const location =
@@ -173,7 +244,7 @@ export class InventoryStocktakeSource {
     principal?: AccessPrincipal,
   ): Promise<InventoryManagementItem[]> {
     if (isProfessionalBusinessPrincipal(principal)) {
-      const snapshot = await this.snapshot();
+      const snapshot = await this.readSnapshot();
       return previous.map(item => {
         const current = snapshot.items.find(candidate => candidate.recordId === item.recordId);
         assertProfessionalRecordScope(principal, current?.specialty, current?.building);

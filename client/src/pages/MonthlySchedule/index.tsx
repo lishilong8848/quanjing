@@ -264,12 +264,15 @@ import { LeaveRequestScreenshotField } from './LeaveRequestScreenshotField';
 import {
   clearLeaveRequestUnknownMutationId,
   coordinateLeaveRequestSubmit,
+  isLockedLeaveRequestState,
   markLeaveRequestMutationFailure,
   persistLeaveRequestUnknownMutationId,
+  readLeaveRequestRecoveryState,
   readLeaveRequestUnknownMutationId,
   resolveLeaveRequestMutationBinding,
   resolveLeaveRequestSuccessResponse,
   type LeaveRequestMutationBinding,
+  type LeaveRequestRecoveryState,
 } from './leave-request-submit';
 import {
   deduplicateScheduleDateKeysByMonth,
@@ -4316,11 +4319,11 @@ function MonthlySchedulePageContent() {
       readLeaveRequestUnknownMutationId(getLeaveRequestSessionStorage()),
     );
   const [leaveRequestRecoveryState, setLeaveRequestRecoveryState] = useState<
-    'editable-error' | 'unknown-result' | null
-  >(() => (recoveredLeaveRequestMutationId ? 'unknown-result' : null));
+    'editable-error' | LeaveRequestRecoveryState | null
+  >(() => readLeaveRequestRecoveryState(getLeaveRequestSessionStorage()));
   const leaveRequestDraftLocked =
     leaveRequestSubmitting ||
-    (leaveRequestRecoveryState === 'unknown-result' &&
+    (isLockedLeaveRequestState(leaveRequestRecoveryState) &&
       !recoveredLeaveRequestMutationId);
   const [leaveAuthoritativeImpact, setLeaveAuthoritativeImpact] =
     useState<LeaveRequestImpact | null>(null);
@@ -4477,9 +4480,9 @@ function MonthlySchedulePageContent() {
     new Map<string, number>(),
   );
   const lockedLeaveRequestRetryBinding =
-    leaveRequestRecoveryState === 'unknown-result' &&
+    isLockedLeaveRequestState(leaveRequestRecoveryState) &&
     !recoveredLeaveRequestMutationId &&
-    leaveRequestMutationBindingRef.current?.state === 'unknown-result'
+    isLockedLeaveRequestState(leaveRequestMutationBindingRef.current?.state)
       ? leaveRequestMutationBindingRef.current
       : null;
   const hasLockedLeaveRequestRetry = Boolean(lockedLeaveRequestRetryBinding);
@@ -7765,7 +7768,9 @@ function MonthlySchedulePageContent() {
         ? {
             clientMutationId: recoveredLeaveRequestMutationId,
             snapshot: submissionSnapshot,
-            state: 'unknown-result' as const,
+            state: leaveRequestRecoveryState === 'workflow-pending'
+              ? 'workflow-pending' as const
+              : 'unknown-result' as const,
           }
         : null;
       mutationResolution = resolveLeaveRequestMutationBinding(
@@ -7775,12 +7780,15 @@ function MonthlySchedulePageContent() {
       );
     }
     if (mutationResolution.status === 'blocked') {
-      setLeaveRequestRecoveryState('unknown-result');
+      const workflowPending = mutationResolution.binding.state === 'workflow-pending';
+      setLeaveRequestRecoveryState(workflowPending ? 'workflow-pending' : 'unknown-result');
       setLeaveAuthoritativeImpact(
         mutationResolution.binding.snapshot.expectedImpact,
       );
       toast.warning(
-        '原请休假提交结果仍待确认，当前草稿已锁定，请使用原申请标识安全重试',
+        workflowPending
+          ? '原申请已保存，请使用原申请内容恢复审批流转'
+          : '原请休假提交结果仍待确认，当前草稿已锁定，请使用原申请标识安全重试',
       );
       return;
     }
@@ -7791,6 +7799,7 @@ function MonthlySchedulePageContent() {
     const mutationIdPersisted = persistLeaveRequestUnknownMutationId(
       getLeaveRequestSessionStorage(),
       clientMutationId,
+      mutationBinding.state === 'workflow-pending' ? 'workflow-pending' : 'unknown-result',
     );
     if (!mutationIdPersisted) {
       toast.error('浏览器无法保存本次申请标识，请检查存储设置后重试');
@@ -7805,8 +7814,11 @@ function MonthlySchedulePageContent() {
       clientMutationId,
       staffSearch: boundSnapshot.staffName,
       coverageKey: leaveScheduleCoverageKey,
+      workflowRecoveryOnly: mutationBinding.state === 'workflow-pending' ? true as const : undefined,
     });
-    const toastId = toast.info('请休假申请已受理，正在后台同步');
+    const toastId = toast.info(
+      submittedDraft.workflowRecoveryOnly ? '正在恢复原申请的审批流转' : '正在提交请休假申请',
+    );
 
     void coordinateLeaveRequestSubmit({
       draft: submittedDraft,
@@ -7830,6 +7842,7 @@ function MonthlySchedulePageContent() {
             leaveReason: draft.reason,
             needSubstitute: draft.needSubstitute,
             substituteStaffName: draft.substituteName || null,
+            workflowRecoveryOnly: draft.workflowRecoveryOnly,
           },
           draft.screenshot,
         ),
@@ -7843,6 +7856,23 @@ function MonthlySchedulePageContent() {
         }
         const response = resolveLeaveRequestSuccessResponse(result, draft);
         setLeaveRequestSyncStatus('idle');
+        if (response.approvalWorkflow?.accepted === false) {
+          leaveRequestMutationBindingRef.current = {
+            ...mutationBinding,
+            state: 'workflow-pending',
+          };
+          setLeaveRequestRecoveryState('workflow-pending');
+          persistLeaveRequestUnknownMutationId(
+            getLeaveRequestSessionStorage(),
+            draft.clientMutationId,
+            'workflow-pending',
+          );
+          setLeaveAuthoritativeImpact(draft.expectedImpact);
+          refreshBusinessClock();
+          setLeaveRequestDialogOpen(true);
+          toast.warning('请休假申请已保存，审批流转待恢复', { id: toastId });
+          return;
+        }
         setLeaveAuthoritativeImpact(null);
         setLeaveRequestDialogOpen(false);
         setLeaveStaffName('');
@@ -7872,14 +7902,15 @@ function MonthlySchedulePageContent() {
         );
         leaveRequestMutationBindingRef.current = failedBinding;
         const recoveryState =
-          failedBinding.state === 'unknown-result'
-            ? 'unknown-result'
+          isLockedLeaveRequestState(failedBinding.state)
+            ? failedBinding.state
             : 'editable-error';
         setLeaveRequestRecoveryState(recoveryState);
-        if (recoveryState === 'unknown-result') {
+        if (isLockedLeaveRequestState(recoveryState)) {
           persistLeaveRequestUnknownMutationId(
             getLeaveRequestSessionStorage(),
             failedBinding.clientMutationId,
+            recoveryState,
           );
           setLeaveAuthoritativeImpact(draft.expectedImpact);
         } else {
@@ -7907,10 +7938,15 @@ function MonthlySchedulePageContent() {
         }
         setLeaveRequestSyncStatus('error');
         logger.error('提交请休假失败', error);
-        const staleImpactConflict = isBackendStatus(error, 409);
-        const latestImpact = staleImpactConflict
+        const failedState = leaveRequestMutationBindingRef.current.state;
+        if (failedState === 'workflow-pending') {
+          toast.warning('申请记录已保存，审批流转仍待恢复，请重试原申请', { id: toastId });
+          return;
+        }
+        const latestImpact = failedState === 'editable-error' && isBackendStatus(error, 409)
           ? getBackendLatestLeaveImpact(error)
           : null;
+        const staleImpactConflict = latestImpact !== null;
         if (latestImpact) {
           setLeaveAuthoritativeImpact(latestImpact);
         }
@@ -7944,11 +7980,9 @@ function MonthlySchedulePageContent() {
           error,
           '请休假提交失败，请稍后重试',
         );
-        const unknownResult =
-          leaveRequestMutationBindingRef.current?.state === 'unknown-result';
         toast.error(
-          unknownResult
-            ? `${backendMessage}；提交结果待确认，草稿已锁定，请使用原申请标识安全重试`
+          failedState === 'unknown-result'
+            ? '提交结果待确认，草稿已锁定，请使用原申请标识安全重试'
             : staleImpactConflict
               ? scheduleRefreshResult
                 ? `${backendMessage}；排班和可选时段已刷新，请确认后重试`
@@ -7993,6 +8027,7 @@ function MonthlySchedulePageContent() {
     leaveReason,
     leaveRequestScreenshot,
     recoveredLeaveRequestMutationId,
+    leaveRequestRecoveryState,
     refreshBusinessClock,
     selectedLeaveStaffProfile,
   ]);
@@ -14026,17 +14061,21 @@ function MonthlySchedulePageContent() {
             <div className="text-xs text-slate-500">
               {leaveRequestSyncStatus === 'syncing'
                 ? '正在提交请休假...'
-                : leaveRequestRecoveryState === 'unknown-result'
+                : leaveRequestRecoveryState === 'workflow-pending'
                   ? recoveredLeaveRequestMutationId
-                    ? '检测到上次提交结果待确认，请重新填写原申请并上传同一截图，系统将复用原申请标识安全对账。'
-                    : '提交结果待确认，当前草稿已锁定；可用原申请标识安全重试对账。'
-                  : leaveScheduleCoverageStatus === 'loading'
-                    ? '正在加载完整日期范围内的排班，加载完成后开放登记。'
-                    : leaveScheduleCoverageStatus === 'error'
-                      ? '排班加载失败，已保留草稿，请稍后重试。'
-                      : leaveRequestSyncStatus === 'error'
-                        ? '提交失败，已保留当前填写内容，可修改后重试。'
-                        : `休假时段：${leaveStartAt ? leaveStartAt.replace('T', ' ') : '未选开始时间'} 至 ${leaveEndAt ? leaveEndAt.replace('T', ' ') : '未选结束时间'}`}
+                    ? '申请已保存，审批流转待恢复。请重新填写原申请并上传同一截图，以恢复原记录的审批流转。'
+                    : '申请已保存，审批流转待恢复。点击恢复审批流转继续处理原记录。'
+                  : leaveRequestRecoveryState === 'unknown-result'
+                    ? recoveredLeaveRequestMutationId
+                      ? '检测到上次提交结果待确认，请重新填写原申请并上传同一截图，系统将复用原申请标识安全对账。'
+                      : '提交结果待确认，当前草稿已锁定，可用原申请标识安全重试对账。'
+                    : leaveScheduleCoverageStatus === 'loading'
+                      ? '正在加载完整日期范围内的排班，加载完成后开放登记。'
+                      : leaveScheduleCoverageStatus === 'error'
+                        ? '排班加载失败，已保留草稿，请稍后重试。'
+                        : leaveRequestSyncStatus === 'error'
+                          ? '提交失败，已保留当前填写内容，可修改后重试。'
+                          : `休假时段：${leaveStartAt ? leaveStartAt.replace('T', ' ') : '未选开始时间'} 至 ${leaveEndAt ? leaveEndAt.replace('T', ' ') : '未选结束时间'}`}
             </div>
             <div className="flex items-center justify-end gap-2">
               <Button
@@ -14084,9 +14123,11 @@ function MonthlySchedulePageContent() {
                 )}
                 {leaveRequestSubmitting
                   ? '提交中'
-                  : leaveRequestRecoveryState === 'unknown-result'
-                    ? '安全重试'
-                    : '提交'}
+                  : leaveRequestRecoveryState === 'workflow-pending'
+                    ? '恢复审批流转'
+                    : leaveRequestRecoveryState === 'unknown-result'
+                      ? '安全重试'
+                      : '提交'}
               </Button>
             </div>
           </div>

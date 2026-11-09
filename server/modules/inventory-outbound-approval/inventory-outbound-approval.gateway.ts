@@ -109,14 +109,16 @@ export class InventoryOutboundApprovalGateway {
     recipientOpenId: string,
     card: Record<string, unknown>,
     deliveryUuid: string,
+    stocktakeReminderId?: string,
   ): Promise<string> {
     const recipient = requireOpenId(recipientOpenId);
     const uuid = requireRfcUuid(deliveryUuid);
     const content = serializeInteractiveCard(card);
+    const errorMessage = stocktakeReminderId ? '发送库存盘点卡片失败' : '发送出库审批卡片失败';
     const token = await this.getTenantAccessToken();
     let response: { data?: unknown };
     try {
-      response = await observedCardPost(this.httpService.axiosRef, 'inventory-outbound',
+      response = await observedCardPost(this.httpService.axiosRef, stocktakeReminderId ? 'inventory-stocktake' : 'inventory-outbound',
         'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
         {
           receive_id: recipient,
@@ -125,18 +127,19 @@ export class InventoryOutboundApprovalGateway {
           uuid,
         },
         requestConfig(token),
+        stocktakeReminderId,
       );
     } catch (error) {
-      throw normalizeFeishuHttpError(error, '发送出库审批卡片失败');
+      throw normalizeFeishuHttpError(error, errorMessage);
     }
-    assertFeishuSuccess(response.data, '发送出库审批卡片失败');
+    assertFeishuSuccess(response.data, errorMessage);
     const messageId = clean(
       (response.data as { data?: { message_id?: unknown } } | undefined)?.data
         ?.message_id,
     );
     if (!MESSAGE_ID_PATTERN.test(messageId)) {
       throw new BadGatewayException(
-        '发送出库审批卡片失败：响应缺少有效 message_id',
+        `${errorMessage}：响应缺少有效 message_id`,
       );
     }
     return messageId;

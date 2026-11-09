@@ -307,6 +307,58 @@ export class PurchaseWorkflowGateway {
     return evidence;
   }
 
+  async readRecordsForStageTransition(expectedAppId: string, recordIds: string[]): Promise<{
+    records: PurchaseWorkflowRecord[]; missingRecordIds: string[];
+  }> {
+    if (readEnv('FEISHU_APP_ID') !== expectedAppId || !/^cli_[A-Za-z0-9_-]+$/.test(expectedAppId) ||
+        !recordIds.length || recordIds.length > 100 || new Set(recordIds).size !== recordIds.length ||
+        recordIds.some(id => !/^rec[A-Za-z0-9]+$/.test(id))) {
+      throw new BadRequestException('采购分阶段恢复来源无效');
+    }
+    const config = this.config();
+    const token = await this.getTenantAccessToken();
+    const response = await this.httpService.axiosRef.post(
+      `${recordsUrl(config.appToken, config.executionTableId)}/batch_get`,
+      { record_ids: recordIds }, requestConfig(token, 15_000),
+    );
+    assertFeishuSuccess(response.data, '核对采购分阶段恢复来源失败');
+    const data = response.data?.data;
+    const records = data?.records;
+    const missing = data?.absent_record_ids ?? [];
+    const forbidden = data?.forbidden_record_ids ?? [];
+    if (!Array.isArray(records) || !Array.isArray(missing) || !Array.isArray(forbidden) || forbidden.length ||
+        readEnv('FEISHU_APP_ID') !== expectedAppId || JSON.stringify(this.config()) !== JSON.stringify(config)) {
+      throw new BadGatewayException('采购分阶段恢复来源无法完整核对');
+    }
+    const mapped = records.map((record: BitableRecordItem) => mapExecutionRecord(record));
+    const returned = [...mapped.map(record => record.recordId), ...missing];
+    if (returned.length !== recordIds.length || new Set(returned).size !== returned.length ||
+        returned.some(id => !recordIds.includes(id))) {
+      throw new BadGatewayException('采购分阶段恢复记录回执不完整');
+    }
+    return { records: mapped, missingRecordIds: missing };
+  }
+
+  async readLifecycleCardForStageTransition(expectedAppId: string, messageId: string, expectedSentAtMs: number): Promise<void> {
+    if (readEnv('FEISHU_APP_ID') !== expectedAppId || !/^cli_[A-Za-z0-9_-]+$/.test(expectedAppId) ||
+        !/^om_[A-Za-z0-9_-]+$/.test(messageId) || !Number.isSafeInteger(expectedSentAtMs) || expectedSentAtMs <= 0) {
+      throw new BadRequestException('采购原卡片身份无效');
+    }
+    const token = await this.getTenantAccessToken();
+    const response = await this.httpService.axiosRef.get(
+      `https://open.feishu.cn/open-apis/im/v1/messages/${messageId}`, requestConfig(token, 10_000),
+    );
+    assertFeishuSuccess(response.data, '核对采购原卡片失败');
+    const messages = response.data?.data?.items;
+    const message = Array.isArray(messages) && messages.length === 1 ? messages[0] : null;
+    if (readEnv('FEISHU_APP_ID') !== expectedAppId || !message || message.message_id !== messageId ||
+        message.msg_type !== 'interactive' || message.deleted !== false ||
+        message.sender?.id !== expectedAppId || message.sender?.id_type !== 'app_id' ||
+        message.sender?.sender_type !== 'app' || Number(message.create_time) !== expectedSentAtMs) {
+      throw new BadGatewayException('采购原卡片回执无法核对');
+    }
+  }
+
   private async readExecutionRecordAsApp(recordId: string): Promise<BitableRecordItem> {
     const config = this.config();
     const token = await this.getTenantAccessToken();

@@ -60,6 +60,13 @@ describe('TodayAttendanceAnomalyList rendering', () => {
     const html = renderToStaticMarkup(React.createElement(TodayAttendanceAnomalyList, { snapshot, state: 'ready', retry: () => undefined, manualSyncState: 'success' }));
     expect(html).toContain('本次手动同步已完成'); expect(html).toContain('归档或补卡资料仍在后台更新'); expect(html).not.toContain('正在核验本次手动同步'); expect(html).not.toContain('当前第');
   });
+  it('displays the final check result while the scheduled task is sending or archiving', () => {
+    const running = runningSnapshot();
+    const snapshot: TodayAttendanceSnapshot = { ...running, sourceStatus: 'fresh', runStatus: { ...running.runStatus!, resultReady: true, archiveSyncState: 'syncing' } };
+    const html = renderToStaticMarkup(React.createElement(TodayAttendanceAnomalyList, { snapshot, state: 'ready', retry: () => undefined }));
+    expect(html).toContain('考勤核验结果已更新，后续处理进行中');
+    expect(html).not.toContain('考勤终检正在核验');
+  });
   it('pending observation offers only a read refresh and keeps manual resubmission disabled', () => {
     const html = renderToStaticMarkup(React.createElement(TodayAttendanceAnomalyList, { snapshot: runningSnapshot(), state: 'ready', retry: () => undefined, canManualSync: true, manualSync: () => undefined, manualSyncState: 'pending' }));
     expect(html).toContain('本次手动核验结果尚未确认'); expect(html).toContain('刷新结果'); expect(html).not.toContain('当前第');

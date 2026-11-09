@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InventoryStocktakeStore } from '../../server/modules/inventory-management/inventory-stocktake.store';
 import { InventoryStocktakeService } from '../../server/modules/inventory-management/inventory-stocktake.service';
 import { createProcessLockOwner } from '../../server/common/process-lock-owner';
 import { nextStocktakeGenerationAt } from '../../server/modules/inventory-management/inventory-stocktake.rules';
+import { currentHotfixActivation } from '../../server/common/hotfix-runtime-activation';
 
 describe('monthly stocktake generation', () => {
   let root: string;
@@ -67,6 +68,7 @@ describe('monthly stocktake generation', () => {
     const running = generation.runPending();
     await Promise.resolve();
     expect(source.snapshot).toHaveBeenCalledTimes(1);
+    expect(source.snapshot).toHaveBeenCalledWith(undefined, request.month);
     resolve({ items: [], movements: [] });
     await running;
     expect(store.read().sheets).toHaveLength(7);
@@ -236,6 +238,41 @@ describe('monthly stocktake generation', () => {
     await generation.onModuleDestroy();
     expect(jest.getTimerCount()).toBe(0);
   });
+  it('waits for finalized production activation and never processes during smoke', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-09T14:00:00+08:00'));
+    const { generation, store, source, request } = setup();
+    generation.request(request, principal, 'session-test');
+    const original = readFileSync(store.path);
+    const previousEnv = process.env.NODE_ENV;
+    const previousSmoke = process.env.NANTONG_HOTFIX_SMOKE_MODE;
+    const gate = jest.spyOn(currentHotfixActivation(), 'isAcceptingNewWork').mockReturnValue(false);
+    try {
+      process.env.NODE_ENV = 'production';
+      delete process.env.NANTONG_HOTFIX_SMOKE_MODE;
+      await generation.onModuleInit();
+      await generation.runPending();
+      expect(readFileSync(store.path)).toEqual(original);
+      expect(source.snapshot).not.toHaveBeenCalled();
+
+      gate.mockReturnValue(true);
+      process.env.NANTONG_HOTFIX_SMOKE_MODE = 'true';
+      await jest.advanceTimersByTimeAsync(30_001);
+      expect(readFileSync(store.path)).toEqual(original);
+      expect(source.snapshot).not.toHaveBeenCalled();
+
+      delete process.env.NANTONG_HOTFIX_SMOKE_MODE;
+      await jest.advanceTimersByTimeAsync(30_001);
+      expect(source.snapshot).toHaveBeenCalledTimes(1);
+      expect(store.read().sheets).toHaveLength(7);
+    } finally {
+      await generation.onModuleDestroy();
+      gate.mockRestore();
+      if (previousEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousEnv;
+      if (previousSmoke === undefined) delete process.env.NANTONG_HOTFIX_SMOKE_MODE;
+      else process.env.NANTONG_HOTFIX_SMOKE_MODE = previousSmoke;
+    }
+  });
   it('keeps an earlier building failure visible in the admin summary after another building succeeds', async () => {
     const { generation, source, request, month } = setup();
     source.snapshot.mockRejectedValueOnce(new Error('source failure'));
@@ -281,6 +318,48 @@ describe('monthly stocktake generation', () => {
     });
     expect(source.snapshot).toHaveBeenCalledTimes(3);
     await generation.onModuleDestroy();
+  });
+  it('recovers a previous exhausted monthly job on restart without touching existing plans', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-01T02:30:00+08:00'));
+    const { generation, source, store, service, Type, item } = setup();
+    source.snapshot.mockRejectedValue(new Error('source failure'));
+    await generation.onModuleInit();
+    await jest.advanceTimersByTimeAsync(240_001);
+    const exhausted = store.read().generationJobs[0];
+    expect(exhausted).toMatchObject({ status: 'error', attempts: 3, retryAt: null });
+    await generation.onModuleDestroy();
+
+    jest.setSystemTime(new Date('2026-11-09T14:00:00+08:00'));
+    source.snapshot.mockReset().mockResolvedValue({ items: [item], movements: [] });
+    await service.start(
+      { month: '2026-11', building: 'A楼', clientMutationId: 'existing-november-sheet' },
+      principal as any,
+      'session-test',
+    );
+    store.update((state) => {
+      state.sheets[0].lines[0].actualQuantity = 12;
+      state.sheets[0].lines[0].note = '已有草稿';
+      return true;
+    });
+    const existing = store.read().sheets[0];
+    source.snapshot.mockClear();
+    const restarted = new Type(store, source, service);
+    await restarted.onModuleInit();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(source.snapshot).toHaveBeenCalledTimes(1);
+    expect(store.read().generationJobs[0]).toEqual(exhausted);
+    expect(store.read().generationJobs[1]).toMatchObject({ status: 'success', attempts: 1 });
+    expect(store.read().sheets).toHaveLength(7);
+    expect(store.read().sheets[0]).toEqual(existing);
+    expect(store.read().receipts.filter((receipt) => receipt.key.includes('-recovery-'))).toHaveLength(1);
+    await restarted.onModuleDestroy();
+
+    const replay = new Type(store, source, service);
+    await replay.onModuleInit();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(source.snapshot).toHaveBeenCalledTimes(1);
+    expect(store.read().generationJobs).toHaveLength(2);
+    await replay.onModuleDestroy();
   });
   it('computes 02:30 monthly deadlines including year changes independently of host time zone', () => {
     expect(

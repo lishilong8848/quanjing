@@ -26,6 +26,7 @@ import { PurchaseWorkflowCallbackController } from './purchase-workflow-callback
 import { PurchaseWorkflowScheduler } from './purchase-workflow.scheduler';
 import { PurchaseWorkflowService } from './purchase-workflow.service';
 import { PurchaseWorkflowStore } from './purchase-workflow.store';
+import { PurchaseStageCardRecoveryService } from './purchase-stage-card-recovery.service';
 import { WarehouseInboundHandoverService } from './warehouse-inbound-handover.service';
 import { OvertimeWorkflowModule } from '../overtime-workflow/overtime-workflow.module';
 import { LeaveWorkflowModule } from '../leave-workflow/leave-workflow.module';
@@ -102,6 +103,7 @@ function purchasePlatformRecoveryOptions(): { enabled: boolean } {
     PurchaseApplicationService,
     PurchaseWorkflowGateway,
     PurchaseWorkflowStore,
+    PurchaseStageCardRecoveryService,
     PurchaseWorkflowService,
     WarehouseInboundHandoverService,
     PurchaseWorkflowReceiptTaskService,

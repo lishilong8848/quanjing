@@ -7,6 +7,7 @@ import { InventoryStocktakeService } from './inventory-stocktake.service';
 import { InventoryStocktakeSource } from './inventory-stocktake.source';
 import { InventoryStocktakeStore } from './inventory-stocktake.store';
 import { InventoryStocktakeGenerationService } from './inventory-stocktake-generation.service';
+import { InventoryStocktakeReminderService } from './inventory-stocktake-reminder.service';
 import { InventoryStocktakeResultsGateway } from './inventory-stocktake-results.gateway';
 import { InventoryStocktakeResultsSync } from './inventory-stocktake-results.sync';
 import { InventoryStocktakeBulkService } from './inventory-stocktake-bulk.service';
@@ -44,6 +45,7 @@ import { PERSONNEL_PREVIEW_READERS } from '../../common/access/personnel-preview
     InventoryStocktakeSource,
     InventoryStocktakeStore,
     InventoryStocktakeGenerationService,
+    InventoryStocktakeReminderService,
     InventoryStocktakeResultsGateway,
     InventoryStocktakeResultsSync,
     InventoryStocktakeBulkService,

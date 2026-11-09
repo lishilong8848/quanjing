@@ -78,7 +78,7 @@ interface LeaveRequestSubmissionSnapshot {
 interface LeaveRequestMutationBinding {
   clientMutationId: string;
   snapshot: LeaveRequestSubmissionSnapshot;
-  state: 'in-flight' | 'editable-error' | 'unknown-result';
+  state: 'in-flight' | 'editable-error' | 'unknown-result' | 'workflow-pending';
 }
 
 type LeaveRequestMutationResolution =
@@ -108,9 +108,13 @@ interface LeaveRequestSubmissionStateHelpers {
   readLeaveRequestUnknownMutationId: (
     storage: Pick<Storage, 'getItem'> | null,
   ) => string | null;
+  readLeaveRequestRecoveryState: (
+    storage: Pick<Storage, 'getItem'> | null,
+  ) => 'unknown-result' | 'workflow-pending' | null;
   persistLeaveRequestUnknownMutationId: (
     storage: Pick<Storage, 'setItem'> | null,
     clientMutationId: string,
+    state?: 'unknown-result' | 'workflow-pending',
   ) => boolean;
   clearLeaveRequestUnknownMutationId: (
     storage: Pick<Storage, 'removeItem'> | null,
@@ -760,7 +764,7 @@ describe('Monthly schedule leave request tool', () => {
       ts.forEachChild(node, visit);
     };
     visit(parsedPage);
-    expect(openingCalls).toHaveLength(3);
+    expect(openingCalls).toHaveLength(4);
     for (const opening of openingCalls) {
       const statement = opening.parent;
       expect(ts.isExpressionStatement(statement)).toBe(true);
@@ -1584,7 +1588,7 @@ describe('Monthly schedule leave request tool', () => {
     const handler = source.slice(handlerStart, handlerEnd);
 
     expect(handler).toContain('void coordinateLeaveRequestSubmit');
-    expect(handler).toContain('请休假申请已受理，正在后台同步');
+    expect(handler).toContain('正在提交请休假申请');
     expect(handler).toContain('待审批通过后生效');
     expect(handler).not.toContain("toast.loading('正在提交请休假...')");
     expect(handler).not.toContain('applyOptimisticLeaveToRecords');
@@ -1608,7 +1612,7 @@ describe('Monthly schedule leave request tool', () => {
     const dialog = source.slice(dialogStart, dialogEnd);
 
     expect(source).toContain('leaveRequestMutationBindingRef');
-    expect(source).toContain("'editable-error' | 'unknown-result' | null");
+    expect(source).toContain("'editable-error' | LeaveRequestRecoveryState | null");
     expect(source).toContain("leaveRequestRecoveryState === 'unknown-result'");
     expect(handler).toContain('resolveLeaveRequestMutationBinding');
     expect(handler).toContain("mutationResolution.status === 'blocked'");
@@ -1622,9 +1626,10 @@ describe('Monthly schedule leave request tool', () => {
     expect(dialog).toContain("leaveRequestRecoveryState === 'unknown-result'");
   });
 
-  it('restores only the unknown leave mutation id across a page refresh', () => {
+  it('restores the leave mutation id and recovery phase without form data', () => {
     const {
       readLeaveRequestUnknownMutationId,
+      readLeaveRequestRecoveryState,
       persistLeaveRequestUnknownMutationId,
       clearLeaveRequestUnknownMutationId,
     } = requireSubmissionStateHelpers();
@@ -1642,10 +1647,18 @@ describe('Monthly schedule leave request tool', () => {
       persistLeaveRequestUnknownMutationId(storage, clientMutationId),
     ).toBe(true);
     expect(readLeaveRequestUnknownMutationId(storage)).toBe(clientMutationId);
+    expect(readLeaveRequestRecoveryState(storage)).toBe('unknown-result');
     expect([...values.values()]).toEqual([clientMutationId]);
+    expect(
+      persistLeaveRequestUnknownMutationId(storage, clientMutationId, 'workflow-pending'),
+    ).toBe(true);
+    expect(readLeaveRequestUnknownMutationId(storage)).toBe(clientMutationId);
+    expect(readLeaveRequestRecoveryState(storage)).toBe('workflow-pending');
+    expect([...values.values()]).toEqual([clientMutationId, clientMutationId]);
     expect([...values.values()].join('')).not.toContain('马进宇');
     expect(clearLeaveRequestUnknownMutationId(storage)).toBe(true);
     expect(readLeaveRequestUnknownMutationId(storage)).toBeNull();
+    expect(readLeaveRequestRecoveryState(storage)).toBeNull();
   });
 
   it('wires refresh-safe leave idempotency into the page without persisting form data', () => {
@@ -1707,6 +1720,22 @@ describe('Monthly schedule leave request tool', () => {
     expect(
       resolveLeaveRequestSuccessResponse({ data: { data: response } }, draft),
     ).toBe(response);
+    const pending: LeaveRequestCreateResponse = {
+      ...response,
+      approvalWorkflow: {
+        mode: 'program_card',
+        accepted: false,
+        pending: true,
+        recordIds: response.recordIds,
+      },
+    };
+    expect(resolveLeaveRequestSuccessResponse(pending, draft)).toBe(pending);
+    expect(() =>
+      resolveLeaveRequestSuccessResponse({
+        ...pending,
+        approvalWorkflow: { ...pending.approvalWorkflow, recordIds: ['different-record'] },
+      }, draft),
+    ).toThrow('请休假响应格式异常');
   });
 
   it('rejects malformed, failed, and genuinely mismatched success payloads', () => {
@@ -1879,6 +1908,39 @@ describe('Monthly schedule leave request tool', () => {
         () => 'must-not-create',
       ),
     ).toEqual({ status: 'blocked', binding: unknownFailure });
+  });
+
+  it('preserves a saved application on an unsuccessful workflow-only retry', () => {
+    const {
+      markLeaveRequestMutationFailure,
+      resolveLeaveRequestMutationBinding,
+    } = requireSubmissionStateHelpers();
+    const snapshot: LeaveRequestSubmissionSnapshot = {
+      staffName: '测试人员',
+      startAt: '2026-08-04T09:00',
+      endAt: '2026-08-04T18:00',
+      expectedImpact: createImpact(),
+      leaveType: '年假',
+      reason: '审批恢复测试',
+      screenshot: Object.freeze({ name: 'leave-proof.png' }),
+      needSubstitute: false,
+      substituteName: '',
+    };
+    const binding: LeaveRequestMutationBinding = {
+      clientMutationId: 'leave-request-workflow-recovery',
+      snapshot,
+      state: 'workflow-pending',
+    };
+    const newId = jest.fn(() => 'must-not-create');
+    expect(resolveLeaveRequestMutationBinding(binding, snapshot, newId)).toEqual({
+      status: 'ready', binding, reused: true,
+    });
+    expect(resolveLeaveRequestMutationBinding(binding, { ...snapshot, reason: 'changed' }, newId))
+      .toEqual({ status: 'blocked', binding });
+    expect(markLeaveRequestMutationFailure(binding, {
+      response: { status: 502, data: { writeDisposition: 'definitely-not-written' } },
+    })).toBe(binding);
+    expect(newId).not.toHaveBeenCalled();
   });
 
   it('treats only authoritative non-ambiguous 4xx responses as definitely not written', () => {
@@ -2180,11 +2242,11 @@ describe('Monthly schedule leave request tool', () => {
 
     expect(bindingStart).toBeGreaterThan(-1);
     expect(bindingSource).toContain(
-      "leaveRequestRecoveryState === 'unknown-result'",
+      'isLockedLeaveRequestState(leaveRequestRecoveryState)',
     );
     expect(bindingSource).toContain('!recoveredLeaveRequestMutationId');
     expect(bindingSource).toContain(
-      "leaveRequestMutationBindingRef.current?.state === 'unknown-result'",
+      'isLockedLeaveRequestState(leaveRequestMutationBindingRef.current?.state)',
     );
     expect(bindingSource).toContain('const hasLockedLeaveRequestRetry =');
     expect(retryBranchStart).toBeGreaterThan(-1);

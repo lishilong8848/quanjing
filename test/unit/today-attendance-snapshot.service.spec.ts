@@ -797,6 +797,35 @@ describe('TodayAttendanceSnapshotService', () => {
     },
   );
 
+  it.each(['this-execution', 'older-execution'])('only exposes a result from this execution as ready while post-processing (%s)', async (executionId) => {
+    const service = new TodayAttendanceSnapshotService(
+      {} as any,
+      {
+        read: jest.fn().mockResolvedValue({
+          businessDate: '2026-09-05',
+          checks: {
+            'morning-off-duty-check': {
+              executionId,
+              generatedAt: '2026-09-05T01:30:10.000Z',
+              expectedKeys: ['normal'], normalKeys: ['normal'], excludedKeys: [], anomalies: [],
+            },
+          },
+        }),
+      } as any,
+      {
+        getRunStatus: jest.fn().mockReturnValue({
+          state: 'running', executionId: 'this-execution', task: 'morning-off-duty-check',
+          date: '2026-09-05', scheduledAt: '2026-09-05T01:30:00.000Z', lastAttemptAt: '2026-09-05T01:30:01.000Z',
+          archiveSyncState: 'syncing',
+        }),
+      } as any,
+    );
+    const snapshot = await service.getSnapshot(now);
+    expect(snapshot.runStatus?.state).toBe('running');
+    expect(snapshot.runStatus?.resultReady).toBe(executionId === 'this-execution' ? true : undefined);
+    expect(snapshot.sourceStatus).toBe(executionId === 'this-execution' ? 'fresh' : 'running');
+  });
+
   it('exposes retry timing, attempt count and the safe failure reason', async () => {
     const archive = { readArchivedAttendanceSummary: jest.fn() };
     const service = new TodayAttendanceSnapshotService(

@@ -383,6 +383,8 @@ export interface LeaveRequestCreateRequest {
   leaveReason: string;
   needSubstitute?: boolean | null;
   substituteStaffName?: string | null;
+  /** Reconcile the original record and resume approval without creating a new record. */
+  workflowRecoveryOnly?: true;
 }
 export interface LeaveRequestCreateResponse {
   success: boolean;
@@ -402,7 +404,8 @@ export interface LeaveRequestCreateResponse {
   missingCalendarYears: string[];
   approvalWorkflow?: {
     mode: 'program_card';
-    accepted: true;
+    /** False means the leave record was saved, but approval acceptance is unconfirmed. */
+    accepted: boolean;
     pending: true;
     recordIds: string[];
   };

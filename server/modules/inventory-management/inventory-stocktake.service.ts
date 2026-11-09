@@ -149,7 +149,7 @@ export class InventoryStocktakeService {
       request.scope,
     );
     if (existing) return existing;
-    const snapshot = await this.source.snapshot(request.building);
+    const snapshot = await this.source.snapshot(request.building, request.month);
     this.createSheet(request, snapshot, request.clientMutationId, fp);
     return this.get(request.month, request.building, principal, request.scope)!;
   }

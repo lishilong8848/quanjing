@@ -17,10 +17,18 @@ export type LeaveRequestFailureDisposition =
   | 'definitely-not-written'
   | 'unknown-result';
 
+export type LeaveRequestRecoveryState = 'unknown-result' | 'workflow-pending';
+
 export type LeaveRequestMutationState =
   | 'in-flight'
   | 'editable-error'
-  | 'unknown-result';
+  | LeaveRequestRecoveryState;
+
+export function isLockedLeaveRequestState(
+  state: LeaveRequestMutationState | null | undefined,
+): state is LeaveRequestRecoveryState {
+  return state === 'unknown-result' || state === 'workflow-pending';
+}
 
 export interface LeaveRequestSubmissionSnapshot {
   staffName: string;
@@ -53,6 +61,8 @@ export type LeaveRequestMutationResolution =
 
 const LEAVE_REQUEST_UNKNOWN_MUTATION_STORAGE_KEY =
   'monthly-schedule.leave-request.unknown-mutation-id';
+const LEAVE_REQUEST_WORKFLOW_PENDING_STORAGE_KEY =
+  'monthly-schedule.leave-request.workflow-pending-mutation-id';
 
 function normalizeLeaveRequestMutationId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -69,24 +79,42 @@ function normalizeLeaveRequestMutationId(value: unknown): string | null {
 export function readLeaveRequestUnknownMutationId(
   storage: Pick<Storage, 'getItem'> | null,
 ): string | null {
-  if (!storage) return null;
   try {
     return normalizeLeaveRequestMutationId(
-      storage.getItem(LEAVE_REQUEST_UNKNOWN_MUTATION_STORAGE_KEY),
+      storage?.getItem(LEAVE_REQUEST_UNKNOWN_MUTATION_STORAGE_KEY),
     );
   } catch {
     return null;
   }
 }
 
+export function readLeaveRequestRecoveryState(
+  storage: Pick<Storage, 'getItem'> | null,
+): LeaveRequestRecoveryState | null {
+  const clientMutationId = readLeaveRequestUnknownMutationId(storage);
+  if (!clientMutationId) return null;
+  try {
+    if (storage?.getItem(LEAVE_REQUEST_WORKFLOW_PENDING_STORAGE_KEY) === clientMutationId) {
+      return 'workflow-pending';
+    }
+  } catch {
+    // The original mutation ID still protects recovery if the phase is unavailable.
+  }
+  return 'unknown-result';
+}
+
 export function persistLeaveRequestUnknownMutationId(
   storage: Pick<Storage, 'setItem'> | null,
   clientMutationId: string,
+  state: LeaveRequestRecoveryState = 'unknown-result',
 ): boolean {
   const normalized = normalizeLeaveRequestMutationId(clientMutationId);
   if (!storage || !normalized) return false;
   try {
     storage.setItem(LEAVE_REQUEST_UNKNOWN_MUTATION_STORAGE_KEY, normalized);
+    if (state === 'workflow-pending') {
+      storage.setItem(LEAVE_REQUEST_WORKFLOW_PENDING_STORAGE_KEY, normalized);
+    }
     return true;
   } catch {
     return false;
@@ -99,6 +127,7 @@ export function clearLeaveRequestUnknownMutationId(
   if (!storage) return false;
   try {
     storage.removeItem(LEAVE_REQUEST_UNKNOWN_MUTATION_STORAGE_KEY);
+    storage.removeItem(LEAVE_REQUEST_WORKFLOW_PENDING_STORAGE_KEY);
     return true;
   } catch {
     return false;
@@ -235,7 +264,7 @@ export function markLeaveRequestMutationFailure(
   binding: LeaveRequestMutationBinding,
   error: unknown,
 ): LeaveRequestMutationBinding {
-  if (binding.state === 'unknown-result') return binding;
+  if (isLockedLeaveRequestState(binding.state)) return binding;
   return {
     ...binding,
     state:
@@ -255,13 +284,13 @@ export function resolveLeaveRequestMutationBinding(
       return {
         status: 'ready',
         binding:
-          binding.state === 'unknown-result'
+          isLockedLeaveRequestState(binding.state)
             ? binding
             : { ...binding, state: 'in-flight' },
         reused: true,
       };
     }
-    if (binding.state === 'unknown-result') {
+    if (isLockedLeaveRequestState(binding.state)) {
       return { status: 'blocked', binding };
     }
   }
@@ -293,10 +322,31 @@ function isLeaveRequestSuccessPayload(
     typeof value.rawHours === 'number' &&
     typeof value.minimumHours === 'number' &&
     Array.isArray(value.recordIds) &&
+    value.recordIds.length > 0 &&
+    value.recordIds.every((id) => typeof id === 'string' && Boolean(id.trim())) &&
+    new Set(value.recordIds).size === value.recordIds.length &&
+    isLeaveRequestWorkflowReceipt(value.approvalWorkflow, value.recordIds) &&
     Array.isArray(value.affectedSchedules) &&
     Array.isArray(value.excludedSchedules) &&
     Array.isArray(value.unrecognizedShifts) &&
     Array.isArray(value.missingCalendarYears)
+  );
+}
+
+function isLeaveRequestWorkflowReceipt(
+  workflow: unknown,
+  recordIds: string[],
+): boolean {
+  if (workflow === undefined) return true;
+  if (!isObject(workflow)) return false;
+  const workflowRecordIds = workflow.recordIds;
+  return (
+    workflow.mode === 'program_card' &&
+    typeof workflow.accepted === 'boolean' &&
+    workflow.pending === true &&
+    Array.isArray(workflowRecordIds) &&
+    workflowRecordIds.length === recordIds.length &&
+    recordIds.every((id) => workflowRecordIds.includes(id))
   );
 }
 

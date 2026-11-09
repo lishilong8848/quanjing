@@ -1,5 +1,6 @@
 import type { HttpService } from '@nestjs/axios';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { invalidateBitableRecordCache } from '../../common/feishu/bitable-direct-read';
 import {
   buildOvertimeConfirmationUrl,
   issueOvertimeConfirmationTicket,
@@ -8,10 +9,16 @@ import {
   verifyOvertimeConfirmationTicket,
 } from './overtime-workflow.gateway';
 
+jest.mock('../../common/feishu/bitable-direct-read', () => ({
+  ...jest.requireActual('../../common/feishu/bitable-direct-read'),
+  invalidateBitableRecordCache: jest.fn(),
+}));
+
 describe('OvertimeWorkflowGateway', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    jest.mocked(invalidateBitableRecordCache).mockClear();
     process.env.FEISHU_APP_ID = 'cli_app';
     process.env.FEISHU_APP_SECRET = 'app-secret';
     process.env.FEISHU_MAIN_APP_TOKEN = 'main_app_token';
@@ -76,6 +83,43 @@ describe('OvertimeWorkflowGateway', () => {
         headers: { Authorization: 'Bearer tenant-token' },
       }),
     );
+    expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
+      appToken: 'main_app_token',
+      tableId: 'tblpCzmTT3EapaUY',
+      deletePersisted: true,
+    });
+  });
+
+  it('records a workflow error without invalidating approvals and invalidates a mixed update', async () => {
+    const post = jest.fn().mockResolvedValue({
+      data: { code: 0, tenant_access_token: 'tenant-token', expire: 7200 },
+    });
+    const put = jest.fn().mockResolvedValue({ data: { code: 0 } });
+    const gateway = new OvertimeWorkflowGateway(
+      { axiosRef: { post, put } } as unknown as HttpService,
+      jest.fn(),
+    );
+    const fields = { 加班工作流错误: '交付失败' };
+
+    await gateway.updateOvertimeRecord('rec_1', fields);
+    expect(put).toHaveBeenCalledWith(
+      expect.stringContaining('/rec_1'),
+      { fields },
+      expect.anything(),
+    );
+    expect(invalidateBitableRecordCache).not.toHaveBeenCalled();
+
+    put.mockResolvedValueOnce({ data: { code: 1254302, msg: 'Permission denied' } });
+    await expect(gateway.updateOvertimeRecord('rec_1', fields)).rejects.toThrow(
+      '更新加班多维记录失败',
+    );
+    expect(invalidateBitableRecordCache).not.toHaveBeenCalled();
+
+    await gateway.updateOvertimeRecord('rec_1', {
+      加班工作流错误: '',
+      加班流程进展: '已审批',
+    });
+    expect(invalidateBitableRecordCache).toHaveBeenCalledTimes(1);
   });
 
   it('treats only an explicitly missing Base record as absent', async () => {

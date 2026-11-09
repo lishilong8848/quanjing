@@ -227,7 +227,8 @@ describe('DutyScheduleService construction crew ledger views', () => {
   it('reuses prepared monthly rows only for the same verified input snapshots', async () => {
     const approvalSource = require('../../server/common/feishu/leave-approval-source');
     const approval = { verified: true, requests: [] };
-    const approvalRead = jest.spyOn(approvalSource, 'readCachedLeaveApprovalSnapshot').mockResolvedValue(approval);
+    const state = { snapshot: approval, approvalFetchedAt: 1, shiftDetailFetchedAt: null };
+    const approvalRead = jest.spyOn(approvalSource, 'readCachedLeaveApprovalSnapshotState').mockResolvedValue(state);
     const service = createServiceWithAxios({});
     const month = { records: [{ record_id: 'rec_schedule', fields: {} }] };
     const monthRead = jest.spyOn(service.localMonthSnapshots, 'readPreferredMonth').mockResolvedValue(month);
@@ -243,7 +244,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       expect(await load()).toEqual(first);
       expect(service.mapFeishuScheduleRecord).toHaveBeenCalledTimes(1);
 
-      approvalRead.mockResolvedValue({ ...approval });
+      approvalRead.mockResolvedValue({ ...state, snapshot: { ...approval } });
       await load();
       expect(service.mapFeishuScheduleRecord).toHaveBeenCalledTimes(2);
 
@@ -251,7 +252,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
       await load();
       expect(service.mapFeishuScheduleRecord).toHaveBeenCalledTimes(3);
 
-      approvalRead.mockResolvedValue({ verified: false, requests: [] });
+      approvalRead.mockResolvedValue({ ...state, snapshot: { verified: false, requests: [] } });
       await load();
       await load();
       expect(service.mapFeishuScheduleRecord).toHaveBeenCalledTimes(5);
@@ -5381,13 +5382,13 @@ describe('DutyScheduleService construction crew ledger views', () => {
         ...originalRequest,
         leaveReason: '更改后的请假原因',
       }),
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({ status: 503, response: { writeDisposition: 'unknown-result' } });
     await expect(
       restartedService.createLeaveRequest({
         ...originalRequest,
         leaveReason: '更改后的请假原因',
       }),
-    ).rejects.toThrow('clientMutationId 重复但请休假内容不同');
+    ).rejects.toMatchObject({ status: 503, response: { writeDisposition: 'unknown-result' } });
     expect(
       restartedService.getMonthlySchedulesFromFeishu,
     ).not.toHaveBeenCalled();
@@ -5396,6 +5397,33 @@ describe('DutyScheduleService construction crew ledger views', () => {
       expect.anything(),
       expect.objectContaining({ tableId: 'tblLeavePerson' }),
     );
+  });
+
+  it('reconciles a workflow-only leave retry without uploading or writing a new record', async () => {
+    const request = createLeaveRequestInput({ clientMutationId: 'leave-workflow-recovery-only' });
+    const fixture = createLeaveRequestService([createLeaveSchedule()]);
+    const fingerprint = fixture.buildLeaveRequestMutationFingerprint(request);
+    const service = createLeaveRequestService([createLeaveSchedule()], {
+      leaveRecords: [{ record_id: 'recOriginal', fields: {
+        请求唯一ID: request.clientMutationId, 请求指纹: fingerprint,
+      } }],
+    });
+    await expect(service.createLeaveRequest({ ...request, workflowRecoveryOnly: true })).resolves.toMatchObject({
+      created: 0, recordIds: ['recOriginal'],
+    });
+    expect(service.uploadBitableAttachment).not.toHaveBeenCalled();
+    expect(service.createBitableRecord).not.toHaveBeenCalled();
+    expect(getInvalidateBitableRecordCacheMock()).not.toHaveBeenCalled();
+  });
+
+  it('refuses to create if a workflow-only leave retry cannot find the prior record', async () => {
+    const service = createLeaveRequestService([createLeaveSchedule()]);
+    await expect(service.createLeaveRequest({
+      ...createLeaveRequestInput({ clientMutationId: 'leave-workflow-recovery-only-missing' }),
+      workflowRecoveryOnly: true,
+    })).rejects.toMatchObject({ status: 503, response: { writeDisposition: 'unknown-result' } });
+    expect(service.uploadBitableAttachment).not.toHaveBeenCalled();
+    expect(service.createBitableRecord).not.toHaveBeenCalled();
   });
 
   it('fails closed when the persisted leave-request lookup fails', async () => {
@@ -5410,7 +5438,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
           clientMutationId: 'leave-request-persisted-lookup-failed',
         }),
       ),
-    ).rejects.toBe(lookupError);
+    ).rejects.toMatchObject({ status: 503, response: { writeDisposition: 'unknown-result' } });
     expect(service.getMonthlySchedulesFromFeishu).not.toHaveBeenCalled();
     expect(service.createBitableRecord).not.toHaveBeenCalled();
     expect(getBitableRecordsMock()).not.toHaveBeenCalledWith(
@@ -5441,11 +5469,11 @@ describe('DutyScheduleService construction crew ledger views', () => {
     });
 
     await expect(service.createLeaveRequest(request)).rejects.toMatchObject({
-      status: 400,
+      status: 503, response: { writeDisposition: 'unknown-result' },
     });
-    await expect(service.createLeaveRequest(request)).rejects.toThrow(
-      '存在多个相同请求唯一ID',
-    );
+    await expect(service.createLeaveRequest(request)).rejects.toMatchObject({
+      status: 503, response: { writeDisposition: 'unknown-result' },
+    });
     expect(service.getMonthlySchedulesFromFeishu).not.toHaveBeenCalled();
     expect(service.createBitableRecord).not.toHaveBeenCalled();
   });
@@ -5629,7 +5657,9 @@ describe('DutyScheduleService construction crew ledger views', () => {
           clientMutationId: 'leave-request-authoritative-refresh-failed',
         }),
       ),
-    ).rejects.toThrow('authoritative schedule refresh failed');
+    ).rejects.toMatchObject({
+      response: { message: expect.stringContaining('尚未建立请休假记录'), writeDisposition: 'definitely-not-written' },
+    });
 
     expectStrictLeaveRequestLookup(
       'leave-request-authoritative-refresh-failed',

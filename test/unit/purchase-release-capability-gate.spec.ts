@@ -54,6 +54,20 @@ describe('purchase runtime capability release and rollback gate',()=>{
     return spawnSync(exe,['-NoProfile','-NonInteractive','-File',script],{encoding:'utf8',timeout:30_000,windowsHide:true});
   }
   const stopMarker=()=>join(root,'stop-was-called');
+  it('rejects an old rollback runtime before stopping when separate-stage cutover data exists',()=>{
+    setupHelper();
+    const migrated={...marked(),requiredRuntimeCapability:'purchase-stage-cards-v1',managerApprovalBatches:[{flowVersion:'legacy',stageCardTransition:{version:1}}]};
+    json(ledger,migrated);declare(dist);
+    expect(()=>check()).toThrow('PURCHASE_LEDGER_RUNTIME_INCOMPATIBLE');
+    const helper=join(root,'scripts/verify-purchase-ledger-compatibility.cjs');
+    const script=`& ${quote(process.execPath)} ${quote(helper)} --app-root ${quote(root)} --runtime-dist ${quote(dist)} --ledger ${quote(ledger)}\nif ($LASTEXITCODE -ne 0) { throw 'incompatible-runtime' }\nSet-Content -LiteralPath ${quote(stopMarker())} -Value stopped\n`;
+    const refused=powershell(script);expect(refused.status).not.toBe(0);expect(existsSync(stopMarker())).toBe(false);
+    json(join(dist,'server/common/purchase-runtime-capabilities.json'),{schemaVersion:1,capabilities:[capability,'purchase-stage-cards-v1']});
+    const allowed=powershell(script);expect(allowed.status).toBe(0);expect(existsSync(stopMarker())).toBe(true);
+    expect(check()).toEqual({compatible:true,requiredCapability:'purchase-stage-cards-v1',runtimeCapability:capability});
+    json(ledger,{...migrated,requiredRuntimeCapability:capability});
+    expect(()=>check()).toThrow('PURCHASE_LEDGER_CAPABILITY_MARKER_MISSING');
+  });
   function setupHelper(){mkdirSync(join(root,'scripts'),{recursive:true});copyFileSync(join(repo,'scripts/verify-purchase-ledger-compatibility.cjs'),join(root,'scripts/verify-purchase-ledger-compatibility.cjs'));}
   it.each(['start.ps1','deploy/start.ps1'])('%s refuses before the first process stop, and starts with the supported runtime',file=>{
     setupHelper();json(ledger,marked());

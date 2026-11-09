@@ -70,7 +70,10 @@ jest.mock(
 jest.mock('@server/common/feishu/leave-approval-source', () => ({
   ...jest.requireActual('@server/common/feishu/leave-approval-source'),
   fetchLeaveApprovalSnapshot: jest.fn(async () => ({ verified: true, requests: [] })),
-  readCachedLeaveApprovalSnapshot: jest.fn(async () => ({ verified: true, requests: [] })),
+  readCachedLeaveApprovalSnapshot: jest.fn(),
+  readCachedLeaveApprovalSnapshotState: jest.fn(),
+  refreshVerifiedLeaveApprovalSnapshot: jest.fn(),
+  waitForLeaveScheduleCacheRecovery: jest.fn(async (promise) => promise),
 }));
 
 jest.mock(
@@ -84,13 +87,22 @@ jest.mock(
 import { DutyScheduleService } from '../../server/modules/duty-schedule/duty-schedule.service';
 import { DutyLocalMonthSnapshots } from '../../server/modules/duty-schedule/duty-local-sync.snapshot';
 import { fetchBitableRecords, readBitableCacheScopeRevision, readLatestPersistedBitableRecordSnapshot } from '../../server/common/feishu/bitable-direct-read';
-import { fetchLeaveApprovalSnapshot, readCachedLeaveApprovalSnapshot } from '../../server/common/feishu/leave-approval-source';
+import { fetchLeaveApprovalSnapshot, readCachedLeaveApprovalSnapshot, readCachedLeaveApprovalSnapshotState, refreshVerifiedLeaveApprovalSnapshot, waitForLeaveScheduleCacheRecovery } from '../../server/common/feishu/leave-approval-source';
 import { isDatabaseDisabled } from '../../server/common/database/unavailable-database';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 describe('duty schedule fast sync', () => {
+  beforeEach(() => {
+    const approval = { verified: true, requests: [] };
+    jest.mocked(readCachedLeaveApprovalSnapshot).mockReset().mockResolvedValue(approval);
+    jest.mocked(readCachedLeaveApprovalSnapshotState).mockReset().mockImplementation(async () => ({
+      snapshot: await readCachedLeaveApprovalSnapshot(), approvalFetchedAt: null, shiftDetailFetchedAt: null,
+    }));
+    jest.mocked(refreshVerifiedLeaveApprovalSnapshot).mockReset().mockResolvedValue(approval);
+    jest.mocked(waitForLeaveScheduleCacheRecovery).mockClear();
+  });
   it('limits database replacement to the requested range and excludes historical source rows', async () => {
     const values = jest.fn(async () => undefined), where = jest.fn(async () => undefined);
     const transaction = { delete: jest.fn(() => ({ where })), insert: jest.fn(() => ({ values })) };
@@ -210,17 +222,17 @@ describe('duty schedule fast sync', () => {
   it.each(['during-source', 'during-publication'])('refuses success if the scope is invalidated %s', async moment => {
     const service = new DutyScheduleService({} as never, { axiosRef: {} } as never) as any;
     const revision = jest.mocked(readBitableCacheScopeRevision); revision.mockReset();
-    for (let attempt = 0; attempt < 2; attempt++) {
-      revision.mockResolvedValueOnce('before').mockResolvedValueOnce(moment === 'during-source' ? 'after' : 'before');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      revision.mockResolvedValueOnce(moment === 'during-source' ? 'after' : 'before');
       if (moment === 'during-publication') revision.mockResolvedValueOnce('after');
     }
     service.fetchFeishuScheduleRecords = jest.fn(async (_force, _strict, _approval, _range, persistence) => {
-      persistence.onPersisted({ sourceStartedAt: 10, fetchedAt: 20, invalidationToken: moment === 'during-source' ? 'after' : 'before' }); return [];
+      persistence.onPersisted({ sourceStartedAt: 10, fetchedAt: 20, invalidationToken: 'before' }); return [];
     });
     const publish = jest.fn(async () => 20);
     service.localMonthSnapshots = { publish, readMonth: jest.fn(async () => ({ sourceStartedAt: 10, records: [] })) };
     await expect(service.syncThreeMonthScheduleSnapshots(jest.fn(), new Date('2026-10-20'))).rejects.toThrow('来源已变化');
-    expect(publish).toHaveBeenCalledTimes(moment === 'during-source' ? 0 : 2);
+    expect(publish).toHaveBeenCalledTimes(moment === 'during-source' ? 0 : 3);
     revision.mockReset(); revision.mockResolvedValue(null);
   });
 
@@ -275,6 +287,39 @@ describe('duty schedule fast sync', () => {
     service.getMonthlySchedulesFromLocalCache.mockReset().mockRejectedValue(new Error('请休假审批缓存尚未核验'));
     await expect(service.getSchedulesForRiskScan('2026-10-31', '2026-11-07')).rejects.toThrow('尚未核验');
     expect(service.getMonthlySchedulesFromLocalCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for one shared approval recovery before reading the verified risk scan', async () => {
+    const service = new DutyScheduleService({} as never, { axiosRef: {} } as never) as any;
+    const snapshot = { records: [], fetchedAt: Date.now(), expiresAt: Date.now() + 60_000 };
+    service.localMonthSnapshots = { readPreferredMonth: jest.fn(async () => snapshot) };
+    jest.mocked(readCachedLeaveApprovalSnapshotState).mockResolvedValueOnce({
+      snapshot: { verified: false, requests: [] },
+      approvalFetchedAt: null,
+      shiftDetailFetchedAt: null,
+      failure: 'missing',
+    });
+    await expect(service.getSchedulesForRiskScan('2026-11-09', '2026-11-10')).resolves.toEqual([]);
+    expect(refreshVerifiedLeaveApprovalSnapshot).toHaveBeenCalledTimes(1);
+    expect(readCachedLeaveApprovalSnapshotState).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds attendance reads by date and retains the long-white full-table-view fallback within that date', async () => {
+    const service = new DutyScheduleService({} as never, { axiosRef: {} } as never) as any;
+    service.longWhiteDutyConfig = { appToken: 'synthetic', tableId: 'long-white', viewId: 'preferred', tableName: '长白班排班' };
+    const approval = { verified: true, requests: [] };
+    const records = jest.mocked(fetchBitableRecords);
+    records.mockClear().mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    await service.getDutySchedules('2026-11-08', '2026-11-09', approval);
+    await service.getLongWhiteDutyStaff('2026-11-09', true, approval);
+    const calls = records.mock.calls.map(([, options]) => options);
+    expect(calls).toHaveLength(3);
+    const before = (date: string) => String(Date.parse(date + 'T00:00:00+08:00') - 86_400_000);
+    expect(calls[0].filter?.conditions[0].value).toEqual(['ExactDate', before('2026-11-08')]);
+    expect(calls[1].filter?.conditions[0].value).toEqual(['ExactDate', before('2026-11-09')]);
+    expect(calls[1].viewId).toBe('preferred');
+    expect(calls[2].viewId).toBeUndefined();
+    expect(calls[2].filter).toEqual(calls[1].filter);
   });
 
   it('reads both local month snapshots across a month boundary without duplicating the full snapshot', async () => {
@@ -344,8 +389,10 @@ describe('duty schedule fast sync', () => {
     const persisted = jest.mocked(readLatestPersistedBitableRecordSnapshot);
     persisted.mockResolvedValue(stale);
     service.localMonthSnapshots = { readPreferredMonth: jest.fn(async () => stale) };
+    service.syncDutyScheduleToLocalFast = jest.fn().mockResolvedValue({ success: true });
     try {
       await expect(service.getSchedulesForRiskScan(`${month}-01`, `${month}-02`)).rejects.toThrow('缓存');
+      expect(service.syncDutyScheduleToLocalFast).toHaveBeenCalledTimes(1);
       await expect(service.getMonthlySchedulesFromLocalCache(`${month}-01`, `${month}-02`, true)).resolves.toEqual([]);
       service.localMonthSnapshots.readPreferredMonth.mockRejectedValue(new Error('damaged month'));
       persisted.mockResolvedValue({ ...stale, expiresAt: Date.now() + 60_000 });

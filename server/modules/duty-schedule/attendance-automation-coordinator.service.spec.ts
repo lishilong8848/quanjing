@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AttendanceDailySummaryStore } from './attendance-daily-summary.store';
@@ -121,6 +121,7 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
         feishuGateway as unknown as AttendanceAutomationFeishuGateway,
         dailySummaryStore as unknown as AttendanceDailySummaryStore,
       );
+      await restarted.recoverPendingAttendanceArchives();
       await restarted.recoverPendingCorrections(
         new Date(Date.now() + 60 * 60_000),
       );
@@ -200,6 +201,11 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
 
       await expect(service.run(run)).resolves.toMatchObject({ success: true });
       expect(dailySummaryStore.mergeLiveCheck).toHaveBeenCalledTimes(1);
+      expect(feishuGateway.archiveAttendance).not.toHaveBeenCalled();
+      const completed = service.getRunStatus(run.task, run.date);
+      expect(completed).toMatchObject({ state: 'completed', archiveSyncState: 'syncing' });
+      expect(dailySummaryStore.mergeLiveCheck).toHaveBeenCalledWith(expect.objectContaining({ executionId: completed?.executionId }));
+      await service.recoverPendingAttendanceArchives();
       expect(service.getRunStatus(run.task, run.date)).toMatchObject({
         state: 'completed',
         archiveSyncFailureReason: '飞书考勤多维表同步失败',
@@ -320,7 +326,7 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
     }
   });
 
-  it('retries only Feishu after correction discovery succeeded but its write failed', async () => {
+  it.each(['evidence-only', 'legacy'] as const)('retries a persisted %s correction job after its write failed', async (mode) => {
     const stateDir = mkdtempSync(
       join(tmpdir(), 'attendance-correction-write-'),
     );
@@ -407,9 +413,24 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
           sent: 1,
         } as never);
       await expect(service.run(run)).resolves.toMatchObject({ success: true });
-      expect(
-        service.getRunStatus(run.task, run.date)?.correctionSyncFailureReason,
-      ).toBeDefined();
+      expect(service.getRunStatus(run.task, run.date)).toMatchObject({
+        archiveSyncState: 'syncing',
+        correctionSyncState: 'syncing',
+      });
+      const jobDirectory = join(stateDir, 'attendance-correction-jobs');
+      const jobPath = join(jobDirectory, `${run.date}-${run.task}.json`);
+      const job = JSON.parse(readFileSync(jobPath, 'utf8'));
+      expect(job.evidenceOnly).toBe(true);
+      if (mode === 'legacy') {
+        delete job.evidenceOnly;
+        writeFileSync(jobPath, JSON.stringify(job), 'utf8');
+      } else {
+        writeFileSync(join(jobDirectory, `${run.date}-morning-on-duty-reminder.json`), JSON.stringify({
+          ...job, task: 'morning-on-duty-reminder', stage: 'pending',
+          nextRetryAt: new Date(Date.now() + 4 * 60 * 60_000).toISOString(),
+          corrections: undefined, evidenceOnly: undefined,
+        }), 'utf8');
+      }
 
       const restarted = new AttendanceAutomationCoordinatorService(
         dingTalkClient as unknown as DingTalkAttendanceClient,
@@ -420,6 +441,9 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
       const recheck = jest
         .spyOn(restarted as never, 'recheckArchivedAnomalies')
         .mockResolvedValue({ targets: 1, archived: 1 } as never);
+      await restarted.recoverPendingCorrections();
+      expect(feishuGateway.archiveAttendance).not.toHaveBeenCalled();
+      await restarted.recoverPendingAttendanceArchives();
       await restarted.recoverPendingCorrections(
         new Date(Date.now() + 60 * 60_000),
       );
@@ -429,6 +453,9 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
       expect(recheck).not.toHaveBeenCalled();
       await restarted.recoverPendingCorrections(
         new Date(Date.now() + 2 * 60 * 60_000),
+      );
+      await restarted.recoverPendingCorrections(
+        new Date(Date.now() + 3 * 60 * 60_000),
       );
       expect(dingTalkClient.listCorrectionApprovals).toHaveBeenCalledTimes(1);
       expect(dingTalkClient.listAttendanceDetails).toHaveBeenCalledTimes(1);
@@ -440,21 +467,17 @@ describe('AttendanceAutomationCoordinatorService morning brief', () => {
           corrections: [correction],
         }),
       );
-      expect(
-        feishuGateway.readArchivedAttendanceRecheckTargets,
-      ).toHaveBeenCalledWith(['2026-09-16']);
-      expect(recheck).toHaveBeenCalledWith(
-        run.date,
-        '2026-09-16',
-        [
-          {
-            businessDate: '2026-09-16',
-            userId: 'ding-test',
-            expectation: { key: 'corrected-punch' },
-          },
-        ],
-        [correction],
-      );
+      if (mode === 'legacy') {
+        expect(feishuGateway.readArchivedAttendanceRecheckTargets).toHaveBeenCalledWith(['2026-09-16']);
+        expect(recheck).toHaveBeenCalledWith(run.date, '2026-09-16', [
+          { businessDate: '2026-09-16', userId: 'ding-test', expectation: { key: 'corrected-punch' } },
+        ], [correction]);
+      } else {
+        expect(feishuGateway.readArchivedAttendanceRecheckTargets).not.toHaveBeenCalled();
+        expect(recheck).not.toHaveBeenCalled();
+        const pending = JSON.parse(readFileSync(join(jobDirectory, `${run.date}-morning-on-duty-reminder.json`), 'utf8'));
+        expect(pending.stage).toBe('pending');
+      }
       expect(
         restarted.getRunStatus(run.task, run.date)?.correctionSyncFailureReason,
       ).toBeUndefined();

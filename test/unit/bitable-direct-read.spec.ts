@@ -32,6 +32,7 @@ const {
   getBitableRecordCacheGeneration,
   invalidateFeishuTenantAccessTokenCache,
   invalidateBitableRecordCache,
+  readBitableCacheScopeRevision,
   readLatestPersistedBitableRecordSnapshot,
   readLatestPersistedBitableRecords,
   resolveBitableAppToken,
@@ -60,8 +61,10 @@ async function expectPathToDisappear(cachePath: string): Promise<void> {
     try {
       await access(cachePath);
     } catch (error: unknown) {
-      if ((error as { code?: string })?.code === 'ENOENT') return;
-      throw error;
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') return;
+      // Windows can deny access while an asynchronous unlink is completing.
+      if (process.platform !== 'win32' || code !== 'EPERM') throw error;
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
   }
@@ -469,6 +472,37 @@ describe('exact persistent snapshot lookup', () => {
     } finally {
       invalidateBitableRecordCache({ ...options, deletePersisted: true });
       await rm(cachePath, { force: true });
+    }
+  });
+
+  it('does not remove a peer publication when a cached revision disagrees', async () => {
+    const query = { appToken: 'peer-cache-app', tableId: 'peer-cache-table', tableName: 'peer publication' };
+    const cachePath = getProjectedCachePath(`${query.appToken}:${query.tableId}:`);
+    const marker = join(localCacheDir, `${createHash('sha1').update(`scope-invalidation:${query.appToken}\u001f${query.tableId}`).digest('hex')}.invalidation`);
+    const fsPromises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const remove = jest.spyOn(fsPromises, 'rm');
+    try {
+      await fsPromises.mkdir(localCacheDir, { recursive: true });
+      await writeFile(marker, 'first-revision');
+      expect(await readBitableCacheScopeRevision(query.appToken, query.tableId)).toBe('first-revision');
+      const fetchedAt = Date.now();
+      await writeFile(marker, 'peer-revision');
+      const published = JSON.stringify({ version: 1, ...query, invalidationToken: 'peer-revision', fetchedAt, expiresAt: fetchedAt + 60_000, records: [] });
+      await writeFile(cachePath, published);
+      invalidateBitableRecordCache();
+      await expect(readLatestPersistedBitableRecordSnapshot(query)).resolves.toBeNull();
+      await expect(readLatestPersistedBitableRecordSnapshot({ ...query, directOnly: true })).resolves.toBeNull();
+      expect(remove).not.toHaveBeenCalledWith(cachePath, expect.anything());
+      expect(readFileSync(cachePath, 'utf8')).toBe(published);
+      let freshReader!: typeof readLatestPersistedBitableRecordSnapshot;
+      jest.isolateModules(() => {
+        freshReader = require('../../server/common/feishu/bitable-direct-read').readLatestPersistedBitableRecordSnapshot;
+      });
+      await expect(freshReader(query)).resolves.toMatchObject({ fetchedAt, records: [] });
+    } finally {
+      remove.mockRestore();
+      await rm(cachePath, { force: true });
+      await rm(marker, { force: true });
     }
   });
 });

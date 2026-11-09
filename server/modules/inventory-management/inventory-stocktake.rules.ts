@@ -172,11 +172,11 @@ export function selectStocktakeItems(input: {
       entry.movementIds.push(m.recordId);
     selected.set(item.recordId, entry);
   }
-  const randomTarget = Math.ceil(items.length / 10);
+  const randomTarget = Math.ceil((items.length - selected.size) / 10);
   const rank = (i: InventoryManagementItem) =>
     createHash('sha256').update(`${input.seed}:${i.recordId}`).digest('hex');
   const pool = items
-    .filter((i) => !excluded.has(i.recordId))
+    .filter((i) => !selected.has(i.recordId) && !excluded.has(i.recordId))
     .map((i) => ({ i, rank: rank(i) }))
     .sort(
       (a, b) =>
@@ -184,13 +184,11 @@ export function selectStocktakeItems(input: {
         a.i.recordId.localeCompare(b.i.recordId),
     );
   for (const { i } of pool.slice(0, randomTarget)) {
-    const entry = selected.get(i.recordId) || {
+    selected.set(i.recordId, {
       item: i,
-      reasons: [],
+      reasons: ['random'],
       movementIds: [],
-    };
-    entry.reasons.push('random');
-    selected.set(i.recordId, entry);
+    });
   }
   return {
     selected: [...selected.values()],

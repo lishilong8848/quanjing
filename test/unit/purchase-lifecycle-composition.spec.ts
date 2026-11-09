@@ -30,9 +30,11 @@ describe('production lifecycle owner composition', () => {
     mockActive = true; delete process.env.PURCHASE_LEDGER_RUNTIME_CAPABILITY;
     await owner.ensureStarted(); expect(images.start).not.toHaveBeenCalled(); expect(owner.isReady()).toBe(false);
   });
-  it('starts once with real factory and worker, closes admission immediately on maintenance or source change', async () => {
+  it('drains existing work once and stops processing on maintenance or source change', async () => {
+    store.hasExistingLifecycleWork.mockResolvedValue(true);
     await Promise.all([owner.ensureStarted(), owner.ensureStarted()]);
-    expect(images.start).toHaveBeenCalledTimes(1); expect(prepare.startRecovery).toHaveBeenCalledTimes(1); expect(owner.isReady()).toBe(true);
+    expect(images.start).toHaveBeenCalledTimes(1); expect(prepare.startRecovery).toHaveBeenCalledTimes(1);
+    expect(owner.isReady()).toBe(false); expect(owner.isProcessing()).toBe(true);
     await jest.advanceTimersByTimeAsync(5_000); expect(store.listPendingLifecycleDeliveries).toHaveBeenCalledTimes(1);
     mockActive = false; expect(owner.isProcessing()).toBe(false); await jest.advanceTimersByTimeAsync(5_000); expect(store.listPendingLifecycleDeliveries).toHaveBeenCalledTimes(1);
     mockActive = true; process.env.FEISHU_PURCHASE_INVENTORY_APP_TOKEN = 'other_base'; expect(owner.isProcessing()).toBe(false);
@@ -53,6 +55,7 @@ describe('production lifecycle owner composition', () => {
     mockActive=false;await expect(controller.issue(req,{} as never)).rejects.toThrow('暂不可用');
   });
   it('does not admit before shared connection is ready or when persisted source fails', async () => {
+    store.hasExistingLifecycleWork.mockResolvedValue(true);
     transport.isReady.mockReturnValue(false); await owner.ensureStarted(); expect(images.start).not.toHaveBeenCalled();
     transport.isReady.mockReturnValue(true); store.verifyLifecycleReceiptImageSource.mockRejectedValue(new Error('source mismatch'));
     await owner.ensureStarted(); expect(owner.isReady()).toBe(false); expect(prepare.startRecovery).not.toHaveBeenCalled();

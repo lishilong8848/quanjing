@@ -824,7 +824,7 @@ export class LeaveWorkflowService {
         substituteRequired || substituteDecisionRequired;
       const candidateSets =
         substituteChoiceAvailable && (snapshot.shiftGroups || []).length
-          ? await this.resolveShiftCandidateSets(snapshot, applicant, directory)
+          ? await this.resolveShiftCandidateSets(snapshot, applicant, directory, undefined, { waitForApprovalRecovery: true })
           : [];
       const substituteCandidates = substituteChoiceAvailable
         ? candidateSets.length
@@ -1102,6 +1102,7 @@ export class LeaveWorkflowService {
       await this.bitableSyncService.getCachedLeaveRequestImpactSchedules(
         startDate,
         endDate,
+        { waitForApprovalRecovery: true },
       );
     const rule = calculateLeaveRequestSubstituteRule(
       schedules,
@@ -1143,6 +1144,7 @@ export class LeaveWorkflowService {
     applicant: LeaveRoutePerson,
     directory: ActivePersonnelDirectory,
     selections?: LeaveShiftAssignmentSelection[],
+    cacheOptions?: { waitForApprovalRecovery?: boolean },
   ): Promise<LeaveShiftCandidateSet[]> {
     const groups = snapshot.shiftGroups || [];
     if (!groups.length) return [];
@@ -1154,6 +1156,7 @@ export class LeaveWorkflowService {
       await this.bitableSyncService.getCachedLeaveRequestImpactSchedules(
         startDate,
         endDate,
+        cacheOptions,
       );
     const schedules = restoreOwnShiftCoverage(snapshot, cachedSchedules);
     const currentGroups = createLeaveRequestShiftGroups(
@@ -1213,6 +1216,7 @@ export class LeaveWorkflowService {
       this.bitableSyncService,
       startDate,
       endDate,
+      { waitForApprovalRecovery: true },
     );
     const shiftGroups = createLeaveRequestShiftGroups(
       calculateLeaveRequestImpact(schedules, {

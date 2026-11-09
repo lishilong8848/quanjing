@@ -25,7 +25,9 @@ export class FeishuCardCopyEngine implements CardCopyObserver {
     // The displayed content identifies the logical card across original recipients.
     // Only cards without a business identity use a day boundary for recurring notices.
     const day = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(event.startedAt));
-    const material = [event.source, card.entityKeys.length ? '' : day, card.entityKeys, card.title, card.fingerprint];
+    const material = event.logicalDeliveryId
+      ? [event.source, event.logicalDeliveryId, card.fingerprint]
+      : [event.source, card.entityKeys.length ? '' : day, card.entityKeys, card.title, card.fingerprint];
     const groupKey = createHash('sha256').update(JSON.stringify(material)).digest('hex');
     await this.options.store.enroll({ sourceMessageId: event.messageId, groupKey, card, sourceStartedAt: event.startedAt, now: this.now(),
       ...(event.recipientType === 'open_id' ? { originalRecipientOpenId: event.recipientId } : {}) });

@@ -105,4 +105,76 @@ describe('AttendanceDailySummaryStore', () => {
     expect(result.expected).toBe(0);
     expect(result.excluded).toBe(1);
   });
+
+  it('merges only confirmed correction targets without replacing the current execution result', async () => {
+    const store = new AttendanceDailySummaryStore();
+    const businessDate = '2026-09-08';
+    const anomaly = {
+      name: '测试甲', building: 'A楼', shiftLabel: '白班',
+      expectedAt: '2026-09-08 09:00:00', direction: 'OnDuty' as const,
+      reason: '未打卡', status: 'on_duty' as const,
+    };
+    await store.mergeLiveCheck({
+      businessDate, task: 'morning-off-duty-check', executionId: 'current',
+      generatedAt: '2026-09-08T01:30:00Z', normal: [], excluded: [],
+      anomalies: ['corrected', 'unconfirmed', 'unrelated'].map(key => ({ ...anomaly, key })),
+    });
+    await store.write({
+      version: 1, businessDate, source: 'dingtalk-archive',
+      generatedAt: '2026-09-08T02:00:00Z',
+      expected: 2, normal: 2, excluded: 0, anomalies: [],
+    }, { targetKeys: ['corrected', 'unconfirmed'], normalKeys: ['corrected', 'unrelated'] });
+    const summary = await store.read(businessDate);
+    expect(summary?.checks?.['morning-off-duty-check']).toMatchObject({ executionId: 'current', normalKeys: ['corrected'] });
+    expect(summary?.anomalies.map(item => item.key)).toEqual(['unconfirmed', 'unrelated']);
+  });
+
+  it('retains recorded final checks when a full historical archive is written again', async () => {
+    const store = new AttendanceDailySummaryStore();
+    const businessDate = '2026-09-08';
+    const morning = await store.mergeLiveCheck({
+      task: 'morning-off-duty-check',
+      businessDate,
+      executionId: 'morning-execution',
+      generatedAt: '2026-09-08T01:30:00Z',
+      normal: [{ key: 'morning-normal' }],
+      excluded: [],
+      anomalies: [],
+    });
+    const evening = await store.mergeLiveCheck({
+      task: 'evening-off-duty-check',
+      businessDate,
+      executionId: 'evening-execution',
+      generatedAt: '2026-09-08T12:00:00Z',
+      normal: [{ key: 'evening-normal' }],
+      excluded: [{ key: 'approved-leave' }],
+      anomalies: [],
+    });
+
+    const archive = {
+      version: 1 as const,
+      businessDate,
+      source: 'dingtalk-archive' as const,
+      generatedAt: '2026-09-09T00:30:00Z',
+      expected: 10,
+      normal: 10,
+      excluded: 2,
+      anomalies: [],
+    };
+    await store.write(archive);
+    await expect(store.read(businessDate)).resolves.toEqual({
+      ...archive,
+      checks: evening.checks,
+    });
+
+    const correctedArchive = { ...archive, generatedAt: '2026-09-11T00:31:00Z', expected: 11, normal: 11 };
+    await store.write(correctedArchive);
+    await expect(store.read(businessDate)).resolves.toEqual({
+      ...correctedArchive,
+      checks: {
+        'morning-off-duty-check': morning.checks?.['morning-off-duty-check'],
+        'evening-off-duty-check': evening.checks?.['evening-off-duty-check'],
+      },
+    });
+  });
 });

@@ -1,4 +1,5 @@
 import type { HttpService } from '@nestjs/axios';
+import { ServiceUnavailableException } from '@nestjs/common';
 import {
   parseFeishuBitableLink,
   readEnv,
@@ -17,6 +18,7 @@ import {
   extractDisplayText,
   extractDisplayValues,
   fetchBitableRecords,
+  getBitableRecordCacheGeneration,
   getRecordId,
   normalizeBuildingForFrontend,
   normalizeShiftForFrontend,
@@ -31,6 +33,7 @@ const DEFAULT_LEAVE_REQUEST_SOURCE_URL =
   'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E';
 const LEAVE_APPROVAL_CACHE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_LEAVE_APPROVAL_LOCAL_MAX_AGE_MS = 30 * 60 * 1000;
+const LEAVE_APPROVAL_SOURCE_RETRY_DELAYS_MS = [1_000, 3_000];
 
 export const SYSTEM_APPROVED_LEAVE_STAFF_FIELD = '__systemApprovedLeaveStaff';
 export const SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD =
@@ -169,12 +172,31 @@ interface PersistedLeaveApprovalSnapshot {
   records: BitableRecordItem[];
   fetchedAt: number;
   expiresAt: number;
+  contentFingerprint?: string;
+}
+
+type LeaveApprovalCacheFailure = 'missing' | 'expired' | 'invalid' | 'persistence' | 'source_changed';
+
+const leaveApprovalCacheMessages: Record<LeaveApprovalCacheFailure, string> = {
+  missing: '请休假审批缓存尚未核验：缺少审批或替班明细快照',
+  expired: '请休假审批缓存尚未核验：审批或替班明细快照已过期',
+  invalid: '请休假审批缓存尚未核验：审批或替班资料读取失败',
+  persistence: '请休假审批缓存尚未核验：审批或替班明细保存失败',
+  source_changed: '请休假审批缓存尚未核验：审批或替班明细正在更新',
+};
+
+export class LeaveApprovalCacheError extends ServiceUnavailableException {
+  constructor(readonly kind: LeaveApprovalCacheFailure) {
+    super(leaveApprovalCacheMessages[kind]);
+    this.name = 'LeaveApprovalCacheError';
+  }
 }
 
 export interface CachedLeaveApprovalSnapshotState {
   snapshot: LeaveApprovalSnapshot;
   approvalFetchedAt: number | null;
   shiftDetailFetchedAt: number | null;
+  failure?: LeaveApprovalCacheFailure;
 }
 
 let cachedParsedLeaveApprovalSnapshot: {
@@ -184,7 +206,8 @@ let cachedParsedLeaveApprovalSnapshot: {
   maxAgeMs: number;
   snapshot: LeaveApprovalSnapshot;
 } | null = null;
-let resolvedLeaveShiftDetailTableId = '';
+let resolvedLeaveSource: { key: string; appToken: string; shiftDetailTableId?: string } | undefined;
+const verifiedLeaveRefreshes = new Map<string, Promise<LeaveApprovalSnapshot>>();
 
 export function resolveLeaveApprovalSource(): {
   appToken: string;
@@ -210,6 +233,15 @@ export function resolveLeaveApprovalSource(): {
         'FEISHU_LEAVE_REQUEST_TABLE_ID',
       ]) || parsed.tableId,
   };
+}
+
+export function isResolvedLeaveApprovalCacheScope(appToken: string, tableId: string): boolean {
+  const source = resolveLeaveApprovalSource();
+  const resolved = resolvedLeaveSource?.key === JSON.stringify(source) ? resolvedLeaveSource : undefined;
+  const currentAppToken = source.appToken || resolved?.appToken;
+  const detailTableId = readEnv('FEISHU_LEAVE_SHIFT_DETAIL_TABLE_ID') || resolved?.shiftDetailTableId;
+  return Boolean(appToken && tableId && currentAppToken === appToken &&
+    (source.tableId === tableId || detailTableId === tableId));
 }
 
 function getLeaveApprovalLocalMaxAgeMs(): number {
@@ -265,31 +297,54 @@ export async function readCachedLeaveApprovalSnapshotState(): Promise<CachedLeav
         snapshot: { verified: false, requests: [] },
         approvalFetchedAt: null,
         shiftDetailFetchedAt: null,
+        failure: 'missing',
       };
     }
-    const shiftDetailTableId =
-      readEnv('FEISHU_LEAVE_SHIFT_DETAIL_TABLE_ID') ||
-      resolvedLeaveShiftDetailTableId;
+    const key = JSON.stringify(source);
+    const resolved = resolvedLeaveSource?.key === key ? resolvedLeaveSource : undefined;
+    const appToken = source.appToken || resolved?.appToken;
+    if (!appToken) {
+      return {
+        snapshot: { verified: false, requests: [] },
+        approvalFetchedAt: null,
+        shiftDetailFetchedAt: null,
+        failure: 'missing',
+      };
+    }
+    const shiftDetailTableId = readEnv('FEISHU_LEAVE_SHIFT_DETAIL_TABLE_ID') || resolved?.shiftDetailTableId;
+    const generations = () => [
+      getBitableRecordCacheGeneration(appToken, source.tableId),
+      shiftDetailTableId ? getBitableRecordCacheGeneration(appToken, shiftDetailTableId) : null,
+    ].join(':');
+    const before = generations();
     const [snapshot, shiftDetailSnapshot, localProjection] = await Promise.all([
-      readCompatibleLeaveRequestSnapshot(source.appToken || undefined, source.tableId),
+      readCompatibleLeaveRequestSnapshot(appToken, source.tableId),
       shiftDetailTableId
-        ? readCompatibleShiftDetailSnapshot(source.appToken || undefined, shiftDetailTableId)
+        ? readCompatibleShiftDetailSnapshot(appToken, shiftDetailTableId)
         : Promise.resolve(null),
       readLocalLeaveProjection(),
     ]);
+    if (before !== generations()) {
+      return {
+        snapshot: { verified: false, requests: [] },
+        approvalFetchedAt: snapshot?.fetchedAt ?? null,
+        shiftDetailFetchedAt: shiftDetailSnapshot?.fetchedAt ?? null,
+        failure: 'source_changed',
+      };
+    }
     const nowMs = Date.now();
     const maxAgeMs = getLeaveApprovalLocalMaxAgeMs();
     const shiftDetailFetchedAt = shiftDetailSnapshot?.fetchedAt ?? null;
     const detailsFresh =
-      !shiftDetailTableId ||
-      (shiftDetailSnapshot !== null &&
-        Number.isFinite(shiftDetailSnapshot.fetchedAt) &&
-        shiftDetailSnapshot.fetchedAt > 0 &&
-        nowMs - shiftDetailSnapshot.fetchedAt <= maxAgeMs);
+      shiftDetailSnapshot !== null &&
+      Number.isFinite(shiftDetailSnapshot.fetchedAt) &&
+      shiftDetailSnapshot.fetchedAt > 0 &&
+      nowMs - shiftDetailSnapshot.fetchedAt <= maxAgeMs;
     // An empty, freshly verified approval set has no detail rows to depend on.
     const emptyApproval = !detailsFresh ? buildCachedLeaveApprovalSnapshot(snapshot, nowMs, maxAgeMs) : null;
     const shiftDetailIsFresh = detailsFresh || Boolean(emptyApproval?.verified && emptyApproval.requests.length === 0);
-    const sourceKey = `${source.appToken}:${source.tableId}:${shiftDetailTableId}:${localProjection.fingerprint}`;
+    const sourceKey = JSON.stringify([appToken, source.tableId, shiftDetailTableId, before,
+      snapshot?.contentFingerprint, shiftDetailSnapshot?.contentFingerprint, localProjection.fingerprint]);
     if (
       snapshot &&
       cachedParsedLeaveApprovalSnapshot &&
@@ -317,13 +372,7 @@ export async function readCachedLeaveApprovalSnapshotState(): Promise<CachedLeav
           localProjection,
         )
       : { verified: false, requests: [] };
-    if (
-      snapshot &&
-      Number.isFinite(snapshot.fetchedAt) &&
-      snapshot.fetchedAt > 0 &&
-      nowMs - snapshot.fetchedAt <= maxAgeMs &&
-      shiftDetailIsFresh
-    ) {
+    if (parsedSnapshot.verified && snapshot) {
       cachedParsedLeaveApprovalSnapshot = {
         sourceKey,
         fetchedAt: snapshot.fetchedAt,
@@ -338,13 +387,103 @@ export async function readCachedLeaveApprovalSnapshotState(): Promise<CachedLeav
       snapshot: parsedSnapshot,
       approvalFetchedAt: snapshot?.fetchedAt ?? null,
       shiftDetailFetchedAt,
+      ...(!parsedSnapshot.verified && {
+        failure: !snapshot || (!shiftDetailIsFresh && !shiftDetailSnapshot)
+          ? 'missing' as const
+          : nowMs - snapshot.fetchedAt > maxAgeMs || !shiftDetailIsFresh
+            ? 'expired' as const
+            : 'invalid' as const,
+      }),
     };
   } catch {
     return {
       snapshot: { verified: false, requests: [] },
       approvalFetchedAt: null,
       shiftDetailFetchedAt: null,
+      failure: 'invalid',
     };
+  }
+}
+
+/** A successful source read is only usable here after both required local files read back. */
+export function refreshVerifiedLeaveApprovalSnapshot(httpService: HttpService): Promise<LeaveApprovalSnapshot> {
+  const source = resolveLeaveApprovalSource();
+  const key = JSON.stringify([source.appToken, source.wikiToken, source.tableId, readEnv('FEISHU_LEAVE_SHIFT_DETAIL_TABLE_ID')]);
+  const existing = verifiedLeaveRefreshes.get(key);
+  if (existing) return existing;
+
+  const refresh = (async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await refreshLeaveApprovalSnapshotOnce(httpService);
+      } catch (error) {
+        const delay = LEAVE_APPROVAL_SOURCE_RETRY_DELAYS_MS[attempt];
+        if (!(error instanceof LeaveApprovalCacheError) || error.kind !== 'source_changed' || delay === undefined) {
+          throw error;
+        }
+        // Keep retrying within the shared refresh so another caller cannot
+        // start a competing fetch during the backoff.
+        await new Promise<void>(resolve => setTimeout(resolve, delay));
+      }
+    }
+  })().finally(() => {
+    if (verifiedLeaveRefreshes.get(key) === refresh) verifiedLeaveRefreshes.delete(key);
+  });
+  verifiedLeaveRefreshes.set(key, refresh);
+  return refresh;
+}
+
+async function refreshLeaveApprovalSnapshotOnce(httpService: HttpService): Promise<LeaveApprovalSnapshot> {
+  const revisions: { appToken: string; tableId: string; generation: number }[] = [];
+  const assertSourcesCurrent = () => {
+    if (revisions.some(({ appToken, tableId, generation }) =>
+      getBitableRecordCacheGeneration(appToken, tableId) !== generation
+    )) {
+      throw new LeaveApprovalCacheError('source_changed');
+    }
+  };
+
+  try {
+    await fetchLeaveApprovalSnapshotFromSources(
+      httpService,
+      { forceRefresh: true, strict: true, requirePersisted: true },
+      (appToken, tableId) => {
+        assertSourcesCurrent();
+        revisions.push({ appToken, tableId, generation: getBitableRecordCacheGeneration(appToken, tableId) });
+      },
+    );
+  } catch (error) {
+    assertSourcesCurrent();
+    const message = error instanceof Error ? error.message : '';
+    if (message === '数据在读取期间已变更，请重新读取' || message === 'LOCAL_SYNC_SNAPSHOT_INVALIDATED') {
+      throw new LeaveApprovalCacheError('source_changed');
+    }
+    if (message === '本地数据缓存保存失败，请稍后重试') throw new LeaveApprovalCacheError('persistence');
+    throw new LeaveApprovalCacheError('invalid');
+  }
+  // A main-table write may invalidate its persisted file while the detail
+  // table is still being read. Keep the original generations through readback.
+  assertSourcesCurrent();
+  const state = await readCachedLeaveApprovalSnapshotState();
+  assertSourcesCurrent();
+  if (!state.snapshot.verified) throw new LeaveApprovalCacheError(state.failure || 'invalid');
+  return state.snapshot;
+}
+
+export async function waitForLeaveScheduleCacheRecovery<T>(
+  refresh: Promise<T>,
+  pendingMessage: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      refresh,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(pendingMessage)), 30_000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -364,9 +503,17 @@ export function buildLeaveApprovalSnapshot(
   };
 }
 
-export async function fetchLeaveApprovalSnapshot(
+export function fetchLeaveApprovalSnapshot(
   httpService: HttpService,
   options: FetchLeaveApprovalSnapshotOptions = {},
+): Promise<LeaveApprovalSnapshot> {
+  return fetchLeaveApprovalSnapshotFromSources(httpService, options);
+}
+
+async function fetchLeaveApprovalSnapshotFromSources(
+  httpService: HttpService,
+  options: FetchLeaveApprovalSnapshotOptions,
+  onSourceRead?: (appToken: string, tableId: string) => void,
 ): Promise<LeaveApprovalSnapshot> {
   try {
     const source = resolveLeaveApprovalSource();
@@ -375,6 +522,11 @@ export async function fetchLeaveApprovalSnapshot(
       wikiToken: source.wikiToken,
       tableName: '请休假审批状态',
     });
+    const key = JSON.stringify(source);
+    if (resolvedLeaveSource?.key !== key || resolvedLeaveSource.appToken !== appToken) {
+      resolvedLeaveSource = { key, appToken };
+    }
+    onSourceRead?.(appToken, source.tableId);
     const records = await fetchBitableRecords(httpService, {
       appToken,
       tableId: source.tableId,
@@ -398,7 +550,8 @@ export async function fetchLeaveApprovalSnapshot(
         appToken,
         tableName: '请假替班班次明细',
       }));
-    resolvedLeaveShiftDetailTableId = detailTableId;
+    resolvedLeaveSource = { key, appToken, shiftDetailTableId: detailTableId };
+    onSourceRead?.(appToken, detailTableId);
     const [detailRecords, localProjection] = await Promise.all([fetchBitableRecords(httpService, {
       appToken,
       tableId: detailTableId,
@@ -423,14 +576,16 @@ async function readCompatibleShiftDetailSnapshot(appToken: string | undefined, t
   // The new column is optional on historical tables; full records do not request missing names.
   const full = await readLatestPersistedBitableRecordSnapshot(options);
   if (full && Date.now() - full.fetchedAt <= getLeaveApprovalLocalMaxAgeMs()) return full;
-  return readLatestPersistedBitableRecordSnapshot({ ...options, fieldNames: LEAVE_SHIFT_DETAIL_FIELD_NAMES });
+  const legacy = await readLatestPersistedBitableRecordSnapshot({ ...options, fieldNames: LEAVE_SHIFT_DETAIL_FIELD_NAMES });
+  return legacy && (!full || legacy.fetchedAt > full.fetchedAt) ? legacy : full;
 }
 
 async function readCompatibleLeaveRequestSnapshot(appToken: string | undefined, tableId: string): Promise<PersistedLeaveApprovalSnapshot | null> {
   const options = { appToken, tableId, tableName: '请休假审批状态' };
   const current = await readLatestPersistedBitableRecordSnapshot({ ...options, fieldNames: LEAVE_APPROVAL_FIELD_NAMES });
   if (current && Date.now() - current.fetchedAt <= getLeaveApprovalLocalMaxAgeMs()) return current;
-  return readLatestPersistedBitableRecordSnapshot({ ...options, fieldNames: LEAVE_APPROVAL_FIELD_NAMES.filter((name) => name !== '替班安排') });
+  const legacy = await readLatestPersistedBitableRecordSnapshot({ ...options, fieldNames: LEAVE_APPROVAL_FIELD_NAMES.filter((name) => name !== '替班安排') });
+  return legacy && (!current || legacy.fetchedAt > current.fetchedAt) ? legacy : current;
 }
 
 export function enrichScheduleRecordsWithLeaveApproval(

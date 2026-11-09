@@ -29,9 +29,10 @@ describe('process-local schedule sync task recovery', () => {
   });
   it('shows a safe explanation for a known source conflict', async () => {
     const tasks = new DutyLocalSyncTasks(), id = randomUUID();
-    tasks.start(id, async () => { throw Error('数据在读取期间已变更，请重新读取'); });
+    tasks.start(id, async phase => { phase('publishing_snapshot'); throw Error('数据在读取期间已变更，请重新读取'); });
     await settle();
     expect(tasks.current(id)?.error?.message).toContain('同步期间排班数据发生变化');
+    expect(tasks.current(id)?.error).toMatchObject({ kind: 'source_changed', failedPhase: 'publishing_snapshot' });
   });
   it('expires only terminal tasks and reports restarted or missing tasks as unknown', async () => {
     let now = 1_000; const tasks = new DutyLocalSyncTasks(() => now, 100), id = randomUUID();

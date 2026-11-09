@@ -16,10 +16,9 @@ import { lifecyclePaymentUploadSourceFingerprint } from './purchase-lifecycle-pa
 import { FeishuCardActionConsumer } from './feishu-card-action.consumer';
 
 export function purchaseLifecycleNewApplicationsEnabled(): boolean {
-  // New applications use the new flow after the runtime passes all gates. An
-  // explicit false remains a supported way to stop admission while draining.
-  const configured = readEnv('PURCHASE_LIFECYCLE_CARD_ENABLED').trim();
-  return configured === '' || /^(1|true|yes|on)$/i.test(configured);
+  // This release routes every new application through separate stage cards.
+  // Keep the lifecycle runtime available to safely finish existing work.
+  return false;
 }
 
 /** The single owner starts only after the release is active and the existing

@@ -1,5 +1,6 @@
 import { InventoryStocktakeSource } from '../../server/modules/inventory-management/inventory-stocktake.source';
 import { selectStocktakeItems } from '../../server/modules/inventory-management/inventory-stocktake.rules';
+import * as bitable from '../../server/common/feishu/bitable-direct-read';
 
 describe('stocktake source field adaptation', () => {
   const envNames = ['INVENTORY', 'CATALOG', 'INBOUND', 'OUTBOUND'].map(
@@ -7,6 +8,10 @@ describe('stocktake source field adaptation', () => {
   );
   const old = envNames.map((name) => process.env[name]);
   beforeEach(() => envNames.forEach((name) => (process.env[name] = name)));
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
   afterAll(() =>
     envNames.forEach((name, i) =>
       old[i] === undefined
@@ -24,8 +29,7 @@ describe('stocktake source field adaptation', () => {
         存放位置: 'B-1F-126仓库-06-3F',
       },
     };
-    const gateway = {
-      listRecords: jest.fn(async ({ tableName }) =>
+    jest.spyOn(bitable, 'fetchBitableRecords').mockImplementation(async (_http, { tableName }) =>
         tableName === '库存台账'
           ? [
               inventory,
@@ -65,14 +69,45 @@ describe('stocktake source field adaptation', () => {
                 },
               ]
             : [],
-      ),
-    };
-    const source = new InventoryStocktakeSource({} as any, gateway as any);
+      );
+    const source = new InventoryStocktakeSource({} as any, {} as any);
     jest
       .spyOn(source as any, 'config')
       .mockResolvedValue({ appToken: 'test', url: '' });
-    return source.snapshot('B楼');
+    return source.snapshot('B楼', '2026-10');
   }
+  it('limits movement searches to the prior Shanghai month and requires fresh complete reads', async () => {
+    await snapshot('B-1F-126仓库-06-3F');
+    const calls = jest.mocked(bitable.fetchBitableRecords).mock.calls.map(([, options]) => options);
+    expect(calls).toHaveLength(4);
+    for (const [tableName, dateField] of [['入库填写', '入库日期'], ['出库填写', '出库时间']]) {
+      expect(calls.find((call) => call.tableName === tableName)).toMatchObject({
+        forceRefresh: true,
+        strict: true,
+        allowStale: false,
+        filter: { conjunction: 'and', conditions: [
+          { field_name: dateField, operator: 'isGreater', value: ['ExactDate', String(Date.parse('2026-08-31T00:00:00+08:00'))] },
+          { field_name: dateField, operator: 'isLess', value: ['ExactDate', String(Date.parse('2026-10-01T00:00:00+08:00'))] },
+        ] },
+      });
+    }
+    expect(calls.filter((call) => !call.filter).map((call) => call.tableName)).toEqual(['库存台账', '物品类别']);
+  });
+  it('bounds an incomplete snapshot without cancelling a shared source read', async () => {
+    jest.useFakeTimers();
+    let finishSharedRead: (records: bitable.BitableRecordItem[]) => void = () => {};
+    const shared = new Promise<bitable.BitableRecordItem[]>((resolve) => { finishSharedRead = resolve; });
+    const read = jest.spyOn(bitable, 'fetchBitableRecords').mockReturnValue(shared);
+    const http = {} as any;
+    const source = new InventoryStocktakeSource(http, {} as any);
+    jest.spyOn(source as any, 'config').mockResolvedValue({ appToken: 'test', url: '' });
+    const result = expect(source.snapshot(undefined, '2026-11')).rejects.toMatchObject({ code: 'ETIMEDOUT' });
+    await jest.advanceTimersByTimeAsync(180_000);
+    await result;
+    expect(read.mock.calls.every(([client]) => client === http)).toBe(true);
+    finishSharedRead([]);
+    await expect(shared).resolves.toEqual([]);
+  });
   it('does not mistake a Feishu option ID for the location label', async () => {
     const data = await snapshot('optasobP2g');
     expect(data.movements[0].location).toBe('');

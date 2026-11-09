@@ -69,6 +69,30 @@ describe('purchase lifecycle batch registration', () => {
     expect(store.registerManagerApprovalBatch).toHaveBeenNthCalledWith(2, expect.objectContaining({ flowVersion: 'lifecycle_v1' }), expect.any(Date), expect.objectContaining({appId:'cli_test'}));
     expect(result.failed).toBe(0);
   });
+  it('recognizes a matching recovered lifecycle admission after the batch switched to separate stage cards', async () => {
+    const approvalBatchId = 'purchase-application-replayed';
+    const input = { approvalBatchId, requesterOpenId: 'ou_requester', recordIds: ['rec_one', 'rec_two'], flowVersion: 'lifecycle_v1' as const };
+    const store = {
+      findManagerApprovalBatch: jest.fn().mockResolvedValue({
+        approvalBatchId, requesterOpenId: input.requesterOpenId, recordIds: input.recordIds,
+        flowVersion: 'legacy', stageCardTransition: { appId: 'cli_test' },
+      }),
+      listManagerApprovalBatchIds: jest.fn().mockResolvedValue([approvalBatchId]),
+      registerManagerApprovalBatch: jest.fn(),
+    };
+    const gateway = { getExecutionRecordAsApp: jest.fn() };
+    const ledger = { listCompletedTasksWithCreatedRecords: jest.fn().mockReturnValue([
+      { flowVersion: input.flowVersion, task: { id: approvalBatchId, result: { created: input.recordIds.map(recordId => ({ recordId })) } } },
+    ]) };
+    const service = new PurchaseManagerApprovalService(gateway as never, store as never, ledger as never);
+    const result = { processed: 0, failed: 0, manualReconciliation: 0, alerts: [], errors: [] };
+    await (service as unknown as { reconcileCompletedApplicationBatches(r: unknown): Promise<void> }).reconcileCompletedApplicationBatches(result);
+    await expect(service.enqueueApprovalBatch(input)).resolves.toBeUndefined();
+    await expect(service.enqueueApprovalBatch({ ...input, recordIds: ['rec_one', 'rec_other'] })).rejects.toThrow();
+    expect(gateway.getExecutionRecordAsApp).not.toHaveBeenCalled();
+    expect(store.registerManagerApprovalBatch).not.toHaveBeenCalled();
+    expect(result.failed).toBe(0);
+  });
   it.each(['approval', 'receipt'] as const)('does not rebuild a known lifecycle batch with the legacy %s scanner', async stage => {
     const record = { recordId: 'rec_new', status: stage === 'approval' ? '未开始（待审批）' : '下单完成（待签收）',
       approvalBatchId: 'purchase-application-new', requestCode: 'CG-NEW', requesterOpenId: 'ou_requester', purchaserOpenId: 'ou_purchaser',

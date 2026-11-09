@@ -22,5 +22,5 @@ export interface DutyLocalSyncTaskResponse {
   startedAt: string;
   finishedAt?: string;
   result?: DutyLocalSyncResult;
-  error?: { code: 'LOCAL_SYNC_FAILED'; message: string };
+  error?: { code: 'LOCAL_SYNC_FAILED'; message: string; kind?: string; failedPhase?: string };
 }

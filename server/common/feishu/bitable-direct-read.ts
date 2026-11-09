@@ -304,6 +304,7 @@ const persistedBitableRecordFileInvalidationTokens = new Map<
   string,
   string | null
 >();
+const persistedCacheInvalidationListeners = new Set<(appToken: string, tableId: string) => void>();
 let persistedBitableRecordScopeInvalidationSequence = 0;
 let latestPersistedBitableRecordFileIndexReady = false;
 let latestPersistedBitableRecordFileIndexScan: Promise<boolean | null> | null =
@@ -392,6 +393,13 @@ export function invalidateFeishuTenantAccessTokenCacheForApp(
   tenantAccessTokenCache.delete(normalizedAppId);
 }
 
+export function observePersistedBitableCacheInvalidation(
+  listener: (appToken: string, tableId: string) => void,
+): () => void {
+  persistedCacheInvalidationListeners.add(listener);
+  return () => { persistedCacheInvalidationListeners.delete(listener); };
+}
+
 export function invalidateBitableRecordCache(options?: {
   appToken?: string;
   tableId?: string;
@@ -468,6 +476,16 @@ export function invalidateBitableRecordCache(options?: {
   for (const cachePath of persistedCachePaths) {
     persistedBitableRecordFileInvalidationTokens.delete(cachePath);
     queuePersistedBitableRecordCacheDeletion(cachePath);
+  }
+
+  if (options.deletePersisted && options.appToken && options.tableId) {
+    for (const listener of persistedCacheInvalidationListeners) {
+      try {
+        listener(options.appToken, options.tableId);
+      } catch {
+        localCacheLogger.warn('Feishu local cache invalidation listener failed');
+      }
+    }
   }
 }
 
@@ -1369,7 +1387,6 @@ async function readPersistedBitableRecordCache(
     persistedBitableRecordFileInvalidationTokens.get(cachePath) !==
       activeInvalidationToken
   ) {
-    queuePersistedBitableRecordCacheDeletion(cachePath);
     return null;
   }
 
@@ -1386,7 +1403,6 @@ async function readPersistedBitableRecordCache(
       currentInvalidationToken &&
       persisted.invalidationToken !== currentInvalidationToken
     ) {
-      queuePersistedBitableRecordCacheDeletion(cachePath);
       return null;
     }
     if (persisted && fingerprint)
@@ -1671,7 +1687,7 @@ async function readIndexedPersistedBitableRecordSnapshot(
       const candidate = parsePersistedBitableRecordCache(raw);
       if (!candidate) return cached?.snapshot ?? null;
       if (
-        !(await isPersistedBitableRecordCacheCurrent(file.cachePath, candidate))
+        !(await isPersistedBitableRecordCacheCurrent(candidate))
       ) {
         return null;
       }
@@ -1818,7 +1834,6 @@ function parsePersistedBitableRecordCache(
 }
 
 async function isPersistedBitableRecordCacheCurrent(
-  cachePath: string,
   persisted: PersistedBitableRecordCache,
 ): Promise<boolean> {
   if (!persisted.appToken) return true;
@@ -1828,14 +1843,9 @@ async function isPersistedBitableRecordCacheCurrent(
   );
   const expectedInvalidationToken =
     await readPersistedBitableRecordScopeInvalidationToken(scopeKey);
-  if (
-    expectedInvalidationToken &&
-    persisted.invalidationToken !== expectedInvalidationToken
-  ) {
-    queuePersistedBitableRecordCacheDeletion(cachePath);
-    return false;
-  }
-  return true;
+  // A different process may have published a newer revision. Readers can
+  // reject a mismatch, but must leave the shared file to the writer.
+  return !expectedInvalidationToken || persisted.invalidationToken === expectedInvalidationToken;
 }
 
 function updateLatestPersistedBitableRecordIndexAfterWrite(
@@ -1970,7 +1980,10 @@ async function writePersistedBitableRecordCache(
     localCacheLogger.warn(
       `Write Feishu local cache failed for ${options.tableName}: ${message}`,
     );
-    if (options.requirePersisted) throw new Error('本地数据缓存保存失败，请稍后重试');
+    if (options.requirePersisted) {
+      if (message === 'LOCAL_SYNC_SNAPSHOT_INVALIDATED') throw error;
+      throw new Error('本地数据缓存保存失败，请稍后重试');
+    }
   } finally {
     if (
       cacheFile &&

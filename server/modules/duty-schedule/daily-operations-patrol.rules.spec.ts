@@ -122,6 +122,14 @@ describe('daily operations patrol rules', () => {
     ]);
   });
 
+  it('uses the same effective roster as the calendar when a raw roster is different', () => {
+    const previousNight = schedule('2026-10-20', 'night', '原排甲', 'C楼');
+    previousNight.dutyStaffActual = ['实际甲', '实际乙'];
+    const nextWhite = schedule('2026-10-21', 'white', '原排甲', 'E楼');
+    const result = detectScheduleRisks([previousNight, nextWhite], '2026-10-21', '2026-10-21');
+    expect(result.issues).toEqual([]);
+  });
+
   it('finds a future change overlapping the sealing work window', () => {
     const changes = [
       {

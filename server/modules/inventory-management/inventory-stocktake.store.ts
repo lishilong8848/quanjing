@@ -34,6 +34,7 @@ import {
   processLockOwnerMayBeAlive,
   type ProcessLockOwner,
 } from '../../common/process-lock-owner';
+import { validStocktakeReminders, type StocktakeReminderBatch } from './inventory-stocktake-reminder.model';
 
 export interface StocktakeGenerationJob extends StocktakeGeneration {
   owner: ProcessLockOwner | null;
@@ -77,6 +78,7 @@ export interface StocktakeLedger {
   sheets: StocktakeSheet[];
   receipts: StocktakeReceipt[];
   generationJobs: StocktakeGenerationJob[];
+  reminderBatches?: StocktakeReminderBatch[];
 }
 const MAX_BYTES = 32 * 1024 * 1024;
 function validSync(line: {
@@ -140,6 +142,8 @@ export class InventoryStocktakeStore {
       )
         throw new Error('schema');
       if (value.generationJobs === undefined) value.generationJobs = [];
+      if (value.reminderBatches !== undefined && !validStocktakeReminders(value.reminderBatches))
+        throw new Error('reminder-batches');
       if (
         value.bulkJobs !== undefined &&
         (!Array.isArray(value.bulkJobs) ||

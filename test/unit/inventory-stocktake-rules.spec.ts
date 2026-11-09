@@ -53,7 +53,7 @@ const movement = (
 });
 
 describe('库存盘点抽样', () => {
-  it('rounds up 10%, excludes all preceding three months and keeps moved entries', () => {
+  it('rounds up 10% of unmoved items, excludes all preceding three months and keeps moved entries', () => {
     const result = rules().selectStocktakeItems({
       month: '2026-10',
       building: 'A楼',
@@ -66,10 +66,10 @@ describe('库存盘点抽样', () => {
       ],
       seed: 'fixed',
     });
-    expect(result.randomTarget).toBe(3);
+    expect(result.randomTarget).toBe(2);
     expect(
       result.selected.filter((r: any) => r.reasons.includes('random')),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
     expect(
       result.selected.find((r: any) => r.item.recordId === 'rec0').reasons,
     ).toEqual(['movement']);
@@ -80,7 +80,7 @@ describe('库存盘点抽样', () => {
     ).toBe(false);
     expect(result.excludedRecordIds).toHaveLength(4);
   });
-  it('deduplicates double hits, is reproducible and handles Shanghai month boundaries', () => {
+  it('does not randomly resample moved items and handles Shanghai month boundaries', () => {
     const input = {
       month: '2026-01',
       building: 'A楼',
@@ -94,7 +94,8 @@ describe('库存盘点抽样', () => {
     };
     const result = rules().selectStocktakeItems(input);
     expect(result.selected).toHaveLength(1);
-    expect(result.selected[0].reasons.sort()).toEqual(['movement', 'random']);
+    expect(result.randomTarget).toBe(0);
+    expect(result.selected[0].reasons).toEqual(['movement']);
     expect(result.selected[0].movementIds).toEqual(['move1', 'move2']);
     expect(rules().selectStocktakeItems(input)).toEqual(result);
     expect(rules().stocktakeMonth(new Date('2025-12-31T16:00:00Z'))).toBe(

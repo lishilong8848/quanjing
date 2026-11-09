@@ -6,6 +6,7 @@ jest.mock('@nestjs/common', () => {
     Body: decorator,
     Controller: decorator,
     Get: decorator,
+    HttpCode: decorator,
     Param: decorator,
     Post: decorator,
     Query: decorator,
@@ -20,6 +21,7 @@ jest.mock('@nestjs/common', () => {
 
 jest.mock('@nestjs/platform-express', () => ({
   AnyFilesInterceptor: jest.fn(() => class TestAnyFilesInterceptor {}),
+  FileInterceptor: jest.fn(() => class TestFileInterceptor {}),
   FileInterceptor: jest.fn(() => class TestFileInterceptor {}),
   FilesInterceptor: jest.fn(() => class TestFilesInterceptor {}),
 }));
@@ -269,6 +271,71 @@ describe('DutyScheduleController routes', () => {
     expect(leaveRequestRoute).toContain('fields: 1');
     expect(leaveRequestRoute).toContain('files: 1');
     expect(leaveRequestRoute).toContain('parts: 3');
+  });
+
+  it('returns a saved leave receipt when workflow acceptance fails and retries routing for the same record', async () => {
+    const request = {
+      clientMutationId: 'leave-request-controller-recovery',
+      leaveStaffName: '测试人员',
+      startAt: '2026-11-09T09:00',
+      endAt: '2026-11-09T18:00',
+      leaveType: '年假',
+      leaveReason: '流转测试',
+    };
+    const result = {
+      ...request,
+      success: true,
+      created: 1,
+      recordIds: ['recLeaveOriginal'],
+      minimumHours: 4,
+      affectedSchedules: [{ date: '2026-11-09' }],
+      shiftGroups: [],
+    };
+    const createLeaveRequest = jest.fn()
+      .mockResolvedValueOnce(result)
+      .mockResolvedValueOnce({ ...result, created: 0 });
+    const acceptApplications = jest.fn()
+      .mockRejectedValueOnce(new Error('private workflow store error'))
+      .mockResolvedValueOnce({ recordIds: result.recordIds });
+    const controller = new DutyScheduleController(
+      { createLeaveRequest } as never,
+      {} as never,
+      {} as never,
+      { start: jest.fn() } as never,
+      undefined,
+      undefined,
+      { isEnabled: () => true, acceptApplications } as never,
+    );
+    const screenshot = { originalname: 'proof.png' } as never;
+    const principal = { role: 'admin' };
+    const access = {
+      accessPrincipal: principal,
+      accessPrincipalFingerprint: 'test-admin',
+    } as never;
+    await expect(controller.createLeaveRequest(
+      JSON.stringify(request), [screenshot], access,
+    )).resolves.toMatchObject({
+      success: true,
+      recordIds: result.recordIds,
+      message: '请休假申请已保存，审批流转待恢复',
+      approvalWorkflow: {
+        mode: 'program_card', accepted: false, pending: true, recordIds: result.recordIds,
+      },
+    });
+    await expect(controller.createLeaveRequest(
+      JSON.stringify({ ...request, workflowRecoveryOnly: true }), [screenshot], access,
+    )).resolves.toMatchObject({
+      created: 0,
+      approvalWorkflow: { accepted: true, recordIds: result.recordIds },
+    });
+    expect(createLeaveRequest).toHaveBeenLastCalledWith(
+      { ...request, workflowRecoveryOnly: true }, screenshot, principal,
+    );
+    expect(acceptApplications.mock.calls[1][0]).toEqual(acceptApplications.mock.calls[0][0]);
+    await expect(controller.createLeaveRequest(
+      JSON.stringify({ ...request, workflowRecoveryOnly: 'true' }), [screenshot], access,
+    )).rejects.toThrow('审批流转恢复标识无效');
+    expect(createLeaveRequest).toHaveBeenCalledTimes(2);
   });
 
   it('registers the guest-submittable overtime screenshot command with strict multipart limits', () => {

@@ -7,17 +7,19 @@ jest.mock('../../server/common/feishu/leave-approval-source', () => ({
   ...jest.requireActual('../../server/common/feishu/leave-approval-source'),
   fetchLeaveApprovalSnapshot: jest.fn(),
   readCachedLeaveApprovalSnapshotState: jest.fn(),
+  refreshVerifiedLeaveApprovalSnapshot: jest.fn(),
 }));
 
 import { BitableSyncService } from '../../server/modules/bitable-sync/bitable-sync.service';
 import { fetchBitableRecords, readLatestPersistedBitableRecordSnapshot } from '../../server/common/feishu/bitable-direct-read';
-import { fetchLeaveApprovalSnapshot, readCachedLeaveApprovalSnapshotState } from '../../server/common/feishu/leave-approval-source';
+import { fetchLeaveApprovalSnapshot, readCachedLeaveApprovalSnapshotState, refreshVerifiedLeaveApprovalSnapshot } from '../../server/common/feishu/leave-approval-source';
 
 describe('leave card schedule validation stays on persisted snapshots', () => {
   const persisted = jest.mocked(readLatestPersistedBitableRecordSnapshot);
   const cachedApproval = jest.mocked(readCachedLeaveApprovalSnapshotState);
   const cloudApproval = jest.mocked(fetchLeaveApprovalSnapshot);
   const cloudRecords = jest.mocked(fetchBitableRecords);
+  const refresh = jest.mocked(refreshVerifiedLeaveApprovalSnapshot);
   let service: BitableSyncService;
 
   beforeEach(() => {
@@ -25,6 +27,7 @@ describe('leave card schedule validation stays on persisted snapshots', () => {
     service = Object.assign(Object.create(BitableSyncService.prototype), {
       NON_DUTY_APP_TOKEN: 'app_test', NON_DUTY_TABLE_ID: 'tbl_nonduty',
       SCHEDULE_APP_TOKEN: 'app_test', SCHEDULE_TABLE_ID: 'tbl_schedule',
+      logger: { log: jest.fn(), warn: jest.fn() },
     });
     persisted.mockImplementation(async options => ({
       fetchedAt: Date.now(), expiresAt: Date.now() + 60_000,
@@ -36,6 +39,7 @@ describe('leave card schedule validation stays on persisted snapshots', () => {
     cachedApproval.mockResolvedValue({ snapshot: { verified: true, requests: [] }, approvalFetchedAt: Date.now(), shiftDetailFetchedAt: null });
     cloudApproval.mockResolvedValue({ verified: true, requests: [] });
     cloudRecords.mockResolvedValue([]);
+    refresh.mockResolvedValue({ verified: true, requests: [] });
   });
 
   it('uses one local approval projection and both local schedules without cloud calls', async () => {
@@ -47,10 +51,22 @@ describe('leave card schedule validation stays on persisted snapshots', () => {
     expect(rows.map(row => row.recordId)).toEqual(['rec_test']);
   });
 
-  it('fails closed when the local approval projection is missing or expired', async () => {
+  it('returns immediately and requests background recovery on a cold card callback', async () => {
     cachedApproval.mockResolvedValue({ snapshot: { verified: false, requests: [] }, approvalFetchedAt: null, shiftDetailFetchedAt: null });
-    await expect(service.getCachedLeaveRequestImpactSchedules('2026-10-28', '2026-10-28')).rejects.toThrow(/审批.*缓存/);
+    let finish!: (snapshot: { verified: true; requests: [] }) => void;
+    refresh.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await expect(service.getCachedLeaveRequestImpactSchedules('2026-10-28', '2026-10-28')).rejects.toThrow(/审批.*后台核验/);
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(cloudApproval).not.toHaveBeenCalled();
+    finish({ verified: true, requests: [] });
+  });
+
+  it('rechecks both schedules and verified approvals after shared recovery in the route worker', async () => {
+    cachedApproval.mockResolvedValueOnce({ snapshot: { verified: false, requests: [] }, approvalFetchedAt: null, shiftDetailFetchedAt: null, failure: 'expired' });
+    const rows = await service.getCachedLeaveRequestImpactSchedules('2026-10-28', '2026-10-28', { waitForApprovalRecovery: true });
+    expect(rows.map(row => row.recordId)).toEqual(['rec_test']);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(cachedApproval).toHaveBeenCalledTimes(2);
   });
 
   it('preserves the actual roster instead of overwriting it with an approval summary', async () => {

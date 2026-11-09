@@ -308,6 +308,16 @@ export class PurchaseManagerApprovalService {
     recordIds: string[];
     flowVersion?: 'legacy' | 'lifecycle_v1';
   }): Promise<void> {
+    const existing = await this.store.findManagerApprovalBatch?.(input.approvalBatchId);
+    if (existing?.stageCardTransition) {
+      if (existing.stageCardTransition.appId !== readEnv('FEISHU_APP_ID') ||
+          existing.approvalBatchId !== input.approvalBatchId || existing.requesterOpenId !== input.requesterOpenId ||
+          existing.recordIds.length !== input.recordIds.length ||
+          existing.recordIds.some((recordId, index) => recordId !== input.recordIds[index])) {
+        throw new ConflictException('采购分阶段卡已登记的批次身份不一致');
+      }
+      return;
+    }
     if (!this.isEnabled()) {
       if (input.flowVersion === 'lifecycle_v1') throw new ConflictException('采购全流程卡功能尚未启用');
       return;
@@ -511,8 +521,10 @@ export class PurchaseManagerApprovalService {
         executionRecordId: result.executionRecordId,
         messageId: result.messageId,
         actorOpenId: result.operatorOpenId,
-      });
-      return renderManagerApprovalBatch(opened.batch);
+      }, new Date(), batch => this.assertMigratedApprovalActor(
+        batch, result.operatorOpenId, [result.executionRecordId],
+      ));
+      return this.renderScopedManagerApprovalBatch(opened.batch, result.operatorOpenId);
     }
     if (result.action === 'cancel_item_reject') {
       const cancelled = await this.store.cancelManagerApprovalBatchRejectEditor(
@@ -520,23 +532,28 @@ export class PurchaseManagerApprovalService {
           approvalBatchId: current.approvalBatchId,
           messageId: result.messageId,
           actorOpenId: result.operatorOpenId,
-        },
+        }, new Date(), batch => this.assertMigratedApprovalActor(
+          batch, result.operatorOpenId, batch.selectedRejectRecordId ? [batch.selectedRejectRecordId] : [],
+        ),
       );
-      return renderManagerApprovalBatch(cancelled.batch);
+      return this.renderScopedManagerApprovalBatch(cancelled.batch, result.operatorOpenId);
     }
     if (result.action === 'submit_item_reject') {
-      if (!current.selectedRejectRecordId) {
+      const selectedRecordId = current.selectedRejectRecordId;
+      if (!selectedRecordId) {
         throw new ConflictException('采购批次审批卡未选择驳回明细');
       }
       const claimed = await this.store.claimManagerApprovalBatchItemReject({
         eventId: result.eventId,
         approvalBatchId: current.approvalBatchId,
-        executionRecordId: current.selectedRejectRecordId,
+        executionRecordId: selectedRecordId,
         rejectionReason: result.rejectionReason,
         messageId: result.messageId,
         actorOpenId: result.operatorOpenId,
-      },new Date(),batch=>this.assertCurrentManagerActor(result.operatorOpenId,parsePurchaseManagerBatchApprovalCardContext(batch.cardContext).building));
-      return renderManagerApprovalBatch(claimed.batch);
+      }, new Date(), batch => this.assertMigratedApprovalActor(
+        batch, result.operatorOpenId, [selectedRecordId],
+      ));
+      return this.renderScopedManagerApprovalBatch(claimed.batch, result.operatorOpenId);
     }
     const claimed = await this.store.claimManagerApprovalBatchPendingApproval({
       eventId: result.eventId,
@@ -547,8 +564,11 @@ export class PurchaseManagerApprovalService {
           : 'building_self',
       messageId: result.messageId,
       actorOpenId: result.operatorOpenId,
-    },new Date(),batch=>this.assertCurrentManagerActor(result.operatorOpenId,parsePurchaseManagerBatchApprovalCardContext(batch.cardContext).building));
-    return renderManagerApprovalBatch(claimed.batch);
+    }, new Date(), batch => {
+      const replay = batch.items.filter(item => item.actionEventId === result.eventId && item.actorOpenId === result.operatorOpenId);
+      this.assertMigratedApprovalActor(batch, result.operatorOpenId, (replay.length ? replay : batch.items.filter(item => item.status === 'pending')).map(item => item.executionRecordId));
+    });
+    return this.renderScopedManagerApprovalBatch(claimed.batch, result.operatorOpenId);
   }
 
   async patchManagerApprovalCardView(messageId: string, actorOpenId: string, batch = false): Promise<void> {
@@ -556,7 +576,7 @@ export class PurchaseManagerApprovalService {
       ? await this.store.findManagerApprovalBatchCard(messageId, actorOpenId)
       : await this.store.findManagerApprovalCard(messageId, actorOpenId);
     if (!current) throw new ConflictException('采购审批卡消息映射不存在');
-    const card = batch ? renderManagerApprovalBatch(current as PurchaseManagerApprovalBatchEntry) : renderManagerApprovalCard(current as PurchaseManagerApprovalCardEntry);
+    const card = batch ? this.renderScopedManagerApprovalBatch(current as PurchaseManagerApprovalBatchEntry, actorOpenId) : renderManagerApprovalCard(current as PurchaseManagerApprovalCardEntry);
     await this.gateway.updateInteractiveCard(requireMessageId(messageId), card);
   }
 
@@ -564,6 +584,82 @@ export class PurchaseManagerApprovalService {
     assertFeishuBusinessIdentity(this.accessConfiguration,openId);
     const members=typeof this.accessConfiguration?.currentDutyRoutePeople==='function'?purchaseCurrentDutyMembers(this.accessConfiguration,kind,{building,...(specialty?{specialty}:{})}):null;
     if(members!==null&&!members.some(person=>person.openId===openId))throw new ForbiddenException('当前采购岗位已变化，请使用现任人员的新卡片办理');
+  }
+
+  private renderScopedManagerApprovalBatch(
+    batch: PurchaseManagerApprovalBatchEntry,
+    openId: string,
+  ): Record<string, unknown> {
+    const transition = batch.stageCardTransition;
+    if (transition) {
+      const appId = readEnv('FEISHU_APP_ID');
+      const access = this.accessConfiguration;
+      try {
+        assertFeishuBusinessIdentity(access, openId);
+        const principal = access?.feishuPrincipal(openId, appId);
+        if (!principal || principal.requiresPasswordChange || transition.appId !== appId || !batch.items.length) {
+          return unavailableManagerStageCard();
+        }
+        // This card's bulk action uses the canonical full pending set. Do not
+        // present a smaller actionable subset as if the button only applies to it.
+        for (const item of batch.items) {
+          const target = item.authorityTarget;
+          if (!target || !canPerformBusinessAction(principal, { module: 'purchase', action: 'read', ...target })) {
+            return unavailableManagerStageCard();
+          }
+          const duties = access && purchaseCurrentDutyMembers(access, 'purchase_manager', target);
+          if (!duties?.some(person => person.openId === openId) ||
+              (item.status === 'pending' && !canPerformBusinessAction(principal, { module: 'purchase', action: 'approve', ...target }))) {
+            return unavailableManagerStageCard();
+          }
+        }
+      } catch {
+        return unavailableManagerStageCard();
+      }
+    }
+    return renderManagerApprovalBatch(batch);
+  }
+
+  private assertMigratedApprovalActor(
+    batch: PurchaseManagerApprovalBatchEntry,
+    openId: string,
+    recordIds: string[],
+  ): void {
+    if (!batch.stageCardTransition) {
+      this.assertCurrentManagerActor(openId, parsePurchaseManagerBatchApprovalCardContext(batch.cardContext).building);
+      return;
+    }
+    for (const recordId of recordIds) {
+      const item = batch.items.find(row => row.executionRecordId === recordId);
+      this.assertMigratedStageAction(batch, item, openId, 'approve');
+    }
+  }
+
+  private assertMigratedStageAction(
+    batch: PurchaseManagerApprovalBatchEntry,
+    item: PurchaseManagerApprovalBatchItemEntry | undefined,
+    openId: string,
+    action: 'approve' | 'order' | 'receive',
+  ): void {
+    const transition = batch.stageCardTransition;
+    if (!transition) return;
+    assertFeishuBusinessIdentity(this.accessConfiguration, openId);
+    const appId = readEnv('FEISHU_APP_ID')?.trim() || '';
+    const target = item?.authorityTarget;
+    const access = this.accessConfiguration;
+    const principal = access?.feishuPrincipal(openId, appId);
+    if (transition.appId !== appId || !target || !principal || principal.requiresPasswordChange ||
+        !canPerformBusinessAction(principal, { module: 'purchase', action, ...target }) ||
+        (action === 'approve' && !canPerformBusinessAction(principal, { module: 'purchase', action: 'read', ...target }))) {
+      throw new ForbiddenException('采购阶段卡操作权限已变化');
+    }
+    if (action !== 'receive') {
+      const duty = action === 'approve' ? 'purchase_manager' : item!.choice === 'building_self' ? 'building_executor' : 'purchase_executor';
+      const current = access && purchaseCurrentDutyMembers(access, duty, target);
+      if (!current?.some(person => person.openId === openId)) {
+        throw new ForbiddenException('当前采购岗位已变化，请使用现任人员的新卡片办理');
+      }
+    }
   }
 
   async handlePurchaseBatchFulfillmentCardAction(
@@ -611,6 +707,7 @@ export class PurchaseManagerApprovalService {
             currentItem.choice === 'building_self' ? 'building_executor' : 'purchase_executor',
             currentItem.authorityTarget?.specialty,
           );
+          this.assertMigratedStageAction(current, currentItem, result.operatorOpenId, 'order');
           if (result.lifecycle) {
             const target = currentItem.authorityTarget, appId = readEnv('FEISHU_APP_ID')?.trim() || '';
             const principal = this.accessConfiguration?.feishuPrincipal(result.operatorOpenId, appId);
@@ -670,8 +767,9 @@ export class PurchaseManagerApprovalService {
         },
         result.eventId,
         new Date(),
-        (_current, currentItem) => {
+        (current, currentItem) => {
           assertFeishuBusinessIdentity(this.accessConfiguration, result.operatorOpenId);
+          this.assertMigratedStageAction(current, currentItem, result.operatorOpenId, 'receive');
           if (result.lifecycle) {
             const target = currentItem.authorityTarget, appId = readEnv('FEISHU_APP_ID')?.trim() || '';
             const principal = this.accessConfiguration?.feishuPrincipal(result.operatorOpenId, appId);
@@ -699,6 +797,12 @@ export class PurchaseManagerApprovalService {
     }
 
     const { batch } = await this.store.getPurchaseBatchForFulfillmentCard(identity);
+    if (batch.stageCardTransition && 'executionRecordId' in result && result.executionRecordId) {
+      this.assertMigratedStageAction(
+        batch, batch.items.find(item => item.executionRecordId === result.executionRecordId),
+        result.operatorOpenId, role === 'purchaser' ? 'order' : 'receive',
+      );
+    }
 
     if (result.action === 'prepare_receipt_photo' || result.action === 'prepare_invoice') {
       const updated = await this.store.preparePurchaseBatchReceiptUpload(identity, {
@@ -1014,11 +1118,22 @@ export class PurchaseManagerApprovalService {
       kind: 'manager_batch_receipt_requested',
     });
     const receiptBatchIds = new Set<string>();
+    const archivedReceiptBatchIds = new Set<string>();
     for (const receipt of receipts) {
-      const approvalBatchId = receipt.businessEventId.replace(
-        /^manager_batch_receipt_requested:/u,
-        '',
-      );
+      let approvalBatchId: string;
+      try {
+        approvalBatchId = parseReceiptBatchIdFromNotification(receipt);
+        if (receipt.lifecycleBinding) {
+          const batch = await this.store.findManagerApprovalBatch(approvalBatchId);
+          if (batch?.stageCardTransition) {
+            archivedReceiptBatchIds.add(approvalBatchId);
+            continue;
+          }
+        }
+      } catch (error) {
+        recordTaskFailure(result, `receipt-recovery:${receipt.key}`, error);
+        continue;
+      }
       receiptBatchIds.add(approvalBatchId);
       if (receipt.status === 'failed') {
         try {
@@ -1105,7 +1220,7 @@ export class PurchaseManagerApprovalService {
         }
         await this.store.enqueueNotification(
           {
-            businessEventId: `manager_batch_receipt_requested:${batch.approvalBatchId}`,
+            businessEventId: `manager_batch_receipt_requested:${batch.approvalBatchId}${archivedReceiptBatchIds.has(batch.approvalBatchId) ? ':stage-cards' : ''}`,
             recordId: batch.recordIds[0]!,
             recipientOpenId: batch.requesterOpenId,
             kind: 'manager_batch_receipt_requested',
@@ -1574,14 +1689,14 @@ export class PurchaseManagerApprovalService {
     }
   }
 
-  /** A known new-flow batch must never be rebuilt by the legacy recovery path. */
+  /** Canonical batches own their cards. A switched batch must not get rebuilt from a view row. */
   private async isKnownLifecycleRecoveryBatch(value: string | undefined): Promise<boolean> {
     const batchId = value?.trim() || '';
     if (!batchId) return false;
     const task = this.submissionTaskLedger?.findByTaskId(batchId);
     if (task?.flowVersion === 'lifecycle_v1') return true;
     const batch = await this.store.findManagerApprovalBatch(batchId);
-    return batch?.flowVersion === 'lifecycle_v1';
+    return batch?.flowVersion === 'lifecycle_v1' || Boolean(batch?.stageCardTransition);
   }
 
   private async ensureInitialCallbackCard(
@@ -1782,11 +1897,12 @@ export class PurchaseManagerApprovalService {
         continue;
       }
       if (item.status !== 'processing') continue;
+      const strictSource = batch.flowVersion === 'lifecycle_v1' || Boolean(batch.stageCardTransition);
 
       let latest: PurchaseWorkflowRecord;
       try {
-        if(batch.flowVersion==='lifecycle_v1' && !sourceGuard){
-          const appId=batch.lifecycleAppId,fingerprint=lifecyclePaymentUploadSourceFingerprint();
+        if(strictSource && !sourceGuard){
+          const appId=batch.lifecycleAppId ?? batch.stageCardTransition?.appId,fingerprint=lifecyclePaymentUploadSourceFingerprint();
           sourceGuard=async()=>{
             if(!appId || readEnv('FEISHU_APP_ID')!==appId || lifecyclePaymentUploadSourceFingerprint()!==fingerprint)throw new ConflictException('采购审批持久来源已变化');
             await this.store.verifyLifecycleReceiptImageSource(appId,fingerprint);
@@ -1794,9 +1910,10 @@ export class PurchaseManagerApprovalService {
           };
         }
         latest = await this.getManagerDecisionRecord(recordId,sourceGuard);
-        if (batch.flowVersion === 'lifecycle_v1' && latest.status === DECISION_PRE_STATE) {
+        if (strictSource && latest.status === DECISION_PRE_STATE) {
           const actual = purchaseAuthorityTarget(latest);
           if (latest.approvalBatchId !== batch.approvalBatchId || !item.authorityTarget || !actual ||
+              (batch.stageCardTransition && latest.requesterOpenId !== batch.requesterOpenId) ||
               actual.building !== item.authorityTarget.building || actual.specialty !== item.authorityTarget.specialty) {
             throw new ConflictException('采购明细授权范围已变化，需要重新核对');
           }
@@ -1866,7 +1983,7 @@ export class PurchaseManagerApprovalService {
       };
       let patch: Record<string, unknown>;
       try {
-        if (batch.flowVersion === 'lifecycle_v1') {
+        if (strictSource) {
           const alreadyApplied = isManagerApprovalTargetApplied(latest, decision);
           if (alreadyApplied) {
             if (latest.approvalActionId !== action.eventId || latest.approvalBatchId !== batch.approvalBatchId) {
@@ -1923,7 +2040,7 @@ export class PurchaseManagerApprovalService {
 
       try {
         await this.updateManagerDecisionRecord(recordId, patch,sourceGuard);
-        if (batch.flowVersion === 'lifecycle_v1') {
+        if (strictSource) {
           const confirmed = await this.getManagerDecisionRecord(recordId,sourceGuard);
           if (!isManagerApprovalTargetApplied(confirmed, decision) || confirmed.approvalActionId !== action.eventId || confirmed.approvalBatchId !== batch.approvalBatchId) throw new ConflictException('采购审批写入回读不一致，需核对');
         }
@@ -1944,7 +2061,7 @@ export class PurchaseManagerApprovalService {
       } catch (writeError) {
         let observed: PurchaseWorkflowRecord;
         try {
-          observed = await this.getManagerDecisionRecord(recordId);
+          observed = await this.getManagerDecisionRecord(recordId, sourceGuard);
         } catch (readError) {
           const ambiguous = new Error(
             `Base 写入结果未知，复核读取失败：${safeErrorMessage(readError)}`,
@@ -1974,7 +2091,7 @@ export class PurchaseManagerApprovalService {
           continue;
         }
         if (isManagerApprovalTargetApplied(observed, decision) &&
-            (batch.flowVersion !== 'lifecycle_v1' || (observed.approvalActionId === action.eventId && observed.approvalBatchId === batch.approvalBatchId))) {
+            (!strictSource || (observed.approvalActionId === action.eventId && observed.approvalBatchId === batch.approvalBatchId))) {
           await this.store.completeManagerApprovalBatchActionRecord(
             action.key,
             action.claimToken,
@@ -2090,7 +2207,8 @@ export class PurchaseManagerApprovalService {
     const item = batch.items.find(row => row.executionRecordId === notification.recordId);
     const target = item?.authorityTarget;
     if (!target) throw new ForbiddenException('采购明细授权范围缺失');
-    if (notification.kind === 'manager_batch_approval_requested' || notification.kind === 'manager_batch_approval_refresh') {
+    if (notification.kind === 'manager_batch_approval_requested' || notification.kind === 'manager_batch_approval_refresh' ||
+        notification.kind === 'manager_batch_approval_attention_required') {
       const permitted = batch.items.some(candidate => {
         const scope = candidate.authorityTarget;
         if (!scope) return false;
@@ -2331,7 +2449,9 @@ export class PurchaseManagerApprovalService {
         }
       }
       const context = serializePurchaseManagerBatchApprovalCardContext(input);
-      const preparedCard = batch.state === 'awaiting_delivery'
+      const preparedCard = batch.stageCardTransition
+        ? this.renderScopedManagerApprovalBatch({ ...batch, cardContext: context }, notification.recipientOpenId)
+        : batch.state === 'awaiting_delivery'
         ? buildPurchaseManagerBatchApprovalCard(parsePurchaseManagerBatchApprovalCardContext(context))
         : renderManagerApprovalBatch({ ...batch, cardContext: context });
       serializeInteractiveCard(preparedCard);
@@ -2500,10 +2620,7 @@ export class PurchaseManagerApprovalService {
   ): Promise<void> {
     try {
       if (notification.kind === 'manager_batch_receipt_requested') {
-        const approvalBatchId = notification.businessEventId.replace(
-          /^manager_batch_receipt_requested:/u,
-          '',
-        );
+        const approvalBatchId = parseReceiptBatchIdFromNotification(notification);
         const batch =
           await this.store.findManagerApprovalBatch(approvalBatchId);
         if (!batch) {
@@ -2563,7 +2680,9 @@ export class PurchaseManagerApprovalService {
         return await this.processLifecycleStageNotification(notification, now);
       }
       const view = notification.kind === 'manager_batch_approval_result' ? batch : managerBatchCardView(batch, notification.recipientOpenId);
-      const card = renderManagerApprovalBatch(view);
+      const card = notification.kind === 'manager_batch_approval_result'
+        ? renderManagerApprovalBatch(view)
+        : this.renderScopedManagerApprovalBatch(view, notification.recipientOpenId);
       if (notification.kind === 'manager_batch_approval_result') {
         const anchored = await this.store.markManagerApprovalBatchSendStarted(
           notification.key,
@@ -2726,6 +2845,7 @@ export class PurchaseManagerApprovalService {
         cardContext: string;
       }> = [];
       if (context.action === 'order') {
+        const receiptEventId = await this.purchaseBatchReceiptEventId(batch);
         followUps.push(
           {
             businessEventId: `manager_batch_purchase_refresh:${batch.approvalBatchId}:${context.executionRecordId}`,
@@ -2734,13 +2854,13 @@ export class PurchaseManagerApprovalService {
             kind: 'manager_batch_purchase_refresh',
             cardContext: batch.cardContext,
           },
-          {
-            businessEventId: `manager_batch_receipt_requested:${batch.approvalBatchId}`,
+          ...(receiptEventId ? [{
+            businessEventId: receiptEventId,
             recordId: batch.recordIds[0]!,
             recipientOpenId: batch.requesterOpenId,
-            kind: 'manager_batch_receipt_requested',
+            kind: 'manager_batch_receipt_requested' as const,
             cardContext: batch.cardContext,
-          },
+          }] : []),
           {
             businessEventId: `manager_batch_receipt_refresh:${batch.approvalBatchId}:${context.executionRecordId}`,
             recordId: context.executionRecordId,
@@ -2993,6 +3113,26 @@ export class PurchaseManagerApprovalService {
         notification.kind === 'manager_batch_purchase_assigned' ||
         notification.kind === 'manager_batch_receipt_requested';
       if (isInitialDelivery) {
+        if (batch.stageCardTransition) {
+          const stage = isPurchaseCard ? 'ordering' : 'receipt';
+          const pending = batch.items.filter(item => {
+            const record = fulfillmentRecords.get(item.executionRecordId);
+            return item.status === 'approved' && record &&
+              resolvePurchaseStage(record.status) === stage &&
+              (isPurchaseCard ? item.purchaserOpenId : batch.requesterOpenId) === notification.recipientOpenId;
+          });
+          if (!pending.length) throw new ConflictException('采购阶段已变化，未发送旧阶段卡');
+          for (const item of pending) {
+            const record = fulfillmentRecords.get(item.executionRecordId)!;
+            const currentTarget = purchaseAuthorityTarget(record);
+            if (record.approvalBatchId !== batch.approvalBatchId || record.requesterOpenId !== batch.requesterOpenId ||
+                (isPurchaseCard && record.purchaserOpenId !== notification.recipientOpenId) ||
+                currentTarget?.building !== item.authorityTarget?.building || currentTarget?.specialty !== item.authorityTarget?.specialty) {
+              throw new ConflictException('采购阶段卡明细权限或人员已变化');
+            }
+            this.assertMigratedStageAction(batch, item, notification.recipientOpenId, isPurchaseCard ? 'order' : 'receive');
+          }
+        }
         if (notification.kind === 'manager_batch_receipt_requested') {
           if (!receiptDeliveryRecordIds.length) {
             throw new ConflictException('采购签收卡没有可写入投递围栏的明细');
@@ -3308,7 +3448,7 @@ export class PurchaseManagerApprovalService {
           .filter(
             (entry) =>
               entry.sendOutcome === 'delivered' &&
-              entry.cardContext === batch.cardContext,
+              this.matchesStageFulfillmentDelivery(batch, entry),
           )
           .map((entry) => entry.messageId)
           .filter(Boolean),
@@ -3334,12 +3474,34 @@ export class PurchaseManagerApprovalService {
       (entry) =>
         entry.sendOutcome === 'delivered' &&
         Boolean(entry.messageId) &&
-        entry.cardContext === batch.cardContext,
+        this.matchesStageFulfillmentDelivery(batch, entry),
     );
     if (!delivered) {
       throw new ConflictException('采购履约卡片送达台账不存在');
     }
     return delivered;
+  }
+
+  private matchesStageFulfillmentDelivery(
+    batch: PurchaseManagerApprovalBatchEntry,
+    entry: PurchaseWorkflowNotificationEntry,
+  ): boolean {
+    const transition = batch.stageCardTransition;
+    if (!transition) return entry.cardContext === batch.cardContext;
+    return !entry.lifecycleBinding && !transition.archivedMessageIds.includes(entry.messageId) &&
+      (entry.cardContext === batch.cardContext || entry.cardContext === transition.originalCardContext);
+  }
+
+  private async purchaseBatchReceiptEventId(batch: PurchaseManagerApprovalBatchEntry): Promise<string | null> {
+    const eventId = `manager_batch_receipt_requested:${batch.approvalBatchId}`;
+    if (!batch.stageCardTransition) return eventId;
+    const receipts = await this.store.listNotifications({
+      kind: 'manager_batch_receipt_requested',
+      recipientOpenId: batch.requesterOpenId,
+    });
+    const related = receipts.filter(row => row.businessEventId === eventId || row.businessEventId.startsWith(`${eventId}:`));
+    if (related.some(row => this.matchesStageFulfillmentDelivery(batch, row))) return null;
+    return related.length ? `${eventId}:stage-cards` : eventId;
   }
 
   private async resolveManagerDecisionPurchaser(
@@ -3708,6 +3870,15 @@ function renderManagerApprovalCard(
   return buildPurchaseManagerManualReconciliationCard(input, {
     choice: card.choice || undefined,
   });
+}
+
+function unavailableManagerStageCard(): Record<string, unknown> {
+  return {
+    schema: '2.0',
+    config: { update_multi: true, enable_forward: false },
+    header: { template: 'grey', title: { tag: 'plain_text', content: '采购审批' } },
+    body: { elements: [{ tag: 'div', text: { tag: 'plain_text', content: '审批范围已变化，请到平台查看有权限的明细。' } }] },
+  };
 }
 
 function renderManagerApprovalBatch(

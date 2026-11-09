@@ -396,10 +396,10 @@ function normalizedHistory(
 
 function staffNames(row: MonthlySchedule): string[] {
   const source =
-    cleanText(row.actualDutyStaff) ||
     (Array.isArray(row.dutyStaffActual)
       ? row.dutyStaffActual.map(cleanText).filter(Boolean).join('、')
       : '') ||
+    cleanText(row.actualDutyStaff) ||
     cleanText(row.personText);
   return [...new Set(source.split(STAFF_SEPARATOR).map(cleanText).filter(Boolean))];
 }

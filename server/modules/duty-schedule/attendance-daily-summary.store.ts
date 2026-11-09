@@ -12,6 +12,7 @@ type AttendanceLiveCheckTask = Exclude<
 
 export interface AttendanceDailyCheckSummary {
   generatedAt: string;
+  executionId?: string;
   expectedKeys: string[];
   normalKeys: string[];
   excludedKeys: string[];
@@ -50,11 +51,39 @@ export class AttendanceDailySummaryStore {
       : null;
   }
 
-  async write(summary: AttendanceDailySummary): Promise<void> {
+  async write(
+    summary: AttendanceDailySummary,
+    recheck?: { targetKeys: readonly string[]; normalKeys: readonly string[] },
+  ): Promise<void> {
     assertSummary(summary);
     await this.enqueue(async () => {
       const ledger = await this.readLedger();
-      ledger.summaries[summary.businessDate] = structuredClone(summary);
+      const checks = ledger.summaries[summary.businessDate]?.checks;
+      if (recheck && checks) {
+        const normal = new Set(recheck.normalKeys);
+        const anomalies = new Map(summary.anomalies.map(item => [item.key, item]));
+        const verifiedKeys = new Set(recheck.targetKeys.filter(key => normal.has(key) || anomalies.has(key)));
+        for (const check of Object.values(checks)) {
+          if (!check) continue;
+          const updatedKeys = check.expectedKeys.filter(key => verifiedKeys.has(key) && !check.excludedKeys.includes(key));
+          if (!updatedKeys.length) continue;
+          const updated = new Set(updatedKeys);
+          check.normalKeys = check.normalKeys.filter(key => !updated.has(key));
+          check.anomalies = check.anomalies.filter(item => !updated.has(item.key));
+          for (const key of updatedKeys) {
+            const anomaly = anomalies.get(key);
+            if (anomaly) check.anomalies.push(anomaly);
+            else check.normalKeys.push(key);
+          }
+          check.generatedAt = summary.generatedAt;
+        }
+        ledger.summaries[summary.businessDate] = aggregateChecks(summary.businessDate, checks);
+      } else {
+        const archived = structuredClone(summary);
+        // Keep the published archive totals and preserve the individual check results.
+        if (checks) archived.checks = { ...checks, ...archived.checks };
+        ledger.summaries[summary.businessDate] = archived;
+      }
       await this.writeLedger(ledger);
     });
   }
@@ -63,6 +92,7 @@ export class AttendanceDailySummaryStore {
     task: AttendanceLiveCheckTask;
     businessDate: string;
     generatedAt: string;
+    executionId?: string;
     normal: Array<{ key: string }>;
     excluded: Array<{ key: string }>;
     anomalies: AttendanceAnomaly[];
@@ -102,6 +132,7 @@ export class AttendanceDailySummaryStore {
         ...previousChecks,
         [input.task]: {
           generatedAt: input.generatedAt,
+          ...(input.executionId ? { executionId: input.executionId } : {}),
           expectedKeys: [
             ...input.normal.map((item) => item.key),
             ...input.anomalies.map((item) => item.key),

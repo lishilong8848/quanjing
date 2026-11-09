@@ -33,20 +33,21 @@ describe('production purchase admission wiring', () => {
     requestFingerprint: '1'.repeat(64), submissionFingerprint: '2'.repeat(64), flowVersion,
     task: { id: 'purchase-application-' + id, status: 'pending' as const, message: 'synthetic', createdAt: new Date().toISOString() },
   });
-  it.each(['', 'true'])('admits and recovers the same new-flow task using the real module when enabled (%s)', async setting => {
+  it.each(['', 'true', 'on', 'false'])('uses separate stage cards with a previous configuration value of %s', async setting => {
     mockAdmissionSetting = setting;
-    const store = await ledger(), original = entry();
-    expect(store.reserve(original).created).toBe(true);
-    const restarted = await ledger();
-    const result = restarted.reserve({ ...original, task: { ...original.task, id: 'must-not-create-a-second-task' } });
-    expect(result.created).toBe(false);
-    expect(result.entry.task.id).toBe(original.task.id);
+    const store = await ledger();
+    expect(store.reserve(entry('legacy-request-123', 'legacy')).entry.flowVersion).toBe('legacy');
+    expect(() => store.reserve(entry())).toThrow('采购全流程卡');
+    expect(store.findByIdentity('H楼', 'synthetic-owner', 'original-request-123')).toBeUndefined();
   });
   it('drains existing reservations when disabled, but rejects a new reservation as definitely not written through the HTTP error contract', async () => {
-    const original = entry(); (await ledger()).reserve(original);
-    mockAdmissionSetting = 'false';
+    const previousVersion = new PurchaseApplicationTaskLedgerStore(join(directory, 'applications.json'), { allowLifecycleReservations: true });
+    const original = entry(); previousVersion.reserve(original);
+    mockAdmissionSetting = 'true';
     const disabled = await ledger();
-    expect(disabled.reserve(original).created).toBe(false);
+    expect(disabled.reserve({ ...original, task: { ...original.task, id: 'must-not-create-a-second-task' } })).toMatchObject({
+      created: false, entry: { task: { id: original.task.id } },
+    });
     let failure: unknown;
     try { disabled.reserve(entry('new-request-456')); } catch (e) { failure = e; }
     expect(failure).toBeDefined();

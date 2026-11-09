@@ -9,6 +9,7 @@ import {
   getFeishuAuthPayload,
   readEnv,
 } from '../../common/config/external-services.config';
+import { invalidateBitableRecordCache } from '../../common/feishu/bitable-direct-read';
 import type { LeaveRequestShiftGroup } from '../../../shared/leave-request-impact';
 import type { LeaveShiftSubstituteAssignment } from './leave-workflow.types';
 
@@ -193,8 +194,9 @@ export class LeaveWorkflowDetailGateway {
     fields: Record<string, unknown>,
     clientToken: string,
   ): Promise<FeishuRecord> {
+    const { appToken, tableId, url } = await this.recordsTarget();
     const response = await this.httpService.axiosRef.post(
-      await this.recordsUrl(),
+      url,
       { fields },
       {
         ...(await this.requestConfig()),
@@ -202,6 +204,7 @@ export class LeaveWorkflowDetailGateway {
       },
     );
     assertFeishuSuccess(response.data, '创建请假替班班次明细失败');
+    invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true });
     const record = response.data?.data?.record as FeishuRecord | undefined;
     if (!record?.record_id) {
       throw new BadGatewayException('创建请假替班班次明细响应缺少记录');
@@ -213,12 +216,14 @@ export class LeaveWorkflowDetailGateway {
     recordId: string,
     fields: Record<string, unknown>,
   ): Promise<FeishuRecord> {
+    const { appToken, tableId, url } = await this.recordsTarget();
     const response = await this.httpService.axiosRef.put(
-      `${await this.recordsUrl()}/${encodeURIComponent(recordId)}`,
+      `${url}/${encodeURIComponent(recordId)}`,
       { fields },
       await this.requestConfig(),
     );
     assertFeishuSuccess(response.data, '更新请假替班班次明细失败');
+    invalidateBitableRecordCache({ appToken, tableId, deletePersisted: true });
     return (
       (response.data?.data?.record as FeishuRecord | undefined) || {
         record_id: recordId,
@@ -228,6 +233,10 @@ export class LeaveWorkflowDetailGateway {
   }
 
   private async recordsUrl(): Promise<string> {
+    return (await this.recordsTarget()).url;
+  }
+
+  private async recordsTarget() {
     const appToken = readEnv('FEISHU_LEAVE_REQUEST_APP_TOKEN', [
       'FEISHU_LEAVE_SUBSTITUTE_APP_TOKEN',
       'FEISHU_MAIN_APP_TOKEN',
@@ -239,9 +248,10 @@ export class LeaveWorkflowDetailGateway {
     const tableId =
       readEnv('FEISHU_LEAVE_SHIFT_DETAIL_TABLE_ID') ||
       (await this.discoverTableId(appToken));
-    return `${OPENAPI_BASE_URL}/bitable/v1/apps/${encodeURIComponent(
+    const url = `${OPENAPI_BASE_URL}/bitable/v1/apps/${encodeURIComponent(
       appToken,
     )}/tables/${encodeURIComponent(tableId)}/records`;
+    return { appToken, tableId, url };
   }
 
   private async discoverTableId(appToken: string): Promise<string> {

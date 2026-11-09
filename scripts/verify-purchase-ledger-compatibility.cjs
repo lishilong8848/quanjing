@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const CAPABILITY = 'purchase-workflow-ledger-v1';
+const STAGE_CARDS_CAPABILITY = 'purchase-stage-cards-v1';
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 function ordinaryPath(file) {
   let cursor = path.resolve(file);
@@ -50,6 +51,8 @@ function verifyPurchaseLedgerCompatibility({appRoot,runtimeDist,ledgerPath}) {
   if(ledger.lifecycleReceiptPrepareQueue!==undefined&&(!object(ledger.lifecycleReceiptPrepareQueue)||!Array.isArray(ledger.lifecycleReceiptPrepareQueue.tasks)))fail('PURCHASE_LEDGER_INVALID');
   if(ledger.lifecycleReceiptImageLedger!==undefined&&(!object(ledger.lifecycleReceiptImageLedger)||!Array.isArray(ledger.lifecycleReceiptImageLedger.tasks)||!Array.isArray(ledger.lifecycleReceiptImageLedger.intents)))fail('PURCHASE_LEDGER_INVALID');
   const required=ledger.requiredRuntimeCapability;
+  const hasStageCardTransition=(ledger.managerApprovalBatches||[]).some(row=>row.stageCardTransition!==undefined);
+  if(hasStageCardTransition && required!==STAGE_CARDS_CAPABILITY)fail('PURCHASE_LEDGER_CAPABILITY_MARKER_MISSING');
   if(required===undefined){
     const hasNewData=ledger.lifecycleReceiptImageSource!==undefined||arrays.some(key=>ledger[key]?.length>0)||
       (ledger.managerApprovalBatches||[]).some(row=>row?.flowVersion==='lifecycle_v1')||
@@ -61,8 +64,8 @@ function verifyPurchaseLedgerCompatibility({appRoot,runtimeDist,ledgerPath}) {
     if(hasNewData)fail('PURCHASE_LEDGER_CAPABILITY_MARKER_MISSING');
     return {compatible:true,requiredCapability:null,runtimeCapability};
   }
-  if(required!==CAPABILITY)fail('PURCHASE_LEDGER_CAPABILITY_UNKNOWN');
-  if(runtimeCapability!==required)fail('PURCHASE_LEDGER_RUNTIME_INCOMPATIBLE');
+  if(required!==CAPABILITY && required!==STAGE_CARDS_CAPABILITY)fail('PURCHASE_LEDGER_CAPABILITY_UNKNOWN');
+  if(runtimeCapability!==CAPABILITY || !capabilities.capabilities.includes(required))fail('PURCHASE_LEDGER_RUNTIME_INCOMPATIBLE');
   return {compatible:true,requiredCapability:required,runtimeCapability};
 }
 module.exports={verifyPurchaseLedgerCompatibility};

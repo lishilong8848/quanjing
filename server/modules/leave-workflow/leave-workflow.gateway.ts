@@ -295,12 +295,15 @@ export class LeaveWorkflowGateway {
   ): Promise<void> {
     const normalizedRecordId = requireRecordId(recordId);
     const config = this.leaveConfig();
+    const normalizedFields = clone(fields);
     const response = await this.httpService.axiosRef.put(
       `${recordsUrl(config.appToken, config.tableId)}/${encodeURIComponent(normalizedRecordId)}`,
-      { fields: clone(fields) },
+      { fields: normalizedFields },
       requestConfig(await this.getTenantAccessToken()),
     );
     assertFeishuSuccess(response.data, '更新请休假多维记录失败');
+    const fieldNames = Object.keys(normalizedFields);
+    if (fieldNames.length === 1 && fieldNames[0] === '请假工作流错误') return;
     invalidateBitableRecordCache({
       appToken: config.appToken,
       tableId: config.tableId,

@@ -1,13 +1,20 @@
 import type { HttpService } from '@nestjs/axios';
+import { invalidateBitableRecordCache } from '../../common/feishu/bitable-direct-read';
 import {
   LeaveWorkflowGateway,
   stableLeaveMessageUuid,
 } from './leave-workflow.gateway';
 
+jest.mock('../../common/feishu/bitable-direct-read', () => ({
+  ...jest.requireActual('../../common/feishu/bitable-direct-read'),
+  invalidateBitableRecordCache: jest.fn(),
+}));
+
 describe('LeaveWorkflowGateway', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    jest.mocked(invalidateBitableRecordCache).mockClear();
     process.env.FEISHU_APP_ID = 'cli_leave_app';
     process.env.FEISHU_APP_SECRET = 'leave-app-secret';
     process.env.FEISHU_LEAVE_REQUEST_APP_TOKEN = 'leave_app_token';
@@ -82,6 +89,43 @@ describe('LeaveWorkflowGateway', () => {
     expect(put.mock.calls[0][2]).toEqual(
       expect.objectContaining({ timeout: 15_000 }),
     );
+    expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
+      appToken: 'leave_app_token',
+      tableId: 'tblpCzmTT3EapaUY',
+      deletePersisted: true,
+    });
+  });
+
+  it('records a workflow error without invalidating approvals and invalidates a mixed update', async () => {
+    const post = jest.fn().mockResolvedValue({
+      data: { code: 0, tenant_access_token: 'tenant-token', expire: 7200 },
+    });
+    const put = jest.fn().mockResolvedValue({ data: { code: 0 } });
+    const gateway = new LeaveWorkflowGateway(
+      { axiosRef: { post, put } } as unknown as HttpService,
+      jest.fn(),
+    );
+    const fields = { 请假工作流错误: '交付失败' };
+
+    await gateway.updateLeaveRecord('rec_leave_1', fields);
+    expect(put).toHaveBeenCalledWith(
+      expect.stringContaining('/rec_leave_1'),
+      { fields },
+      expect.anything(),
+    );
+    expect(invalidateBitableRecordCache).not.toHaveBeenCalled();
+
+    put.mockResolvedValueOnce({ data: { code: 1254302, msg: 'Permission denied' } });
+    await expect(gateway.updateLeaveRecord('rec_leave_1', fields)).rejects.toThrow(
+      '更新请休假多维记录失败',
+    );
+    expect(invalidateBitableRecordCache).not.toHaveBeenCalled();
+
+    await gateway.updateLeaveRecord('rec_leave_1', {
+      请假工作流错误: '',
+      请假工作流状态: '待主管审批',
+    });
+    expect(invalidateBitableRecordCache).toHaveBeenCalledTimes(1);
   });
 
   it('preserves the Feishu response code and safe message when card delivery is rejected', async () => {

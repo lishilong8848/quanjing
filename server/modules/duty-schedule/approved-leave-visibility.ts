@@ -206,21 +206,44 @@ export function resolveApprovalAwareDutyStaffFromFields(
       ]),
     ),
   );
-  const rawSubstituteKeys = new Set(
-    approvedLeave.rawSubstituteStaff.map(normalizeComparableName),
+  const plannedKeys = new Set(plannedStaff.map(normalizeComparableName));
+  const approvedSubstituteKeys = new Set(approvedLeave.substituteStaff.map(normalizeComparableName));
+  const tentativeSubstituteKeys = new Set(
+    approvedLeave.rawSubstituteStaff.map(normalizeComparableName)
+      .filter(key => !approvedSubstituteKeys.has(key) && !plannedKeys.has(key)),
   );
-  const fallbackPlannedStaff =
-    activeDutyStaff.length > 0
-      ? normalizeStaffNames([
-          ...activeDutyStaff.filter(
-            (name) => !rawSubstituteKeys.has(normalizeComparableName(name)),
-          ),
-          ...approvedLeave.rawLeaveStaff,
-        ])
+
+  let baseline = plannedStaff;
+  if (currentDutyStaff.length > 0) {
+    const hasTentativeSubstitute = currentDutyStaff.some(name =>
+      tentativeSubstituteKeys.has(normalizeComparableName(name)),
+    );
+    if (!hasTentativeSubstitute && approvedLeave.leaveStaff.length === 0) {
+      return { ...approvedLeave, dutyStaff: activeDutyStaff };
+    }
+
+    // Only undo the named pending substitution. Restoring the whole planned
+    // roster also undoes unrelated manual duty changes.
+    const approvedLeaveKeys = new Set(approvedLeave.leaveStaff.map(normalizeComparableName));
+    const restoredPending = hasTentativeSubstitute
+      ? approvedLeave.rawLeaveStaff.filter(name => {
+          const key = normalizeComparableName(name);
+          return !approvedLeaveKeys.has(key) && (plannedKeys.size === 0 || plannedKeys.has(key));
+        })
       : [];
+    const actualAndRestored = normalizeStaffNames([
+      ...activeDutyStaff.filter(name => !tentativeSubstituteKeys.has(normalizeComparableName(name))),
+      ...restoredPending,
+    ]);
+    const restoredKeys = new Set(actualAndRestored.map(normalizeComparableName));
+    baseline = [
+      ...plannedStaff.filter(name => restoredKeys.has(normalizeComparableName(name))),
+      ...actualAndRestored.filter(name => !plannedKeys.has(normalizeComparableName(name))),
+    ];
+  }
   const effective = buildDutyProgramModifiedRefreshItem({
     recordId: '',
-    plannedStaff: plannedStaff.length > 0 ? plannedStaff : fallbackPlannedStaff,
+    plannedStaff: baseline,
     leaveStaff: approvedLeave.leaveStaff,
     substituteStaff: approvedLeave.substituteStaff,
     vacancySubstituteStaff: normalizeStaffNames(

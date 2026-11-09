@@ -3,6 +3,7 @@ import type { AxiosInstance, AxiosResponse } from 'axios';
 export interface PrimaryCardDelivery {
   source: string; messageId: string; card: Record<string, unknown>;
   recipientId: string; recipientType: string; uuid?: string; startedAt: string;
+  logicalDeliveryId?: string;
 }
 export interface CardCopyObserver {
   delivered(event: PrimaryCardDelivery): Promise<void>;
@@ -36,7 +37,7 @@ async function releaseUpdateReservation(operation: unknown): Promise<void> {
   try { await observer?.cancelUpdate?.(operation); } catch { note('CARD_COPY_UPDATE_CANCEL_FAILED'); }
 }
 
-export async function observedCardPost(http: Pick<AxiosInstance, 'post'>, source: string, url: string, body: unknown, config: unknown): Promise<AxiosResponse<any>> {
+export async function observedCardPost(http: Pick<AxiosInstance, 'post'>, source: string, url: string, body: unknown, config: unknown, logicalDeliveryId?: string): Promise<AxiosResponse<any>> {
   const target = messageApi(url), payload = record(body) ? body : undefined;
   const card = observer && target?.pathname === '/open-apis/im/v1/messages' && payload?.msg_type === 'interactive' ? parseCard(payload.content) : undefined;
   const startedAt = new Date().toISOString();
@@ -46,7 +47,7 @@ export async function observedCardPost(http: Pick<AxiosInstance, 'post'>, source
     if (typeof id === 'string' && /^om_[A-Za-z0-9_-]+$/.test(id) && typeof payload.receive_id === 'string') {
       try { await observer.delivered({ source, card, messageId: id, recipientId: payload.receive_id,
         recipientType: target.searchParams.get('receive_id_type') || String((config as { params?: { receive_id_type?: string } })?.params?.receive_id_type || 'open_id'),
-        ...(typeof payload.uuid === 'string' ? { uuid: payload.uuid } : {}), startedAt }); }
+        ...(typeof payload.uuid === 'string' ? { uuid: payload.uuid } : {}), startedAt, ...(logicalDeliveryId ? { logicalDeliveryId } : {}) }); }
       catch { note('CARD_COPY_ENROLLMENT_FAILED'); }
     }
   }

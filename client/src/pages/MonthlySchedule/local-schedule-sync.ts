@@ -78,7 +78,9 @@ export function createLocalScheduleSyncController(ports: LocalSyncPorts) {
     }
     clearTimer();
     if (task.status === 'failed') {
-      update({ phase: 'failed', task, refreshWarning: false, message: task.error?.message || '本次同步未完成，现有页面数据已保留，可重试。' });
+      const failedPhase = task.error?.failedPhase && phaseLabels[task.error.failedPhase];
+      const message = task.error?.message || '本次同步未完成，现有页面数据已保留，可重试。';
+      update({ phase: 'failed', task, refreshWarning: false, message: failedPhase ? `${failedPhase}未完成。 ${message}` : message });
       return;
     }
     if (recovery.appliedTaskId !== task.taskId) {

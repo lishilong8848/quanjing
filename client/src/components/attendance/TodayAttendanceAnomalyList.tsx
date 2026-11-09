@@ -208,6 +208,22 @@ export function TodayAttendanceAnomalyList({
           </div>
         </header>
 
+        {sourceStatus === 'fresh' && !isPreviousDay && !isManualSyncing && manualSyncState !== 'success' && (
+          (runStatus?.resultReady && runStatus.state === 'running') ||
+          runStatus?.archiveSyncState === 'syncing' ||
+          runStatus?.correctionSyncState === 'syncing'
+        ) && (
+          <div role="status" className="border-b border-sky-100 bg-sky-50/50 px-4 py-2 text-xs text-sky-700">
+            {runStatus?.state === 'running' && runStatus.resultReady
+              ? '考勤核验结果已更新，后续处理进行中。'
+              : '考勤核验结果已更新，归档或补卡资料正在同步。'}
+          </div>
+        )}
+        {sourceStatus === 'fresh' && (runStatus?.archiveSyncState === 'failed' || runStatus?.correctionSyncState === 'failed') && (
+          <div role="status" className="border-b border-amber-100 bg-amber-50/50 px-4 py-2 text-xs text-amber-800">
+            {runStatus.archiveSyncState === 'failed' ? runStatus.archiveSyncFailureReason || '考勤归档待重试' : runStatus.correctionSyncFailureReason || '补卡同步待重试'}
+          </div>
+        )}
         {isManualSyncing && (
           <div
             className="border-b border-sky-100 bg-sky-50/50 px-4 py-2 text-xs font-medium text-sky-700"

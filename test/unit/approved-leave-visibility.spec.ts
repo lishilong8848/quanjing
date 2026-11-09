@@ -174,6 +174,31 @@ describe('approved leave visibility', () => {
     ).toEqual(['张三', '王五']);
   });
 
+  it('keeps an explicit actual roster when an unrelated leave is pending', () => {
+    const staff = resolveApprovalAwareDutyStaffFromFields({
+      '人员（文本）': '原排甲 实际甲',
+      '值班人员（实际）程序修改': '实际甲 实际乙',
+      '值班人员（实际）': '实际甲 实际乙',
+      请假人员: '实际甲',
+      __systemLeaveApprovalVerified: true,
+      __systemApprovedLeaveStaff: [],
+      __systemApprovedSubstituteStaff: [],
+    });
+    expect(staff.hasUnapprovedLeave).toBe(true);
+    expect(staff.dutyStaff).toEqual(['实际甲', '实际乙']);
+  });
+
+  it('undoes a pending substitute without restoring unrelated planned staff', () => {
+    const staff = resolveApprovalAwareDutyStaffFromFields({
+      '人员（文本）': '原排甲 待审批乙',
+      '值班人员（实际）程序修改': '临时替班 实际甲',
+      请假人员: '待审批乙',
+      替班人员: '临时替班',
+      __systemLeaveApprovalVerified: true,
+    });
+    expect(staff.dutyStaff).toEqual(['待审批乙', '实际甲']);
+  });
+
   it('fails closed for actual substitutes on mixed approval records', () => {
     expect(
       resolveApprovalAwareDutyStaffFromFields({

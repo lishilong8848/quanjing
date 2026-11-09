@@ -1,9 +1,16 @@
-jest.mock('../../server/common/feishu/bitable-direct-read', () => ({ ...jest.requireActual('../../server/common/feishu/bitable-direct-read'), fetchBitableRecords: jest.fn(), resolveBitableAppToken: jest.fn().mockResolvedValue('app_local_only_test'), readLatestPersistedBitableRecordSnapshot: jest.fn() }));
+jest.mock('../../server/common/feishu/bitable-direct-read', () => ({
+  ...jest.requireActual('../../server/common/feishu/bitable-direct-read'),
+  fetchBitableRecords: jest.fn(),
+  getBitableRecordCacheGeneration: jest.fn(),
+  resolveBitableAppToken: jest.fn().mockResolvedValue('app_local_only_test'),
+  resolveBitableTableIdByName: jest.fn(),
+  readLatestPersistedBitableRecordSnapshot: jest.fn(),
+}));
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { fetchBitableRecords, readLatestPersistedBitableRecordSnapshot } from '../../server/common/feishu/bitable-direct-read';
-import { enrichScheduleRecordsWithLeaveApproval, fetchLeaveApprovalSnapshot, readCachedLeaveApprovalSnapshot, SYSTEM_LEAVE_APPROVAL_VERIFIED_FIELD } from '../../server/common/feishu/leave-approval-source';
+import { fetchBitableRecords, getBitableRecordCacheGeneration, readLatestPersistedBitableRecordSnapshot, resolveBitableTableIdByName } from '../../server/common/feishu/bitable-direct-read';
+import { enrichScheduleRecordsWithLeaveApproval, fetchLeaveApprovalSnapshot, isResolvedLeaveApprovalCacheScope, readCachedLeaveApprovalSnapshot, refreshVerifiedLeaveApprovalSnapshot, waitForLeaveScheduleCacheRecovery, SYSTEM_LEAVE_APPROVAL_VERIFIED_FIELD } from '../../server/common/feishu/leave-approval-source';
 import { resolveApprovalAwareDutyStaffFromFields } from '../../server/modules/duty-schedule/approved-leave-visibility';
 import { BitableSyncService } from '../../server/modules/bitable-sync/bitable-sync.service';
 import { applicant, backup, fixture, group, primary, replacement } from './fixtures/leave-two-level';
@@ -22,10 +29,134 @@ describe('local-authoritative two-level approval source', () => {
     details = [{ record_id: 'rec_local_detail', fields: { 状态: 'active', 请假记录ID: data().application.recordId, 班次键: data().selection.shiftKey, 排班记录IDs: JSON.stringify(['rec_schedule_d']), 替班人员姓名: primary.name, 替班人员记录ID: primary.personRecordId, 替班人员OpenID: primary.openId, 替班安排版本: 0 } }];
     const rows = (name?: string) => name === '请休假审批状态' ? main : details;
     jest.mocked(fetchBitableRecords).mockImplementation(async (_http, options) => rows(options.tableName));
+    jest.mocked(getBitableRecordCacheGeneration).mockReturnValue(0);
     const fetchedAt = Date.now();
     jest.mocked(readLatestPersistedBitableRecordSnapshot).mockImplementation(async options => ({ records: rows(options.tableName), fetchedAt, expiresAt: fetchedAt + 60_000 }) as never);
   });
   afterEach(async () => { process.env = previous; jest.clearAllMocks(); if (!resolve(directory).startsWith(resolve(tmpdir()) + sep) || !directory.includes('leave-two-level-source-local-owned-')) throw Error('Unsafe cleanup'); await rm(directory, { recursive: true, force: true }); });
+  it('coalesces strict refreshes and requires persisted reads of both approval sources', async () => {
+    await writeLedger();
+    const first = refreshVerifiedLeaveApprovalSnapshot({} as never);
+    const joined = refreshVerifiedLeaveApprovalSnapshot({} as never);
+    expect(joined).toBe(first);
+    await expect(first).resolves.toMatchObject({ verified: true });
+    const sourceOptions = jest.mocked(fetchBitableRecords).mock.calls.map(([, options]) => options);
+    expect(sourceOptions.map(options => options.tableName)).toEqual(['请休假审批状态', '请假替班班次明细']);
+    expect(sourceOptions.every(options => options.requirePersisted && options.strict)).toBe(true);
+  });
+
+  it('binds Wiki-resolved main and detail cache scopes before reading each source', async () => {
+    delete process.env.FEISHU_LEAVE_REQUEST_APP_TOKEN;
+    delete process.env.FEISHU_LEAVE_SUBSTITUTE_APP_TOKEN;
+    delete process.env.FEISHU_LEAVE_SHIFT_DETAIL_TABLE_ID;
+    delete process.env.FEISHU_LEAVE_SUBSTITUTE_TABLE_ID;
+    const app = 'app_local_only_test';
+    const mainTable = 'tbl_wiki_scope_test';
+    const detailTable = 'tbl_wiki_detail_scope_test';
+    process.env.FEISHU_LEAVE_REQUEST_TABLE_ID = mainTable;
+    expect(isResolvedLeaveApprovalCacheScope(app, mainTable)).toBe(false);
+    jest.mocked(resolveBitableTableIdByName).mockResolvedValueOnce(detailTable);
+    jest.mocked(fetchBitableRecords)
+      .mockImplementationOnce(async () => {
+        expect(isResolvedLeaveApprovalCacheScope(app, mainTable)).toBe(true);
+        expect(isResolvedLeaveApprovalCacheScope(app, detailTable)).toBe(false);
+        return main;
+      })
+      .mockImplementationOnce(async () => {
+        expect(isResolvedLeaveApprovalCacheScope(app, mainTable)).toBe(true);
+        expect(isResolvedLeaveApprovalCacheScope(app, detailTable)).toBe(true);
+        expect(isResolvedLeaveApprovalCacheScope('app_other', mainTable)).toBe(false);
+        expect(isResolvedLeaveApprovalCacheScope(app, 'tbl_unrelated')).toBe(false);
+        return details;
+      });
+    await expect(refreshVerifiedLeaveApprovalSnapshot({} as never)).resolves.toMatchObject({ verified: true });
+  });
+
+  it.each(['main', 'details'])('retries a %s generation change during detail fetch before reading back an incomplete pair', async (scope) => {
+    let generation = 0;
+    jest.mocked(getBitableRecordCacheGeneration).mockImplementation((_appToken, tableId) =>
+      tableId === `tbl_local_only_${scope}` ? generation : 0,
+    );
+    jest.mocked(fetchBitableRecords)
+      .mockResolvedValueOnce(main)
+      .mockImplementationOnce(async () => {
+        generation += 1;
+        return details;
+      });
+    const refresh = refreshVerifiedLeaveApprovalSnapshot({} as never);
+    expect(refreshVerifiedLeaveApprovalSnapshot({} as never)).toBe(refresh);
+    await expect(refresh).resolves.toMatchObject({ verified: true });
+    expect(jest.mocked(fetchBitableRecords).mock.calls.map(([, options]) => options.tableName))
+      .toEqual(['请休假审批状态', '请假替班班次明细', '请休假审批状态', '请假替班班次明细']);
+    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not report a remote read as verified when a required cache write fails', async () => {
+    jest.mocked(fetchBitableRecords).mockRejectedValueOnce(new Error('本地数据缓存保存失败，请稍后重试'));
+    await expect(refreshVerifiedLeaveApprovalSnapshot({} as never)).rejects.toMatchObject({ kind: 'persistence' });
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares a retry after an approval source revision changes', async () => {
+    main = [];
+    jest.useFakeTimers();
+    try {
+      jest.mocked(fetchBitableRecords).mockRejectedValueOnce(new Error('数据在读取期间已变更，请重新读取'));
+      const refresh = refreshVerifiedLeaveApprovalSnapshot({} as never);
+      await jest.advanceTimersByTimeAsync(999);
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(1);
+      expect(refreshVerifiedLeaveApprovalSnapshot({} as never)).toBe(refresh);
+      await jest.advanceTimersByTimeAsync(1);
+      await expect(refresh).resolves.toEqual({ verified: true, requests: [] });
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(2);
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('stops after two source revision retries and allows a later refresh', async () => {
+    main = [];
+    jest.useFakeTimers();
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        jest.mocked(fetchBitableRecords).mockRejectedValueOnce(new Error('LOCAL_SYNC_SNAPSHOT_INVALIDATED'));
+      }
+      const outcome = expect(refreshVerifiedLeaveApprovalSnapshot({} as never)).rejects.toMatchObject({ kind: 'source_changed' });
+      await jest.advanceTimersByTimeAsync(3_999);
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(2);
+      await jest.advanceTimersByTimeAsync(1);
+      await outcome;
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+      await expect(refreshVerifiedLeaveApprovalSnapshot({} as never)).resolves.toEqual({ verified: true, requests: [] });
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('accepts a verified empty approval set and refuses a missing nonempty detail cache', async () => {
+    jest.mocked(readLatestPersistedBitableRecordSnapshot).mockImplementation(async options => options.tableName === '请假替班班次明细'
+      ? null
+      : { records: main, fetchedAt: Date.now(), expiresAt: Date.now() + 60_000 });
+    await expect(refreshVerifiedLeaveApprovalSnapshot({} as never)).rejects.toMatchObject({ kind: 'missing' });
+    main = [];
+    await expect(refreshVerifiedLeaveApprovalSnapshot({} as never)).resolves.toEqual({ verified: true, requests: [] });
+  });
+
+  it('requires a known detail source before trusting nonempty approvals after a cold start', async () => {
+    process.env.FEISHU_LEAVE_REQUEST_TABLE_ID = 'tbl_cold_main';
+    delete process.env.FEISHU_LEAVE_SHIFT_DETAIL_TABLE_ID;
+    await expect(readCachedLeaveApprovalSnapshot()).resolves.toEqual({ verified: false, requests: [] });
+  });
+
+  it('bounds the waiting caller without cancelling the shared cache refresh', async () => {
+    jest.useFakeTimers();
+    try {
+      let finish!: (value: string) => void;
+      const refresh = new Promise<string>(resolve => { finish = resolve; });
+      const pending = expect(waitForLeaveScheduleCacheRecovery(refresh, '仍在核验')).rejects.toThrow('仍在核验');
+      await jest.advanceTimersByTimeAsync(30_000);
+      await pending;
+      finish('ready');
+      await expect(refresh).resolves.toBe('ready');
+    } finally { jest.useRealTimers(); }
+  });
+
   it('reads and projects both posts with no new cloud column', async () => {
     await writeLedger(); const snapshot = await fetchLeaveApprovalSnapshot({} as never, { strict: true, forceRefresh: true });
     expect(snapshot.verified).toBe(true);

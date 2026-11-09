@@ -226,10 +226,16 @@ export class TodayAttendanceSnapshotService {
             displayScope,
           );
           if (snapshot) {
+            const currentResultReady = Boolean(
+              runStatus?.executionId &&
+                localSummary.checks?.[latestTask]?.executionId === runStatus.executionId,
+            );
             return this.excludeNewlyApprovedLeave({
               ...snapshot,
-              sourceStatus: incompleteSourceStatus || 'fresh',
-              ...(runStatus ? { runStatus } : {}),
+              sourceStatus: currentResultReady && incompleteSourceStatus === 'running'
+                ? 'fresh'
+                : incompleteSourceStatus || 'fresh',
+              ...(runStatus ? { runStatus: currentResultReady ? { ...runStatus, resultReady: true } : runStatus } : {}),
             });
           }
         }

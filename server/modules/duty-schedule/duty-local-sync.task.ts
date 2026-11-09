@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { LeaveApprovalCacheError } from '../../common/feishu/leave-approval-source';
 import type { DutyLocalSyncResult, DutyLocalSyncTaskResponse } from '../../../shared/duty-local-sync.interface';
 
 type Run = (phase: (value: string) => void) => Promise<DutyLocalSyncResult>;
@@ -7,12 +8,19 @@ export const validDutyLocalSyncId = (value: unknown): value is string => typeof 
 
 /** Classify only known errors; never expose upstream messages or credentials to the browser. */
 export function describeDutyLocalSyncFailure(error: unknown): { kind: string; retryable: boolean; message: string } {
+  if (error instanceof LeaveApprovalCacheError) {
+    return {
+      kind: error.kind === 'source_changed' ? 'source_changed' : 'approval_snapshot_unavailable',
+      retryable: error.kind === 'source_changed',
+      message: error.message,
+    };
+  }
   const message = error instanceof Error ? error.message : '';
-  if (message === '数据在读取期间已变更，请重新读取' || message === '排班来源已变化，请重新同步' || message === 'LOCAL_SYNC_SNAPSHOT_INVALIDATED') {
+  if (message === '数据在读取期间已变更，请重新读取' || message === '排班来源已变化，请重新同步' || message === 'LOCAL_SYNC_SNAPSHOT_INVALIDATED' || message === '排班来源已变化，请重新读取' || message === 'LOCAL_SYNC_SNAPSHOT_CHANGED' || message === 'LOCAL_SYNC_NEWER_SNAPSHOT_EXISTS') {
     return { kind: 'source_changed', retryable: true, message: '同步期间排班数据发生变化，未覆盖现有数据，请稍后重试。' };
   }
   if (message === '排班及审批快照尚未完整保存') {
-    return { kind: 'approval_snapshot_unavailable', retryable: true, message: '排班或请休假数据尚未完整就绪，现有数据已保留，请稍后重试。' };
+    return { kind: 'approval_snapshot_unavailable', retryable: false, message: '排班或请休假数据尚未完整就绪，现有数据已保留，请稍后重试。' };
   }
   if (message === '本地数据缓存保存失败，请稍后重试' || message === '排班本地快照核对失败') {
     return { kind: 'snapshot_unavailable', retryable: true, message: '本地排班数据保存或核对未完成，现有数据已保留，请稍后重试。' };
@@ -51,8 +59,10 @@ export class DutyLocalSyncTasks {
         return result;
       }).catch(error => {
         current.value.status = 'failed';
+        const failedPhase = current.value.phase;
         current.value.phase = 'failed';
-        current.value.error = { code: 'LOCAL_SYNC_FAILED', message: describeDutyLocalSyncFailure(error).message };
+        const failure = describeDutyLocalSyncFailure(error);
+        current.value.error = { code: 'LOCAL_SYNC_FAILED', message: failure.message, kind: failure.kind, failedPhase };
         throw error;
       }).finally(() => {
         current.value.finishedAt = new Date(this.now()).toISOString();

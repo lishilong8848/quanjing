@@ -150,6 +150,7 @@ interface AttendanceCorrectionJob {
   query: { start: string; end: string };
   stage: 'pending' | 'fetched' | 'completed';
   corrections?: DingTalkCorrectionApproval[];
+  evidenceOnly?: boolean;
   failureReason?: string;
   failureDetail?: string;
   alertedAt?: string;
@@ -201,7 +202,8 @@ interface LiveAttendanceExecutionResult {
 }
 
 type AttendanceExecutionRun = AttendanceAutomationRun & {
-  deferAttendanceArchive?: boolean;
+  executionId?: string;
+  manual?: boolean;
 };
 
 interface MorningAttendanceSummarySectionData {
@@ -261,14 +263,15 @@ export class AttendanceAutomationCoordinatorService {
         date: run.date,
       });
     }
+    let executionId: string;
     try {
-      this.markRunning(taskKey, run);
+      executionId = this.markRunning(taskKey, run);
     } catch (error) {
       this.releaseClaim(taskKey, claimId);
       return Promise.reject(error);
     }
     let execution!: Promise<unknown>;
-    execution = this.execute(run)
+    execution = this.execute({ ...run, executionId })
       .then((result) => {
         this.markCompleted(taskKey, run, result);
         return result;
@@ -331,13 +334,14 @@ export class AttendanceAutomationCoordinatorService {
       );
     }
 
+    let executionId: string;
     try {
       const state = this.readState();
       if (state.manualRetries?.[clientMutationId]) {
         this.releaseClaim(taskKey, claimId);
         return this.manualRetryResponse(run, clientMutationId, true, false);
       }
-      const executionId = randomUUID();
+      executionId = randomUUID();
       state.manualRetries = {
         ...(state.manualRetries || {}),
         [clientMutationId]: {
@@ -374,17 +378,12 @@ export class AttendanceAutomationCoordinatorService {
     }
 
     let execution!: Promise<unknown>;
-    execution = this.execute({ ...run, deferAttendanceArchive: true })
+    execution = this.execute({ ...run, executionId, manual: true })
       .then((result) => {
         this.markCompleted(taskKey, run, result);
-        void this.recoverPendingAttendanceArchives().catch((error) => {
+        void this.recoverPendingAttendanceArchives().then(() => this.recoverPendingCorrections()).catch((error) => {
           this.logger.error(
-            `手动考勤飞书归档后台启动失败：task=${run.task}, date=${run.date}, error=${safeAttendanceErrorMessage(error)}`,
-          );
-        });
-        void this.recoverPendingCorrections().catch((error) => {
-          this.logger.error(
-            `手动考勤补卡后台启动失败：task=${run.task}, date=${run.date}, error=${safeAttendanceErrorMessage(error)}`,
+            `手动考勤归档及补卡后台启动失败：task=${run.task}, date=${run.date}, error=${safeAttendanceErrorMessage(error)}`,
           );
         });
         return result;
@@ -563,7 +562,7 @@ export class AttendanceAutomationCoordinatorService {
       overtimeRecords,
     );
     const managementSummary =
-      run.task === 'morning-off-duty-check' && !run.deferAttendanceArchive
+      run.task === 'morning-off-duty-check' && !run.manual
         ? await this.sendMorningManagementSummary(
             { ...run, task: 'morning-off-duty-check' },
             live,
@@ -846,14 +845,16 @@ export class AttendanceAutomationCoordinatorService {
       normal: summary.normal.length,
       excluded: 0,
       anomalies: summary.anomalies,
-    });
+    }, businessDate === runDate ? {
+      targetKeys: uniqueTargets.map(target => target.expectation.key),
+      normalKeys: summary.normal.map(event => event.key),
+    } : undefined);
     return { targets: uniqueTargets.length, archived: archived.total };
   }
 
   private async checkLiveAttendance(
-    run: AttendanceAutomationRun & {
+    run: AttendanceExecutionRun & {
       task: Exclude<AttendanceAutomationTask, 'archive-yesterday'>;
-      deferAttendanceArchive?: boolean;
     },
     approvedLeave: readonly ApprovedLeaveRequest[] = [],
     overtimeRecords: readonly BitableRecordItem[] = [],
@@ -912,6 +913,7 @@ export class AttendanceAutomationCoordinatorService {
         await withAttendanceFailureReason('考勤本地汇总保存失败', () =>
           this.dailySummaryStore.mergeLiveCheck({
             task,
+            executionId: run.executionId,
             businessDate: date,
             generatedAt: new Date().toISOString(),
             normal: [],
@@ -971,45 +973,44 @@ export class AttendanceAutomationCoordinatorService {
       results,
       details: snapshot.details,
     };
-    if (run.deferAttendanceArchive) {
-      archiveFailure = new AttendanceAutomationFailure(
-        '飞书考勤多维表正在后台同步',
-        '手动刷新已受理',
+    if (!isFinalTask) {
+      await withAttendanceFailureReason('飞书考勤多维表同步失败', () =>
+        this.feishuGateway.archiveAttendance({
+          ...attendanceArchiveInput,
+          corrections: [],
+        }),
       );
-      this.queueAttendanceArchiveJob(
-        run,
-        attendanceArchiveInput,
-        archiveFailure,
-        true,
-      );
-    } else {
-      try {
-        await withAttendanceFailureReason('飞书考勤多维表同步失败', () =>
-          this.feishuGateway.archiveAttendance({
-            ...attendanceArchiveInput,
-            corrections: [],
-          }),
-        );
-        this.completeAttendanceArchiveJob(task, date);
-      } catch (error) {
-        if (!isFinalTask) throw error;
-        archiveFailure =
-          error instanceof AttendanceAutomationFailure
-            ? error
-            : new AttendanceAutomationFailure('飞书考勤多维表同步失败', error);
-        this.queueAttendanceArchiveJob(
-          run,
-          attendanceArchiveInput,
-          archiveFailure,
-        );
-        this.logger.error(
-          `飞书考勤多维表同步失败，考勤结果已保存并转入后台续跑：task=${task}, date=${date}, error=${safeAttendanceErrorMessage(archiveFailure)}`,
-        );
-      }
+      this.completeAttendanceArchiveJob(task, date);
     }
     let correctionSyncFailure: AttendanceAutomationFailure | undefined;
     let discoveredCorrections: DingTalkCorrectionApproval[] | undefined;
+    let queueCorrection = false;
+    let queueCorrectionEvidenceOnly = false;
+    const applyCorrections = (corrections: DingTalkCorrectionApproval[]) => {
+      if (corrections.length === 0) return;
+      results = tagAttendanceResults(
+        deriveAttendanceResults(
+          plan.expectations,
+          snapshot.users,
+          snapshot.details,
+          snapshot.results,
+          corrections,
+        ),
+        task,
+      );
+      matched = matchDingTalkResultsToExpectations(
+        plan.expectations,
+        snapshot.users,
+        results,
+        snapshot.details,
+      );
+      all = classifyAttendanceExpectations(plan.expectations, matched);
+      all.excluded.push(...approvedExclusions);
+    };
     const existingCorrectionJob = this.readCorrectionJob(task, date);
+    if (isFinalTask && existingCorrectionJob?.corrections) {
+      applyCorrections(existingCorrectionJob.corrections);
+    }
     if (existingCorrectionJob && existingCorrectionJob.stage !== 'completed') {
       correctionSyncFailure = new AttendanceAutomationFailure(
         existingCorrectionJob.failureReason || '补卡记录及举证待同步',
@@ -1026,35 +1027,14 @@ export class AttendanceAutomationCoordinatorService {
         );
         discoveredCorrections = corrections;
         if (corrections.length > 0) {
-          results = tagAttendanceResults(
-            deriveAttendanceResults(
-              plan.expectations,
-              snapshot.users,
-              snapshot.details,
-              snapshot.results,
-              corrections,
-            ),
-            task,
-          );
-          matched = matchDingTalkResultsToExpectations(
-            plan.expectations,
-            snapshot.users,
-            results,
-            snapshot.details,
-          );
-          all = classifyAttendanceExpectations(plan.expectations, matched);
-          all.excluded.push(...approvedExclusions);
-          if (run.deferAttendanceArchive) {
+          applyCorrections(corrections);
+          if (isFinalTask) {
             correctionSyncFailure = new AttendanceAutomationFailure(
               '补卡记录及举证仍在后台同步',
-              '手动刷新已受理',
+              '已获取补卡审批',
             );
-            this.queueCorrectionJob(
-              run,
-              correctionSyncFailure,
-              corrections,
-              true,
-            );
+            queueCorrection = true;
+            queueCorrectionEvidenceOnly = !run.manual;
           } else {
             await withAttendanceFailureReason('补卡记录及举证同步失败', () =>
               this.feishuGateway.archiveAttendance({
@@ -1081,17 +1061,31 @@ export class AttendanceAutomationCoordinatorService {
         this.logger.error(
           `补卡记录及举证同步失败，考勤结果与09:30群卡继续保留：task=${task}, date=${date}, error=${safeAttendanceErrorMessage(correctionSyncFailure)}`,
         );
-        this.queueCorrectionJob(
-          run,
-          correctionSyncFailure,
-          discoveredCorrections,
-        );
+        if (isFinalTask) {
+          queueCorrection = true;
+        } else {
+          this.queueCorrectionJob(run, correctionSyncFailure, discoveredCorrections);
+        }
       }
     }
     if (isFinalTask) {
+      // Save the two recovery intents before publishing the execution-bound result.
+      archiveFailure = new AttendanceAutomationFailure(
+        '飞书考勤多维表正在后台同步',
+        '本轮考勤核验已取得结果',
+      );
+      this.queueAttendanceArchiveJob(run, { ...attendanceArchiveInput, results }, archiveFailure, true);
+      if (queueCorrection && correctionSyncFailure) {
+        this.queueCorrectionJob(
+          run, correctionSyncFailure, discoveredCorrections,
+          Boolean(discoveredCorrections?.length),
+          queueCorrectionEvidenceOnly,
+        );
+      }
       await withAttendanceFailureReason('考勤本地汇总保存失败', () =>
         this.dailySummaryStore.mergeLiveCheck({
           task,
+          executionId: run.executionId,
           businessDate: date,
           generatedAt: new Date(snapshot.capturedAt).toISOString(),
           normal: all.normal,
@@ -1105,7 +1099,7 @@ export class AttendanceAutomationCoordinatorService {
     let personalRecipients: AttendancePersonalRecipient[] = [];
     if (
       isFinalTask &&
-      !run.deferAttendanceArchive &&
+      !run.manual &&
       all.anomalies.length > 0
     ) {
       try {
@@ -1234,6 +1228,10 @@ export class AttendanceAutomationCoordinatorService {
     overtimeRecords: readonly BitableRecordItem[] = [],
   ): Promise<{ reportDate: string; archiveDate: string; sent: number }> {
     const archiveDate = shiftDate(run.date, -1);
+    const deliveryKey = `${run.date}:morning-brief:group:${MORNING_BRIEF_COMPLETION_VERSION}`;
+    if (this.readState().completed[deliveryKey]) {
+      return { reportDate: run.date, archiveDate, sent: 0 };
+    }
     const summary = await withAttendanceFailureReason(
       '昨日考勤汇总读取失败',
       () => this.feishuGateway.readArchivedAttendanceSummary(archiveDate),
@@ -1265,10 +1263,6 @@ export class AttendanceAutomationCoordinatorService {
           return null;
         })
       : null;
-    const deliveryKey = `${run.date}:morning-brief:group:${MORNING_BRIEF_COMPLETION_VERSION}`;
-    if (this.readState().completed[deliveryKey]) {
-      return { reportDate: run.date, archiveDate, sent: 0 };
-    }
     const cardSections = sections.map((section) => ({
       title: section.title,
       date: section.date,
@@ -1567,6 +1561,7 @@ export class AttendanceAutomationCoordinatorService {
     error: AttendanceAutomationFailure,
     corrections?: DingTalkCorrectionApproval[],
     retryImmediately = false,
+    evidenceOnly = false,
   ): void {
     const existing = this.readCorrectionJob(run.task, run.date);
     const query = buildCorrectionDiscoveryWindow(run.scheduledAt);
@@ -1578,6 +1573,7 @@ export class AttendanceAutomationCoordinatorService {
       query,
       stage: corrections ? 'fetched' : 'pending',
       ...(corrections ? { corrections } : {}),
+      ...(evidenceOnly ? { evidenceOnly: true } : {}),
       failureReason: retryImmediately
         ? undefined
         : publicAttendanceFailureReason(error),
@@ -1603,6 +1599,7 @@ export class AttendanceAutomationCoordinatorService {
     retryImmediately = false,
   ): void {
     const existing = this.readAttendanceArchiveJob(run.task, run.date);
+    if (existing && JSON.stringify(existing.input) === JSON.stringify(input)) return;
     this.writeAttendanceArchiveJob({
       version: 1,
       task: run.task,
@@ -1722,19 +1719,21 @@ export class AttendanceAutomationCoordinatorService {
       const claimKey = `attendance-archive:${queued.date}:${queued.task}`;
       const claimId = this.claimTask(claimKey);
       if (!claimId) continue;
+      let attemptedInput: AttendanceArchiveJob['input'] | undefined;
       try {
         const job = this.readAttendanceArchiveJob(queued.task, queued.date);
         if (!job || job.stage === 'completed') continue;
+        attemptedInput = job.input;
         await withAttendanceFailureReason('飞书考勤多维表同步失败', () =>
           this.feishuGateway.archiveAttendance(job.input),
         );
-        this.completeAttendanceArchiveJob(job.task, job.date);
+        this.completeAttendanceArchiveJob(job.task, job.date, job.input);
         this.logger.log(
           `飞书考勤多维表后台同步完成：task=${job.task}, date=${job.date}`,
         );
       } catch (error) {
         const job = this.readAttendanceArchiveJob(queued.task, queued.date);
-        if (job && job.stage !== 'completed') {
+        if (job && job.stage !== 'completed' && JSON.stringify(job.input) === JSON.stringify(attemptedInput)) {
           this.writeAttendanceArchiveJob({
             ...job,
             failureReason: publicAttendanceFailureReason(error),
@@ -1755,9 +1754,11 @@ export class AttendanceAutomationCoordinatorService {
   private completeAttendanceArchiveJob(
     task: AttendanceAutomationTask,
     date: string,
+    expectedInput?: AttendanceArchiveJob['input'],
   ): void {
     const job = this.readAttendanceArchiveJob(task, date);
     if (!job || job.stage === 'completed') return;
+    if (expectedInput && JSON.stringify(job.input) !== JSON.stringify(expectedInput)) return;
     this.writeAttendanceArchiveJob({
       ...job,
       stage: 'completed',
@@ -1864,6 +1865,8 @@ export class AttendanceAutomationCoordinatorService {
       try {
         let job = this.readCorrectionJob(queued.task, queued.date);
         if (!job || job.stage === 'completed') continue;
+        // Rechecking corrections requires the base attendance rows to exist.
+        if (this.readAttendanceArchiveJob(job.task, job.date)?.stage === 'pending') continue;
         if (job.stage === 'pending') {
           const corrections = await withAttendanceFailureReason(
             '钉钉补卡审批查询失败',
@@ -1894,11 +1897,14 @@ export class AttendanceAutomationCoordinatorService {
               });
             },
           );
-          await withAttendanceFailureReason('补卡后考勤复核失败', () =>
-            this.recheckCorrectedAttendance(job!),
-          );
+          if (job.evidenceOnly !== true) {
+            await withAttendanceFailureReason('补卡后考勤复核失败', () =>
+              this.recheckCorrectedAttendance(job!),
+            );
+          }
         }
-        this.completeCoveredCorrectionJobs(job.query);
+        if (job.evidenceOnly === true) this.completeCorrectionJob(job);
+        else this.completeCoveredCorrectionJobs(job.query);
       } catch (error) {
         const job = this.readCorrectionJob(queued.task, queued.date);
         if (job && job.stage !== 'completed') {
@@ -1969,15 +1975,19 @@ export class AttendanceAutomationCoordinatorService {
         job.query.start >= query.start &&
         job.query.end <= query.end
       ) {
-        this.writeCorrectionJob({
-          ...job,
-          stage: 'completed',
-          completedAt: new Date().toISOString(),
-          failureReason: undefined,
-          nextRetryAt: undefined,
-        });
+        this.completeCorrectionJob(job);
       }
     }
+  }
+
+  private completeCorrectionJob(job: AttendanceCorrectionJob): void {
+    this.writeCorrectionJob({
+      ...job,
+      stage: 'completed',
+      completedAt: new Date().toISOString(),
+      failureReason: undefined,
+      nextRetryAt: undefined,
+    });
   }
 
   private readCorrectionJobs(): AttendanceCorrectionJob[] {
@@ -2205,14 +2215,15 @@ export class AttendanceAutomationCoordinatorService {
     taskKey: string,
     run: AttendanceAutomationRun,
     maxAttemptsOverride?: number,
-  ): void {
+  ): string {
     const state = this.readState();
     const attemptedAt = new Date().toISOString();
     const previous = state.runs[taskKey];
     const policy = attendanceRetryPolicy(run.task);
+    const executionId = randomUUID();
     state.runs[taskKey] = {
       state: 'running',
-      executionId: randomUUID(),
+      executionId,
       task: run.task,
       date: run.date,
       scheduledAt: run.scheduledAt.toISOString(),
@@ -2225,6 +2236,7 @@ export class AttendanceAutomationCoordinatorService {
       ).toISOString(),
     };
     this.writeState(state);
+    return executionId;
   }
 
   private markFailed(

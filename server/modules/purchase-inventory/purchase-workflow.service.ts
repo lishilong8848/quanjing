@@ -78,11 +78,12 @@ import { parsePurchaseBatchFulfillmentCommandContext } from './purchase-batch-fu
 import { purchaseAuthorityTarget, type PurchaseAuthorityTarget } from './purchase-authority-target';
 import { isPurchaseManagerApprovalEnabled, readPurchaseManagerApprovers } from './purchase-manager-approval.config';
 import { InventoryBatchCardService } from '../inventory-outbound-approval/inventory-batch-card.service';
+import { assertPurchaseInboundExecutionScope } from '../inventory-management/inventory-access-policy';
 import { inventoryNotificationBatchId } from '../inventory-outbound-approval/inventory-batch-notification-id';
 import { webReceiptInput, type WebReceiptInput } from './purchase-web-receipt-command';
 import { PurchaseLifecycleServerAuthorizer } from './purchase-lifecycle-delivery-authorizer';
 import { PurchaseLifecycleGatewayRecordSource } from './purchase-lifecycle-gateway-record-source';
-import { projectPurchaseLifecycle } from './purchase-lifecycle-projection';
+import { projectPurchaseLifecycle, resolvePurchaseLifecycleStage } from './purchase-lifecycle-projection';
 import type { PurchasePlatformAction, PurchasePlatformIdentityProof } from './purchase-platform-identity-proof';
 
 export interface PurchaseWorkflowSession {
@@ -604,7 +605,8 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     const normalizedRecordId = requireText(recordId, '采购执行记录 ID 缺失');
     const record =
       await this.gateway.getExecutionRecordAsApp(normalizedRecordId);
-    if (resolvePurchaseStage(record.status) !== 'inbound') return 0;
+    if (resolvePurchaseStage(record.status) !== 'inbound' &&
+        !(resolvePurchaseLifecycleStage(record.status) === 'inbound' && await this.store.stageCardInboundAuthority?.(record.recordId))) return 0;
     const managers = await this.gateway.resolveInboundResponsibleUsersAsApp(
       record.building,
     );
@@ -1156,21 +1158,21 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     const candidates = (await this.gateway.listExecutionRecordsAsApp()).filter(
       (record) =>
         !isHealthcheckRecord(record.requestCode) &&
-        resolvePurchaseStage(record.status) === 'inbound',
+        resolvePurchaseLifecycleStage(record.status) === 'inbound',
     );
     let recovered = 0;
     for (const record of candidates) {
       if (recovered >= limit) break;
       try {
+        if (resolvePurchaseStage(record.status) !== 'inbound' && !await this.store.stageCardInboundAuthority?.(record.recordId)) continue;
         const managers = await this.gateway.resolveInboundResponsibleUsersAsApp(
           record.building,
         );
-        const existing = await this.store.listNotifications({
-          recordId: record.recordId,
-          kind: 'warehouse_inbound',
-        });
         const knownRecipients = new Set(
-          existing.map((notification) => notification.recipientOpenId),
+          this.store.pendingWarehouseStageRecipients
+            ? await this.store.pendingWarehouseStageRecipients(record.recordId)
+            : (await this.store.listNotifications({ recordId: record.recordId, kind: 'warehouse_inbound' }))
+              .map(notification => notification.recipientOpenId),
         );
         const remainingCapacity = limit - recovered;
         const missing = [
@@ -1704,7 +1706,8 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       return { messageId };
     }
     if (notification.kind === 'warehouse_inbound') {
-      const stage = resolvePurchaseStage(record.status);
+      const staged = await this.store.stageCardInboundAuthority?.(record.recordId);
+      const stage = staged ? resolvePurchaseLifecycleStage(record.status) : resolvePurchaseStage(record.status);
       if (stage === 'completed' || stage === 'terminated') {
         if (notification.sendOutcome === 'unknown') throw new ConflictException('原待入库提醒发送结果仍需核对');
         return { businessStage: stage };
@@ -1712,10 +1715,26 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
       if (stage !== 'inbound') {
         throw new ConflictException('采购记录尚未进入待入库阶段');
       }
+      if (staged && !this.accessConfiguration) throw new ServiceUnavailableException('采购分阶段入库权限不可核对');
       const card = buildWarehouseInboundCard(record, readEnv('PUBLIC_BASE_URL'));
       const sending = this.accessConfiguration
         ? await this.store.markInboundCompletedSendStarted(notification.key, notification.claimToken, now, () => {
           assertFeishuBusinessIdentity(this.accessConfiguration, notification.recipientOpenId);
+          if (staged) {
+            const appId = readEnv('FEISHU_APP_ID');
+            const target = purchaseAuthorityTarget(record);
+            const principal = this.accessConfiguration!.feishuPrincipal(notification.recipientOpenId, appId);
+            const duties = target && purchaseCurrentDutyMembers(this.accessConfiguration!, 'warehouse_approver', target);
+            if (appId !== staged.appId || record.approvalBatchId !== staged.approvalBatchId || !target ||
+                target.building !== staged.target.building || target.specialty !== staged.target.specialty ||
+                !principal || principal.requiresPasswordChange ||
+                !duties?.some(person => person.openId === notification.recipientOpenId) ||
+                !canPerformBusinessAction(principal, { module: 'inventory', action: 'read', ...target }) ||
+                !canPerformBusinessAction(principal, { module: 'inventory', action: 'confirm', ...target })) {
+              throw new ForbiddenException('当前无该采购记录的入库职责');
+            }
+            assertPurchaseInboundExecutionScope(principal, target.building);
+          }
           return true;
         })
         : await this.store.markInboundCompletedSendStarted(notification.key, notification.claimToken, now);

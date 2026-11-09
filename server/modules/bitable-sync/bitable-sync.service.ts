@@ -1,6 +1,7 @@
 import {
   Injectable,
   Inject,
+  ConflictException,
   Logger,
   NotFoundException,
   OnModuleDestroy,
@@ -47,6 +48,7 @@ import {
   normalizeBuildingForFrontend,
   normalizeBuildingLabel,
   normalizeTeamForFrontend,
+  observePersistedBitableCacheInvalidation,
   pickField,
   readLatestPersistedBitableRecordSnapshot,
   resolveBitableAppToken,
@@ -55,8 +57,13 @@ import {
 import {
   enrichScheduleRecordsWithLeaveApproval,
   fetchLeaveApprovalSnapshot,
+  isResolvedLeaveApprovalCacheScope,
   readCachedLeaveApprovalSnapshot,
   readCachedLeaveApprovalSnapshotState,
+  refreshVerifiedLeaveApprovalSnapshot,
+  waitForLeaveScheduleCacheRecovery,
+  LeaveApprovalCacheError,
+  type LeaveApprovalSnapshot,
   SYSTEM_APPROVED_LEAVE_STAFF_FIELD,
   SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD,
   SYSTEM_APPROVED_POST_REPLACEMENTS_FIELD,
@@ -256,6 +263,8 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   private isSyncing = false;
   private cacheRefreshTimer?: NodeJS.Timeout;
   private leaveApprovalRefreshTimer?: NodeJS.Timeout;
+  private leaveApprovalRecoveryTimer?: NodeJS.Timeout;
+  private stopObservingLeaveApprovalInvalidation?: () => void;
   private personProfileRefreshTimer?: NodeJS.Timeout;
   private readonly personProfileRefreshStarted = new Map<string, number>();
   private readonly personProfileSnapshotMetadata = new WeakMap<BitableRecordItem[], { fetchedAt: number; stale: boolean; refreshing: boolean }>();
@@ -267,7 +276,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   }>();
   private readonly personProfileRefreshes = new Map<string, Promise<BitableRecordItem[]>>();
   private cacheRefreshRunning = false;
-  private leaveApprovalRefreshRunning = false;
+  private leaveApprovalRefresh?: Promise<void>;
   // 飞书多维表配置 - 封网信息表
   private readonly APP_TOKEN = readEnv('FEISHU_SEALING_APP_TOKEN', [
     'FEISHU_MAIN_APP_TOKEN',
@@ -405,8 +414,12 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     }
     await warmLatestPersistedBitableRecordSnapshotIndex();
     await this.warmLeaveFormLocalSnapshots();
+    this.stopObservingLeaveApprovalInvalidation = observePersistedBitableCacheInvalidation((appToken, tableId) => {
+      if (isResolvedLeaveApprovalCacheScope(appToken, tableId)) this.scheduleLeaveApprovalCacheRecovery();
+    });
     void this.refreshPersonProfileLocalCache();
     void this.refreshFeishuLocalCache();
+    void this.refreshLeaveApprovalCache();
     this.cacheRefreshTimer = setInterval(
       () => void this.refreshFeishuLocalCache(),
       this.getLocalCacheRefreshMs(),
@@ -425,6 +438,12 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    this.stopObservingLeaveApprovalInvalidation?.();
+    this.stopObservingLeaveApprovalInvalidation = undefined;
+    if (this.leaveApprovalRecoveryTimer) {
+      clearTimeout(this.leaveApprovalRecoveryTimer);
+      this.leaveApprovalRecoveryTimer = undefined;
+    }
     if (this.personProfileRefreshTimer) {
       clearInterval(this.personProfileRefreshTimer);
       this.personProfileRefreshTimer = undefined;
@@ -509,27 +528,41 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     ]);
   }
 
-  private async refreshLeaveApprovalCache(): Promise<void> {
-    if (this.leaveApprovalRefreshRunning) {
-      return;
-    }
-    this.leaveApprovalRefreshRunning = true;
-    try {
-      const snapshot = await fetchLeaveApprovalSnapshot(this.httpService, {
-        forceRefresh: true,
-        strict: true,
+  private scheduleLeaveApprovalCacheRecovery(): void {
+    if (this.leaveApprovalRecoveryTimer) return;
+    const timer = setTimeout(() => {
+      void this.recoverInvalidatedLeaveApprovalCache().finally(() => {
+        if (this.leaveApprovalRecoveryTimer === timer) this.leaveApprovalRecoveryTimer = undefined;
       });
-      this.logger.log(
-        `Feishu leave approval cache refreshed: ${snapshot.requests.length}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(
-        `Feishu leave approval cache refresh failed: ${message}`,
-      );
-    } finally {
-      this.leaveApprovalRefreshRunning = false;
+    }, 1_000);
+    this.leaveApprovalRecoveryTimer = timer;
+    timer.unref?.();
+  }
+
+  private async recoverInvalidatedLeaveApprovalCache(): Promise<void> {
+    await this.leaveApprovalRefresh;
+    if (!this.stopObservingLeaveApprovalInvalidation) return;
+    const current = await readCachedLeaveApprovalSnapshotState();
+    if (this.stopObservingLeaveApprovalInvalidation && !current.snapshot.verified) {
+      await this.refreshLeaveApprovalCache();
     }
+  }
+
+  private refreshLeaveApprovalCache(): Promise<void> {
+    if (this.leaveApprovalRefresh) return this.leaveApprovalRefresh;
+    const refresh = refreshVerifiedLeaveApprovalSnapshot(this.httpService)
+      .then(snapshot => {
+        this.logger.log(`Feishu leave approval cache refreshed: ${snapshot.requests.length}`);
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Feishu leave approval cache refresh failed: ${message}`);
+      })
+      .finally(() => {
+        if (this.leaveApprovalRefresh === refresh) this.leaveApprovalRefresh = undefined;
+      });
+    this.leaveApprovalRefresh = refresh;
+    return refresh;
   }
 
   private async refreshFeishuLocalCache(): Promise<void> {
@@ -598,9 +631,15 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
 
   private async refreshRollingScheduleCache(kind: 'schedule' | 'non-duty'): Promise<number> {
     const source = this.scheduleSource(kind);
+    let approvalSnapshot: LeaveApprovalSnapshot | undefined;
     const result = await synchronizeRollingSchedule({
       ...source, store: new DutyLocalMonthSnapshots(), dateOf: record => this.scheduleRecordDate(record),
-      approvalReady: async () => (await readCachedLeaveApprovalSnapshot()).verified,
+      approvalReady: async () => approvalSnapshot?.verified === true,
+      assertDependenciesCurrent: async () => {
+        if (await readCachedLeaveApprovalSnapshot() !== approvalSnapshot) {
+          throw new ConflictException('排班来源已变化，请重新同步');
+        }
+      },
       load: async (range, persistence) => {
         const settled = await Promise.allSettled([
           fetchBitableRecords(this.httpService, { ...source, forceRefresh: true, strict: true, allowStale: false, ...persistence,
@@ -608,11 +647,12 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
               { field_name: '排班日期', operator: 'isGreater', value: ['ExactDate', String(Date.parse(range.startDate + 'T00:00:00+08:00') - 86400000)] },
               { field_name: '排班日期', operator: 'isLess', value: ['ExactDate', String(Date.parse(range.endDate + 'T00:00:00+08:00') + 86400000)] },
             ] } }),
-          fetchLeaveApprovalSnapshot(this.httpService, { forceRefresh: true, strict: true, requirePersisted: true }),
+          refreshVerifiedLeaveApprovalSnapshot(this.httpService),
         ]);
         if (settled[0].status === 'rejected') throw settled[0].reason;
         if (settled[1].status === 'rejected') throw settled[1].reason;
-        return enrichScheduleRecordsWithLeaveApproval(settled[0].value, settled[1].value);
+        approvalSnapshot = settled[1].value;
+        return enrichScheduleRecordsWithLeaveApproval(settled[0].value, approvalSnapshot);
       },
     });
     return result.localSynced;
@@ -3825,11 +3865,12 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * 卡片资格校验只读后台保存的快照，不能在受理前触发云端刷新。
+   * 卡片回调只等待本地读取。后台路由可等待一次合并的审批缓存恢复。
    */
   async getCachedLeaveRequestImpactSchedules(
     startDate: string,
     endDate: string,
+    options: { waitForApprovalRecovery?: boolean } = {},
   ): Promise<LeaveRequestImpactSchedule[]> {
     if (
       !/^\d{4}-\d{2}-\d{2}$/u.test(startDate) ||
@@ -3838,29 +3879,41 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     ) {
       throw new ServiceUnavailableException('请休假替班排班日期范围无效');
     }
-    const [nonDutyRows, scheduleRows, approvalState] = await Promise.all([
+    const readSources = () => Promise.all([
       this.readRollingScheduleRecords('non-duty', startDate, endDate),
       this.readRollingScheduleRecords('schedule', startDate, endDate),
       readCachedLeaveApprovalSnapshotState(),
     ]);
-    const nonDutySnapshot = { records: nonDutyRows }, scheduleSnapshot = { records: scheduleRows };
-    if (!nonDutySnapshot || !scheduleSnapshot) {
-      throw new ServiceUnavailableException('排班本地缓存暂不可用，请等待后台同步后重试');
-    }
+    let [nonDutyRows, scheduleRows, approvalState] = await readSources();
     if (!approvalState.snapshot.verified) {
-      throw new ServiceUnavailableException('请休假审批本地缓存缺失或已过期，请等待后台同步后重试');
+      if (!options.waitForApprovalRecovery) {
+        void this.refreshLeaveApprovalCache();
+        throw new ServiceUnavailableException('请休假审批缓存正在后台核验，请稍后重试原操作');
+      }
+      try {
+        await waitForLeaveScheduleCacheRecovery(
+          refreshVerifiedLeaveApprovalSnapshot(this.httpService),
+          '请休假审批缓存正在后台核验，请稍后重试原操作',
+        );
+      } catch (error) {
+        throw new ServiceUnavailableException(error instanceof Error ? error.message : '请休假审批缓存暂未核验');
+      }
+      [nonDutyRows, scheduleRows, approvalState] = await readSources();
+      if (!approvalState.snapshot.verified) {
+        throw new ServiceUnavailableException(new LeaveApprovalCacheError(approvalState.failure || 'invalid').message);
+      }
     }
     const inRange = (date: string | null): date is string =>
       Boolean(date && date >= startDate && date <= endDate);
     // The caller includes adjacent rest days; unrelated historical rows need no approval projection.
     const nonDutyRecords = enrichScheduleRecordsWithLeaveApproval(
-      nonDutySnapshot.records.filter(record => inRange(extractFeishuDateValue(
+      nonDutyRows.filter(record => inRange(extractFeishuDateValue(
         pickField(record.fields || {}, ['排班日期', '日期', 'schedule_date']),
       ))),
       approvalState.snapshot,
     );
     const scheduleRecords = enrichScheduleRecordsWithLeaveApproval(
-      scheduleSnapshot.records.filter(record => inRange(extractFeishuDateValue(
+      scheduleRows.filter(record => inRange(extractFeishuDateValue(
         pickField(record.fields || {}, ['fldZSaDbGf', '排班日期', '日期']),
       ))),
       approvalState.snapshot,

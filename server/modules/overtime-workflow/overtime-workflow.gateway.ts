@@ -258,6 +258,8 @@ export class OvertimeWorkflowGateway {
       requestConfig(token),
     );
     assertFeishuSuccess(response.data, '更新加班多维记录失败');
+    const fieldNames = Object.keys(normalizedFields);
+    if (fieldNames.length === 1 && fieldNames[0] === '加班工作流错误') return;
     invalidateBitableRecordCache({
       appToken: config.appToken,
       tableId: config.tableId,

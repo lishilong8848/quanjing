@@ -77,6 +77,10 @@ import {
   fetchLeaveApprovalSnapshot,
   readApprovedLeaveAssignmentsFromFields,
   readCachedLeaveApprovalSnapshot,
+  readCachedLeaveApprovalSnapshotState,
+  refreshVerifiedLeaveApprovalSnapshot,
+  LeaveApprovalCacheError,
+  waitForLeaveScheduleCacheRecovery,
   type LeaveApprovalSnapshot,
 } from '@server/common/feishu/leave-approval-source';
 import { ResponseCode } from '@server/common/constants/api_response_code';
@@ -498,11 +502,13 @@ class ConstructionFollowupChildTaskError extends Error {
   }
 }
 
+class DutyScheduleCacheUnavailableError extends ServiceUnavailableException {}
+
 class LeaveRequestAmbiguousWriteError extends ServiceUnavailableException {
   readonly originalError: unknown;
 
   constructor(message: string, originalError: unknown) {
-    super(message);
+    super({ message, writeDisposition: 'unknown-result' });
     this.name = 'LeaveRequestAmbiguousWriteError';
     this.originalError = originalError;
     Object.setPrototypeOf(this, LeaveRequestAmbiguousWriteError.prototype);
@@ -1551,7 +1557,6 @@ export class DutyScheduleService {
       schedules: MonthlySchedule[];
     }
   >();
-  private threeMonthLocalSyncPromise?: Promise<DutyLocalSyncResult>;
   private sealingSourceSnapshot:
     | {
         records: BitableRecordItem[];
@@ -2081,7 +2086,7 @@ export class DutyScheduleService {
   private async fetchFeishuScheduleRecords(
     forceRefresh = false,
     strict = false,
-    verifiedApprovalSnapshot?: LeaveApprovalSnapshot,
+    verifiedApprovalSnapshot?: LeaveApprovalSnapshot | Promise<LeaveApprovalSnapshot>,
     dateRange?: { startDate: string; endDate: string },
     persistence?: { requirePersisted: boolean; onPersisted?: (snapshot: { fetchedAt: number; sourceStartedAt: number; invalidationToken: string | null }) => void },
   ): Promise<BitableRecordItem[]> {
@@ -2142,6 +2147,7 @@ export class DutyScheduleService {
     forceRefresh = false,
     useConfiguredView = true,
     verifiedApprovalSnapshot?: LeaveApprovalSnapshot,
+    attendanceDate?: string,
   ): Promise<BitableRecordItem[]> {
     const appToken = await resolveBitableAppToken(
       this.httpService,
@@ -2155,6 +2161,13 @@ export class DutyScheduleService {
           ? this.longWhiteDutyConfig.viewId || undefined
           : undefined,
         tableName: this.longWhiteDutyConfig.tableName,
+        ...(attendanceDate && { filter: {
+          conjunction: 'and' as const,
+          conditions: [
+            { field_name: '排班日期', operator: 'isGreater', value: ['ExactDate', String(Date.parse(attendanceDate + 'T00:00:00+08:00') - 86_400_000)] },
+            { field_name: '排班日期', operator: 'isLess', value: ['ExactDate', String(Date.parse(attendanceDate + 'T00:00:00+08:00') + 86_400_000)] },
+          ],
+        } }),
         forceRefresh,
         ...(verifiedApprovalSnapshot
           ? { strict: true, allowStale: false }
@@ -6001,38 +6014,31 @@ export class DutyScheduleService {
   }
 
   private syncThreeMonthScheduleSnapshots(phase: (value: string) => void, now = new Date()): Promise<DutyLocalSyncResult> {
-    if (!this.threeMonthLocalSyncPromise) {
-      const operation = this.performThreeMonthScheduleSyncWithRetry(phase, now).finally(() => {
-        if (this.threeMonthLocalSyncPromise === operation) this.threeMonthLocalSyncPromise = undefined;
-      });
-      this.threeMonthLocalSyncPromise = operation;
-    }
-    return this.threeMonthLocalSyncPromise;
-  }
-
-  private async performThreeMonthScheduleSyncWithRetry(phase: (value: string) => void, now: Date): Promise<DutyLocalSyncResult> {
-    const startedAt = Date.now();
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const result = await this.performThreeMonthScheduleSync(phase, now);
-        return { ...result, durationMs: Date.now() - startedAt };
-      } catch (error) {
-        const failure = describeDutyLocalSyncFailure(error);
-        if (attempt >= 1 || !failure.retryable) throw error;
-        this.logger.warn(`近三个月排班读取遇到${failure.kind}，将重新核对一次`);
-        phase('retrying_sources');
-        await new Promise<void>(resolve => setTimeout(resolve, 250));
-      }
-    }
-  }
-
-  private async performThreeMonthScheduleSync(phase: (value: string) => void, now: Date): Promise<DutyLocalSyncResult> {
+    let approvalSnapshot: LeaveApprovalSnapshot | undefined;
     return synchronizeRollingSchedule({
       appToken: this.scheduleAppToken, tableId: this.scheduleTableId, tableName: '值班排班', now,
       store: this.localMonthSnapshots, phase,
       dateOf: record => this.extractScheduleDateFromFields(record.fields || {}),
-      load: (range, persistence) => this.fetchFeishuScheduleRecords(true, true, undefined, range, persistence),
-      approvalReady: async () => (await readCachedLeaveApprovalSnapshot()).verified,
+      load: (range, persistence) => {
+        const approval = refreshVerifiedLeaveApprovalSnapshot(this.httpService).then(snapshot => {
+          approvalSnapshot = snapshot;
+          return snapshot;
+        });
+        return Promise.allSettled([
+          this.fetchFeishuScheduleRecords(true, true, approval, range, persistence),
+          approval,
+        ]).then(([scheduleResult, approvalResult]) => {
+          if (scheduleResult.status === 'rejected') throw scheduleResult.reason;
+          if (approvalResult.status === 'rejected') throw approvalResult.reason;
+          return scheduleResult.value;
+        });
+      },
+      approvalReady: async () => approvalSnapshot?.verified === true,
+      assertDependenciesCurrent: async () => {
+        if (await readCachedLeaveApprovalSnapshot() !== approvalSnapshot) {
+          throw new ConflictException('排班来源已变化，请重新同步');
+        }
+      },
     });
   }
 
@@ -6561,10 +6567,12 @@ export class DutyScheduleService {
       return rows;
     };
 
+    const attendanceDate = verifiedApprovalSnapshot ? targetDate : undefined;
     const records = await this.fetchLongWhiteDutyRecords(
       forceRefresh,
       true,
       verifiedApprovalSnapshot,
+      attendanceDate,
     );
     let rows = buildRows(records);
     if (
@@ -6576,6 +6584,7 @@ export class DutyScheduleService {
           forceRefresh,
           false,
           verifiedApprovalSnapshot,
+          attendanceDate,
         ),
       );
       rows = preferMoreCompleteLongWhiteDutyRows(
@@ -7498,6 +7507,7 @@ export class DutyScheduleService {
     request: LeaveRequestCreateRequest,
     clientMutationId: string,
     screenshot: ConstructionUploadFile,
+    recovery: 'unknown-write' | 'workflow-only' = 'unknown-write',
   ): Promise<LeaveRequestCreateResponse | null> {
     if (!this.hasBitableSourceConfig(this.leaveSubstituteConfig)) {
       throw new BadRequestException(
@@ -7527,11 +7537,13 @@ export class DutyScheduleService {
     if (!persistedRequest) {
       return null;
     }
-    invalidateBitableRecordCache({
-      appToken,
-      tableId: this.leaveSubstituteConfig.tableId,
-      deletePersisted: true,
-    });
+    if (recovery === 'unknown-write') {
+      invalidateBitableRecordCache({
+        appToken,
+        tableId: this.leaveSubstituteConfig.tableId,
+        deletePersisted: true,
+      });
+    }
     return this.buildPersistedLeaveRequestResponse(
       request,
       clientMutationId,
@@ -7899,6 +7911,7 @@ export class DutyScheduleService {
             return response;
           }
           if (
+            request.workflowRecoveryOnly ||
             unknown.replayState.reconcileOnly ||
             unknown.replayState.preparedWrite?.reconcileOnly
           ) {
@@ -12849,14 +12862,20 @@ export class DutyScheduleService {
       clientMutationId,
       request,
       validatedScreenshot,
-      (replayState) =>
-        this.createLeaveRequestNow(
-          request,
-          clientMutationId,
-          validatedScreenshot,
-          replayState,
-          authenticatedStaff,
-        ),
+      async (replayState) => {
+        if (request.workflowRecoveryOnly) {
+          const existing = await this.reconcilePersistedLeaveRequest(
+            request, clientMutationId, validatedScreenshot, 'workflow-only',
+          ).catch(error => {
+            throw new LeaveRequestAmbiguousWriteError('原请休假记录暂未核对，请使用原申请标识重试审批流转', error);
+          });
+          if (!existing) throw new LeaveRequestAmbiguousWriteError('原请休假记录暂未核对，请使用原申请标识重试审批流转', undefined);
+          return existing;
+        }
+        return this.createLeaveRequestNow(
+          request, clientMutationId, validatedScreenshot, replayState, authenticatedStaff,
+        );
+      },
       () =>
         this.reconcilePersistedLeaveRequest(
           request,
@@ -12936,25 +12955,21 @@ export class DutyScheduleService {
         replayState.preparedWrite,
       );
     }
-    const [appToken, tenantAccessToken] = await Promise.all([
-      resolveBitableAppToken(this.httpService, this.leaveSubstituteConfig),
-      this.getFeishuTenantAccessToken(),
-    ]);
-    const fieldMetas = await this.fetchBitableFieldMetas(
-      appToken,
-      this.leaveSubstituteConfig.tableId,
-      this.leaveSubstituteConfig.tableName,
-      tenantAccessToken,
-    );
-    const fieldConfig = this.resolveLeaveRequestFieldConfig(fieldMetas);
-    const leaveProgramWorkflowFields = isLeaveProgramWorkflowEnabled()
-      ? this.resolveLeaveProgramWorkflowInitialFieldConfig(fieldMetas)
-      : null;
-    const persistedRequest = await this.findPersistedLeaveRequest(
-      appToken,
-      clientMutationId,
-      requestFingerprint,
-    );
+    const { appToken, persistedRequest } = await (async () => {
+      try {
+        const appToken = await resolveBitableAppToken(this.httpService, this.leaveSubstituteConfig);
+        return { appToken, persistedRequest: await this.findPersistedLeaveRequest(appToken, clientMutationId, requestFingerprint) };
+      } catch (error) {
+        const reason = error instanceof BadRequestException ? 'identity-conflict' : 'lookup-unavailable';
+        this.logger.warn(`请休假记录回查未确认：类型=${reason}`);
+        // This attempt has not dispatched a write. A retry can repeat the lookup
+        // without creating a durable ambiguous-write marker for this read error.
+        throw new ServiceUnavailableException({
+          message: '原请休假申请结果暂未核对，请使用原申请标识重试',
+          writeDisposition: 'unknown-result',
+        });
+      }
+    })();
     if (persistedRequest) {
       return this.buildPersistedLeaveRequestResponse(
         request,
@@ -12962,6 +12977,24 @@ export class DutyScheduleService {
         persistedRequest.recordId,
       );
     }
+    const { tenantAccessToken, fieldConfig, leaveProgramWorkflowFields } = await (async () => {
+      try {
+        const tenantAccessToken = await this.getFeishuTenantAccessToken();
+        const fieldMetas = await this.fetchBitableFieldMetas(
+          appToken, this.leaveSubstituteConfig.tableId, this.leaveSubstituteConfig.tableName, tenantAccessToken,
+        );
+        return {
+          tenantAccessToken,
+          fieldConfig: this.resolveLeaveRequestFieldConfig(fieldMetas),
+          leaveProgramWorkflowFields: isLeaveProgramWorkflowEnabled()
+            ? this.resolveLeaveProgramWorkflowInitialFieldConfig(fieldMetas)
+            : null,
+        };
+      } catch (error) {
+        if (error instanceof BadRequestException) throw error;
+        throw this.createLeaveRequestDefinitelyNotWrittenException('请休假申请配置暂未就绪，尚未建立记录', error);
+      }
+    })();
     const queryStartDate = new Date(`${start.dateKey}T00:00:00.000Z`);
     queryStartDate.setUTCDate(queryStartDate.getUTCDate() - 1);
     const scheduleStartDate = queryStartDate.toISOString().slice(0, 10);
@@ -12973,7 +13006,14 @@ export class DutyScheduleService {
       scheduleEndDate,
       true,
       true,
-    );
+    ).catch(error => {
+      const changed = describeDutyLocalSyncFailure(error).kind === 'source_changed';
+      throw this.createLeaveRequestDefinitelyNotWrittenException(
+        changed ? '排班正在更新，尚未建立请休假记录，请核对最新班次后重试'
+          : '排班或审批资料暂未核验，尚未建立请休假记录，请稍后重试',
+        error,
+      );
+    });
     const impactSchedules = schedules.map((schedule) => ({
       recordId: schedule.recordId,
       scheduleDate: schedule.scheduleDate,
@@ -21463,15 +21503,29 @@ export class DutyScheduleService {
    * Never substitute historical/stale data or fetch full source tables for a scan.
    */
   async getSchedulesForRiskScan(startDate: string, endDate: string): Promise<MonthlySchedule[]> {
-    for (let attempt = 0; ; attempt++) {
+    let recovered = false;
+    for (let conflicts = 0; ; ) {
       try {
         return await this.getMonthlySchedulesFromLocalCache(startDate, endDate, false);
       } catch (error) {
-        const message = error instanceof Error ? error.message : '';
-        const changed = message === '数据在读取期间已变更，请重新读取' ||
-          message === '排班来源已变化，请重新读取';
-        if (!changed || attempt >= 2) throw error;
-        await new Promise(resolve => setTimeout(resolve, 100));
+        const range = dutyThreeMonthRange();
+        const missingSchedule = error instanceof DutyScheduleCacheUnavailableError &&
+          startDate >= range.startDate && endDate <= range.endDate;
+        const missingApproval = error instanceof LeaveApprovalCacheError &&
+          (error.kind === 'missing' || error.kind === 'expired');
+        if (!recovered && (missingSchedule || missingApproval)) {
+          recovered = true;
+          await waitForLeaveScheduleCacheRecovery<unknown>(
+            missingSchedule
+              ? this.syncDutyScheduleToLocalFast()
+              : refreshVerifiedLeaveApprovalSnapshot(this.httpService),
+            '排班或请休假审批缓存正在后台核验，请稍后查看',
+          );
+          continue;
+        }
+        if (describeDutyLocalSyncFailure(error).kind !== 'source_changed' || conflicts >= 2) throw error;
+        conflicts++;
+        await new Promise<void>(resolve => setTimeout(resolve, 100));
       }
     }
   }
@@ -21507,7 +21561,7 @@ export class DutyScheduleService {
       const snapshots = await Promise.all(months.map(month => this.localMonthSnapshots.readPreferredMonth(
         this.scheduleAppToken, this.scheduleTableId, month, fullSnapshot, revision,
       )));
-      if (snapshots.some(row => !row)) throw new ServiceUnavailableException('本地排班缓存尚未覆盖完整日期范围');
+      if (snapshots.some(row => !row)) throw new DutyScheduleCacheUnavailableError('本地排班缓存尚未覆盖完整日期范围');
       if (await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== revision) throw new ConflictException('排班来源已变化，请重新读取');
       const records: BitableRecordItem[] = [];
       const ids = new Set<string>();
@@ -21525,14 +21579,13 @@ export class DutyScheduleService {
     }
     if (historical && !snapshot && startMonth === endMonth) snapshot = await this.localMonthSnapshots.readMonth(this.scheduleAppToken, this.scheduleTableId, startMonth) || null;
     if (!snapshot || !historical && (!Number.isFinite(snapshot.expiresAt) || snapshot.expiresAt <= Date.now())) {
-      throw new ServiceUnavailableException(
-        '本地排班缓存尚未准备完成，请稍后重试',
-      );
+      throw new DutyScheduleCacheUnavailableError('本地排班缓存尚未准备完成，请稍后重试');
     }
 
-    const approvalSnapshot = await readCachedLeaveApprovalSnapshot();
+    const approvalState = await readCachedLeaveApprovalSnapshotState();
+    const approvalSnapshot = approvalState.snapshot;
     if (!historical && await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== revision) throw new ConflictException('排班来源已变化，请重新读取');
-    if (!historical && !approvalSnapshot.verified) throw new ServiceUnavailableException('请休假审批缓存尚未核验，暂不能办理，请稍后重试');
+    if (!historical && !approvalSnapshot.verified) throw new LeaveApprovalCacheError(approvalState.failure || 'invalid');
     const prepared = this.preparedMonthlySchedules.get(snapshot);
     if (
       approvalSnapshot.verified &&
@@ -22124,6 +22177,7 @@ export class DutyScheduleService {
         Boolean(verifiedApprovalSnapshot),
         Boolean(verifiedApprovalSnapshot),
         verifiedApprovalSnapshot,
+        verifiedApprovalSnapshot && startDate && endDate ? { startDate, endDate } : undefined,
       );
       return records
         .map((record) => this.mapFeishuScheduleRecord(record))

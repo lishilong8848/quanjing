@@ -209,9 +209,10 @@ export class DutyLocalMonthSnapshots {
     }
     return preferred;
   }
-  async publish(appToken: string, tableId: string, range: DutySyncRange, records: BitableRecordItem[], sourceStartedAt: number, invalidationToken: string | null, dateOf: (record: BitableRecordItem) => string | null): Promise<number> {
+  async publish(appToken: string, tableId: string, range: DutySyncRange, records: BitableRecordItem[], sourceStartedAt: number, invalidationToken: string | null, dateOf: (record: BitableRecordItem) => string | null, assertCurrent?: () => Promise<void>): Promise<number> {
     const file = this.file(appToken, tableId), previous = this.writes.get(file) || Promise.resolve();
     const operation = previous.catch(() => undefined).then(async () => {
+      await assertCurrent?.();
       const current = await this.read(appToken, tableId);
       const state = { ...current, months: { ...current.months } };
       const byMonth = new Map(range.months.map(month => [month, [] as BitableRecordItem[]])), ids = new Set<string>();
@@ -242,6 +243,7 @@ export class DutyLocalMonthSnapshots {
         const handle = await open(temporary, 'wx', 0o600);
         try { await handle.writeFile(bytes, 'utf8'); await handle.sync(); }
         finally { await handle.close(); }
+        await assertCurrent?.();
         await rename(temporary, file);
         if (this.cachedStore?.file === file) this.cachedStore = undefined;
       }

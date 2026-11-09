@@ -514,7 +514,11 @@ function parseLeaveRequestPayload(payload: string): LeaveRequestCreateRequest {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('请休假 payload 必须是对象');
   }
-  return parsed as LeaveRequestCreateRequest;
+  const request = parsed as LeaveRequestCreateRequest;
+  if (request.workflowRecoveryOnly !== undefined && request.workflowRecoveryOnly !== true) {
+    throw new Error('审批流转恢复标识无效');
+  }
+  return request;
 }
 
 function parseOvertimeRequestPayload(
@@ -761,30 +765,48 @@ export class DutyScheduleController {
       files[0],
       accessRequest?.accessPrincipal,
     );
-    if (!this.leaveWorkflowService?.isEnabled()) return result;
-    const workflow = await this.leaveWorkflowService.acceptApplications({
-      clientMutationId: result.clientMutationId,
-      recordIds: result.recordIds,
-      leaveStaffName: result.leaveStaffName,
-      startAt: result.startAt,
-      endAt: result.endAt,
-      leaveType: request.leaveType,
-      leaveHours: result.minimumHours,
-      approvalDayCount: new Set(
-        result.affectedSchedules.map((schedule) => schedule.date),
-      ).size,
-      shiftGroups: result.shiftGroups,
-      reason: request.leaveReason,
-    });
-    return {
+    const workflowPending = (): LeaveRequestCreateResponse => ({
       ...result,
+      message: '请休假申请已保存，审批流转待恢复',
       approvalWorkflow: {
         mode: 'program_card',
-        accepted: true,
+        accepted: false,
         pending: true,
-        recordIds: workflow.recordIds,
+        recordIds: result.recordIds,
       },
-    };
+    });
+    if (!this.leaveWorkflowService?.isEnabled()) {
+      return request.workflowRecoveryOnly ? workflowPending() : result;
+    }
+
+    try {
+      const workflow = await this.leaveWorkflowService.acceptApplications({
+        clientMutationId: result.clientMutationId,
+        recordIds: result.recordIds,
+        leaveStaffName: result.leaveStaffName,
+        startAt: result.startAt,
+        endAt: result.endAt,
+        leaveType: request.leaveType,
+        leaveHours: result.minimumHours,
+        approvalDayCount: new Set(
+          result.affectedSchedules.map((schedule) => schedule.date),
+        ).size,
+        shiftGroups: result.shiftGroups,
+        reason: request.leaveReason,
+      });
+      return {
+        ...result,
+        approvalWorkflow: {
+          mode: 'program_card',
+          accepted: true,
+          pending: true,
+          recordIds: workflow.recordIds,
+        },
+      };
+    } catch {
+      this.logger.warn('请休假记录已确认，审批流转受理待恢复');
+      return workflowPending();
+    }
   }
 
   @GuestSubmittable()

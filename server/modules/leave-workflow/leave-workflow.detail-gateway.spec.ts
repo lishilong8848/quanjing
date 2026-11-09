@@ -1,11 +1,15 @@
 import type { HttpService } from '@nestjs/axios';
+import { invalidateBitableRecordCache } from '../../common/feishu/bitable-direct-read';
 import { LeaveWorkflowDetailGateway } from './leave-workflow.detail-gateway';
 import type { LeaveShiftSubstituteAssignment } from './leave-workflow.types';
+
+jest.mock('../../common/feishu/bitable-direct-read', () => ({ invalidateBitableRecordCache: jest.fn() }));
 
 describe('LeaveWorkflowDetailGateway', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    jest.mocked(invalidateBitableRecordCache).mockClear();
     process.env.FEISHU_APP_ID = 'leave-detail-app';
     process.env.FEISHU_APP_SECRET = 'leave-detail-secret';
     process.env.FEISHU_LEAVE_REQUEST_APP_TOKEN = 'leave-base-token';
@@ -25,6 +29,10 @@ describe('LeaveWorkflowDetailGateway', () => {
 
     expect(api.rows).toHaveLength(2);
     expect(api.createCalls).toHaveLength(2);
+    expect(invalidateBitableRecordCache).toHaveBeenCalledTimes(2);
+    expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
+      appToken: 'leave-base-token', tableId: 'tbl_leave_shift_detail', deletePersisted: true,
+    });
     expect(api.createCalls.map((call) => call.clientToken)).toEqual(
       expect.arrayContaining([
         expect.stringMatching(
@@ -53,9 +61,11 @@ describe('LeaveWorkflowDetailGateway', () => {
       expect(call.fields).toHaveProperty('替班用户');
     }
     api.updateCalls.length = 0;
+    jest.mocked(invalidateBitableRecordCache).mockClear();
     await gateway.upsertCurrentAssignments('rec_leave_1', 1, assignments);
 
     expect(api.updateCalls).toHaveLength(0);
+    expect(invalidateBitableRecordCache).not.toHaveBeenCalled();
     api.rows[1].fields['替班安排版本'] = 0;
     await gateway.upsertCurrentAssignments('rec_leave_1', 1, assignments);
     expect(api.updateCalls).toHaveLength(1);

@@ -35,7 +35,7 @@ export function isAttendanceCoreSyncComplete(
 ): boolean {
   return Boolean(
     snapshot &&
-    ((snapshot.runStatus?.state === 'completed' &&
+    (((snapshot.runStatus?.state === 'completed' || snapshot.runStatus?.resultReady) &&
       snapshot.sourceStatus === 'fresh') ||
       (snapshot.sourceStatus === 'failed' &&
         snapshot.runStatus?.failureScope === 'personal-delivery' &&
@@ -250,7 +250,10 @@ export function useTodayAttendanceSnapshot(enabled = true): UseTodayAttendanceSn
           )
         : !isTerminalFailure &&
             snapshot &&
-            RECOVERABLE_SOURCE_STATUSES.has(snapshot.sourceStatus)
+            (RECOVERABLE_SOURCE_STATUSES.has(snapshot.sourceStatus) ||
+              snapshot.runStatus?.state === 'running' ||
+              snapshot.runStatus?.archiveSyncState === 'syncing' ||
+              snapshot.runStatus?.correctionSyncState === 'syncing')
           ? RECOVERY_REFRESH_INTERVAL_MS
           : snapshot?.sourceStatus === 'fresh' && snapshot.entries.length > 0
             ? APPROVED_LEAVE_REFRESH_INTERVAL_MS
