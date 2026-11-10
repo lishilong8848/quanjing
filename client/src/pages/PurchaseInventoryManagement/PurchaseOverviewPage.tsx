@@ -433,6 +433,19 @@ export default function PurchaseOverviewPage() {
     return promise;
   }, []);
 
+  const loadInitialDashboard = useCallback(() => {
+    const requestPrincipalKey = activePrincipalKeyRef.current;
+    void loadDashboard(false).then((loaded) => {
+      if (
+        loaded &&
+        activePrincipalKeyRef.current === requestPrincipalKey &&
+        document.visibilityState !== 'hidden'
+      ) {
+        void loadDashboard('active');
+      }
+    });
+  }, [loadDashboard]);
+
   useEffect(() => {
     if (previousPrincipalKeyRef.current === principalKey) return;
     previousPrincipalKeyRef.current = principalKey;
@@ -451,8 +464,8 @@ export default function PurchaseOverviewPage() {
     setDashboard(null);
     setLoadError(null);
     setDashboardNotice(null);
-    void loadDashboard('active');
-  }, [loadDashboard, principalKey]);
+    loadInitialDashboard();
+  }, [loadInitialDashboard, principalKey]);
 
   useEffect(() => {
     const refreshActiveDashboard = () => {
@@ -460,7 +473,7 @@ export default function PurchaseOverviewPage() {
         void loadDashboard('active');
       }
     };
-    refreshActiveDashboard();
+    loadInitialDashboard();
     const activeTimer = window.setInterval(
       refreshActiveDashboard,
       ACTIVE_AUTO_REFRESH_MS,
@@ -477,7 +490,7 @@ export default function PurchaseOverviewPage() {
       window.removeEventListener('focus', refreshActiveDashboard);
       document.removeEventListener('visibilitychange', refreshActiveDashboard);
     };
-  }, [loadDashboard]);
+  }, [loadDashboard, loadInitialDashboard]);
 
   useEffect(() => {
     if (!canCreateApplication) setApplicationDialogOpen(false);
@@ -821,6 +834,7 @@ export default function PurchaseOverviewPage() {
   async function settleOptimisticMutation(
     recordId: string,
     outcome: 'completed' | 'failed',
+    refresh: DashboardRefreshMode = true,
   ): Promise<boolean> {
     const originalItem = optimisticItemSnapshotsRef.current.get(recordId);
     if (outcome === 'failed' && originalItem) {
@@ -829,7 +843,7 @@ export default function PurchaseOverviewPage() {
       );
     }
     optimisticItemSnapshotsRef.current.delete(recordId);
-    return loadDashboard(true);
+    return loadDashboard(refresh);
   }
 
   function rememberOptimisticSnapshot(
@@ -1097,7 +1111,13 @@ export default function PurchaseOverviewPage() {
         onOrderAccepted={applyOptimisticOrder}
         onOrderTaskSettled={settleOptimisticMutation}
         onReceiptAccepted={applyOptimisticReceipt}
-        onReceiptTaskSettled={settleOptimisticMutation}
+        onReceiptTaskSettled={(recordId, outcome) =>
+          settleOptimisticMutation(
+            recordId,
+            outcome,
+            canForceRefresh ? true : 'active',
+          )
+        }
       />
       <PurchaseRecordEditDialog
         item={

@@ -407,6 +407,80 @@ describe('PurchaseInventoryService', () => {
     expect(refreshed).not.toBe(first);
     expect(refreshed.refreshState).toBe('stale');
     expect(refreshed.refreshError).toContain('进行中数据刷新失败');
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(7);
+  });
+
+  it('retries a changed execution read once for all concurrent active refreshes', async () => {
+    const read = jest.mocked(fetchBitableRecords);
+    const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+    await service.getDashboard(false);
+    read.mockClear();
+    read.mockRejectedValueOnce(new Error('数据在读取期间已变更，请重新读取'));
+    read.mockResolvedValueOnce([
+      executionRecord('active-new', '未开始（待审批）'),
+    ]);
+
+    const dashboards = await Promise.all([
+      service.getDashboard('active'),
+      service.getDashboard('active'),
+    ]);
+
+    expect(dashboards[0]).toBe(dashboards[1]);
+    expect(dashboards[0]).toMatchObject({
+      refreshState: 'fresh',
+      requests: [{ recordId: 'active-new' }],
+    });
+    expect(read.mock.calls.map(([, options]) => options.tableId)).toEqual([
+      process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID,
+      process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID,
+    ]);
+  });
+
+  it('shares a stale fallback after two conflicts and recovers on the next active refresh', async () => {
+    const read = jest.mocked(fetchBitableRecords);
+    const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+    read.mockResolvedValueOnce([
+      executionRecord('active-old', '未开始（待审批）'),
+    ]);
+    const old = await service.getDashboard(false);
+    read.mockClear();
+    read.mockRejectedValueOnce(new Error('数据在读取期间已变更，请重新读取'));
+    read.mockRejectedValueOnce(new Error('数据在读取期间已变更，请重新读取'));
+
+    const results = await Promise.all([
+      service.getDashboard('active'),
+      service.getDashboard('active'),
+    ]);
+
+    expect(results[0]).toBe(results[1]);
+    expect(results[0]).toMatchObject({
+      refreshState: 'stale',
+      refreshError: '采购数据正在同步，暂显示上次成功结果。',
+      requests: old.requests,
+    });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(await service.getDashboard('active')).toMatchObject({
+      refreshState: 'fresh',
+    });
+  });
+
+  it('does not return an invalidated active dashboard as fresh', async () => {
+    const read = jest.mocked(fetchBitableRecords);
+    const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+    const original = await service.getDashboard(false);
+    let finish!: (records: Awaited<ReturnType<typeof fetchBitableRecords>>) => void;
+    read.mockImplementationOnce(() => new Promise((resolve) => {
+      finish = resolve;
+    }));
+
+    const active = service.getDashboard('active');
+    service.invalidateCache();
+    finish([executionRecord('obsolete-active', '未开始（待审批）')]);
+
+    expect(await active).toMatchObject({
+      refreshState: 'stale',
+      requests: original.requests,
+    });
   });
 
   it.each([false, true])(

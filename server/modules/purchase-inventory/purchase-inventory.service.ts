@@ -27,6 +27,8 @@ import { buildPurchaseInventoryView } from './purchase-inventory.mapper';
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const RETRY_CACHE_TTL_MS = 45 * 1000;
 const ACTIVE_SOURCE_CACHE_TTL_MS = 10 * 1000;
+const BITABLE_READ_CONFLICT = '数据在读取期间已变更，请重新读取';
+const ACTIVE_SYNC_NOTICE = '采购数据正在同步，暂显示上次成功结果。';
 const COMPLETED_WORKFLOW_STATUS = '采购完成（已入库）';
 const ACTIVE_EXECUTION_FILTER = {
   conjunction: 'and' as const,
@@ -251,37 +253,59 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
 
     const fallbackCache = this.dashboardCache;
     const requestGeneration = this.dashboardGeneration;
-    const request = this.buildActiveDashboard(this.sourceSnapshot);
-    const activeRequest = request.then(({ dashboard, sourceSnapshot }) => {
-      if (requestGeneration === this.dashboardGeneration) {
+    const previousSnapshot = this.sourceSnapshot;
+    const activeRequest = (async () => {
+      try {
+        const { dashboard, sourceSnapshot } =
+          await this.buildActiveDashboard(previousSnapshot);
+        if (requestGeneration !== this.dashboardGeneration) {
+          return this.dashboardCache?.value ??
+            markDashboardStale(fallbackCache.value, ACTIVE_SYNC_NOTICE);
+        }
         this.sourceSnapshot = sourceSnapshot;
         this.dashboardCache = {
           expiresAt: fallbackCache.expiresAt,
           value: dashboard,
         };
+        return dashboard;
+      } catch (error) {
+        if (requestGeneration !== this.dashboardGeneration) {
+          if (this.dashboardCache) return this.dashboardCache.value;
+          throw error;
+        }
+        const message = `采购进行中数据刷新失败：${safeErrorMessage(error)}`;
+        this.logger.warn(`${message}，继续使用最近一次成功看板`);
+        const staleDashboard = markDashboardStale(
+          fallbackCache.value,
+          isBitableReadConflict(error)
+            ? ACTIVE_SYNC_NOTICE
+            : message,
+        );
+        this.dashboardCache = {
+          expiresAt: fallbackCache.expiresAt,
+          value: staleDashboard,
+        };
+        return staleDashboard;
       }
-      return dashboard;
-    });
+    })();
     this.activeDashboardRequest = activeRequest;
     try {
       return await activeRequest;
-    } catch (error) {
-      if (requestGeneration !== this.dashboardGeneration) {
-        if (this.dashboardCache) return this.dashboardCache.value;
-        throw error;
-      }
-      const message = `采购进行中数据刷新失败：${safeErrorMessage(error)}`;
-      this.logger.warn(`${message}，继续使用最近一次成功看板`);
-      const staleDashboard = markDashboardStale(fallbackCache.value, message);
-      this.dashboardCache = {
-        expiresAt: fallbackCache.expiresAt,
-        value: staleDashboard,
-      };
-      return staleDashboard;
     } finally {
       if (this.activeDashboardRequest === activeRequest) {
         this.activeDashboardRequest = undefined;
       }
+    }
+  }
+
+  private async readDashboardRecords(
+    options: Parameters<typeof fetchBitableRecords>[1],
+  ): Promise<BitableRecordItem[]> {
+    try {
+      return await fetchBitableRecords(this.httpService, options);
+    } catch (error) {
+      if (!isBitableReadConflict(error)) throw error;
+      return fetchBitableRecords(this.httpService, options);
     }
   }
 
@@ -323,7 +347,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
           }
 
           try {
-            const records = await fetchBitableRecords(this.httpService, {
+            const records = await this.readDashboardRecords({
               appToken,
               tableId,
               tableName: table.name,
@@ -389,7 +413,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const activeRecords = await fetchBitableRecords(this.httpService, {
+    const activeRecords = await this.readDashboardRecords({
       appToken: sourceSnapshot.appToken,
       tableId,
       tableName: TABLES.executions.name,
@@ -495,7 +519,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
           readEnv('FEISHU_ACTIVE_EMPLOYEE_WIKI_TOKEN') || source.wikiToken,
         tableName: '在职人员',
       });
-      const records = await fetchBitableRecords(this.httpService, {
+      const records = await this.readDashboardRecords({
         appToken,
         tableId,
         viewId: readEnv('FEISHU_ACTIVE_EMPLOYEE_VIEW_ID'),
@@ -512,6 +536,10 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
       return { records: fallback, message };
     }
   }
+}
+
+function isBitableReadConflict(error: unknown): boolean {
+  return error instanceof Error && error.message === BITABLE_READ_CONFLICT;
 }
 
 function markDashboardStale(

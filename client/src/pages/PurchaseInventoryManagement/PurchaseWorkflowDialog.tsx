@@ -406,22 +406,23 @@ export function PurchaseWorkflowDialog({
           void monitorPurchaseWorkflowReceiptTask(
             accepted.taskId,
             async (message, warnings) => {
+              toast.success(message);
+              warnings.forEach((warning) => toast.warning(warning));
               const refreshed = await onReceiptTaskSettled(
                 recordId,
                 'completed',
               );
-              if (refreshed) toast.success(message);
-              else toast.warning(`${message}，但清单刷新失败，请手动刷新`);
-              warnings.forEach((warning) => toast.warning(warning));
+              if (!refreshed) toast.warning('采购清单刷新失败，请稍后刷新');
             },
             async (message) => {
-              await onReceiptTaskSettled(recordId, 'failed');
+              const refresh = onReceiptTaskSettled(recordId, 'failed');
               toast.error(`${message}，页面状态已自动恢复`);
+              await refresh;
             },
           );
         })
-        .catch(async (actionError) => {
-          await onReceiptTaskSettled(recordId, 'failed');
+        .catch((actionError) => {
+          void onReceiptTaskSettled(recordId, 'failed');
           const message = apiError(actionError, '到货签收提交失败');
           toast.error(`${message}，页面状态已自动恢复`);
         })

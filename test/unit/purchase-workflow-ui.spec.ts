@@ -208,5 +208,13 @@ describe('purchase workflow UI contract', () => {
     expect(dialog.indexOf('onReceiptAccepted(recordId)')).toBeLessThan(
       dialog.indexOf('void submitPurchaseWorkflowReceipt'),
     );
+    const receiptAction = dialog.slice(
+      dialog.indexOf('function runReceiptAction'),
+      dialog.indexOf('const detailVerified'),
+    );
+    expect(receiptAction.indexOf('toast.success(message)')).toBeGreaterThan(-1);
+    expect(receiptAction.indexOf('toast.success(message)')).toBeLessThan(
+      receiptAction.indexOf('await onReceiptTaskSettled'),
+    );
   });
 });

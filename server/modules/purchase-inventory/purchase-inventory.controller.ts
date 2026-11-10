@@ -532,10 +532,6 @@ export class PurchaseInventoryController {
       invoices?: PurchaseWorkflowUploadFile[];
     } = {},
   ) {
-    if (isProfessionalBusinessPrincipal(requirePrincipal(req))) {
-      const record = await this.workflowGateway.getExecutionRecordAsApp(recordId);
-      assertProfessionalRecordScope(requirePrincipal(req), record.specialty, record.building);
-    }
     const session = await this.getWorkflowSession(req);
     const input = parsePayload<
       Omit<PurchaseWorkflowReceiptInput, 'receiptPhotoTokens' | 'invoiceTokens'>

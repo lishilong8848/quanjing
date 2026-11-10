@@ -104,6 +104,15 @@ describe('signed web receipt personal identity through controller and durable le
     live.building = 'C楼'; live.status = '驳回申请'; await expect(submit(employeeToken)).rejects.toThrow();
     expect(await workflowStore.listNotifications({ kind:'web_receipt_command' })).toHaveLength(0);
   });
+  it('受理签收只读取一次执行记录，重试仍检查最新楼栋范围', async () => {
+    const first = await submit(employeeToken);
+    expect(gateway.getExecutionRecordAsApp).not.toHaveBeenCalled();
+    expect(gateway.getExecutionRecord).toHaveBeenCalledTimes(1);
+    await expect(submit(employeeToken)).resolves.toMatchObject({ taskId: first.taskId });
+    live.building = 'A楼';
+    await expect(submit(employeeToken)).rejects.toThrow('超出授权');
+    expect(await workflowStore.listNotifications({ kind:'web_receipt_command' })).toHaveLength(1);
+  });
   it('已认证但受理前被停用的账号不能创建签收任务', async () => {
     const originalRequest = request(employeeToken);
     await configStore.mutate(configStore.read().revision, `revoke-${randomUUID()}`, 'fixture-only', state => { state.accounts[employeeId]!.enabled = false; state.accounts[employeeId]!.version += 1; });

@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import type { PurchaseWorkflowReceiptAcceptedResponse, PurchaseWorkflowReceiptInput, PurchaseWorkflowReceiptTask, PurchaseWorkflowReceiptTaskStatusResponse } from '../../../shared/purchase-workflow.interface';
+import { assertProfessionalRecordScope } from '../../common/access/professional-record-scope';
 import { PurchaseWorkflowGateway, type PurchaseWorkflowUploadFile } from './purchase-workflow.gateway';
 import { PurchaseWorkflowService, type PurchaseWorkflowSession } from './purchase-workflow.service';
 import { PurchaseWorkflowStore, type PurchaseWorkflowNotificationEntry } from './purchase-workflow.store';
@@ -66,6 +68,12 @@ export class PurchaseWorkflowReceiptTaskService {
       }
       const replay = { ...saved, input: submission.receipt, files: submission.metadata };
       if (existing.recordId !== recordId || saved.ownerId !== submission.ownerId || webReceiptFingerprint(replay) !== saved.fingerprint) throw new ConflictException('签收提交标识已用于其他内容');
+      if (isProfessionalBusinessPrincipal(session.permissionPrincipal)) {
+        const record = await this.gateway.getExecutionRecord(recordId, session.accessToken);
+        assertProfessionalRecordScope(
+          session.permissionPrincipal, record.specialty, record.building,
+        );
+      }
       return accepted(existing);
     }
     const prepared = await this.workflowService.prepareReceiptSubmission(recordId, session, submission.receipt, submission.metadata.some(file => file.group === 'invoices'));
