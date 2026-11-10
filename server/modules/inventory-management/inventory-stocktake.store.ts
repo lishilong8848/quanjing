@@ -338,8 +338,8 @@ export class InventoryStocktakeStore {
     }
   }
 
-  replay<T>(key: string, fingerprint: string): T | undefined {
-    return this.receipt<T>(this.read(), key, fingerprint);
+  replay<T>(key: string, fingerprint: string, state = this.read()): T | undefined {
+    return this.receipt<T>(state, key, fingerprint);
   }
 
   mutate<T>(

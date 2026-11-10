@@ -25,12 +25,12 @@ async function read<T>(path: string, params: unknown): Promise<T> {
   });
   return response.data;
 }
-async function write<T>(path: string, data: unknown): Promise<T> {
+async function write<T>(path: string, data: unknown, timeout = 20_000): Promise<T> {
   const response = await axiosForBackend({
     url: `${base}/${path}`,
     method: 'POST',
     data,
-    timeout: 20_000,
+    timeout,
   });
   return response.data;
 }
@@ -129,10 +129,28 @@ export const getStocktakeSync = (
 ) => read<StocktakeSyncSummary>('sync-status', { month, building, scope });
 export const retryStocktakeSync = (request: StocktakeWriteRequest) =>
   write<StocktakeSyncSummary>('retry-sync', request);
-export const writeStocktakeLine = (
+export async function writeStocktakeLine(
   mode: 'draft' | 'confirm' | 'refresh-line',
   request: StocktakeLineRequest,
-) => write<{ line: StocktakeLine; sheetVersion: number }>(mode, request);
+) {
+  try {
+    return await write<{ line: StocktakeLine; sheetVersion: number }>(mode, request, 35_000);
+  } catch (error) {
+    const failure = error as { code?: string; name?: string; response?: { status?: number } } | null;
+    if (!['ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK'].includes(failure?.code || '') &&
+        failure?.name !== 'TimeoutError' && ![502, 504].includes(failure?.response?.status || 0)) throw error;
+    // A lost HTTP response does not undo the committed write. Check its
+    // mutation ID before treating a line as saved, and never resubmit here.
+    const sheet = await getStocktakeSheet(request.month, request.building, request.scope).catch(() => null);
+    const line = sheet?.lines.find(item => item.inventory.recordId === request.recordId);
+    if (sheet && line?.version === request.expectedVersion + 1 &&
+        line.sync?.clientMutationId === request.clientMutationId &&
+        line.sync.version === line.version) {
+      return { line, sheetVersion: sheet.version };
+    }
+    throw error;
+  }
+}
 export const completeStocktake = (request: StocktakeCompleteRequest) =>
   write<{ status: 'completed'; version: number; completedAt: string }>(
     'complete',

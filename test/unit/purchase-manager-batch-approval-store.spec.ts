@@ -61,6 +61,52 @@ describe('purchase manager batch approval store', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('keeps the full validated context on downstream cards for large purchases', async () => {
+    const context = serializePurchaseManagerBatchApprovalCardContext({
+      ...cardInput,
+      items: Array.from({ length: 20 }, (_, index) => ({
+        ...cardInput.items[0]!,
+        executionRecordId: `rec-large-${index}`,
+        title: '采购配件'.repeat(35),
+        specification: 'X'.repeat(120),
+        purchaseLinks: [`https://example.com/products/${'a'.repeat(350)}`],
+      })),
+    });
+    expect(context.length).toBeGreaterThan(8_000);
+    for (const kind of [
+      'manager_batch_purchase_refresh',
+      'manager_batch_receipt_requested',
+      'manager_batch_receipt_refresh',
+      'manager_batch_receipt_completed',
+    ] as const) {
+      await store.enqueueNotification({
+        businessEventId: kind, recordId: 'rec-large-0',
+        recipientOpenId: 'ou_requester', kind, cardContext: context,
+      }, now);
+    }
+    expect((await store.listNotifications()).map(row => row.cardContext))
+      .toEqual(Array(4).fill(context));
+  });
+
+  it('gives fresh approval deliveries a turn without discarding the older work', async () => {
+    const older = {
+      businessEventId: 'older-purchase-refresh', recordId: 'rec-older',
+      recipientOpenId: 'ou_purchaser', kind: 'manager_batch_purchase_refresh' as const,
+      cardContext: serializePurchaseManagerBatchApprovalCardContext(cardInput),
+    };
+    await store.enqueueNotification(older, now);
+    const originalClaim = (await store.takeNextManagerApprovalNotification(now, 1))!;
+    await store.registerManagerApprovalBatch({
+      approvalBatchId: cardInput.approvalBatchId, requesterOpenId: 'ou_requester',
+      recipientOpenId: 'ou_manager', recordIds: ['rec-1'],
+    }, now);
+    const later = new Date(now.getTime() + 10);
+    expect(await store.takeNextManagerApprovalNotification(later, 300_000, true))
+      .toMatchObject({ kind: 'manager_batch_approval_requested', attempts: 1 });
+    expect(await store.takeNextManagerApprovalNotification(later))
+      .toMatchObject({ key: originalClaim.key, attempts: 2 });
+  });
+
   it('persists one idempotent batch and rejects conflicting reuse', async () => {
     const input = {
       approvalBatchId: cardInput.approvalBatchId,

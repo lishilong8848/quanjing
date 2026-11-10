@@ -19,6 +19,43 @@ describe('stocktake source field adaptation', () => {
         : (process.env[name] = old[i]),
     ),
   );
+  it('skips only unnamed zero-stock placeholders while preserving real zero-stock items', async () => {
+    const source = new InventoryStocktakeSource({} as any, {} as any);
+    jest.spyOn(source as any, 'config').mockResolvedValue({ appToken: 'test', url: '' });
+    jest.spyOn(bitable, 'fetchBitableRecords').mockImplementation(async (_http, { tableName }) =>
+      tableName === '库存台账' ? [
+        { record_id: 'blank', fields: { 楼栋: 'B楼', 剩余库存: 0 } },
+        { record_id: 'real', fields: { 楼栋: 'B楼', 剩余库存: 0, 物品类别号: 'D1013', 名称: '电池' } },
+        { record_id: 'named', fields: { 楼栋: 'B楼', 剩余库存: 0, 名称: '待补编号物品' } },
+        { record_id: 'nonzero', fields: { 楼栋: 'B楼', 剩余库存: 2 } },
+      ] : []);
+    const result = await source.snapshot();
+    expect(result.items.map(item => item.recordId)).toEqual(['real', 'named', 'nonzero']);
+  });
+
+  it('looks up only the requested stock and still revalidates its catalog specialty', async () => {
+    const stock = { record_id: 'stock1', fields: { 物品类别号: 'D1013', 楼栋: 'B楼', 剩余库存: 2 } };
+    const gateway = { getRecords: jest.fn().mockResolvedValue([stock]) };
+    const source = new InventoryStocktakeSource({} as any, gateway as any);
+    jest.spyOn(source as any, 'config').mockResolvedValue({ appToken: 'test', url: '' });
+    const fetch = jest.spyOn(bitable, 'fetchBitableRecords').mockResolvedValue([
+      { record_id: 'catalog1', fields: { 物品类别号: 'D1013', 楼栋: 'B楼', 专业: '暖通' } },
+    ]);
+    const item = { recordId: 'stock1', sku: 'D1013', building: 'B楼', specialty: '暖通' } as const;
+    const principal = { role: 'professional_admin', purchaseBuilding: null, specialties: ['暖通'] } as const;
+    await expect(source.current(item as any, principal))
+      .resolves.toMatchObject({ recordId: 'stock1', quantity: 2, specialty: '暖通' });
+    expect(gateway.getRecords).toHaveBeenCalledWith('test', envNames[0], ['stock1'], '库存台账');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      tableId: envNames[1], forceRefresh: true, allowStale: false,
+    }));
+    fetch.mockResolvedValue([
+      { record_id: 'catalog1', fields: { 物品类别号: 'D1013', 楼栋: 'B楼', 专业: '电气' } },
+    ]);
+    await expect(source.current(item as any, principal)).rejects.toThrow('超出授权');
+  });
+
   async function snapshot(location: string, duplicate = false, multi = false) {
     const inventory = {
       record_id: 'stock1',

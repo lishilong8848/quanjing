@@ -86,10 +86,11 @@ describe('采购分阶段卡原消息和操作范围', () => {
     expect(() => fixture(true).manager.assertMigratedStageAction(batch, undefined, 'ou_actor', action)).toThrow('操作权限');
   });
 
-  it('denies approval and order if the acting manager or purchaser no longer holds the duty', () => {
+  it('keeps current approval duty but allows the scoped purchaser to order without a generic duty assignment', () => {
     const { manager } = fixture(true, false);
     expect(() => manager.assertMigratedStageAction(batch, item, 'ou_actor', 'approve')).toThrow('当前采购岗位');
-    expect(() => manager.assertMigratedStageAction(batch, item, 'ou_actor', 'order')).toThrow('当前采购岗位');
+    expect(() => manager.assertMigratedStageAction(batch, item, 'ou_actor', 'order')).not.toThrow();
+    expect(() => manager.assertMigratedStageAction(batch, { ...item, choice: 'building_self' }, 'ou_actor', 'order')).not.toThrow();
   });
 
   it('renders a generic inert card for partial read scope or revoked manager duty', () => {

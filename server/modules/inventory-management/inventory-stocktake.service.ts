@@ -583,19 +583,19 @@ export class InventoryStocktakeService {
     mode: 'draft' | 'confirm' | 'refresh',
   ): Promise<StocktakeLineResult> {
     this.validateWrite(request, principal);
-    this.assertNoPendingBulk(request);
     if (!request.recordId || !Number.isSafeInteger(request.expectedVersion))
       throw new BadRequestException('盘点条目或版本无效');
     const fp = this.fingerprint(mode, request, actor);
+    const state = this.store.read();
     const replay = this.store.replay<StocktakeLineResult>(
       request.clientMutationId,
       fp,
+      state,
     );
     if (replay) return replay;
-    const initial = this.findLine(this.store.read(), request);
+    this.assertNoPendingBulk(request, state);
+    const initial = this.findLine(state, request);
     assertProfessionalRecordScope(principal, initial.line.inventory.specialty, initial.line.inventory.building);
-    let canonicalPerson = request.confirmer;
-    let current = initial.line.inventory;
     if (mode !== 'refresh') {
       if (
         request.actualQuantity !== null &&
@@ -611,23 +611,24 @@ export class InventoryStocktakeService {
         throw new BadRequestException('实际数量须为非负数，最多三位小数');
       if (typeof request.note !== 'string' || request.note.length > 1000)
         throw new BadRequestException('差异说明最多1000字');
-      if (request.confirmer) {
-        canonicalPerson = await this.people.resolveApplicantForBuilding(
-          request.confirmer,
-          mode === 'confirm',
-        );
-        if (!canonicalPerson)
-          throw new BadRequestException('确认人已失效，请重新选择在职员工');
-      }
     }
     if (mode === 'confirm')
       validateStocktakeDraft({
         ...request,
-        confirmer: canonicalPerson,
         bookQuantity: initial.line.inventory.quantity,
       });
-    if (mode === 'confirm' || mode === 'refresh' || isProfessionalBusinessPrincipal(principal))
-      current = await this.source.current(initial.line.inventory, ...(isProfessionalBusinessPrincipal(principal) ? [principal] : []));
+    const professional = isProfessionalBusinessPrincipal(principal);
+    const confirmer = request.confirmer;
+    const [canonicalPerson, current] = await Promise.all([
+      mode !== 'refresh' && confirmer
+        ? this.lineDependency('人员', () => this.people.resolveApplicantForBuilding(confirmer, mode === 'confirm'))
+        : confirmer,
+      mode === 'confirm' || mode === 'refresh' || professional
+        ? this.lineDependency('库存', () => this.source.current(initial.line.inventory, ...(professional ? [principal] : [])))
+        : initial.line.inventory,
+    ]);
+    if (mode !== 'refresh' && confirmer && !canonicalPerson)
+      throw new BadRequestException('确认人已失效，请重新选择在职员工');
     assertProfessionalRecordScope(principal, current.specialty, current.building);
     if (
       mode === 'confirm' &&
@@ -635,6 +636,7 @@ export class InventoryStocktakeService {
     )
       throw new ConflictException('库存已变化，请更新台账数量并重新核查');
     return this.store.mutate(request.clientMutationId, fp, (state) => {
+      this.assertNoPendingBulk(request, state);
       const { sheet, line } = this.findLine(state, request);
       const now = new Date().toISOString();
       if (mode === 'refresh') {
@@ -656,6 +658,26 @@ export class InventoryStocktakeService {
       queueStocktakeResult(line, request.clientMutationId);
       return { line, sheetVersion: sheet.version };
     });
+  }
+  private async lineDependency<T>(stage: '人员' | '库存', read: () => Promise<T>): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new ServiceUnavailableException(
+            `${stage}核查超时，请保留草稿并重试`,
+          )), 25_000);
+        }),
+      ]);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      const code = (error as { code?: unknown } | null)?.code;
+      const reason = code === 'ECONNABORTED' || code === 'ETIMEDOUT' ? '超时' : '暂不可用';
+      throw new ServiceUnavailableException(`${stage}核查${reason}，请保留草稿并重试`);
+    } finally {
+      clearTimeout(timer);
+    }
   }
   async complete(
     request: StocktakeCompleteRequest,
@@ -780,11 +802,10 @@ export class InventoryStocktakeService {
       shortfall: sheet?.shortfall || 0,
     };
   }
-  private assertNoPendingBulk(request: StocktakeWriteRequest) {
+  private assertNoPendingBulk(request: StocktakeWriteRequest, state?: StocktakeLedger) {
     if (
       request.scope === 'review' &&
-      this.store
-        .read()
+      (state ?? this.store.read())
         .bulkJobs?.some(
           (job) =>
             job.month === request.month &&

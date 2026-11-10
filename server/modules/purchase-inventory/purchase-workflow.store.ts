@@ -74,6 +74,7 @@ const MAX_CARD_ACTIONS = 500;
 const MAX_NOTIFICATIONS = 500;
 const MAX_MANAGER_APPROVAL_ACTIONS = 500;
 const MAX_MANAGER_APPROVAL_BATCHES = 500;
+const STAGE_SOURCE_ORDERING_HOLD_ERROR = '多维表显示待下单，缺少审批回执和采购人，需人工核对原单';
 const MAX_MANAGER_APPROVAL_BATCH_ACTIONS = 500;
 const MAX_LIFECYCLE_REPLICAS = 2000;
 const MAX_LIFECYCLE_GENERATIONS = 100;
@@ -450,6 +451,8 @@ export interface PurchaseLifecycleStageCardTransitionReceipt {
   initialRecipients: NonNullable<PurchaseManagerApprovalBatchEntry['lifecycleInitialRecipients']>;
   authorityTargets: NonNullable<PurchaseManagerApprovalBatchEntry['lifecycleAuthorityTargets']>;
   missingRecordIds: string[];
+  heldSourceItems?: Array<{ recordId: string; reason: 'ordering_without_approval_receipt' }>;
+  heldTerminalOrders?: Array<{ recordId: string; claimSha256: string }>;
   reopenedItems: Array<{
     recordId: string;
     actionEventId: string;
@@ -617,7 +620,7 @@ export interface PurchaseWorkflowNotificationDelivery {
 
 export interface PurchaseFulfillmentClaimProof { notificationKey: string; claimToken: string; }
 export interface PurchaseAcceptedFulfillment {
-  proof: PurchaseFulfillmentClaimProof & { appId: string; cardContext: string; lifecycleAuthority?: { batchId: string; recordId: string; actorOpenId: string; choice: 'comprehensive' | 'building_self'; building: string; specialty?: string } };
+  proof: PurchaseFulfillmentClaimProof & { appId: string; cardContext: string; lifecycleAuthority?: { batchId: string; recordId: string; actorOpenId: string; choice: 'comprehensive' | 'building_self'; building: string; specialty?: string; stageCards?: true } };
   actor: PurchaseWorkflowUser;
   /** Original, lock-authorized web receipt identity; not a reusable session proof. */
   platformIdentity?: PurchasePlatformIdentityProof;
@@ -1433,16 +1436,35 @@ export class PurchaseWorkflowStore {
           records.size + missing.size !== recordIds.size || [...missing].some(id => !recordIds.has(id) || records.has(id))) {
         throw new ConflictException('采购分阶段卡片的明细核验不完整');
       }
-      if (hasStageCardCutoverAmbiguity(ledger, batch, recordIds)) {
+      if (hasStageCardCutoverAmbiguity(ledger, batch, recordIds, timestamp.getTime())) {
         throw new ConflictException('采购仍有在途审批、履约、投递或附件，暂不能切换');
       }
+      const heldTerminalOrders = ledger.commands.filter(command => recordIds.has(command.recordId) && !command.completedAt)
+        .map(command => {
+          const record = records.get(command.recordId);
+          const receipt = terminalReceiptForHeldOrder(ledger, batch, command, timestamp.getTime());
+          if (!record || !receipt || !['采购完成（已入库）', '物品签收已入库'].includes(record.status) ||
+              !record.purchaseCompleted || !record.receiptConfirmed ||
+              record.signerOpenId !== receipt.input.signerOpenId || record.receiptTime !== receipt.input.receiptTime) {
+            throw new ConflictException('采购原下单结果待核对，未确认独立的签收入库终态');
+          }
+          return { recordId: command.recordId, claimSha256: purchaseCutoverDigest(command) };
+        });
       const reopenedItems: PurchaseLifecycleStageCardTransitionReceipt['reopenedItems'] = [];
+      const heldSourceItems: NonNullable<PurchaseLifecycleStageCardTransitionReceipt['heldSourceItems']> = [];
       const items = batch.items.map(item => {
         const record = records.get(item.executionRecordId);
         if (missing.has(item.executionRecordId) && item.status === 'manual_reconciliation') return item;
         if (!record || record.approvalBatchId !== batchId || record.requesterOpenId !== batch.requesterOpenId ||
-            !item.authorityTarget || JSON.stringify(purchaseAuthorityTarget(record)) !== JSON.stringify(item.authorityTarget) ||
-            !stageCardCutoverRecordMatches(item, record)) {
+            !item.authorityTarget || JSON.stringify(purchaseAuthorityTarget(record)) !== JSON.stringify(item.authorityTarget)) {
+          throw new ConflictException('采购分阶段卡片明细与现有业务进度不一致');
+        }
+        if (item.status === 'pending' && hasUnconfirmedSourceOrdering(record)) {
+          heldSourceItems.push({ recordId: item.executionRecordId, reason: 'ordering_without_approval_receipt' });
+          return { ...item, status: 'manual_reconciliation' as const,
+            lastError: STAGE_SOURCE_ORDERING_HOLD_ERROR };
+        }
+        if (!stageCardCutoverRecordMatches(item, record)) {
           throw new ConflictException('采购分阶段卡片明细与现有业务进度不一致');
         }
         if (item.status !== 'manual_reconciliation') return item;
@@ -1476,13 +1498,16 @@ export class PurchaseWorkflowStore {
         initialRecipients: batch.lifecycleInitialRecipients!,
         authorityTargets: batch.lifecycleAuthorityTargets!,
         missingRecordIds: [...missing], reopenedItems,
+        ...(heldSourceItems.length ? { heldSourceItems } : {}),
+        ...(heldTerminalOrders.length ? { heldTerminalOrders } : {}),
       };
       const {
         lifecycleAppId: _app, lifecycleInitialRecipients: _initial, lifecycleAuthorityTargets: _targets, ...preserved
       } = batch;
       const updated = withManagerApprovalBatchContext({
         ...preserved, flowVersion: 'legacy', stageCardTransition: transition,
-        state: items.some(item => item.status === 'pending') ? 'active' : missing.size ? 'manual_reconciliation' : 'resolved',
+        state: items.some(item => item.status === 'pending') ? 'active'
+          : items.some(item => item.status === 'manual_reconciliation') ? 'manual_reconciliation' : 'resolved',
         items, revision: batch.revision + 1, updatedAt: transition.switchedAt,
         ...(reopenedItems.length ? { resolvedAt: '' } : {}),
       });
@@ -1494,7 +1519,11 @@ export class PurchaseWorkflowStore {
       const rawBatch = raw.managerApprovalBatches[position];
       if (!isRecord(rawBatch)) throw new ConflictException('采购分阶段卡片原批次不可核对');
       const { lifecycleAppId: _rawApp, lifecycleInitialRecipients: _rawInitial, lifecycleAuthorityTargets: _rawTargets, ...rawPreserved } = rawBatch;
-      raw.managerApprovalBatches[position] = { ...rawPreserved, ...updated };
+      const converted = { ...rawPreserved, ...updated };
+      // Validate with the same decoder that will read the ledger after the next
+      // operation or restart, before any archived replicas lose their live owner.
+      if (!sanitizeVersionedManagerApprovalBatch(converted)) throw new ConflictException('采购分阶段卡片转换无法读回');
+      raw.managerApprovalBatches[position] = converted;
       // Refresh only the existing approval messages. A separate next-stage card
       // is routed by the normal legacy stage worker and its original event key.
       const priorNotificationKeys = new Set(ledger.notifications.map(row => row.key));
@@ -2050,7 +2079,8 @@ export class PurchaseWorkflowStore {
       if (
         !existing ||
         existing.completedAt ||
-        existing.fingerprint !== clean(fingerprint)
+        existing.fingerprint !== clean(fingerprint) ||
+        isHeldTerminalOrder(ledger, existing)
       ) {
         return false;
       }
@@ -2099,7 +2129,8 @@ export class PurchaseWorkflowStore {
         entry,
       ];
       ledger.commands = trimCommandHistory(ledger.commands);
-      if (entry.action === 'order' && entry.completedAt && entry.orderNotice && !entry.orderNotice.deferUntilFulfillment) {
+      if (entry.action === 'order' && entry.completedAt && entry.orderNotice && !entry.orderNotice.deferUntilFulfillment &&
+          !isHeldTerminalOrder(ledger, entry)) {
         enqueuePurchaseOrderNotices(ledger, entry);
         ledger.notifications = trimNotificationHistory(ledger.notifications, MAX_NOTIFICATIONS);
       }
@@ -2144,8 +2175,11 @@ export class PurchaseWorkflowStore {
 
   async listPendingOrderNoticeCommands(limit = 20, afterKey = ''): Promise<PurchaseWorkflowCommandEntry[]> {
     return this.enqueueRead(async () => {
-      const pending = (await this.read()).commands
-        .filter(entry => entry.action === 'order' && !entry.completedAt && entry.orderNotice && !entry.orderNotice.deferUntilFulfillment)
+      const ledger = await this.read();
+      // A platform command's result fields do not prove which writer applied
+      // them. Its existing claim remains the only way to resolve that outcome.
+      const pending = ledger.commands.filter(entry => entry.action === 'order' && !entry.completedAt && !entry.platformIdentity &&
+        entry.orderNotice && !entry.orderNotice.deferUntilFulfillment && !isHeldTerminalOrder(ledger, entry))
         .sort((left, right) => left.key.localeCompare(right.key));
       const next = pending.findIndex(entry => entry.key.localeCompare(afterKey) > 0);
       const start = next < 0 ? 0 : next;
@@ -2161,7 +2195,8 @@ export class PurchaseWorkflowStore {
     return this.enqueue(async () => {
       const ledger = await this.read();
       const entry = ledger.commands.find(command => command.key === expected.key);
-      if (!entry || entry.action !== 'order' || entry.completedAt || !entry.orderNotice || entry.orderNotice.deferUntilFulfillment ||
+      if (!entry || entry.action !== 'order' || entry.completedAt || entry.platformIdentity || !entry.orderNotice || entry.orderNotice.deferUntilFulfillment ||
+        isHeldTerminalOrder(ledger, entry) ||
         entry.recordId !== expected.recordId || entry.fingerprint !== expected.fingerprint ||
         entry.expectedResultFingerprint !== expected.expectedResultFingerprint || entry.actorOpenId !== expected.actorOpenId || entry.startedAt !== expected.startedAt) return false;
       entry.completedAt = resolveNow(now).toISOString();
@@ -3345,6 +3380,48 @@ export class PurchaseWorkflowStore {
         }),
       };
       await this.write(ledger);
+      return true;
+    });
+  }
+
+  async requeueFailedMigratedOrderCard(
+    expected: PurchaseWorkflowNotificationEntry,
+    batchId: string,
+    now: Date,
+    authorize: (batch: PurchaseManagerApprovalBatchEntry) => void,
+  ): Promise<boolean> {
+    return this.enqueue(async () => {
+      const { ledger, raw, original } = await this.readLifecycleConsistent();
+      const task = ledger.notifications.find(entry => entry.key === expected.key);
+      const batch = ledger.managerApprovalBatches.find(entry => entry.approvalBatchId === batchId);
+      const transition = batch?.stageCardTransition;
+      if (!task || !batch || !transition || transition.appId !== readEnv('FEISHU_APP_ID') ||
+          !isFailedUnattemptedMigratedOrderCard(task) || task.updatedAt !== expected.updatedAt ||
+          task.deliveryUuid !== expected.deliveryUuid || task.cardContext !== expected.cardContext || task.cardContext !== batch.cardContext ||
+          task.businessEventId !== `manager_batch_purchase_assigned:${batchId}:${batch.revision}` ||
+          !lifecycleFulfillmentContextMatches(task.cardContext, batch, task.recordId) ||
+          !batch.items.some(item => item.executionRecordId === task.recordId && item.status === 'approved' &&
+            item.purchaserOpenId === task.recipientOpenId && item.authorityTarget) ||
+          ledger.commands.some(entry => entry.recordId === task.recordId && entry.action === 'order') ||
+          ledger.notifications.some(entry => entry.recordId === task.recordId && entry.kind === 'manager_batch_order_command') ||
+          ledger.notifications.some(entry => entry.key !== task.key && entry.kind === task.kind &&
+            entry.recipientOpenId === task.recipientOpenId && retainedStageNotification(entry, transition) &&
+            lifecycleFulfillmentContextMatches(entry.cardContext, batch, entry.recordId))) return false;
+
+      const entries = Array.isArray(raw.notifications) ? raw.notifications.filter(entry => isRecord(entry) && entry.key === task.key) : [];
+      const source = entries[0];
+      if (entries.length !== 1 || !isRecord(source) || source.sendOutcome !== 'unattempted' ||
+          source.messageId !== '' || source.deliveryId !== '' || source.firstSendAttemptAt !== '' ||
+          source.leaseUntil !== '' || source.claimToken !== '' || !Array.isArray(source.deliveryAudit) ||
+          source.deliveryAudit.length !== 0 || source.deliveryUuid !== task.deliveryUuid ||
+          source.deliveryGeneration !== task.deliveryGeneration) return false;
+
+      assertSynchronousLifecycleAuthorization(() => authorize(structuredClone(batch)));
+      const timestamp = resolveNow(now).toISOString();
+      // Preserve the fifth attempt so the normal claim increments it to six.
+      // Another failure cannot match the one-time recovery condition.
+      Object.assign(source, { status: 'pending', updatedAt: timestamp, nextAttemptAt: timestamp, completedAt: '', lastError: '' });
+      await this.writeLifecycleRaw(raw, original);
       return true;
     });
   }
@@ -5920,6 +5997,7 @@ export class PurchaseWorkflowStore {
   async takeNextManagerApprovalNotification(
     now: Date | number = new Date(),
     leaseMs = DEFAULT_LEASE_MS,
+    preferInitialApproval = false,
   ): Promise<PurchaseWorkflowNotificationEntry | null> {
     return this.enqueue(async () => {
       const timestamp = resolveNow(now);
@@ -6001,7 +6079,14 @@ export class PurchaseWorkflowStore {
         await this.write(ledger);
         return manualNotification;
       }
-      const index = ledger.notifications.findIndex(
+      const initialIndex = preferInitialApproval ? ledger.notifications.findIndex(
+        (entry) =>
+          (entry.kind === 'manager_approval_requested' ||
+            entry.kind === 'manager_batch_approval_requested') &&
+          entry.status === 'pending' && entry.attempts === 0 &&
+          isAvailable(entry, timestamp),
+      ) : -1;
+      const index = initialIndex >= 0 ? initialIndex : ledger.notifications.findIndex(
         (entry) =>
           isManagerNotificationKind(entry.kind) &&
           entry.status !== 'manual_reconciliation' &&
@@ -8107,12 +8192,13 @@ function hasStageCardCutoverAmbiguity(
   ledger: PurchaseWorkflowLedger,
   batch: PurchaseManagerApprovalBatchEntry,
   recordIds: ReadonlySet<string>,
+  now = Date.now(),
 ): boolean {
   const batchId = batch.approvalBatchId;
   const prepares = ledger.lifecycleReceiptPrepareQueue?.tasks || [];
   const images = ledger.lifecycleReceiptImageLedger?.intents || [];
   const platformEvents = new Set((ledger.platformApprovalClaims || []).filter(claim => claim.recordIds.some(id => recordIds.has(id))).map(claim => claim.eventId));
-  return ledger.commands.some(row => recordIds.has(row.recordId) && !row.completedAt) ||
+  return ledger.commands.some(row => recordIds.has(row.recordId) && !row.completedAt && !terminalReceiptForHeldOrder(ledger, batch, row, now)) ||
     ledger.cardActions.some(row => recordIds.has(row.recordId) && isActiveStatus(row.status)) ||
     ledger.managerApprovalActions.some(row => recordIds.has(row.recordId) && isActiveStatus(row.status)) ||
     ledger.managerApprovalBatchActions.some(row => row.approvalBatchId === batchId && isActiveStatus(row.status)) ||
@@ -8127,6 +8213,38 @@ function hasStageCardCutoverAmbiguity(
     images.some(row => row.approvalBatchId === batchId && (row.state === 'open' || row.state === 'bound'));
 }
 
+function terminalReceiptForHeldOrder(
+  ledger: PurchaseWorkflowLedger, batch: PurchaseManagerApprovalBatchEntry, command: PurchaseWorkflowCommandEntry, now: number,
+): PurchaseWebReceiptCommand | undefined {
+  const recordId = command.recordId;
+  const startedAt = Date.parse(command.startedAt);
+  if (command.action !== 'order' || command.key !== 'order:' + recordId || command.completedAt ||
+      !command.platformIdentity || command.platformDispatch !== 'dispatch_started' || !command.platformAttemptId ||
+      !Number.isFinite(startedAt) || now - startedAt < 5 * 60_000) return undefined;
+  const item = batch.items.find(row => row.executionRecordId === recordId);
+  if (item?.status !== 'approved' || !item.authorityTarget ||
+      !Number.isFinite(Date.parse(item.processedAt)) || Date.parse(item.processedAt) > startedAt) return undefined;
+  const receive = ledger.commands.find(row => row.recordId === recordId && row.key === 'receive:' + recordId &&
+    row.action === 'receive' && row.platformDispatch === 'dispatch_started' && !!row.platformAttemptId && !!row.platformIdentity &&
+    Date.parse(row.startedAt) > startedAt && Date.parse(row.completedAt) >= Date.parse(row.startedAt));
+  if (!receive) return undefined;
+  const task = ledger.notifications.find(row => row.recordId === recordId && row.kind === 'web_receipt_command' &&
+    row.status === 'completed' && Date.parse(row.completedAt) >= Date.parse(receive.completedAt) &&
+    row.webReceipt?.recordId === recordId && row.webReceipt.appId === batch.lifecycleAppId &&
+    row.webReceipt.platformIdentity && row.webReceipt.files.every(file => !!file.token) &&
+    purchaseCutoverDigest(row.webReceipt.platformIdentity) === purchaseCutoverDigest(receive.platformIdentity) &&
+    purchaseCutoverDigest(row.webReceipt.scope) === purchaseCutoverDigest(item.authorityTarget));
+  if (!task || !ledger.notifications.some(row => row.recordId === recordId && row.kind === 'inventory_inbound_completed_resolution' &&
+      row.businessEventId === 'inventory-inbound-completed-resolution:' + recordId && row.status === 'completed' &&
+      Date.parse(row.completedAt) >= Date.parse(task.completedAt))) return undefined;
+  return task.webReceipt;
+}
+
+function isHeldTerminalOrder(ledger: PurchaseWorkflowLedger, command: PurchaseWorkflowCommandEntry): boolean {
+  return command.action === 'order' && ledger.managerApprovalBatches.some(batch =>
+    batch.stageCardTransition?.heldTerminalOrders?.some(item => item.recordId === command.recordId));
+}
+
 function stageCardCutoverRecordMatches(item: PurchaseManagerApprovalBatchItemEntry, record: PurchaseWorkflowRecord): boolean {
   const stage = resolvePurchaseStage(record.status);
   if (item.status === 'pending' || item.status === 'manual_reconciliation') {
@@ -8135,9 +8253,19 @@ function stageCardCutoverRecordMatches(item: PurchaseManagerApprovalBatchItemEnt
   }
   if (!item.actionEventId || record.approvalActionId !== item.actionEventId) return false;
   if (item.status === 'rejected') return stage === 'terminated';
-  return item.status === 'approved' && record.approvalCompleted &&
+  // The manager card's approval patch stamps its action and updates the workflow
+  // and warehouse fields. It does not update the historical approval checkbox.
+  const approved = record.approvalCompleted || (record.approvalSource === '程序卡片' &&
+    record.approvalWorkflowStatus === '已通过' && record.warehouseConfirmed);
+  return item.status === 'approved' && approved && OPEN_ID_PATTERN.test(record.purchaserOpenId) &&
     ['approval', 'ordering', 'receipt', 'inbound', 'completed'].includes(stage) &&
     item.purchaserOpenId === record.purchaserOpenId;
+}
+
+function hasUnconfirmedSourceOrdering(record: PurchaseWorkflowRecord): boolean {
+  return record.status === '审批通过（待下单）' && !record.approvalActionId && !record.purchaserOpenId &&
+    !record.approvalCompleted && !record.warehouseConfirmed && !record.purchaseCompleted && !record.receiptConfirmed &&
+    !['已通过', '已驳回'].includes(record.approvalWorkflowStatus || '');
 }
 
 function assertSynchronousLifecycleAuthorization(authorize: () => unknown): void {
@@ -9222,6 +9350,13 @@ function retainedStageNotification(
       !entry.deliveryAudit.some(event => event.action === 'send_started' || event.action === 'send_rejected'));
 }
 
+export function isFailedUnattemptedMigratedOrderCard(task: PurchaseWorkflowNotificationEntry): boolean {
+  return task.kind === 'manager_batch_purchase_assigned' && task.status === 'failed' && task.attempts === 5 &&
+    task.lastError === '当前采购岗位已变化，请使用现任人员的新卡片办理' && task.sendOutcome === 'unattempted' &&
+    !task.lifecycleBinding && !task.messageId && !task.deliveryId && !task.firstSendAttemptAt &&
+    !task.leaseUntil && !task.claimToken && !task.deliveryAudit.length && Boolean(task.deliveryUuid);
+}
+
 function isCanonicalStageReceipt(
   entry: PurchaseWorkflowNotificationEntry,
   batch: PurchaseManagerApprovalBatchEntry | undefined,
@@ -9373,6 +9508,7 @@ function sanitizeVersionedManagerApprovalBatch(value: unknown): PurchaseManagerA
   if (isRecord(value) && value.flowVersion !== undefined && value.flowVersion !== 'legacy' && value.flowVersion !== 'lifecycle_v1') throw new ConflictException('采购批次流程版本不受支持');
   const batch = sanitizeManagerApprovalBatch(value);
   if (isRecord(value) && value.flowVersion === 'lifecycle_v1' && !batch) throw new ConflictException('采购全流程批次账本损坏');
+  if (isRecord(value) && value.stageCardTransition !== undefined && !batch) throw new ConflictException('采购分阶段批次账本损坏');
   return batch;
 }
 
@@ -9394,6 +9530,9 @@ function sanitizeManagerApprovalBatch(
   } catch {
     return null;
   }
+  const stageCardTransition = value.stageCardTransition === undefined
+    ? undefined : parseStageCardTransition(value.stageCardTransition, registration);
+  const heldSourceRecords = new Set(stageCardTransition?.heldSourceItems?.map(item => item.recordId));
   if (
     !Array.isArray(value.items) ||
     value.items.length !== registration.recordIds.length
@@ -9410,11 +9549,16 @@ function sanitizeManagerApprovalBatch(
     const rejectionReason = normalizeManagerRejectionReason(
       rawItem.rejectionReason,
     );
+    const sourceHold = heldSourceRecords.has(executionRecordId);
     if (
       !RECORD_ID_PATTERN.test(executionRecordId) ||
       !isManagerBatchItemStatus(status) ||
       !isManagerBatchChoice(choice) ||
-      !isValidManagerBatchItemDecision(status, choice, rejectionReason, decisionSource)
+      (sourceHold
+        ? status !== 'manual_reconciliation' || choice !== '' || rejectionReason !== '' ||
+          decisionSource !== undefined || rawItem.actionEventId !== '' || rawItem.actorOpenId !== '' ||
+          rawItem.processedAt !== '' || rawItem.purchaserOpenId !== '' || rawItem.lastError !== STAGE_SOURCE_ORDERING_HOLD_ERROR
+        : !isValidManagerBatchItemDecision(status, choice, rejectionReason, decisionSource))
     ) {
       return null;
     }
@@ -9529,7 +9673,7 @@ function sanitizeManagerApprovalBatch(
   return {
     ...registration,
     ...(lifecycleInitialRecipients ? { lifecycleAppId: value.lifecycleAppId as string, lifecycleInitialRecipients, lifecycleAuthorityTargets } : {}),
-    ...(value.stageCardTransition === undefined ? {} : { stageCardTransition: parseStageCardTransition(value.stageCardTransition, registration) }),
+    ...(stageCardTransition ? { stageCardTransition } : {}),
     items,
     managerDeliveries,
     state,
@@ -9571,6 +9715,8 @@ function parseStageCardTransition(
   const retirement = new Set(value.retirementMessageIds);
   const archived = new Set(value.archivedMessageIds);
   const missingRecordIds = value.missingRecordIds;
+  const heldSourceItems = value.heldSourceItems;
+  const heldTerminalOrders = value.heldTerminalOrders;
   if (context.approvalBatchId !== registration.approvalBatchId ||
       context.requesterOpenId !== registration.requesterOpenId ||
       !sameStringArray(context.items.map(item => item.executionRecordId), registration.recordIds) ||
@@ -9583,6 +9729,14 @@ function parseStageCardTransition(
       new Set(value.retiredCards.map(row => isRecord(row) ? row.messageId : null)).size !== value.retiredCards.length ||
       value.retiredCards.some(row => !isRecord(row) || !retirement.has(row.messageId) ||
         typeof row.retiredAt !== 'string' || !isoText(row.retiredAt) || row.retiredAt < String(value.switchedAt)) ||
+      (heldSourceItems !== undefined && (!Array.isArray(heldSourceItems) ||
+        new Set(heldSourceItems.map(row => isRecord(row) ? row.recordId : null)).size !== heldSourceItems.length ||
+        heldSourceItems.some(row => !isRecord(row) || !registration.recordIds.includes(String(row.recordId)) ||
+          missingRecordIds.includes(row.recordId) || row.reason !== 'ordering_without_approval_receipt'))) ||
+      (heldTerminalOrders !== undefined && (!Array.isArray(heldTerminalOrders) ||
+        new Set(heldTerminalOrders.map(row => isRecord(row) ? row.recordId : null)).size !== heldTerminalOrders.length ||
+        heldTerminalOrders.some(row => !isRecord(row) || !registration.recordIds.includes(String(row.recordId)) ||
+          typeof row.claimSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(row.claimSha256)))) ||
       value.reopenedItems.some(row => !isRecord(row) || !registration.recordIds.includes(String(row.recordId)) ||
         missingRecordIds.includes(row.recordId) || !row.actionEventId ||
         row.lastError !== '采购明细授权范围已变化，需要重新核对')) throw invalid();
@@ -9836,7 +9990,14 @@ function normalizeNotificationInput(
   ) {
     throw new Error('Invalid purchase workflow notification');
   }
-  const cardContext = normalizeOptionalCardContext(value?.cardContext);
+  const cardContext = value.cardContext !== undefined && (
+    value.kind === 'manager_batch_purchase_refresh' ||
+    value.kind === 'manager_batch_receipt_requested' ||
+    value.kind === 'manager_batch_receipt_refresh' ||
+    value.kind === 'manager_batch_receipt_completed'
+  )
+    ? canonicalManagerBatchCardContext(value.cardContext)
+    : normalizeOptionalCardContext(value.cardContext);
   return {
     businessEventId,
     recordId,
@@ -11633,7 +11794,8 @@ function requireAcceptedFulfillment(ledger:PurchaseWorkflowLedger,proof:Purchase
     if(lifecycleReceiptOwner(batch)!==notification.acceptedAppId||!item.authorityTarget||item.status!=='approved'||(item.choice!=='comprehensive'&&item.choice!=='building_self')||
       (context.action==='order'?item.purchaserOpenId:batch.requesterOpenId)!==expected.actorOpenId||
       ledger.managerApprovalBatches.filter(candidate=>candidate.recordIds.includes(expected.recordId)).length!==1)throw new ConflictException('采购全流程受理职责不可核对');
-    lifecycleAuthority={batchId:batch.approvalBatchId,recordId:item.executionRecordId,actorOpenId:expected.actorOpenId,choice:item.choice,...item.authorityTarget};
+    lifecycleAuthority={batchId:batch.approvalBatchId,recordId:item.executionRecordId,actorOpenId:expected.actorOpenId,choice:item.choice,...item.authorityTarget,
+      ...(batch.stageCardTransition ? { stageCards: true } : {})};
   }
   return{proof:{notificationKey:notification.key,claimToken:proof.claimToken,appId:notification.acceptedAppId,cardContext:notification.cardContext,...(lifecycleAuthority?{lifecycleAuthority}:{})},...target,
     actor:{openId:expected.actorOpenId,name:context.action==='order'?item.purchaserName:snapshot.requesterName,positions:[],buildings:[target.building],accessRole:'admin'}};

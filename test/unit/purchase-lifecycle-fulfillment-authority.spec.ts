@@ -24,4 +24,27 @@ describe('lifecycle fulfillment write authority',()=>{
     expect(()=>service.assertLifecycleFulfillmentAuthority('receive',record,session)).not.toThrow();
     expect(()=>service.assertLifecycleFulfillmentAuthority('receive',{...record,requesterOpenId:'ou_other'},session)).toThrow();
   });
+  it('honors the verified staged order without duty but rejects scope, permission, identity and purchaser changes', () => {
+    process.env.FEISHU_APP_ID = 'cli_test';
+    let active = true, allowed = true;
+    const config = { canUseFeishuBusinessIdentity: () => active, feishuPrincipal: () => ({ role: allowed ? 'admin' : 'guest' }),
+      currentDutyRoutePeople: () => null };
+    const service = new PurchaseWorkflowService({} as never, {} as never, undefined, config as never) as unknown as {
+      assertLifecycleFulfillmentAuthority(action: 'order', record: object, session: object): void;
+    };
+    const authority = { batchId: 'purchase-application-abc', recordId: 'rec_one', actorOpenId: 'ou_buyer', choice: 'building_self', building: 'B楼', specialty: '暖通' };
+    const session = (stageCards: boolean) => ({ openId: 'ou_buyer', acceptedFulfillment: { proof: {
+      appId: 'cli_test', lifecycleAuthority: { ...authority, ...(stageCards ? { stageCards: true } : {}) },
+    } } });
+    const record = { recordId: 'rec_one', approvalBatchId: authority.batchId, building: 'B楼', specialty: '暖通', purchaserOpenId: 'ou_buyer' };
+    const authorize = (current = record, migrated = true) => service.assertLifecycleFulfillmentAuthority('order', current, session(migrated));
+    expect(() => authorize()).not.toThrow();
+    expect(() => authorize(record, false)).toThrow('下单职责');
+    expect(() => authorize({ ...record, purchaserOpenId: 'ou_other' })).toThrow('下单职责');
+    expect(() => authorize({ ...record, specialty: '电气' })).toThrow('专业');
+    allowed = false;
+    expect(() => authorize()).toThrow('履约权限');
+    allowed = true; active = false;
+    expect(() => authorize()).toThrow('当前人员不可办理');
+  });
 });

@@ -15,7 +15,7 @@ describe('staged procurement recovery coordinator', () => {
   const originalSmoke = process.env.NANTONG_HOTFIX_SMOKE_MODE;
   const candidate = { approvalBatchId: 'batch-001', appId: 'cli_test', batchRevision: 4, recordIds: ['recOne'],
     replicas: [{ recipientOpenId: 'ou_manager', messageId: 'om_original', generation: 1, appliedRevision: 4, sentAtMs: 1000, managerApproval: true }] };
-  const make = () => {
+  const make = (updateLifecycleCard?: PurchaseWorkflowGateway['updateLifecycleCard']) => {
     const store = {
       listLifecycleStageCardTransitionCandidates: jest.fn().mockResolvedValue([candidate]),
       transitionLifecycleBatchToStageCards: jest.fn().mockResolvedValue({ changed: true }),
@@ -23,8 +23,9 @@ describe('staged procurement recovery coordinator', () => {
     };
     const gateway = { readLifecycleCardForStageTransition: jest.fn().mockResolvedValue(undefined),
       readRecordsForStageTransition: jest.fn().mockResolvedValue({ records: [{ recordId: 'recOne', status: '待下单' }], missingRecordIds: [] }),
-      updateInteractiveCard: jest.fn().mockResolvedValue(undefined) };
-    return { store, gateway, service: new PurchaseStageCardRecoveryService(store as never, gateway as never, { isEnabled: () => true } as never) };
+      updateLifecycleCard };
+    const manager = { isEnabled: () => true, requeueFailedMigratedOrderCards: jest.fn().mockResolvedValue(undefined) };
+    return { store, gateway, manager, service: new PurchaseStageCardRecoveryService(store as never, gateway as never, manager as never) };
   };
   beforeEach(() => {
     jest.clearAllMocks(); process.env.NODE_ENV = 'production'; delete process.env.NANTONG_HOTFIX_SMOKE_MODE;
@@ -56,20 +57,22 @@ describe('staged procurement recovery coordinator', () => {
     await service.runPending(); expect(store.transitionLifecycleBatchToStageCards).not.toHaveBeenCalled();
   });
   it('does not recover business state in smoke mode or before runtime activation', async () => {
-    const { service, store } = make(); process.env.NANTONG_HOTFIX_SMOKE_MODE = 'true';
+    const { service, store, manager } = make(); process.env.NANTONG_HOTFIX_SMOKE_MODE = 'true';
     await service.runPending(); delete process.env.NANTONG_HOTFIX_SMOKE_MODE;
     jest.mocked(currentHotfixActivation).mockReturnValue({ isAcceptingNewWork: () => false } as never);
     await service.runPending(); expect(store.listLifecycleStageCardTransitionCandidates).not.toHaveBeenCalled();
+    expect(manager.requeueFailedMigratedOrderCards).not.toHaveBeenCalled();
   });
   it('registers during initialization and waits for acceptance before processing', async () => {
     jest.useFakeTimers();
-    const { service, store } = make(); let accepting = false;
+    const { service, store, manager } = make(); let accepting = false;
     jest.mocked(currentHotfixActivation).mockReturnValue({ isAcceptingNewWork: () => accepting } as never);
     jest.mocked(runHotfixInitialization).mockImplementation(async (_owner, initialize) => { await initialize(); });
     try {
       await service.onModuleInit(); expect(store.listLifecycleStageCardTransitionCandidates).not.toHaveBeenCalled();
       accepting = true; await jest.advanceTimersByTimeAsync(30_000);
       expect(store.transitionLifecycleBatchToStageCards).toHaveBeenCalledTimes(1);
+      expect(manager.requeueFailedMigratedOrderCards).toHaveBeenCalledWith('cli_test');
     } finally { await service.onModuleDestroy(); jest.useRealTimers(); }
   });
   it('merges concurrent scans and retains the original mutation identity', async () => {
@@ -80,12 +83,29 @@ describe('staged procurement recovery coordinator', () => {
     expect(store.transitionLifecycleBatchToStageCards).toHaveBeenCalledTimes(1);
   });
   it('marks an obsolete replica retired only after a confirmed read-only card patch', async () => {
-    const { service, store, gateway } = make();
+    const patch = jest.fn().mockResolvedValue({ data: { code: 0 } });
+    const transport = new PurchaseWorkflowGateway({ axiosRef: { patch } } as never);
+    jest.spyOn(transport as never, 'getTenantAccessToken' as never).mockResolvedValue('test-token' as never);
+    const { service, store, gateway } = make(transport.updateLifecycleCard.bind(transport));
+    store.listLifecycleStageCardTransitionCandidates.mockResolvedValue([]);
     store.listStageCardRetirementTargets.mockResolvedValue([{ approvalBatchId: 'batch-001', appId: 'cli_test', messageId: 'om_observer', sentAtMs: 2000 }] as never);
     await service.runPending();
-    expect(gateway.updateInteractiveCard).toHaveBeenCalledWith('om_observer', expect.objectContaining({ elements: [expect.objectContaining({ tag: 'div' })] }));
+    expect(gateway.readLifecycleCardForStageTransition).toHaveBeenCalledWith('cli_test', 'om_observer', 2000);
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(patch).toHaveBeenCalledWith('https://open.feishu.cn/open-apis/im/v1/messages/om_observer',
+      { content: expect.any(String) }, expect.any(Object));
+    expect(JSON.parse(patch.mock.calls[0][1].content)).toEqual({
+      schema: '2.0',
+      config: { update_multi: true, enable_forward: false },
+      header: { template: 'grey', title: { tag: 'plain_text', content: '采购已恢复分阶段办理' } },
+      body: { elements: [{ tag: 'markdown', content: '此全流程卡片已结束。审批、下单、签收和入库将使用各环节独立卡片，已有办理结果已保留。' }] },
+    });
     expect(store.markStageCardReplicaRetired).toHaveBeenCalledWith('batch-001', 'cli_test', 'om_observer');
-    gateway.updateInteractiveCard.mockRejectedValue(new Error('unknown response')); store.markStageCardReplicaRetired.mockClear();
+    expect(gateway.readLifecycleCardForStageTransition.mock.invocationCallOrder[0]).toBeLessThan(patch.mock.invocationCallOrder[0]);
+    expect(patch.mock.invocationCallOrder[0]).toBeLessThan(store.markStageCardReplicaRetired.mock.invocationCallOrder[0]);
+
+    patch.mockResolvedValue({ data: { code: 230099, msg: 'rejected card' } });
+    store.markStageCardReplicaRetired.mockClear();
     await service.runPending(); expect(store.markStageCardReplicaRetired).not.toHaveBeenCalled();
   });
 });

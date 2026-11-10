@@ -67,6 +67,33 @@ describe('盘点执行服务', () => {
     );
     return { ...context, items, sheet };
   }
+  it('checks stock and confirmer together, and a timed-out check cannot save later', async () => {
+    const { service, source, people, store, start, sheet } = await setupReview();
+    const line = sheet.lines[0];
+    const input = {
+      ...start, scope: 'review', recordId: line.inventory.recordId,
+      expectedVersion: line.version, actualQuantity: 2,
+      clientMutationId: 'slow-line-check-001', confirmer: person, note: '',
+    };
+    let finishPerson!: (value: typeof person) => void;
+    people.resolveApplicantForBuilding.mockImplementationOnce(() =>
+      new Promise(resolve => { finishPerson = resolve; }));
+    jest.useFakeTimers();
+    try {
+      const result = service.writeLine(input, actor, 'session1', 'confirm');
+      const failure = expect(result).rejects.toThrow('人员核查超时');
+      expect(source.current).toHaveBeenCalledWith(line.inventory);
+      await jest.advanceTimersByTimeAsync(25_000);
+      await failure;
+      finishPerson(person);
+      await Promise.resolve();
+      expect(store.read().receipts.some(row => row.key === input.clientMutationId)).toBe(false);
+      await expect(service.writeLine(input, actor, 'session1', 'confirm'))
+        .resolves.toMatchObject({ line: { status: 'confirmed', actualQuantity: 2 } });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   it('retries a historical month without reopening business writes or crossing building access', async () => {
     const { service, start, store } = await setupReview();
     store.update((state) => {

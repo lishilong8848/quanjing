@@ -83,16 +83,20 @@ export class PurchaseStageCardRecoveryService implements OnModuleInit, OnModuleD
       if (!this.enabled() || target.appId !== appId || readEnv('FEISHU_APP_ID') !== appId) return;
       try {
         await this.gateway.readLifecycleCardForStageTransition(appId, target.messageId, target.sentAtMs);
-        await this.gateway.updateInteractiveCard(target.messageId, {
-          config: { wide_screen_mode: true },
+        await this.gateway.updateLifecycleCard(target.messageId, {
+          schema: '2.0',
+          config: { update_multi: true, enable_forward: false },
           header: { template: 'grey', title: { tag: 'plain_text', content: '采购已恢复分阶段办理' } },
-          elements: [{ tag: 'div', text: { tag: 'plain_text', content: '此全流程卡片已结束。审批、下单、签收和入库将使用各环节独立卡片，已有办理结果已保留。' } }],
-        });
+          body: { elements: [{ tag: 'markdown', content: '此全流程卡片已结束。审批、下单、签收和入库将使用各环节独立卡片，已有办理结果已保留。' }] },
+        }, appId);
         await this.store.markStageCardReplicaRetired(target.approvalBatchId, appId, target.messageId);
         this.reported.delete(target.messageId);
       } catch {
         this.report(target.messageId);
       }
+    }
+    if (this.enabled() && readEnv('FEISHU_APP_ID') === appId) {
+      await this.manager.requeueFailedMigratedOrderCards(appId);
     }
   }
 

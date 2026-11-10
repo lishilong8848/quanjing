@@ -2240,8 +2240,11 @@ export class PurchaseWorkflowService implements OnModuleDestroy {
     const principal = config.feishuPrincipal(session.openId, appId);
     if (!principal || principal.requiresPasswordChange || !canPerformBusinessAction(principal, { module: 'purchase', action, ...target })) throw new ForbiddenException('采购全流程履约权限已变化');
     if (action === 'order') {
-      const duties = purchaseCurrentDutyMembers(config, authority.choice === 'building_self' ? 'building_executor' : 'purchase_executor', target);
-      if (record.purchaserOpenId !== session.openId || !duties || !duties.some(person => person.openId === session.openId)) throw new ForbiddenException('采购全流程下单职责已变化');
+      if (record.purchaserOpenId !== session.openId) throw new ForbiddenException('采购全流程下单职责已变化');
+      if (!authority.stageCards) {
+        const duties = purchaseCurrentDutyMembers(config, authority.choice === 'building_self' ? 'building_executor' : 'purchase_executor', target);
+        if (!duties?.some(person => person.openId === session.openId)) throw new ForbiddenException('采购全流程下单职责已变化');
+      }
     } else if (record.requesterOpenId !== session.openId) throw new ForbiddenException('采购全流程签收职责已变化');
   }
 

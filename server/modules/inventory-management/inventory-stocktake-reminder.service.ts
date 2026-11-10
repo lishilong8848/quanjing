@@ -9,7 +9,7 @@ import { createProcessLockOwner, processLockOwnerMayBeAlive } from '../../common
 import { InventoryOutboundApprovalGateway } from '../inventory-outbound-approval/inventory-outbound-approval.gateway';
 import { InventoryWarehouseRoleDirectory } from '../inventory-outbound-approval/inventory-warehouse-role-directory';
 import {
-  buildStocktakeReminderCard, hasOutstandingStocktake, OPEN_ID, stocktakeReminderWeek,
+  buildStocktakeReminderCard, hasOutstandingStocktake, OPEN_ID, STOCKTAKE_RECIPIENT_SOURCE, stocktakeReminderWeek,
   type StocktakeReminderBatch, type StocktakeReminderDelivery,
 } from './inventory-stocktake-reminder.model';
 import { stocktakeBuildings, stocktakeGenerationDueAt, stocktakeMonth } from './inventory-stocktake.rules';
@@ -21,11 +21,13 @@ const SAFE_SEND_RETRY_MS = 50 * 60_000;
 const INITIAL = 'initial';
 const findBatch = (state: StocktakeLedger, month: string, building: WarehouseBuilding, period: string) =>
   state.reminderBatches?.find(row => row.month === month && row.building === building && row.period === period);
-const hasPending = (batch?: StocktakeReminderBatch) => !batch?.routingComplete ||
-  batch.deliveries.some(row => !row.messageId && !row.needsReview);
-const mayRetry = (batch: StocktakeReminderBatch | undefined, now: number) => !batch ||
+const awaitingDelivery = (batch: StocktakeReminderBatch, row: StocktakeReminderDelivery) =>
+  batch.routedOpenIds?.includes(row.openId) && !row.messageId && !row.needsReview;
+const hasPending = (batch?: StocktakeReminderBatch) => batch?.routingSource !== STOCKTAKE_RECIPIENT_SOURCE ||
+  !batch.routingComplete || batch.deliveries.some(row => awaitingDelivery(batch, row));
+const mayRetry = (batch: StocktakeReminderBatch | undefined, now: number) => batch?.routingSource !== STOCKTAKE_RECIPIENT_SOURCE ||
   (batch.retryRoutingAt <= now && (!batch.routingComplete || batch.deliveries.some(row =>
-    !row.messageId && !row.needsReview && row.retryAt <= now)));
+    awaitingDelivery(batch, row) && row.retryAt <= now)));
 
 export const STOCKTAKE_REMINDER_RUNTIME = Symbol('STOCKTAKE_REMINDER_RUNTIME');
 interface ReminderRuntime {
@@ -71,7 +73,8 @@ export class InventoryStocktakeReminderService {
       if (sheet.month !== month || !hasOutstandingStocktake(sheet)) return [];
       const initial = findBatch(state, month, sheet.building, INITIAL);
       const period = hasPending(initial) ? INITIAL :
-        week && !initial?.deliveries.some(row => Math.max(row.firstAttemptAt, row.sentAt ?? 0) >= week.startsAt) ? week.period : null;
+        week && !initial?.deliveries.some(row => initial.routedOpenIds?.includes(row.openId) &&
+          Math.max(row.firstAttemptAt, row.sentAt ?? 0) >= week.startsAt) ? week.period : null;
       return period && mayRetry(findBatch(state, month, sheet.building, period), now) ? [{ building: sheet.building, period }] : [];
     });
     if (!due.length) return;
@@ -86,7 +89,7 @@ export class InventoryStocktakeReminderService {
     }
 
     // Parallel lookups coalesce onto the directory's single fresh source read.
-    const lookups = await Promise.allSettled(due.map(entry => this.directory.resolveNotificationRecipients(entry.building, true)));
+    const lookups = await Promise.allSettled(due.map(entry => this.directory.resolveApprovers(entry.building, true)));
     for (const [index, entry] of due.entries()) {
       if (!this.options.enabled()) return;
       const lookup = lookups[index];
@@ -126,6 +129,7 @@ export class InventoryStocktakeReminderService {
       if (!sheet || !hasOutstandingStocktake(sheet)) return false;
       const batch = getOrCreateBatch(state, month, building, period);
       batch.routingComplete = true;
+      batch.routedOpenIds = [...eligible].sort();
       batch.routingError = null;
       batch.retryRoutingAt = 0;
       for (const row of batch.deliveries) {
@@ -199,8 +203,17 @@ function activeOwner(row: StocktakeReminderDelivery): boolean {
 
 function getOrCreateBatch(state: StocktakeLedger, month: string, building: WarehouseBuilding, period: string): StocktakeReminderBatch {
   const existing = findBatch(state, month, building, period);
-  if (existing) return existing;
-  const created: StocktakeReminderBatch = { month, building, period, routingError: null, routingComplete: false, retryRoutingAt: 0, deliveries: [] };
+  if (existing) {
+    if (existing.routingSource !== STOCKTAKE_RECIPIENT_SOURCE) {
+      // Re-evaluate the old route without losing any known or uncertain delivery.
+      existing.routingSource = STOCKTAKE_RECIPIENT_SOURCE;
+      existing.routedOpenIds = [];
+      existing.routingComplete = false;
+    }
+    return existing;
+  }
+  const created: StocktakeReminderBatch = { month, building, period, routingError: null, routingComplete: false,
+    routingSource: STOCKTAKE_RECIPIENT_SOURCE, routedOpenIds: [], retryRoutingAt: 0, deliveries: [] };
   (state.reminderBatches ??= []).push(created);
   return created;
 }

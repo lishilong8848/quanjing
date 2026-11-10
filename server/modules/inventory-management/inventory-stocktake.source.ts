@@ -78,7 +78,7 @@ export class InventoryStocktakeSource {
     return this.readSnapshot(building, month);
   }
 
-  private async readSnapshot(building?: WarehouseBuilding, month?: string) {
+  private async readSnapshot(building?: WarehouseBuilding, month?: string, inventoryIds?: string[]) {
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -88,7 +88,7 @@ export class InventoryStocktakeSource {
     try {
       // A shared Feishu page read may still serve other consumers after this job times out.
       return await Promise.race([
-        this.readSnapshotSources(building, month),
+        this.readSnapshotSources(building, month, inventoryIds),
         deadline,
       ]);
     } finally {
@@ -99,6 +99,7 @@ export class InventoryStocktakeSource {
   private async readSnapshotSources(
     building?: WarehouseBuilding,
     month?: string,
+    inventoryIds?: string[],
   ) {
     const config = await this.config();
     const sources = [
@@ -109,10 +110,13 @@ export class InventoryStocktakeSource {
     ] as const;
     const entries = await Promise.all(
       sources.map(async ([key, env, name, dateField]) => {
-        if (dateField && !month) return [key, []] as const;
+        if ((key === 'inbound' || key === 'outbound') && !month)
+          return [key, []] as const;
         const tableId = readEnv(env);
         if (!tableId)
           throw new BadRequestException(`${name}未配置，无法生成盘点清单`);
+        if (key === 'inventory' && inventoryIds)
+          return [key, await this.gateway.getRecords(config.appToken, tableId, inventoryIds, name)] as const;
         return [
           key,
           await fetchBitableRecords(this.http, {
@@ -164,6 +168,13 @@ export class InventoryStocktakeSource {
     const outboundById = new Map(
       records.outbound.map((record) => [record.record_id || record.id, record]),
     );
+    // Require an explicit source zero before excluding an empty placeholder.
+    // Missing quantities and named items still go through the normal checks.
+    snapshot.items = snapshot.items.filter(item => {
+      const record = inventoryById.get(item.recordId);
+      return !record || Boolean(item.sku) || item.name !== '未命名物品' || item.quantity !== 0 ||
+        extractNumberValue(pickField(record.fields || {}, ['剩余库存'])) !== 0;
+    });
     for (const item of snapshot.items.filter(
       (i) => !building || i.building === building,
     )) {
@@ -244,7 +255,7 @@ export class InventoryStocktakeSource {
     principal?: AccessPrincipal,
   ): Promise<InventoryManagementItem[]> {
     if (isProfessionalBusinessPrincipal(principal)) {
-      const snapshot = await this.readSnapshot();
+      const snapshot = await this.readSnapshot(undefined, undefined, previous.map(item => item.recordId));
       return previous.map(item => {
         const current = snapshot.items.find(candidate => candidate.recordId === item.recordId);
         assertProfessionalRecordScope(principal, current?.specialty, current?.building);

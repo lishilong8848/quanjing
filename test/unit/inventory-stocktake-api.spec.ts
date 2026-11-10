@@ -9,6 +9,7 @@ import {
   getStocktakeSync,
   retryStocktakeSync,
   waitStocktakeBulkTask,
+  writeStocktakeLine,
 } from '../../client/src/pages/InventoryManagement/inventory-stocktake.api';
 
 describe('stocktake sheet HTTP response', () => {
@@ -16,6 +17,27 @@ describe('stocktake sheet HTTP response', () => {
     typeof axiosForBackend
   >;
   beforeEach(() => jest.clearAllMocks());
+  it('checks a lost save response against the same mutation without posting again', async () => {
+    const input = {
+      month: '2026-11', building: 'D楼', scope: 'sample', recordId: 'rec1',
+      clientMutationId: 'test-line-confirm', expectedVersion: 1,
+    } as const;
+    const line = {
+      inventory: { recordId: input.recordId }, version: 2,
+      sync: { clientMutationId: input.clientMutationId, version: 2 },
+    };
+    const timeout = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' });
+    request.mockRejectedValueOnce(timeout)
+      .mockResolvedValueOnce({ data: { version: 4, lines: [line] } } as any);
+    await expect(writeStocktakeLine('confirm', input as any))
+      .resolves.toEqual({ line, sheetVersion: 4 });
+    expect(request.mock.calls.map(([config]) => config.method)).toEqual(['POST', 'GET']);
+
+    request.mockRejectedValueOnce(timeout).mockResolvedValueOnce({
+      data: { version: 5, lines: [{ ...line, sync: { ...line.sync, clientMutationId: 'another-user' } }] },
+    } as any);
+    await expect(writeStocktakeLine('confirm', input as any)).rejects.toBe(timeout);
+  });
   it('polls a durable task and reads the sheet only once on success', async () => {
     jest.useFakeTimers();
     try {

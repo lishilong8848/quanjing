@@ -8,6 +8,7 @@ const SHANGHAI_OFFSET_MS = 8 * 60 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 const MONTH = /^20\d{2}-(0[1-9]|1[0-2])$/;
 export const OPEN_ID = /^ou_[A-Za-z0-9_-]{1,124}$/u;
+export const STOCKTAKE_RECIPIENT_SOURCE = 'warehouse_responsible';
 
 export interface StocktakeReminderDelivery {
   openId: string;
@@ -27,6 +28,8 @@ export interface StocktakeReminderBatch {
   period: string;
   routingError: 'recipients-unavailable' | 'no-authorized-recipient' | 'public-url-invalid' | null;
   routingComplete: boolean;
+  routingSource?: typeof STOCKTAKE_RECIPIENT_SOURCE;
+  routedOpenIds?: string[];
   retryRoutingAt: number;
   deliveries: StocktakeReminderDelivery[];
 }
@@ -36,7 +39,13 @@ export function validStocktakeReminders(batches: StocktakeReminderBatch[]): bool
     MONTH.test(batch.month) && WAREHOUSE_BUILDINGS.includes(batch.building) &&
     (batch.period === 'initial' || weeklyDate(batch.period, batch.month)) &&
     [null, 'recipients-unavailable', 'no-authorized-recipient', 'public-url-invalid'].includes(batch.routingError) &&
-    typeof batch.routingComplete === 'boolean' && validTime(batch.retryRoutingAt) && Array.isArray(batch.deliveries) &&
+    typeof batch.routingComplete === 'boolean' && validTime(batch.retryRoutingAt) &&
+    (batch.routingSource === undefined ? batch.routedOpenIds === undefined :
+      batch.routingSource === STOCKTAKE_RECIPIENT_SOURCE && Array.isArray(batch.routedOpenIds) &&
+      batch.routedOpenIds.every(id => typeof id === 'string' && OPEN_ID.test(id)) &&
+      new Set(batch.routedOpenIds).size === batch.routedOpenIds.length &&
+      (!batch.routingComplete || batch.routedOpenIds.length > 0)) &&
+    Array.isArray(batch.deliveries) &&
     batch.deliveries.every(row => row && OPEN_ID.test(row.openId) &&
       /^[a-f0-9-]{36}$/.test(row.uuid) && /^[a-f0-9]{64}$/.test(row.payloadSha256) &&
       validTime(row.firstAttemptAt) && validTime(row.retryAt) &&
