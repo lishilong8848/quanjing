@@ -107,6 +107,7 @@ const GUEST_SUBMISSION_MAX_IN_FLIGHT_PER_SOURCE = 1;
 const GUEST_SUBMISSION_MAX_GLOBAL_IN_FLIGHT = 2;
 const GUEST_SUBMISSION_MAX_TRACKED_SOURCES = 2048;
 const INVENTORY_ADMIN_EXACT_REQUESTS = new Set([
+  'GET /api/inventory-management/stocktake/people',
   'GET /api/inventory-management/stocktake/overview',
   'GET /api/inventory-management/stocktake/sheet',
   'GET /api/inventory-management/stocktake/sync-status',

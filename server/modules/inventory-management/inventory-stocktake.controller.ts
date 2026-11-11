@@ -48,6 +48,14 @@ export class InventoryStocktakeController {
     private readonly bulk?: InventoryStocktakeBulkService,
   ) {}
   @ProfessionalScoped()
+  @Get('people') searchPeople(
+    @Req() req: StocktakeRequest,
+    @Query('query') query = '',
+    @Query('limit') limit = '30',
+  ) {
+    return this.service.searchPeople(query, Number(limit), identity(req).principal);
+  }
+  @ProfessionalScoped()
   @Get('overview') overview(
     @Req() req: StocktakeRequest,
     @Query('month') month: string,

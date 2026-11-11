@@ -61,4 +61,119 @@ describe('PurchaseWorkflowReceiptTaskService', () => {
     const f = fixture(); await expect(f.service.acceptReceipt('recReceipt005', f.session, { ...f.input, signerOpenId: '' }, f.files)).rejects.toThrow('请选择签收人');
     expect(f.core.prepareReceiptSubmission).not.toHaveBeenCalled(); expect(f.gateway.uploadAttachment).not.toHaveBeenCalled();
   });
+
+  async function waitUntil(check: () => boolean | Promise<boolean>): Promise<void> {
+    const until = Date.now() + 3000;
+    while (!await check()) {
+      if (Date.now() > until) throw new Error('Receipt fixture did not reach the expected state');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(done => { resolve = done; });
+    return { promise, resolve };
+  }
+
+  it('runs at most two receipts, allowing B and C to complete while A is uploading', async () => {
+    const f = fixture(), slow = deferred<string>();
+    let active = 0, maximum = 0;
+    f.gateway.uploadAttachment.mockImplementation(async (file: any) => {
+      active++; maximum = Math.max(maximum, active);
+      try { return file.originalname === 'a.jpg' ? await slow.promise : `token-${file.originalname}`; }
+      finally { active--; }
+    });
+    const tasks = [];
+    for (const id of ['a', 'b', 'c']) {
+      tasks.push(await f.service.acceptReceipt(`recConcurrent${id}`, f.session, { ...f.input, clientMutationId: randomUUID() },
+        { ...f.files, receiptPhotos: [{ ...f.files.receiptPhotos[0], originalname: `${id}.jpg` }] }));
+    }
+    const run = f.service.runPendingTasks();
+    expect(f.service.runPendingTasks()).toBe(run);
+    try {
+      await waitUntil(async () => (await store.findWebReceipt(tasks[2].taskId))?.status === 'completed');
+      expect((await store.findWebReceipt(tasks[0].taskId))?.status).toBe('processing');
+      expect((await store.findWebReceipt(tasks[1].taskId))?.status).toBe('completed');
+      expect(maximum).toBe(2);
+    } finally { slow.resolve('token-a'); await run; }
+    expect(f.gateway.uploadAttachment).toHaveBeenCalledTimes(3);
+    expect(f.core.receiveAcceptedReceipt).toHaveBeenCalledTimes(3);
+  });
+
+  it('never admits a second command for a record or reclaims an excluded in-flight record', async () => {
+    const f = fixture();
+    const one = await f.service.acceptReceipt('recUnique', f.session, f.input, f.files);
+    expect(await store.takeNextNotification(Date.now(), 1000, ['web_receipt_command'], undefined, () => false)).toBeNull();
+    expect((await store.findWebReceipt(one.taskId))?.attempts).toBe(0);
+    await expect(f.service.acceptReceipt('recUnique', f.session, { ...f.input, clientMutationId: randomUUID() }, f.files)).rejects.toThrow('已有正式签收任务');
+    const claimed = await store.takeNextNotification(Date.now(), 1000, ['web_receipt_command']);
+    expect(claimed?.webReceipt?.taskId).toBe(one.taskId);
+    expect(await store.takeNextNotification(Date.now() + 5000, 1000, ['web_receipt_command'], new Set(['recUnique']))).toBeNull();
+    expect((await store.findWebReceipt(one.taskId))?.claimToken).toBe(claimed?.claimToken);
+  });
+
+  it('keeps the ledger available during shutdown, saves in-flight upload receipts and leaves later work for restart', async () => {
+    const f = fixture(), uploads = [deferred<string>(), deferred<string>()];
+    let started = 0;
+    f.gateway.uploadAttachment.mockImplementation(() => uploads[started++].promise);
+    const tasks = [];
+    for (let i = 0; i < 3; i++) tasks.push(await f.service.acceptReceipt(`recShutdown${i}`, f.session, { ...f.input, clientMutationId: randomUUID() }, f.files));
+    const run = f.service.runPendingTasks();
+    await waitUntil(() => started === 2);
+    let stopped = false;
+    const stop = store.onModuleDestroy().then(() => { stopped = true; });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(stopped).toBe(false);
+    await f.service.runPendingTasks();
+    expect(started).toBe(2);
+    uploads[0].resolve('token-stop-a'); uploads[1].resolve('token-stop-b');
+    await Promise.all([run, stop]);
+    expect(f.core.receiveAcceptedReceipt).not.toHaveBeenCalled();
+    store = new PurchaseWorkflowStore(join(folder, 'purchase.json')); await store.onModuleInit();
+    const saved = await Promise.all(tasks.map(task => store.findWebReceipt(task.taskId)));
+    expect(saved.map(task => task?.status)).toEqual(['pending', 'pending', 'pending']);
+    expect(saved.slice(0, 2).every(task => Boolean(task?.webReceipt?.files[0].token))).toBe(true);
+    expect(saved[2]?.attempts).toBe(0);
+    f.gateway.uploadAttachment.mockResolvedValue('token-stop-c');
+    const restarted = new PurchaseWorkflowReceiptTaskService(f.gateway as never, f.core as never, store);
+    await restarted.runPendingTasks();
+    expect(f.gateway.uploadAttachment).toHaveBeenCalledTimes(3);
+    expect(f.core.receiveAcceptedReceipt).toHaveBeenCalledTimes(3);
+  });
+
+  it('drains a recovery being read during shutdown without writing or accepting another request', async () => {
+    const f = fixture();
+    const accepted = await f.service.acceptReceipt('recRecoveryStop', f.session, f.input, f.files);
+    const original = await store.findWebReceipt(accepted.taskId), reading = deferred<typeof original>();
+    jest.spyOn(store, 'findWebReceipt').mockReturnValueOnce(reading.promise);
+    const write = jest.spyOn(store, 'recoverWebReceipt');
+    const input = { module: 'purchase' as const, taskId: accepted.taskId, expectedVersion: 'a'.repeat(64), clientMutationId: randomUUID() };
+    const actor = { id: 'synthetic-admin', name: '合成管理员', authorizationVersion: 1 };
+    const recovery = f.service.recoverTask(input, actor, () => {});
+    const rejected = expect(recovery).rejects.toThrow('系统正在更新');
+    let stopped = false;
+    const stop = store.onModuleDestroy().then(() => { stopped = true; });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(stopped).toBe(false);
+    await expect(f.service.recoverTask(input, actor, () => {})).rejects.toThrow('系统正在更新');
+    await expect(f.service.acceptReceipt('recAfterStop', f.session, f.input, f.files)).rejects.toThrow('系统正在更新');
+    reading.resolve(original);
+    await rejected; await stop;
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('retries an unstarted failed upload later without blocking another receipt or reuploading its files', async () => {
+    const f = fixture();
+    const first = await f.service.acceptReceipt('recRetryA', f.session, f.input, f.files);
+    const second = await f.service.acceptReceipt('recRetryB', f.session, { ...f.input, clientMutationId: randomUUID() }, f.files);
+    f.gateway.getTenantAccessTokenAsApp.mockRejectedValueOnce(new Error('temporary token failure'));
+    await f.service.runPendingTasks();
+    expect((await store.findWebReceipt(first.taskId))?.status).toBe('pending');
+    expect((await store.findWebReceipt(second.taskId))?.status).toBe('completed');
+    await f.service.runPendingTasks(Date.now() + 5000);
+    expect((await store.findWebReceipt(first.taskId))?.status).toBe('completed');
+    expect(f.gateway.uploadAttachment).toHaveBeenCalledTimes(2);
+    expect(f.core.receiveAcceptedReceipt).toHaveBeenCalledTimes(2);
+  });
 });

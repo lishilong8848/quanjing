@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
@@ -28,6 +29,7 @@ import {
 } from '../../common/config/external-services.config';
 import {
   fetchBitableRecords,
+  getBitableRecordCacheGeneration,
   resolveBitableAppToken,
   type BitableRecordItem,
 } from '../../common/feishu/bitable-direct-read';
@@ -95,6 +97,7 @@ export class PurchaseInboundConfirmationService {
   private readonly logger = new Logger(PurchaseInboundConfirmationService.name);
 
   private readonly running = new Map<string, RunningPurchaseInbound>();
+  private readonly pendingReads = new Map<string, { ordinary?: Promise<PurchasePendingInboundResponse>; fresh?: Promise<PurchasePendingInboundResponse> }>();
 
   constructor(
     private readonly httpService: HttpService,
@@ -111,13 +114,49 @@ export class PurchaseInboundConfirmationService {
     forceRefresh = false,
   ): Promise<PurchasePendingInboundResponse> {
     const config = await this.resolveConfig();
-    const [submissions, executions, catalog] = await Promise.all([
+    const key = JSON.stringify([readEnv('FEISHU_APP_ID'), config]);
+    let reads = this.pendingReads.get(key);
+    if (!reads) { reads = {}; this.pendingReads.set(key, reads); }
+    if (reads.fresh) return structuredClone(await reads.fresh);
+    if (!forceRefresh && reads.ordinary) return structuredClone(await reads.ordinary);
+    const slot = forceRefresh ? 'fresh' : 'ordinary';
+    const preceding = reads.ordinary;
+    const entry = reads;
+    const request = (async () => {
+      // A forced read must start after the ordinary read, including a failed
+      // ordinary read, rather than join the direct reader's in-flight cache.
+      if (forceRefresh && preceding) await preceding.catch(() => undefined);
+      return this.readPendingSnapshot(config, forceRefresh);
+    })().finally(() => {
+      if (entry[slot] === request) delete entry[slot];
+      if (!entry.ordinary && !entry.fresh && this.pendingReads.get(key) === entry) this.pendingReads.delete(key);
+    });
+    entry[slot] = request;
+    return structuredClone(await request);
+  }
+
+  private async readPendingSnapshot(config: PurchaseInboundConfig, forceRefresh: boolean): Promise<PurchasePendingInboundResponse> {
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.readPendingSnapshotOnce(config, forceRefresh || attempt > 0); }
+      catch (error) {
+        if (!isPendingReadConflict(error)) throw error;
+        if (attempt >= 2) throw new ServiceUnavailableException('待采购入库数据正在更新，本次核对未完成，请稍后重试');
+      }
+    }
+  }
+
+  private async readPendingSnapshotOnce(config: PurchaseInboundConfig, forceRefresh: boolean): Promise<PurchasePendingInboundResponse> {
+    const sources = [[config.purchaseAppToken, config.submissionTableId], [config.purchaseAppToken, config.executionTableId], [config.warehouseAppToken, config.catalogTableId]];
+    const generations = sources.map(([app, table]) => getBitableRecordCacheGeneration(app, table));
+    const settled = await Promise.allSettled([
       fetchBitableRecords(this.httpService, {
         appToken: config.purchaseAppToken,
         tableId: config.submissionTableId,
         tableName: '采购提交',
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
+        strict: true,
+        allowStale: false,
       }),
       fetchBitableRecords(this.httpService, {
         appToken: config.purchaseAppToken,
@@ -125,6 +164,8 @@ export class PurchaseInboundConfirmationService {
         tableName: '采购执行',
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
+        strict: true,
+        allowStale: false,
       }),
       fetchBitableRecords(this.httpService, {
         appToken: config.warehouseAppToken,
@@ -132,9 +173,15 @@ export class PurchaseInboundConfirmationService {
         tableName: '物品类别',
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
+        strict: true,
+        allowStale: false,
       }),
     ]);
+    const failed = settled.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed.length) throw (failed.find(result => !isPendingReadConflict(result.reason)) || failed[0]).reason;
+    const [submissions, executions, catalog] = settled.map(result => (result as PromiseFulfilledResult<BitableRecordItem[]>).value);
     const responsibilities = this.inboundTaskLedger ? await this.inboundTaskLedger.purchaseResponsibilities() : {};
+    if (sources.some(([app, table], index) => getBitableRecordCacheGeneration(app, table) !== generations[index])) throw new Error(PENDING_READ_CONFLICT);
     return {
       generatedAt: new Date().toISOString(),
       items: buildPendingPurchaseInbounds({ submissions, executions, catalog }).map(item => {
@@ -545,6 +592,9 @@ export class PurchaseInboundConfirmationService {
     return config;
   }
 }
+
+const PENDING_READ_CONFLICT = '数据在读取期间已变更，请重新读取';
+function isPendingReadConflict(error: unknown): boolean { return error instanceof Error && error.message === PENDING_READ_CONFLICT; }
 
 async function assertWriteOwnership(
   guard?: InventoryWriteOwnershipGuard,

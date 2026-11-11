@@ -1,3 +1,4 @@
+import { ProfileChanges } from './ProfileChanges';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { KeyRound, Loader2, RefreshCw, UserRound } from 'lucide-react';
 import { useAccess } from '@/access/AccessProvider';
@@ -61,7 +62,7 @@ function PersonalCenter() {
       <TabsList className="grid h-auto min-h-11 w-full grid-cols-3 sm:w-fit"><TabsTrigger value="archive" className="min-w-0">个人档案</TabsTrigger><TabsTrigger value="permissions" className="min-w-0">权限与申请</TabsTrigger><TabsTrigger value="security" className="min-w-0">账户安全</TabsTrigger></TabsList>
       <TabsContent value="archive" forceMount className="space-y-4 data-[state=inactive]:hidden">
         <div className="flex flex-wrap gap-2" role="group" aria-label="个人档案栏目"><Button size="sm" variant={archiveView === 'profile' ? 'secondary' : 'ghost'} aria-pressed={archiveView === 'profile'} onClick={() => setArchiveView('profile')}>完整档案</Button><Button size="sm" variant={archiveView === 'corrections' ? 'secondary' : 'ghost'} aria-pressed={archiveView === 'corrections'} onClick={() => setArchiveView('corrections')}>资料核对与反馈</Button></div>
-        <div hidden={archiveView !== 'profile'}><PersonalArchivePanel archive={archive} onCorrect={!readOnly ? () => setArchiveView('corrections') : undefined} /></div>
+        <div hidden={archiveView !== 'profile'}><ProfileChanges onCompleted={() => void archive.refresh()} /><PersonalArchivePanel archive={archive} onCorrect={!readOnly ? () => setArchiveView('corrections') : undefined} /></div>
         <div hidden={archiveView !== 'corrections'} className="space-y-5">{!readOnly && <ArchiveCorrectionForm onSubmitted={updateCorrection} />}<ReadStatus loading={corrections.loading} error={corrections.error} label="核对记录" onRetry={() => void corrections.refresh()} /><ArchiveCorrectionList rows={corrections.items} onUpdated={updateCorrection} readOnly={readOnly} /></div>
       </TabsContent>
       <TabsContent value="permissions" forceMount className="space-y-4 data-[state=inactive]:hidden">

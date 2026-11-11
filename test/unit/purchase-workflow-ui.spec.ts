@@ -112,7 +112,7 @@ describe('purchase workflow UI contract', () => {
       source.indexOf('const allowedActions'),
     );
 
-    expect(receiptAction).toContain('receiptSubmissionInFlight.current = true');
+    expect(receiptAction).toContain('receiptSubmissionGate.current.begin(submissionKey)');
     expect(receiptAction).toContain('onReceiptAccepted(recordId)');
     expect(receiptAction).toContain('onOpenChange(false)');
     expect(receiptAction).toContain('window.setTimeout(() =>');

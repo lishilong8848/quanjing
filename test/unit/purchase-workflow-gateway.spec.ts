@@ -250,6 +250,33 @@ describe('PurchaseWorkflowGateway', () => {
     );
   });
 
+  it('shares only overlapping organization reads with identical credentials and reads fresh again afterwards', async () => {
+    let finish!: (value: unknown) => void;
+    const response = { data: { code: 0, data: { items: [{ record_id: 'rec_org', fields: { 主管: [{ id: 'ou_one', name: '一' }, { id: 'ou_two', name: '二' }], 职位: '设施运维主管', '楼栋/专业': ['B楼'] } }], has_more: false } } };
+    const axiosRef = { get: jest.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(response) };
+    const gateway = new PurchaseWorkflowGateway({ axiosRef } as never);
+    const one = gateway.resolveUser('ou_one', 'synthetic-token-a');
+    const two = gateway.resolveUser('ou_two', 'synthetic-token-a');
+    expect(axiosRef.get).toHaveBeenCalledTimes(1);
+    await gateway.resolveUser('ou_one', 'synthetic-token-b');
+    expect(axiosRef.get).toHaveBeenCalledTimes(2);
+    finish(response);
+    expect(await one).toMatchObject({ openId: 'ou_one', name: '一', buildings: ['B楼'] });
+    expect(await two).toMatchObject({ openId: 'ou_two', name: '二', buildings: ['B楼'] });
+    await gateway.resolveUser('ou_one', 'synthetic-token-a');
+    expect(axiosRef.get).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retain a rejected organization read for a later retry', async () => {
+    const axiosRef = { get: jest.fn().mockRejectedValueOnce(new Error('temporary')).mockResolvedValue({ data: { code: 0, data: { items: [], has_more: false } } }) };
+    const gateway = new PurchaseWorkflowGateway({ axiosRef } as never);
+    const results = await Promise.allSettled([gateway.resolveUser('ou_one', 'synthetic-token'), gateway.resolveUser('ou_two', 'synthetic-token')]);
+    expect(results.every(result => result.status === 'rejected')).toBe(true);
+    expect(axiosRef.get).toHaveBeenCalledTimes(1);
+    await gateway.resolveUser('ou_one', 'synthetic-token');
+    expect(axiosRef.get).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ['missing code', { data: {} }],
     ['string payload', 'success'],
@@ -2321,6 +2348,40 @@ describe('PurchaseWorkflowGateway', () => {
       gateway.sendTextNotification(['ou_requester'], '测试消息', true),
     ).resolves.toEqual([]);
     expect(axiosRef.post).not.toHaveBeenCalled();
+  });
+
+  it('sends at most two text notices concurrently, deduplicates people and preserves input order', async () => {
+    const pending = new Map<string, (value: unknown) => void>();
+    const axiosRef = { post: jest.fn((_url: string, body: { receive_id: string }) => new Promise(resolve => pending.set(body.receive_id, resolve))) };
+    const gateway = new PurchaseWorkflowGateway({ axiosRef } as never);
+    jest.spyOn(gateway as any, 'getTenantAccessToken').mockResolvedValue('synthetic');
+    const sent = gateway.sendTextNotification(['ou_a', 'ou_b', 'ou_a', 'invalid user', 'ou_c'], '通知');
+    const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+    await flush();
+    expect([...pending.keys()]).toEqual(['ou_a', 'ou_b']);
+    pending.get('ou_b')!({ data: { code: 0, data: { message_id: 'om_b' } } });
+    await flush();
+    expect([...pending.keys()]).toEqual(['ou_a', 'ou_b', 'ou_c']);
+    pending.get('ou_c')!({ data: { code: 0, data: { message_id: 'om_c' } } });
+    pending.get('ou_a')!({ data: { code: 0, data: { message_id: 'om_a' } } });
+    await expect(sent).resolves.toEqual(['om_a', 'om_b', 'om_c']);
+    expect(axiosRef.post).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops issuing text notices after failure and awaits the other in-flight response without retries', async () => {
+    let finish!: (value: unknown) => void;
+    const failure = new Error('synthetic send failed');
+    const axiosRef = { post: jest.fn().mockRejectedValueOnce(failure).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })) };
+    const gateway = new PurchaseWorkflowGateway({ axiosRef } as never);
+    jest.spyOn(gateway as any, 'getTenantAccessToken').mockResolvedValue('synthetic');
+    let settled = false;
+    const outcome = gateway.sendTextNotification(['ou_a', 'ou_b', 'ou_c'], '通知').then(() => { settled = true; return null; }, error => { settled = true; return error; });
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(axiosRef.post).toHaveBeenCalledTimes(2);
+    expect(settled).toBe(false);
+    finish({ data: { code: 0, data: { message_id: 'om_b' } } });
+    await expect(outcome).resolves.toBe(failure);
+    expect(axiosRef.post).toHaveBeenCalledTimes(2);
   });
 
   it('sends one interactive card to an open id and returns its message id', async () => {

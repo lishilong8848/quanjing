@@ -852,6 +852,7 @@ export class PurchaseWorkflowStore {
   private readonly ledgerPath: string;
   private readonly sharedState: SharedLedgerState;
   private destroyed = false;
+  private readonly shutdownDrains = new Set<() => Promise<void>>();
 
   constructor(
     @Optional() @Inject(PURCHASE_WORKFLOW_LEDGER_PATH) ledgerPath?: string,
@@ -885,6 +886,7 @@ export class PurchaseWorkflowStore {
   async onModuleDestroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
+    await Promise.allSettled([...this.shutdownDrains].map(drain => drain()));
     this.sharedState.refCount = Math.max(0, this.sharedState.refCount - 1);
     if (this.sharedState.refCount > 0) return;
 
@@ -894,6 +896,10 @@ export class PurchaseWorkflowStore {
     if (sharedLedgerStates.get(this.ledgerPath) === this.sharedState) {
       sharedLedgerStates.delete(this.ledgerPath);
     }
+  }
+
+  registerShutdownDrain(drain: () => Promise<void>): void {
+    this.shutdownDrains.add(drain);
   }
 
   /** Authorization must use current trusted duties and run synchronously within this ledger lock. */
@@ -5912,8 +5918,11 @@ export class PurchaseWorkflowStore {
     now: Date | number = new Date(),
     leaseMs = DEFAULT_LEASE_MS,
     allowedKinds?: readonly PurchaseWorkflowNotificationKind[],
+    excludedRecordIds?: ReadonlySet<string>,
+    canClaim?: () => boolean,
   ): Promise<PurchaseWorkflowNotificationEntry | null> {
     return this.enqueue(async () => {
+      if (canClaim && !canClaim()) return null;
       const timestamp = resolveNow(now);
       const ledger = await this.read();
       const allowedKindSet = allowedKinds ? new Set(allowedKinds) : null;
@@ -5965,9 +5974,15 @@ export class PurchaseWorkflowStore {
           await this.write(ledger);
         }
       }
+      const activeWebReceiptRecords = new Set(ledger.notifications
+        .filter(entry => entry.kind === 'web_receipt_command' && entry.status === 'processing' && !isAvailable(entry, timestamp))
+        .map(entry => entry.recordId));
+      if (canClaim && !canClaim()) return null;
       const index = ledger.notifications.findIndex(
         (entry) =>
           (!allowedKindSet || allowedKindSet.has(entry.kind)) &&
+          !excludedRecordIds?.has(entry.recordId) &&
+          (entry.kind !== 'web_receipt_command' || !activeWebReceiptRecords.has(entry.recordId)) &&
           !isManagerNotificationKind(entry.kind) &&
           (entry.kind !== 'web_receipt_command' || allowedKindSet?.has(entry.kind)) &&
           !ledger.warehouseInboundHandovers.some(job => job.notificationKey === entry.key && job.status !== 'completed') &&

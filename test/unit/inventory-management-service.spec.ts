@@ -9,10 +9,12 @@ jest.mock('../../server/common/feishu/bitable-direct-read', () => ({
   ...jest.requireActual('../../server/common/feishu/bitable-direct-read'),
   resolveBitableAppToken: jest.fn().mockResolvedValue('app-token'),
   fetchBitableRecords: jest.fn().mockResolvedValue([]),
+  getBitableRecordCacheGeneration: jest.fn().mockReturnValue(0),
 }));
 
 import {
   fetchBitableRecords,
+  getBitableRecordCacheGeneration,
   resolveBitableAppToken,
 } from '../../server/common/feishu/bitable-direct-read';
 import { InventoryManagementService } from '../../server/modules/inventory-management/inventory-management.service';
@@ -48,6 +50,7 @@ describe('InventoryManagementService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (getBitableRecordCacheGeneration as jest.Mock).mockReturnValue(0);
     (resolveBitableAppToken as jest.Mock).mockResolvedValue('app-token');
     (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
     process.env.FEISHU_WAREHOUSE_SOURCE_URL =
@@ -69,6 +72,55 @@ describe('InventoryManagementService', () => {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+  });
+
+  it('shares overlapping forced source reads without sharing filtered responses', async () => {
+    const service = new InventoryManagementService({axiosRef:{}} as never);
+    let release!: (records: never[]) => void;
+    const delayed = new Promise<never[]>(resolve => {release=resolve;});
+    (fetchBitableRecords as jest.Mock).mockReturnValue(delayed);
+    const items=service.getItems({building:'A楼'},true);
+    const movements=service.getMovements({type:'inbound',building:'B楼'},true);
+    await new Promise(resolve=>setImmediate(resolve));
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+    release([]);await Promise.all([items,movements]);
+    await service.getItems({},true);
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(5);
+  });
+
+  it('does not use an ordinary in-flight read to satisfy a forced refresh', async () => {
+    const service=new InventoryManagementService({axiosRef:{}} as never);
+    let release!: (records: never[]) => void;
+    const delayed=new Promise<never[]>(resolve=>{release=resolve;});
+    (fetchBitableRecords as jest.Mock).mockReturnValue(delayed);
+    const normal=service.getItems({},false),forced=service.getItems({},true);
+    await new Promise(resolve=>setImmediate(resolve));
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(4);
+    release([]);await Promise.all([normal,forced]);
+  });
+
+  it('drops a rejected shared read so the next explicit attempt can retry', async () => {
+    const service=new InventoryManagementService({axiosRef:{}} as never);
+    (fetchBitableRecords as jest.Mock).mockRejectedValueOnce(new Error('synthetic read failure'));
+    await expect(service.getItems({},true)).rejects.toThrow('synthetic read failure');
+    (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
+    await expect(service.getItems({},true)).resolves.toBeDefined();
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(4);
+  });
+
+  it('rejects old-generation reads and starts fresh reads after invalidation', async () => {
+    const service=new InventoryManagementService({axiosRef:{}} as never);
+    let release!: (records: never[]) => void;
+    const delayed=new Promise<never[]>(resolve=>{release=resolve;});
+    (fetchBitableRecords as jest.Mock).mockReturnValue(delayed);
+    const old=service.getItems({},true);
+    const oldCheck=expect(old).rejects.toThrow('数据在读取期间已变更');
+    await new Promise(resolve=>setImmediate(resolve));
+    (getBitableRecordCacheGeneration as jest.Mock).mockReturnValue(1);
+    const current=service.getItems({},true);
+    await new Promise(resolve=>setImmediate(resolve));
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(4);
+    release([]);await oldCheck;await expect(current).resolves.toBeDefined();
   });
 
   it('reads the eight warehouse tables with the configured cache policy', async () => {

@@ -16,7 +16,6 @@ import {
   ListRestart,
   Search,
 } from 'lucide-react';
-import { searchPurchaseApplicationApplicants } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader } from '@/components/ui/card';
@@ -36,6 +35,7 @@ import type {
   StocktakeSyncSummary,
 } from '@shared/inventory-stocktake.interface';
 import {
+  searchStocktakePeople,
   completeStocktake,
   getStocktakeOverview,
   getStocktakeSheet,
@@ -367,9 +367,13 @@ export default function InventoryStocktakePage({
     const key = query.toLocaleLowerCase();
     let cached = people.current.get(key);
     if (!cached) {
-      cached = searchPurchaseApplicationApplicants({ query, limit: 30 });
+      cached = searchStocktakePeople(query);
       people.current.set(key, cached);
-      cached.catch(() => people.current.delete(key));
+      // Share in-flight lookups only: an empty result must not remain cached after personnel changes.
+      const request = cached;
+      void request.finally(() => {
+        if (people.current.get(key) === request) people.current.delete(key);
+      }).catch(() => undefined);
       if (people.current.size > 100)
         people.current.delete(people.current.keys().next().value!);
     }

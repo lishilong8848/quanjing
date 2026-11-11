@@ -1,3 +1,8 @@
+import { PersonnelProfileNotificationsService } from './personnel-profile-notifications.service';
+import { PersonnelProfileChangesController } from './personnel-profile-changes.controller';
+import { PersonnelProfileChangesService } from './personnel-profile-changes.service';
+import { PersonnelProfileChangesGateway } from './personnel-profile-changes.gateway';
+import { PersonnelProfileChangesStore } from './personnel-profile-changes.store';
 import { HttpModule } from '@nestjs/axios';
 import {
   type MiddlewareConsumer,
@@ -42,8 +47,10 @@ import { PersonnelArchiveCorrectionsService } from './personnel-archive-correcti
 @Global()
 @Module({
   imports: [ConfigModule.forRoot({ ignoreEnvFile: true }), HttpModule],
-  controllers: [UnifiedAccessController, AccessConfigurationController, PersonnelAccountController],
+  controllers: [PersonnelProfileChangesController, UnifiedAccessController, AccessConfigurationController, PersonnelAccountController],
   providers: [
+    PersonnelProfileNotificationsService,
+    PersonnelProfileChangesService, PersonnelProfileChangesGateway, PersonnelProfileChangesStore,
     PersonnelArchiveService,
     PersonnelArchiveGateway,
     PersonnelCredentialsService,

@@ -1,3 +1,4 @@
+import { StocktakeDraftJournal, prepareStocktakeLineRetry, settleStocktakeLineDraft, discardEditableStocktakeDraft } from './stocktake-draft-journal';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useAccess } from '@/access/AccessProvider';
 import { canUseStocktakeAction } from './stocktake-action-access';
@@ -22,6 +23,7 @@ import {
 } from './inventory-stocktake.logic';
 
 export interface StocktakeLocalDraft {
+  baseVersion?: number;
   quantity: string;
   person: PurchaseApplicationApplicant | null;
   note: string;
@@ -51,17 +53,18 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
   const canUpdate = canUseStocktakeAction(principal, 'update', line.inventory);
   const canConfirm = canUseStocktakeAction(principal, 'confirm', line.inventory);
   const draftKey = `${scope}:${month}:${line.inventory.building}:${line.inventory.recordId}`;
-  const cached = line.status === 'confirmed' ? undefined : drafts.get(draftKey);
+  const cached = line.status === 'confirmed' || readOnly || (!canUpdate && !canConfirm) ? undefined : drafts.get(draftKey);
   const [quantity, setQuantity] = useState(
     cached?.quantity ??
       (line.actualQuantity === null ? '' : String(line.actualQuantity)),
   );
   const [person, setPerson] = useState(cached ? cached.person : line.confirmer);
   const [note, setNote] = useState(cached?.note ?? line.note);
+  const [, refreshJournal] = useState(0);
   const [phase, setPhase] = useState<
     'ready' | 'submitting' | 'success' | 'error'
-  >('ready');
-  const [error, setError] = useState('');
+  >(cached?.retry ? 'error' : 'ready');
+  const [error, setError] = useState(cached?.retry ? '上次保存结果待核对，请使用原请求重试。' : '');
   const dirty = isStocktakeDraftDirty(line, { quantity, person, note });
   const inFlight = useRef(false);
   const retry = useRef<{
@@ -74,19 +77,23 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
       return;
     }
     drafts.set(draftKey, {
+      baseVersion: cached?.baseVersion ?? line.version,
       quantity,
       person,
       note,
       dirty,
       retry: retry.current,
     });
+    const issue = drafts instanceof StocktakeDraftJournal ? drafts.issue(draftKey) : '';
+    if (issue) { setError(issue); setPhase('error'); }
   }, [drafts, draftKey, quantity, person, note, dirty]);
   useEffect(() => {
     if (line.status === 'confirmed') {
       setQuantity(String(line.actualQuantity));
       setPerson(line.confirmer);
       setNote(line.note);
-      drafts.delete(draftKey);
+      if (drafts instanceof StocktakeDraftJournal) drafts.clearConfirmed(draftKey);
+      else drafts.delete(draftKey);
     }
   }, [
     line.status,
@@ -96,7 +103,15 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
     drafts,
     draftKey,
   ]);
-  const locked =
+  const unresolved = Boolean(retry.current);
+  let retryMode: 'draft' | 'confirm' | 'refresh-line' | undefined;
+  try { retryMode = retry.current ? JSON.parse(retry.current.signature)[0] : undefined; } catch { /* Keep malformed pending requests locked. */ }
+  const journalIssue = drafts instanceof StocktakeDraftJournal ? drafts.issue(draftKey) : '';
+  const bulkPending = scope === 'review' && drafts instanceof StocktakeDraftJournal && Boolean(drafts.readTask(`bulk:review:${month}:${line.inventory.building}`));
+  const staleDraft = cached?.baseVersion !== undefined && cached.baseVersion !== line.version && !unresolved;
+  const actionLocked = Boolean(bulkPending) || readOnly || (!canUpdate && !canConfirm) || line.status === 'confirmed' || phase === 'submitting' || (drafts instanceof StocktakeDraftJournal && drafts.recoveryBlocked(draftKey)) || staleDraft;
+  const canDiscardStaleDraft = !readOnly && (canUpdate || canConfirm) && !bulkPending && !unresolved && phase !== 'submitting' && !(drafts instanceof StocktakeDraftJournal && drafts.recoveryBlocked(draftKey));
+  const locked = Boolean(bulkPending) || unresolved || staleDraft || Boolean(journalIssue) ||
     readOnly || (!canUpdate && !canConfirm) || line.status === 'confirmed' || phase === 'submitting';
   const difference =
     quantity.trim() && Number.isFinite(Number(quantity))
@@ -107,12 +122,14 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
     setError('');
   };
   async function submit(mode: 'draft' | 'confirm' | 'refresh-line') {
-    if (inFlight.current || readOnly || line.status === 'confirmed') return;
+    if (inFlight.current || actionLocked) return;
+    if (retry.current && retryMode !== mode) return;
+    const hadPendingRequest = Boolean(retry.current);
     if (mode === 'confirm' ? !canConfirm : !canUpdate) return;
     let actualQuantity: number | null;
     try {
-      actualQuantity = parseStocktakeQuantity(quantity);
-      if (mode === 'confirm') {
+      actualQuantity = retry.current ? retry.current.request.actualQuantity : parseStocktakeQuantity(quantity);
+      if (mode === 'confirm' && !retry.current) {
         if (actualQuantity === null) throw new Error('请填写实际数量');
         if (!person) throw new Error('请从在职员工中选择确认人');
         if (difference !== 0 && !note.trim()) throw new Error('请填写差异说明');
@@ -132,12 +149,7 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
       confirmer: person,
       note,
     };
-    const signature = JSON.stringify([mode, payload]);
-    if (retry.current?.signature !== signature)
-      retry.current = {
-        signature,
-        request: { ...payload, clientMutationId: crypto.randomUUID() },
-      };
+    retry.current = prepareStocktakeLineRetry(mode, payload, retry.current, () => crypto.randomUUID());
     drafts.set(draftKey, {
       quantity,
       person,
@@ -145,19 +157,26 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
       dirty,
       retry: retry.current,
     });
+    try { if (drafts instanceof StocktakeDraftJournal) drafts.assertSaved(draftKey); }
+    catch (caught) { setPhase('error'); setError(stocktakeError(caught)); return; }
     inFlight.current = true;
     setPhase('submitting');
     setError('');
     onBusy(line.inventory.recordId, true);
     try {
       const result = await writeStocktakeLine(mode, retry.current.request);
-      onSaved(result.line, result.sheetVersion);
-      setPhase('success');
-      if (mode !== 'refresh-line') {
-        drafts.delete(draftKey);
-      }
       retry.current = null;
+      settleStocktakeLineDraft(drafts, draftKey, result.line, {quantity, person, note});
+      onSaved(result.line, result.sheetVersion);
+      const persistenceIssue = drafts instanceof StocktakeDraftJournal ? drafts.issue(draftKey) : '';
+      setError(persistenceIssue);
+      setPhase(persistenceIssue ? 'error' : 'success');
     } catch (caught) {
+      const status = (caught as {response?: {status?: number}})?.response?.status;
+      if (!hadPendingRequest && status && [400, 403, 404, 409, 422].includes(status)) {
+        retry.current = null;
+        drafts.set(draftKey, {baseVersion: line.version, quantity, person, note, dirty, retry: null});
+      }
       setPhase('error');
       setError(stocktakeError(caught));
     } finally {
@@ -271,17 +290,17 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
             <Button
               size="sm"
               variant="ghost"
-              disabled={locked || !canUpdate}
+              disabled={actionLocked || !canUpdate || (unresolved && retryMode !== 'draft')}
               onClick={() => void submit('draft')}
             >
-              暂存
+              {unresolved && retryMode === 'draft' ? '核对原暂存' : '暂存'}
             </Button>
             <Button
               size="sm"
-              disabled={locked || !canConfirm}
+              disabled={actionLocked || !canConfirm || (unresolved && retryMode !== 'confirm')}
               onClick={() => void submit('confirm')}
             >
-              {phase === 'submitting' ? '保存中' : '确认'}
+              {phase === 'submitting' ? '保存中' : unresolved && retryMode === 'confirm' ? '核对原确认' : '确认'}
             </Button>
           </>
         )}
@@ -301,6 +320,16 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
           />
         </label>
       )}
+      {bulkPending && <div role="status" className="stocktake-line-feedback">本楼批量请求结果待核对，请打开批量确认查询原任务。</div>}
+      {unresolved && retryMode === 'refresh-line' && <Button size="sm" variant="outline" disabled={actionLocked || !canUpdate} onClick={() => void submit('refresh-line')}>核对原台账刷新</Button>}
+      {journalIssue && <div role="alert" className="stocktake-line-feedback">{journalIssue}
+        {drafts instanceof StocktakeDraftJournal && drafts.canDiscardObsoleteDraft(draftKey) && <Button size="sm" variant="outline" disabled={readOnly || (!canUpdate && !canConfirm) || Boolean(bulkPending) || unresolved || phase === 'submitting'} onClick={() => {
+          if (readOnly || (!canUpdate && !canConfirm) || bulkPending || unresolved || phase === 'submitting') return;
+          if (!drafts.discardObsoleteDraft(draftKey)) { setError('旧草稿未能清理，原记录已保留'); setPhase('error'); return; }
+          setQuantity(line.actualQuantity === null ? '' : String(line.actualQuantity)); setPerson(line.confirmer); setNote(line.note); setError(''); setPhase('ready'); refreshJournal(value => value + 1);
+        }}>放弃旧草稿，重新核对</Button>}
+      </div>}
+      {staleDraft && <div role="alert">服务器盘点数据已更新，原草稿已保留。<Button variant="outline" size="sm" disabled={!canDiscardStaleDraft} onClick={() => { if (!discardEditableStocktakeDraft(drafts, draftKey, canDiscardStaleDraft)) { setError('原草稿未能清理，内容已保留，请重试'); setPhase('error'); return; } setQuantity(line.actualQuantity === null ? '' : String(line.actualQuantity)); setPerson(line.confirmer); setNote(line.note); setError(''); setPhase('ready'); }}>使用服务器最新数据</Button></div>}
       {(dirty || phase === 'error' || phase === 'success') &&
         line.status !== 'confirmed' && (
           <div
@@ -310,7 +339,7 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
             {phase === 'error' ? (
               <>
                 <span>{error}</span>
-                {canUpdate && error.includes('库存已变化') && (
+                {canUpdate && !unresolved && error.includes('库存已变化') && (
                   <Button
                     size="sm"
                     variant="outline"

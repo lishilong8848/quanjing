@@ -35,6 +35,34 @@ describe('AttendanceAutomationCoordinatorService', () => {
     jest.restoreAllMocks();
   });
 
+  it('recovers newest due correction jobs first with three eligible claims per round, retaining blocked and historical work',async()=>{
+    const query = jest.fn(async()=>[]);
+    const service = new AttendanceAutomationCoordinatorService({listCorrectionApprovals:query} as never,{} as never,{} as never);
+    const internal=service as any, now=new Date('2026-11-16T12:00:00+08:00');
+    const create=(date:string,extra:Record<string,unknown>={})=>internal.writeCorrectionJob({version:1,task:'archive-yesterday',date,scheduledAt:`${date}T00:30:00+08:00`,query:{start:`${date} 00:00:00`,end:`${date} 23:59:59`},stage:'pending',evidenceOnly:true,attemptCount:1,nextRetryAt:'2026-11-01T00:00:00+08:00',...extra});
+    for(const date of ['2026-09-01','2026-09-02','2026-10-01','2026-11-10','2026-11-11'])create(date);
+    create('2026-11-12');internal.writeAttendanceArchiveJob({version:1,task:'archive-yesterday',date:'2026-11-12',stage:'pending',input:{}});
+    create('2026-11-13',{stage:'completed'});create('2026-11-14',{nextRetryAt:'2026-11-17T00:00:00+08:00'});create('2026-11-15');
+    const claim=internal.claimTask.bind(service);
+    jest.spyOn(internal,'claimTask').mockImplementation((key:unknown)=>String(key).includes('2026-11-15')?null:claim(key));
+    await service.recoverPendingCorrections(now);
+    expect(query.mock.calls.map(call=>(call as any[])[0].start.slice(0,10))).toEqual(['2026-11-11','2026-11-10','2026-10-01']);
+    expect(internal.readCorrectionJob('archive-yesterday','2026-09-02').stage).toBe('pending');
+    expect(internal.readCorrectionJob('archive-yesterday','2026-11-12').attemptCount).toBe(1);
+    await service.recoverPendingCorrections(now);
+    expect(query.mock.calls.map(call=>(call as any[])[0].start.slice(0,10))).toEqual(['2026-11-11','2026-11-10','2026-10-01','2026-09-02','2026-09-01']);
+    await service.recoverPendingCorrections(now);expect(query).toHaveBeenCalledTimes(5);
+    expect(internal.readCorrectionJobs()).toHaveLength(9);
+  });
+
+  it.each([['钉钉补卡审批详情核验不完整','2026-11-16T04:30:00.000Z'],['钉钉补卡审批详情未查询完整：本轮最多抓取20条','2026-11-16T16:45:00.000Z']])('keeps the retry schedule for %s distinct from quota exhaustion',async(message,expected)=>{
+    const service=new AttendanceAutomationCoordinatorService({listCorrectionApprovals:jest.fn().mockRejectedValue(new Error(message))} as never,{} as never,{} as never);
+    const internal=service as any;
+    internal.writeCorrectionJob({version:1,task:'archive-yesterday',date:'2026-11-15',scheduledAt:'2026-11-16T00:30:00+08:00',query:{start:'2026-11-15 00:00:00',end:'2026-11-15 23:59:59'},stage:'pending',attemptCount:1,nextRetryAt:'2026-11-16T00:00:00+08:00'});
+    await service.recoverPendingCorrections(new Date('2026-11-16T12:00:00+08:00'));
+    expect(internal.readCorrectionJob('archive-yesterday','2026-11-15')).toMatchObject({stage:'pending',attemptCount:2,nextRetryAt:expected});
+  });
+
   it.each([
     {
       task: 'morning-off-duty-check' as const,

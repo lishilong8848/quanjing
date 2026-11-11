@@ -78,6 +78,19 @@ describe('personal archive private transport boundary', () => {
     mockFetch.mockResolvedValue(new Response(blob));
     expect((await getPersonalArchivePhoto()).size).toBe(blob.size);
   });
+  it('allows a photo directory read longer than fifteen seconds while keeping a sixty second bound',async()=>{
+    jest.useFakeTimers();
+    mockFetch.mockImplementation(()=>new Promise(resolve=>setTimeout(()=>resolve(new Response(new Blob(['synthetic'],{type:'image/png'}))),20_000)));
+    const pending=getPersonalArchivePhoto();await jest.advanceTimersByTimeAsync(19_000);
+    expect(mockFetch.mock.calls[0][1].signal.aborted).toBe(false);
+    await jest.advanceTimersByTimeAsync(1_000);await expect(pending).resolves.toBeInstanceOf(Blob);
+  });
+  it('only exposes fixed photo error codes, never upstream body messages',async()=>{
+    mockFetch.mockResolvedValue(jsonResponse({code:'PHOTO_SOURCE_DENIED',message:'secret source body'},503));
+    await expect(getPersonalArchivePhoto()).rejects.toThrow('照片来源暂未授权');
+    mockFetch.mockResolvedValue(jsonResponse({code:'untrusted',message:'secret source body'},503));
+    await expect(getPersonalArchivePhoto()).rejects.toThrow(/^个人照片读取失败，请重试$/);
+  });
   it.each([
     () => new Response('<svg/>', { headers: { 'Content-Type': 'image/svg+xml' } }),
     () => new Response(new Blob([], { type: 'image/png' })),

@@ -4434,9 +4434,11 @@ export default function ConstructionManagementPage() {
           }
           consecutiveErrors = 0;
           if (task.status === 'completed') {
-            await loadData({ background: true, forceRefresh: false });
             if (mountedRef.current) {
               callbacks.onCompleted(task.message || '项目后台删除完成');
+              void loadData({ background: true, forceRefresh: false }).catch((err) => {
+                if (mountedRef.current) toast.warning(getErrorMessage(err, '项目已删除，清单刷新失败'));
+              });
             }
             return;
           }
@@ -5243,9 +5245,11 @@ export default function ConstructionManagementPage() {
                   fallbackAuthorizationRange,
                 )
               : task.message || '人员名单后台更新完成';
-            await loadData({ background: true, forceRefresh: false });
             if (mountedRef.current) {
               callbacks.onCompleted(message);
+              void loadData({ background: true, forceRefresh: false }).catch((err) => {
+                if (mountedRef.current) toast.warning(getErrorMessage(err, '人员名单已更新，清单刷新失败'));
+              });
             }
             return;
           }

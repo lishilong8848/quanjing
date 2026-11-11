@@ -4,7 +4,7 @@ import { TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export const CONFIGURATION_GROUPS = [
   { id: 'access', label: '账号与权限', tabs: [['accounts', '账号权限'], ['external', '外部飞书人员'], ['external-employees', '姓名账号'], ['roles', '角色模板'], ['permission-requests', '权限申请'], ['matrix', '权限矩阵']] },
-  { id: 'people', label: '人员与岗位', tabs: [['personnel', '人员与岗位'], ['source', '岗位来源'], ['archive-corrections', '资料纠错']] },
+  { id: 'people', label: '人员与岗位', tabs: [['personnel', '人员与岗位'], ['source', '岗位来源'], ['archive-corrections', '资料纠错'], ['profile-changes', '资料变更审批']] },
   { id: 'handover', label: '岗位交接', tabs: [['handover-preview', '交接预览'], ['handover', '办理交接']] },
   { id: 'notifications', label: '通知与审计', tabs: [['cards', '卡片人员'], ['audit', '变更记录']] },
 ] as const;

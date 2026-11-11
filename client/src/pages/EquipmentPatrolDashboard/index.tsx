@@ -1,7 +1,7 @@
 import { useAccess } from '@/access/AccessProvider';
 import { canUsePageAction } from '../business-action-access';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Building2,
@@ -709,7 +709,8 @@ function ExecutionAnomalyCard({
 }
 
 export default function EquipmentPatrolDashboardPage() {
-  const canRefresh = canUsePageAction(useAccess(), 'patrol', 'refresh', true);
+  const access = useAccess();
+  const canRefresh = canUsePageAction(access, 'patrol', 'refresh', true);
   const [selectedMonth, setSelectedMonth] = useState<string>(DEFAULT_MONTH);
   const [view, setView] = useState<DashboardView>('calendar');
   const [matrixScope, setMatrixScope] = useState<MatrixScope>('standard');
@@ -719,6 +720,12 @@ export default function EquipmentPatrolDashboardPage() {
     useState<EquipmentPatrolExecutionResponse | null>(null);
   const [executionLoading, setExecutionLoading] = useState(true);
   const [executionError, setExecutionError] = useState<string | null>(null);
+
+  const executionGeneration = useRef(0);
+  const mounted = useRef(true);
+  const executionContext = `${selectedMonth}:${canRefresh}:${access.principalFingerprint || ''}`;
+  const contextRef = useRef(executionContext);
+  contextRef.current = executionContext;
 
   const dashboard = useMemo(
     () => getPatrolMonthDashboard(selectedMonth),
@@ -749,6 +756,9 @@ export default function EquipmentPatrolDashboardPage() {
 
   const loadExecution = useCallback(
     async (refresh = false) => {
+      const generation = ++executionGeneration.current;
+      const current = () => mounted.current && generation === executionGeneration.current && contextRef.current === executionContext;
+      setIsRefreshing(refresh);
       setExecutionLoading(true);
       setExecutionError(null);
       if (!refresh) setExecutionResponse(null);
@@ -757,18 +767,26 @@ export default function EquipmentPatrolDashboardPage() {
           selectedMonth,
           refresh && canRefresh,
         );
-        setExecutionResponse(response);
+        if (current()) setExecutionResponse(response);
       } catch {
-        setExecutionError('执行数据读取失败');
+        if (current()) setExecutionError('执行数据读取失败');
       } finally {
-        setExecutionLoading(false);
+        if (current()) {
+          setExecutionLoading(false);
+          setIsRefreshing(false);
+        }
       }
     },
-    [selectedMonth, canRefresh],
+    [selectedMonth, canRefresh, executionContext],
   );
 
   useEffect(() => {
+    mounted.current = true;
     void loadExecution(false);
+    return () => {
+      mounted.current = false;
+      executionGeneration.current++;
+    };
   }, [loadExecution]);
 
   const handleMonthChange = (month: string) => {
@@ -777,16 +795,8 @@ export default function EquipmentPatrolDashboardPage() {
   };
 
   const handleRefresh = async () => {
-    const startedAt = Date.now();
     setPlanRevision((revision) => revision + 1);
-    setIsRefreshing(true);
-    try {
-      await loadExecution(true);
-    } finally {
-      const remaining = Math.max(0, 650 - (Date.now() - startedAt));
-      await new Promise((resolve) => setTimeout(resolve, remaining));
-      setIsRefreshing(false);
-    }
+    await loadExecution(true);
   };
 
   const kpis = executionView?.kpis;

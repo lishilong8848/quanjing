@@ -100,6 +100,29 @@ describe('personal archive stable self identity and privacy', () => {
     accounts['local-admin-all'].enabled=false;
     await expect(service.read(p)).rejects.toThrow('代登录状态');
   });
+  it('rejects a personnel binding changed while the photo was downloading even before a version change',async()=>{
+    let complete!:(value:unknown)=>void;
+    gateway.photo.mockImplementation(()=>new Promise(resolve=>{complete=resolve;}));
+    const pending=service.photo(principal());await Promise.resolve();await Promise.resolve();await Promise.resolve();
+    accounts[localId].personnelIdentity='local-external-'+'f'.repeat(64);
+    complete({contentType:'image/png',buffer:Buffer.from('synthetic')});
+    await expect(pending).rejects.toThrow('关联已变化');
+  });
+  it('bounds the complete photo read to fifty seconds without cancelling another waiter on the shared download',async()=>{
+    jest.useFakeTimers();
+    try {
+      let readDone!:(value:PersonnelArchiveDirectory)=>void,photoDone!:(value:unknown)=>void;
+      const sharedDownload=new Promise(resolve=>{photoDone=resolve;});
+      gateway.read.mockImplementationOnce(()=>new Promise(resolve=>{readDone=resolve;}));
+      gateway.photo.mockReturnValue(sharedDownload);
+      const first=service.photo(principal());const rejected=expect(first).rejects.toThrow('照片来源响应超时');
+      await jest.advanceTimersByTimeAsync(40_000);readDone(directory);await Promise.resolve();await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(5_000);const second=service.photo(principal());
+      await jest.advanceTimersByTimeAsync(5_000);await rejected;
+      await jest.advanceTimersByTimeAsync(10_000);photoDone({contentType:'image/png',buffer:Buffer.from('synthetic')});
+      await expect(second).resolves.toMatchObject({contentType:'image/png'});
+    } finally { jest.useRealTimers(); }
+  });
   it('rejects an impersonation owner changed during an awaited source read',async()=>{
     let complete!:(value:PersonnelArchiveDirectory)=>void;gateway.read.mockImplementation(()=>new Promise(resolve=>{complete=resolve;}));
     const pending=service.read({...principal(),impersonation:{actorAccountId:'local-admin-all',actorName:'合成管理员',targetName:'合成人员',expiresAt:Date.now()+60000}});

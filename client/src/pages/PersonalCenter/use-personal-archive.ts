@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AccessPrincipal } from '@shared/access-control.interface';
 import type { PersonalArchiveResponse } from '@shared/personnel-archive.interface';
 import { getPersonalArchive, getPersonalArchivePhoto } from '@/api/personal-access';
+import { PERSONAL_PHOTO_MESSAGES } from '@shared/personnel-photo-errors';
+const photoMessages = new Set<string>([...Object.values(PERSONAL_PHOTO_MESSAGES), '登录状态已变化，请重新登录后重试', '暂无个人照片']);
 
 export function personalArchiveIdentity(principal: AccessPrincipal & { principalFingerprint?: string | null }): string {
   return JSON.stringify([principal.accountId, principal.authorizationVersion, principal.principalFingerprint, principal.impersonation?.actorAccountId]);
@@ -56,8 +58,8 @@ export function usePersonalArchive(identity: string) {
       if (!active || controller.signal.aborted) return;
       objectUrl = URL.createObjectURL(blob);
       setPhotoState({ key: photoKey, url: objectUrl, loading: false, error: '' });
-    }).catch(() => {
-      if (active && !controller.signal.aborted) setPhotoState({ ...emptyPhoto(photoKey), error: '照片读取失败' });
+    }).catch(failure => {
+      if (active && !controller.signal.aborted) setPhotoState({ ...emptyPhoto(photoKey), error: failure instanceof Error && photoMessages.has(failure.message) ? failure.message : '照片读取失败' });
     });
     return () => { active = false; controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [photoKey, profile?.photoUrl]);

@@ -556,6 +556,7 @@ describe('DingTalkAttendanceClient', () => {
   });
 
   it('refuses a correction query once attendance and correction calls total 70 in September', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-09-08T12:00:00+08:00'));
     const budgetPath = join(stateDir, 'dingtalk-attendance-api-budget.json');
     writeFileSync(
       budgetPath,
@@ -852,6 +853,53 @@ describe('DingTalkAttendanceClient', () => {
     await expect(
       client.getCorrectionApprovalsByInstanceIds(['process-no-date']),
     ).rejects.toThrow('补卡时间');
+  });
+
+  it.each(['formComponentValues', 'form_component_values', 'formValueVOS'])('reads %s and object extValue without replacing the work day with a cross-midnight check time', async (container) => {
+    const correctionTime = Date.parse('2026-09-09T01:00:00+08:00');
+    const workDate = Date.parse('2026-09-08T00:00:00+08:00');
+    const post = jest.fn(async (url: string) => url.endsWith('/v1.0/oauth2/accessToken')
+      ? { data: { accessToken: 'synthetic', expireIn: 7200 } }
+      : { data: { errcode: 0, processInstance: { originatorUserid: 'synthetic-user', status: 'COMPLETED', result: 'refuse', [container]: [
+        { name: 'repairCheckTime', componentType: 'DDDateField', value: String(correctionTime), extValue: { userCheckTime: correctionTime, workDate } },
+        { name: '申请日期', componentType: 'DDDateField', value: '2026-09-10' },
+      ] } } });
+    const client = new DingTalkAttendanceClient({ axiosRef: { post } } as unknown as HttpService);
+    await expect(client.getCorrectionApprovalsByInstanceIds(['synthetic-cross-night'])).resolves.toEqual([
+      expect.objectContaining({ correctionTime, workDate }),
+    ]);
+  });
+
+  it.each(['conflicting', 'missing-work-date'])('rejects %s correction fields without guessing a work date', async (scenario) => {
+    const time = Date.parse('2026-09-08T09:00:00+08:00');
+    const fields = [{ name: '补卡时间', extValue: { userCheckTime: time, ...(scenario === 'conflicting' ? { workDate: time } : {}) } }];
+    if (scenario === 'conflicting') fields.push({ name: 'repairCheckTime', extValue: { userCheckTime: time + 1000, workDate: time } });
+    const post = jest.fn(async (url: string) => url.endsWith('/v1.0/oauth2/accessToken')
+      ? { data: { accessToken: 'synthetic', expireIn: 7200 } }
+      : { data: { errcode: 0, process_instance: { originator_userid: 'synthetic-user', status: 'COMPLETED', result: 'refuse', formComponentValues: fields } } });
+    const client = new DingTalkAttendanceClient({ axiosRef: { post } } as unknown as HttpService);
+    await expect(client.getCorrectionApprovalsByInstanceIds(['synthetic-incomplete'])).rejects.toThrow('详情核验不完整');
+  });
+
+  it('retains valid details after a malformed item while still rejecting the incomplete batch and retries only the malformed detail', async () => {
+    const time = Date.parse('2026-09-08T09:00:00+08:00');
+    const post = jest.fn(async (url: string, body: { process_instance_id?: string }) => url.endsWith('/v1.0/oauth2/accessToken')
+      ? { data: { accessToken: 'synthetic', expireIn: 7200 } }
+      : { data: { errcode: 0, process_instance: { originator_userid: 'synthetic-user', status: 'COMPLETED', result: 'refuse', formComponentValues: body.process_instance_id === 'synthetic-good' ? [{ name: '补卡时间', extValue: { userCheckTime: time, workDate: time } }] : [] } } });
+    const client = new DingTalkAttendanceClient({ axiosRef: { post } } as unknown as HttpService);
+    await expect(client.getCorrectionApprovalsByInstanceIds(['synthetic-bad', 'synthetic-good'])).rejects.toThrow('未完成同步');
+    await expect(client.getCorrectionApprovalsByInstanceIds(['synthetic-bad', 'synthetic-good'])).rejects.toThrow('未完成同步');
+    expect(post.mock.calls.filter(([, body]) => body.process_instance_id === 'synthetic-good')).toHaveLength(1);
+    expect(post.mock.calls.filter(([, body]) => body.process_instance_id === 'synthetic-bad')).toHaveLength(2);
+  });
+
+  it('counts incomplete fetched details against the per-run limit', async () => {
+    const post = jest.fn(async (url: string) => url.endsWith('/v1.0/oauth2/accessToken')
+      ? { data: { accessToken: 'synthetic', expireIn: 7200 } }
+      : { data: { errcode: 0, process_instance: { originator_userid: 'synthetic-user', formComponentValues: [] } } });
+    const client = new DingTalkAttendanceClient({ axiosRef: { post } } as unknown as HttpService);
+    await expect(client.getCorrectionApprovalsByInstanceIds(Array.from({ length: 21 }, (_, i) => `synthetic-limit-${i}`))).rejects.toThrow('另有 1 条');
+    expect(post.mock.calls.filter(([url]) => url.includes('/processinstance/get'))).toHaveLength(20);
   });
 
   it('reuses completed correction details across daily discovery runs', async () => {

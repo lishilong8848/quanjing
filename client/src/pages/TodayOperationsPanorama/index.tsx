@@ -1,3 +1,4 @@
+import { createBusinessClockNotifier, createPanoramaReadCoalescer } from './panorama-refresh';
 import {
   Activity,
   AlarmClock,
@@ -198,6 +199,33 @@ function formatShanghaiClock(date: Date) {
     weekday: 'long',
   }).format(date);
   return { dateText, weekday };
+}
+
+function PanoramaClock({ initialDate, onBusinessTimeChange }: { initialDate: Date; onBusinessTimeChange: (date: Date) => void }) {
+  const [date, setDate] = useState(initialDate);
+  useEffect(() => {
+    const notify = createBusinessClockNotifier(
+      value => `${formatShanghaiBusinessDateKey(value)}:${resolveShanghaiOnDutyLeadShift(value)}`,
+      date,
+      onBusinessTimeChange,
+    );
+    const tick = () => {
+      const current = new Date();
+      setDate(current);
+      notify(current);
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    const visible = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', visible);
+    };
+    // The initial date seeds boundary detection; ticking must not restart this effect.
+  }, [onBusinessTimeChange]);
+  const clock = formatShanghaiClock(date);
+  return <div><strong>{clock.dateText}</strong><span>{clock.weekday}</span></div>;
 }
 
 function resolveIcon(icon: string): LucideIcon {
@@ -1374,6 +1402,12 @@ function AlarmOverview({
 
 export default function TodayOperationsPanoramaPage() {
   const access = useAccess();
+  const identity = access.principalFingerprint || `${access.role}:${access.accountId || ''}`;
+  return <TodayOperationsPanoramaContent key={identity} />;
+}
+
+function TodayOperationsPanoramaContent() {
+  const access = useAccess();
   const { role } = access;
   const canForceRefresh = canUsePageAction(access, 'today_operations', 'refresh', access.capabilities.canForceRefresh);
   const canReadAttendance = canUsePageAction(access, 'attendance', 'read', role !== 'guest');
@@ -1404,15 +1438,18 @@ export default function TodayOperationsPanoramaPage() {
   const topKpiBusinessDateRef = useRef(businessDateKey);
   const overviewBusinessDateRef = useRef(businessDateKey);
   const sealingBusinessDateRef = useRef(businessDateKey);
+  const sharedRead = useRef(createPanoramaReadCoalescer()).current;
+  const readIdentity = access.principalFingerprint || `${access.role}:${access.accountId || ''}`;
 
   const loadTopKpis = useCallback(
     async (forceRefresh = false) => {
       const requestId = ++topKpiRequestIdRef.current;
       setTopKpiLoadState('loading');
       try {
-        const response = await getTodayOperationsKpis({
-          refresh: canForceRefresh && forceRefresh,
-        });
+        const response = await sharedRead(
+          `kpis:${readIdentity}:${topKpiBusinessDateRef.current}:${canForceRefresh && forceRefresh}`,
+          () => getTodayOperationsKpis({ refresh: canForceRefresh && forceRefresh }),
+        );
         if (requestId !== topKpiRequestIdRef.current) return;
         setTopKpiData(response);
         setTopKpiLoadState('ready');
@@ -1421,7 +1458,7 @@ export default function TodayOperationsPanoramaPage() {
         setTopKpiLoadState('error');
       }
     },
-    [canForceRefresh],
+    [canForceRefresh, readIdentity, sharedRead],
   );
 
   const loadOverviewData = useCallback(
@@ -1435,8 +1472,9 @@ export default function TodayOperationsPanoramaPage() {
         setOverviewLoadState('loading');
       }
       try {
-        const response = await getTodayOperationsOverview(
-          canForceRefresh && forceRefresh,
+        const response = await sharedRead(
+          `overview:${readIdentity}:${expectedBusinessDate}:${canForceRefresh && forceRefresh}`,
+          () => getTodayOperationsOverview(canForceRefresh && forceRefresh),
         );
         if (requestId !== overviewRequestIdRef.current) return;
         if (response.businessDate !== expectedBusinessDate) {
@@ -1451,7 +1489,7 @@ export default function TodayOperationsPanoramaPage() {
         setOverviewLoadState('error');
       }
     },
-    [canForceRefresh],
+    [canForceRefresh, readIdentity, sharedRead],
   );
 
   const loadSealingInfo = useCallback(
@@ -1467,7 +1505,10 @@ export default function TodayOperationsPanoramaPage() {
       try {
         const responses = await Promise.all(
           getNetworkFreezeQueryYears(expectedBusinessDate).map((year) =>
-            getYearlySealingInfo(year, canForceRefresh && forceRefresh),
+            sharedRead(
+              `sealing:${readIdentity}:${expectedBusinessDate}:${year}:${canForceRefresh && forceRefresh}`,
+              () => getYearlySealingInfo(year, canForceRefresh && forceRefresh),
+            ),
           ),
         );
         if (
@@ -1487,13 +1528,8 @@ export default function TodayOperationsPanoramaPage() {
         setSealingLoadState('error');
       }
     },
-    [canForceRefresh],
+    [canForceRefresh, readIdentity, sharedRead],
   );
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     const businessDateChanged =
@@ -1539,7 +1575,6 @@ export default function TodayOperationsPanoramaPage() {
     };
   }, [businessDateKey, loadSealingInfo]);
 
-  const clock = formatShanghaiClock(now);
   const onDutyLeadShift = resolveShanghaiOnDutyLeadShift(now);
   const topKpis = useMemo(
     () =>
@@ -1645,10 +1680,7 @@ export default function TodayOperationsPanoramaPage() {
           </p>
           <div className="today-panorama-time">
             <Clock3 aria-hidden />
-            <div>
-              <strong>{clock.dateText}</strong>
-              <span>{clock.weekday}</span>
-            </div>
+            <PanoramaClock initialDate={now} onBusinessTimeChange={setNow} />
             <Button
               type="button"
               variant="ghost"

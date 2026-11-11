@@ -244,6 +244,18 @@ describe('PurchaseApplicationService catalog reads', () => {
     ]);
   });
 
+  it.each([false, 0, '', '否', '在职'])('does not treat the non-departure value %p as departed', async status => {
+    (fetchBitableRecords as jest.Mock).mockResolvedValue([{
+      record_id: 'rec-active-fixture',
+      fields: { 姓名: '测试人员', 员工姓名: [{ open_id: 'ou_active_fixture', name: '测试人员' }],
+        楼栋: 'C楼', '离职/异动情况': status },
+    }]);
+    const service = new PurchaseApplicationService({ axiosRef: {} } as never);
+    await expect(service.searchApplicants({ query: '测试人员' })).resolves.toEqual([
+      expect.objectContaining({ name: '测试人员', openId: 'ou_active_fixture', building: 'C楼' }),
+    ]);
+  });
+
   it('fuzzy searches active employees and excludes departed or unmapped users', async () => {
     (fetchBitableRecords as jest.Mock).mockResolvedValue([
       {

@@ -1856,7 +1856,10 @@ export class AttendanceAutomationCoordinatorService {
   }
 
   private async recoverCorrectionJobs(now: Date): Promise<void> {
-    for (const queued of this.readCorrectionJobs()) {
+    let attempted = 0;
+    const queuedJobs = this.readCorrectionJobs().sort((left, right) => right.date.localeCompare(left.date) || left.task.localeCompare(right.task));
+    for (const queued of queuedJobs) {
+      if (attempted >= 3) break;
       if (queued.stage === 'completed') continue;
       if (Date.parse(queued.nextRetryAt || '') > now.getTime()) continue;
       const claimKey = `correction:${queued.date}:${queued.task}`;
@@ -1867,6 +1870,7 @@ export class AttendanceAutomationCoordinatorService {
         if (!job || job.stage === 'completed') continue;
         // Rechecking corrections requires the base attendance rows to exist.
         if (this.readAttendanceArchiveJob(job.task, job.date)?.stage === 'pending') continue;
+        attempted += 1;
         if (job.stage === 'pending') {
           const corrections = await withAttendanceFailureReason(
             '钉钉补卡审批查询失败',

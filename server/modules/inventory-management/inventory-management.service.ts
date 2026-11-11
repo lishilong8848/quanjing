@@ -24,6 +24,7 @@ import {
 import {
   createBitableBackgroundRefresh,
   fetchBitableRecords,
+  getBitableRecordCacheGeneration,
   resolveBitableAppToken,
   type BitableRecordItem,
 } from '../../common/feishu/bitable-direct-read';
@@ -107,6 +108,7 @@ export class InventoryManagementService
   }
 
   invalidateCache(): void {
+    this.sourceReads.clear();
     this.dashboardGeneration += 1;
     this.dashboardCache = undefined;
     this.dashboardRequest = undefined;
@@ -215,6 +217,31 @@ export class InventoryManagementService
     }).dashboard;
   }
 
+  private readonly sourceReads = new Map<string, Promise<BitableRecordItem[]>>();
+
+  private async readSharedRecords(
+    options: Parameters<typeof fetchBitableRecords>[1],
+  ): Promise<BitableRecordItem[]> {
+    const generation = getBitableRecordCacheGeneration(options.appToken, options.tableId);
+    // Raw records only: each caller still applies its own current permission and query filters.
+    // Keep forced/normal/strict reads distinct and never join a read predating an invalidation.
+    const key = JSON.stringify([options, generation]);
+    let request = this.sourceReads.get(key);
+    if (!request) {
+      request = fetchBitableRecords(this.httpService, options);
+      this.sourceReads.set(key, request);
+      const current = request;
+      void request.finally(() => {
+        if (this.sourceReads.get(key) === current) this.sourceReads.delete(key);
+      }).catch(() => undefined);
+    }
+    const records = await request;
+    if (generation !== getBitableRecordCacheGeneration(options.appToken, options.tableId)) {
+      throw new Error('数据在读取期间已变更，请重新读取');
+    }
+    return records;
+  }
+
   async getItems(
     query: InventoryItemsQuery,
     forceRefresh = false,
@@ -232,14 +259,14 @@ export class InventoryManagementService
       throw new Error('物品类别主数据未配置');
     }
     const [records, catalog] = await Promise.all([
-      fetchBitableRecords(this.httpService, {
+      this.readSharedRecords({
         appToken,
         tableId: inventoryTableId,
         tableName: inventoryTable.name,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
       }),
-      fetchBitableRecords(this.httpService, {
+      this.readSharedRecords({
         appToken,
         tableId: catalogTableId,
         tableName: catalogTable.name,
@@ -282,21 +309,21 @@ export class InventoryManagementService
     if (!movementTableId) throw new Error(`${selectedTable.name}未配置`);
 
     const [inventory, catalog, movementRecords] = await Promise.all([
-      fetchBitableRecords(this.httpService, {
+      this.readSharedRecords({
         appToken,
         tableId: inventoryTableId,
         tableName: TABLES.inventory.name,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
       }),
-      fetchBitableRecords(this.httpService, {
+      this.readSharedRecords({
         appToken,
         tableId: catalogTableId,
         tableName: TABLES.catalog.name,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
       }),
-      fetchBitableRecords(this.httpService, {
+      this.readSharedRecords({
         appToken,
         tableId: movementTableId,
         tableName: selectedTable.name,
@@ -362,7 +389,7 @@ export class InventoryManagementService
     }
 
     try {
-      const records = await fetchBitableRecords(this.httpService, {
+      const records = await this.readSharedRecords({
         appToken,
         tableId,
         tableName: table.name,

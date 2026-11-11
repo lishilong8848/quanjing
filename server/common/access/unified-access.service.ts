@@ -41,7 +41,7 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 
-export const ACCESS_SESSION_TTL_MS = 60 * 60 * 1000;
+export const ACCESS_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 const ACCESS_SESSION_COOKIE_NAME = 'vnet_access_session';
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;

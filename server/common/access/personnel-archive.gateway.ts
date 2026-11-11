@@ -6,6 +6,8 @@ import { DEFAULT_ACTIVE_PERSONNEL_VIEW_ID } from '../../modules/bitable-sync/act
 import { maskOrganizationPersonIdCard } from '../../modules/bitable-sync/organization-person-profile.mapper';
 import { withPersonnelDirectoryDeadline } from './personnel-directory-deadline';
 import { EMPLOYEE_ONBOARDING_PHOTO_FILE_RULE } from '../../../shared/employee-onboarding';
+import { PERSONAL_PHOTO_MESSAGES, type PersonalPhotoErrorCode } from '../../../shared/personnel-photo-errors';
+import { getBitableRecordCacheGeneration, getRecordId } from '../feishu/bitable-direct-read';
 
 const API = 'https://open.feishu.cn/open-apis';
 const CACHE_MS = 5 * 60_000;
@@ -44,8 +46,9 @@ export interface PersonnelArchiveDirectory {
   tableId: string;
   records: BitableRecordItem[];
   snapshotAt: string;
+  photoFieldIds?: Record<string, string>;
 }
-interface Target { appId: string; appToken: string; tableId: string; viewId: string; fields: string[]; checkbox: boolean; photoFields: string[] }
+interface Target { appId: string; appToken: string; tableId: string; viewId: string; fields: string[]; checkbox: boolean; photoFields: string[]; photoFieldIds: Record<string, string> }
 export interface PersonalArchivePhoto { contentType: 'image/png' | 'image/jpeg' | 'image/webp'; buffer: Buffer }
 
 @Injectable()
@@ -77,7 +80,8 @@ export class PersonnelArchiveGateway {
       const available = new Map(metas.map(field => [field.field_name, field.type]));
       if (!['姓名', '员工姓名', '员工', '人员'].some(name => available.has(name)) || !available.has('离职/异动情况')) throw unavailable();
       target = { appId, appToken, tableId: source.tableId, viewId, fields: PERSONAL_ARCHIVE_FIELD_NAMES.filter(name => available.has(name)),
-        checkbox: available.get('离职/异动情况') === 7, photoFields: PHOTO_FIELDS.filter(name => available.get(name) === 17) };
+        checkbox: available.get('离职/异动情况') === 7, photoFields: PHOTO_FIELDS.filter(name => available.get(name) === 17),
+        photoFieldIds: Object.fromEntries(metas.filter(field => PHOTO_FIELDS.includes(field.field_name) && field.type === 17 && /^fld[A-Za-z0-9_-]+$/.test(field.field_id || '')).map(field => [field.field_name, field.field_id!])) };
       this.metadata = { key, target, expiresAt: Date.now() + CACHE_MS };
     }
     const options = { appToken: target.appToken, tableId: target.tableId, viewId: target.viewId, tableName: '本人档案资料',
@@ -89,19 +93,26 @@ export class PersonnelArchiveGateway {
     const projected = records.map(record => ({ ...record, fields: projectFields(record.fields, target!) }));
     const snapshot = await readLatestPersistedBitableRecordSnapshot(options).catch(() => null);
     return { appId: target.appId, appToken: target.appToken, tableId: target.tableId, records: projected,
-      snapshotAt: new Date(snapshot?.fetchedAt || Date.now()).toISOString() };
+      snapshotAt: new Date(snapshot?.fetchedAt || Date.now()).toISOString(), photoFieldIds: { ...target.photoFieldIds } };
   }
 
   async photo(directory: PersonnelArchiveDirectory, record: BitableRecordItem): Promise<PersonalArchivePhoto | null> {
     const token = photoToken(record);
     if (!token) return null;
-    const key = `${directory.appId}:${directory.appToken}:${directory.tableId}:${token}`;
+    const photoField = PHOTO_FIELDS.find(name => Array.isArray(record.fields?.[name]) && (record.fields![name] as Array<{ file_token?: string }>).some(value => value?.file_token === token));
+    const fieldId = photoField ? directory.photoFieldIds?.[photoField] : undefined;
+    const recordId = getRecordId(record);
+    if (!fieldId || !/^fld[A-Za-z0-9_-]+$/.test(fieldId) || typeof recordId !== 'string' || !/^rec[A-Za-z0-9_-]+$/.test(recordId) || !/^tbl[A-Za-z0-9_-]+$/.test(directory.tableId)) throw photoFailure('PHOTO_SOURCE_NOT_READY');
+    const extra = JSON.stringify({ bitablePerm: { tableId: directory.tableId, attachments: { [fieldId]: { [recordId]: [token] } } } });
+    const generation = getBitableRecordCacheGeneration(directory.appToken, directory.tableId);
+    const key = JSON.stringify([directory.appId, directory.appToken, directory.tableId, recordId, fieldId, token, generation]);
     const cached = this.photos.get(key);
     if (cached && cached.expiresAt > Date.now()) return { contentType: cached.value.contentType, buffer: Buffer.from(cached.value.buffer) };
     const pending = this.pendingPhotos.get(key);
     if (pending) return pending;
     if (this.pendingPhotos.size >= 8) throw new ServiceUnavailableException('照片读取繁忙，请稍后重试');
-    const promise = this.download(token).then(value => {
+    const promise = this.download(token, extra).then(value => {
+      if (generation !== getBitableRecordCacheGeneration(directory.appToken, directory.tableId)) throw photoFailure('PHOTO_SOURCE_CHANGED');
       this.photos.delete(key); this.photos.set(key, { value, expiresAt: Date.now() + CACHE_MS });
       while (this.photos.size > 8) this.photos.delete(this.photos.keys().next().value!);
       return value;
@@ -110,23 +121,33 @@ export class PersonnelArchiveGateway {
     return promise;
   }
 
-  private async download(fileToken: string): Promise<PersonalArchivePhoto> {
+  private async download(fileToken: string, extra: string): Promise<PersonalArchivePhoto> {
     try {
       const token = await getTenantAccessToken(this.http, undefined, { requestTimeoutMs: () => 8_000 });
       const response = await this.http.axiosRef.get<ArrayBuffer>(`${API}/drive/v1/medias/${encodeURIComponent(fileToken)}/download`, {
-        headers: { Authorization: `Bearer ${token}` }, responseType: 'arraybuffer', timeout: 8_000,
+        headers: { Authorization: `Bearer ${token}` }, params: { extra }, responseType: 'arraybuffer', timeout: 8_000,
         maxRedirects: 0, maxContentLength: PERSONAL_ARCHIVE_PHOTO_MAX_BYTES, maxBodyLength: PERSONAL_ARCHIVE_PHOTO_MAX_BYTES,
       });
       const buffer = Buffer.from(response.data);
-      if (!buffer.length || buffer.length > PERSONAL_ARCHIVE_PHOTO_MAX_BYTES) throw unavailable();
+      if (!buffer.length || buffer.length > PERSONAL_ARCHIVE_PHOTO_MAX_BYTES) throw photoFailure('PHOTO_INVALID_CONTENT');
       const contentType = imageType(buffer), raw = String(response.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
-      if (!contentType || ![contentType, 'application/octet-stream'].includes(raw)) throw unavailable();
+      if (!contentType || ![contentType, 'application/octet-stream'].includes(raw)) throw photoFailure('PHOTO_INVALID_CONTENT');
       return { buffer, contentType };
-    } catch { throw new ServiceUnavailableException('个人照片读取失败，请稍后重试'); }
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        const body = error.getResponse();
+        if (typeof body === 'object' && 'code' in body && typeof body.code === 'string' && Object.hasOwn(PERSONAL_PHOTO_MESSAGES, body.code)) throw error;
+      }
+      const failure = error as { code?: string; response?: { status?: number } };
+      if (failure?.response?.status === 401 || failure?.response?.status === 403) throw photoFailure('PHOTO_SOURCE_DENIED');
+      if (failure?.response?.status === 404) throw photoFailure('PHOTO_SOURCE_MISSING');
+      if (failure?.code === 'ETIMEDOUT' || failure?.code === 'ECONNABORTED') throw photoFailure('PHOTO_SOURCE_TIMEOUT');
+      throw photoFailure('PHOTO_UNAVAILABLE');
+    }
   }
 
-  private async fields(appToken: string, tableId: string, token: string): Promise<{ field_name: string; type: number }[]> {
-    const fields: { field_name: string; type: number }[] = [], tokens = new Set<string>(), names = new Set<string>();
+  private async fields(appToken: string, tableId: string, token: string): Promise<{ field_name: string; type: number; field_id?: string }[]> {
+    const fields: { field_name: string; type: number; field_id?: string }[] = [], tokens = new Set<string>(), names = new Set<string>();
     let pageToken: string | undefined;
     do {
       const response = await this.http.axiosRef.get(`${API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`, {
@@ -136,7 +157,7 @@ export class PersonnelArchiveGateway {
       if (response.data?.code !== 0 || !data || !Array.isArray(data.items) || typeof data.has_more !== 'boolean') throw unavailable();
       for (const field of data.items) {
         if (!field || typeof field.field_name !== 'string' || !Number.isInteger(field.type) || names.has(field.field_name)) throw unavailable();
-        names.add(field.field_name); fields.push({ field_name: field.field_name, type: field.type });
+        names.add(field.field_name); fields.push({ field_name: field.field_name, type: field.type, ...(typeof field.field_id === 'string' ? { field_id: field.field_id } : {}) });
       }
       if (fields.length > 500) throw unavailable();
       if (!data.has_more) break;
@@ -180,3 +201,4 @@ function imageType(buffer: Buffer): PersonalArchivePhoto['contentType'] | null {
   return null;
 }
 function unavailable() { return new ServiceUnavailableException('个人档案资料暂不可用，请稍后重试'); }
+function photoFailure(code: PersonalPhotoErrorCode) { return new ServiceUnavailableException({ code, message: PERSONAL_PHOTO_MESSAGES[code] }); }

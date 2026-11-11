@@ -2,6 +2,7 @@ import { isProfessionalBusinessPrincipal } from '../../../shared/business-permis
 import { assertProfessionalRecordScope, filterProfessionalRecords } from '../../common/access/professional-record-scope';
 import {
   BadRequestException,
+  ForbiddenException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -53,6 +54,12 @@ export class InventoryStocktakeService {
     private readonly source: InventoryStocktakeSource,
     private readonly people: PurchaseApplicationService,
   ) {}
+
+  searchPeople(query: string, limit: number, principal: AccessPrincipal) {
+    if (!stocktakeBuildings(principal).length) throw new ForbiddenException('无库存盘点权限');
+    // Personnel identity is independent of the stock item's authorized scope.
+    return this.people.searchApplicants({ query, limit }, false);
+  }
 
   overview(month: string, principal: AccessPrincipal): StocktakeOverview {
     validateStocktakeMonth(month);

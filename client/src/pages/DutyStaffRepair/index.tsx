@@ -1,6 +1,6 @@
 import { useAccess } from '@/access/AccessProvider';
 import { canUsePageAction } from '../business-action-access';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { logger } from '@lark-apaas/client-toolkit/logger';
 import {
   AlertTriangle,
@@ -144,7 +144,7 @@ const CandidateRow: React.FC<{
   </TableRow>
 );
 
-const DutyStaffRepairPage: React.FC = () => {
+const DutyStaffRepairContent: React.FC = () => {
   const access = useAccess();
   const canUpdate = canUsePageAction(access, 'schedule_assignments', 'update', true);
   const canRefresh = canUsePageAction(access, 'schedule_assignments', 'refresh', true);
@@ -158,51 +158,106 @@ const DutyStaffRepairPage: React.FC = () => {
   const [manualValue, setManualValue] = useState('');
   const [manualRepairing, setManualRepairing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  const repairLocks = useRef(new Set<string>());
+  const bulkLock = useRef(false);
+  const manualLock = useRef(false);
+  const scanVersion = useRef(0);
+  const scanRequest = useRef<Promise<void> | null>(null);
+  const forceScanQueued = useRef(false);
+  const activeScanIsForced = useRef(false);
+  const canRefreshRef = useRef(canRefresh);
+  canRefreshRef.current = canRefresh;
 
   const repairableCount = useMemo(
     () => scanData?.candidates.filter((item) => item.canRepair).length || 0,
     [scanData],
   );
 
-  const loadData = async (silent = false, refreshRemote = false) => {
-    try {
+  const loadData = (silent = false, refreshRemote = false): Promise<void> => {
+    const force = refreshRemote && canRefreshRef.current;
+    if (scanRequest.current) {
+      if (force && !activeScanIsForced.current) forceScanQueued.current = true;
+      return scanRequest.current;
+    }
+    forceScanQueued.current ||= force;
+    const request = Promise.resolve().then(async () => {
+      if (!mounted.current) return;
       if (silent) {
         setRefreshing(true);
       } else {
         setLoading(true);
       }
-      setError(null);
-      const data = await scanDutyProgramModifiedIssues(500, refreshRemote && canRefresh);
-      setScanData(data);
-    } catch (err) {
-      logger.error('加载值班人员修正数据失败', err);
-      setError('扫描失败，请检查飞书多维表权限或稍后重试');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+      let scanAgain = false;
+      do {
+        const version = scanVersion.current;
+        activeScanIsForced.current = forceScanQueued.current && canRefreshRef.current;
+        forceScanQueued.current = false;
+        try {
+          const data = await scanDutyProgramModifiedIssues(500, activeScanIsForced.current);
+          if (mounted.current && version === scanVersion.current && !forceScanQueued.current) {
+            setScanData(data);
+            setError(null);
+          }
+        } catch (err) {
+          logger.error('加载值班人员修正数据失败', err);
+          if (mounted.current && version === scanVersion.current) {
+            setError('扫描失败，现有结果已保留，请稍后重试');
+          }
+        }
+        scanAgain = version !== scanVersion.current || forceScanQueued.current;
+        if (version !== scanVersion.current) forceScanQueued.current ||= canRefreshRef.current;
+      } while (mounted.current && scanAgain);
+    }).finally(() => {
+      if (scanRequest.current === request) scanRequest.current = null;
+      activeScanIsForced.current = false;
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    });
+    scanRequest.current = request;
+    return request;
   };
 
   useEffect(() => {
+    mounted.current = true;
     void loadData();
+    return () => { mounted.current = false; scanVersion.current += 1; };
   }, []);
 
+  const refreshAfterRepair = (recordIds: string[] = []) => {
+    scanVersion.current += 1;
+    const removed = new Set(recordIds);
+    setScanData(current => {
+      if (!current || !removed.size) return current;
+      const candidates = current.candidates.filter(row => !removed.has(row.recordId));
+      const count = current.candidates.length - candidates.length;
+      return { ...current, candidates, returnedCandidates: candidates.length, totalCandidates: Math.max(0, current.totalCandidates - count) };
+    });
+    void loadData(true, true);
+  };
+
   const handleRepairOne = async (recordId: string) => {
-    if (!canUpdate) return;
+    if (!canUpdate || bulkLock.current || repairLocks.current.has(recordId)) return;
+    repairLocks.current.add(recordId);
     setRepairingIds((prev) => new Set(prev).add(recordId));
     try {
       const result = await repairDutyProgramModifiedIssues({ recordIds: [recordId] });
+      if (!mounted.current) return;
       if (result.failed > 0) {
         toast.error(result.message);
       } else {
         toast.success(result.message);
       }
-      await loadData(true, true);
+      if (mounted.current) refreshAfterRepair(result.failed === 0 && result.repaired > 0 ? [recordId] : []);
     } catch (err) {
+      if (!mounted.current) return;
       logger.error('修正单条记录失败', err);
       toast.error('修正失败，请稍后重试');
     } finally {
-      setRepairingIds((prev) => {
+      repairLocks.current.delete(recordId);
+      if (mounted.current) setRepairingIds((prev) => {
         const next = new Set(prev);
         next.delete(recordId);
         return next;
@@ -211,21 +266,29 @@ const DutyStaffRepairPage: React.FC = () => {
   };
 
   const handleRepairAll = async () => {
-    if (!canUpdate) return;
+    if (!canUpdate || bulkLock.current || repairLocks.current.size) return;
+    bulkLock.current = true;
     setBulkRepairing(true);
     try {
       const result = await repairDutyProgramModifiedIssues();
+      if (!mounted.current) return;
       if (result.failed > 0) {
         toast.error(result.message);
       } else {
         toast.success(result.message);
       }
-      await loadData(true, true);
+      if (mounted.current) refreshAfterRepair(
+        result.failed === 0 && result.repaired > 0 && result.skipped === 0
+          ? scanData?.candidates.filter(row => row.canRepair).map(row => row.recordId) || []
+          : [],
+      );
     } catch (err) {
+      if (!mounted.current) return;
       logger.error('批量修正失败', err);
       toast.error('批量修正失败，请稍后重试');
     } finally {
-      setBulkRepairing(false);
+      bulkLock.current = false;
+      if (mounted.current) setBulkRepairing(false);
     }
   };
 
@@ -236,13 +299,16 @@ const DutyStaffRepairPage: React.FC = () => {
       toast.error('请输入记录 ID');
       return;
     }
-
+    if (bulkLock.current || manualLock.current || repairLocks.current.has(recordId)) return;
+    manualLock.current = true;
+    repairLocks.current.add(recordId);
     setManualRepairing(true);
     try {
       const result = await repairDutyProgramModifiedIssues({
         recordId,
         replacementValue: manualValue,
       });
+      if (!mounted.current) return;
       if (result.failed > 0) {
         toast.error(result.message);
       } else {
@@ -250,12 +316,15 @@ const DutyStaffRepairPage: React.FC = () => {
         setManualRecordId('');
         setManualValue('');
       }
-      await loadData(true, true);
+      if (mounted.current) refreshAfterRepair(result.failed === 0 && result.repaired > 0 ? [recordId] : []);
     } catch (err) {
+      if (!mounted.current) return;
       logger.error('手动修正失败', err);
       toast.error('手动修正失败，请稍后重试');
     } finally {
-      setManualRepairing(false);
+      repairLocks.current.delete(recordId);
+      manualLock.current = false;
+      if (mounted.current) setManualRepairing(false);
     }
   };
 
@@ -301,7 +370,7 @@ const DutyStaffRepairPage: React.FC = () => {
           </Button>
           <Button
             type="button"
-            disabled={!canUpdate || repairableCount === 0 || bulkRepairing || refreshing}
+            disabled={!canUpdate || repairableCount === 0 || bulkRepairing || manualRepairing || repairingIds.size > 0 || refreshing}
             onClick={() => void handleRepairAll()}
           >
             {bulkRepairing ? (
@@ -379,7 +448,7 @@ const DutyStaffRepairPage: React.FC = () => {
                   <CandidateRow
                     key={candidate.recordId}
                     candidate={candidate}
-                    repairing={repairingIds.has(candidate.recordId)}
+                    repairing={bulkRepairing || repairingIds.has(candidate.recordId) || (manualRepairing && manualRecordId.trim() === candidate.recordId)}
                     canUpdate={canUpdate}
                     onRepair={handleRepairOne}
                   />
@@ -414,6 +483,7 @@ const DutyStaffRepairPage: React.FC = () => {
             </label>
             <Input
               id="repair-record-id"
+              disabled={manualRepairing}
               value={manualRecordId}
               onChange={(event) => setManualRecordId(event.target.value)}
               placeholder="rec..."
@@ -425,6 +495,7 @@ const DutyStaffRepairPage: React.FC = () => {
             </label>
             <Textarea
               id="repair-value"
+              disabled={manualRepairing}
               value={manualValue}
               onChange={(event) => setManualValue(event.target.value)}
               placeholder="输入人员姓名；留空表示清空"
@@ -434,7 +505,7 @@ const DutyStaffRepairPage: React.FC = () => {
           <Button
             type="button"
             className="min-h-10"
-            disabled={!canUpdate || manualRepairing}
+            disabled={!canUpdate || manualRepairing || bulkRepairing || repairingIds.has(manualRecordId.trim())}
             onClick={() => void handleManualRepair()}
           >
             {manualRepairing ? (
@@ -448,6 +519,12 @@ const DutyStaffRepairPage: React.FC = () => {
       </Card>
     </main>
   );
+};
+
+const DutyStaffRepairPage: React.FC = () => {
+  const access = useAccess();
+  const identity = access.principalFingerprint || `${access.role}:${access.accountId || ''}:${access.purchaseBuilding || ''}`;
+  return <DutyStaffRepairContent key={identity} />;
 };
 
 export default DutyStaffRepairPage;

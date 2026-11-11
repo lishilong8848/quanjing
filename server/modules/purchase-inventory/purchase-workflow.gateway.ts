@@ -136,6 +136,7 @@ export class PurchaseWorkflowGateway {
   private organizationRecords: OrganizationRecordsState | null = null;
   private organizationRecordsPromise: Promise<BitableRecordItem[]> | null =
     null;
+  private readonly organizationUserReads = new Map<string, Promise<BitableRecordItem[]>>();
   private warehouseRecipientSnapshot: WarehouseRecipientSnapshot | null = null;
   private warehouseRecipientSnapshotLoaded = false;
   private warehouseRecipientLoadPromise: Promise<WarehouseRecipientSnapshot | null> | null =
@@ -902,11 +903,17 @@ export class PurchaseWorkflowGateway {
   ): Promise<PurchaseWorkflowUser> {
     const config = this.config();
     const organizationTableId = requireOrganizationTableId(config);
-    const records = await this.listRecords(
-      config.appToken,
-      organizationTableId,
-      userAccessToken,
-    );
+    const readKey = JSON.stringify([config.appToken, organizationTableId, userAccessToken]);
+    let reading = this.organizationUserReads.get(readKey);
+    if (!reading) {
+      reading = this.listRecords(config.appToken, organizationTableId, userAccessToken);
+      this.organizationUserReads.set(readKey, reading);
+    }
+    let records: BitableRecordItem[];
+    try { records = await reading; }
+    finally {
+      if (this.organizationUserReads.get(readKey) === reading) this.organizationUserReads.delete(readKey);
+    }
     const matches = records
       .flatMap(mapOrganizationRecordUsers)
       .filter((user) => user.openId === openId);
@@ -1309,22 +1316,36 @@ export class PurchaseWorkflowGateway {
     const recipients = unique(recipientOpenIds.filter(isOpenId));
     if (!recipients.length) return [];
     const token = await this.getTenantAccessToken();
-    const messageIds: string[] = [];
-    for (const openId of recipients) {
-      const response = await this.httpService.axiosRef.post(
-        'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
-        {
-          receive_id: openId,
-          msg_type: 'text',
-          content: JSON.stringify({ text }),
-        },
-        requestConfig(token),
-      );
-      assertFeishuSuccess(response.data, '发送采购工作流通知失败');
-      const messageId = clean(response.data?.data?.message_id);
-      if (messageId) messageIds.push(messageId);
-    }
-    return messageIds;
+    const messageIds: string[] = new Array(recipients.length).fill('');
+    let next = 0;
+    let failed = false;
+    let firstError: unknown;
+    const worker = async () => {
+      while (!failed && next < recipients.length) {
+        const index = next++;
+        const openId = recipients[index];
+        try {
+          const response = await this.httpService.axiosRef.post(
+            'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+            {
+              receive_id: openId,
+              msg_type: 'text',
+              content: JSON.stringify({ text }),
+            },
+            requestConfig(token),
+          );
+          assertFeishuSuccess(response.data, '发送采购工作流通知失败');
+          const messageId = clean(response.data?.data?.message_id);
+          if (messageId) messageIds[index] = messageId;
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+        }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    if (failed) throw firstError;
+    return messageIds.filter(Boolean);
   }
 
   async sendIdempotentTextNotification(

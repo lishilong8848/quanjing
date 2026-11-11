@@ -7,6 +7,9 @@ let mockEffects: Array<() => void> = [];
 let mockAccess: any;
 const mockGetDetail = jest.fn();
 const mockSubmit = jest.fn();
+const mockSubmitReceipt = jest.fn();
+const mockReceiptStatus = jest.fn();
+const mockReceiptSettled = jest.fn();
 jest.mock('react', () => ({
   ...jest.requireActual('react'),
   useState: (initial: unknown) => {
@@ -37,7 +40,7 @@ jest.mock('react', () => ({
   },
 }));
 jest.mock('../../client/src/access/AccessProvider', () => ({ useAccess: () => mockAccess }));
-jest.mock('../../client/src/api', () => ({ getPurchaseWorkflowDetail: (...args: unknown[]) => mockGetDetail(...args), submitPurchaseOnlineApproval: (...args: unknown[]) => mockSubmit(...args), getPurchaseOnlineApprovalTaskStatus: jest.fn() }));
+jest.mock('../../client/src/api', () => ({ getPurchaseWorkflowDetail: (...args: unknown[]) => mockGetDetail(...args), submitPurchaseOnlineApproval: (...args: unknown[]) => mockSubmit(...args), getPurchaseOnlineApprovalTaskStatus: jest.fn(), submitPurchaseWorkflowReceipt: (...args: unknown[]) => mockSubmitReceipt(...args), getPurchaseWorkflowReceiptTaskStatus: (...args: unknown[]) => mockReceiptStatus(...args) }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), warning: jest.fn(), error: jest.fn() } }));
 
 import { isValidElement } from 'react';
@@ -59,7 +62,7 @@ function render(current: any) {
 const workflowDetail = (id: string, allowed = ['order']) => ({ record: { recordId: id, building: 'C楼', specialty: '电气', actualQuantity: null, actualAmount: null, note: '', receiptTime: 0, purchaserName: '合成采购人' }, allowedActions: allowed, timeline: [], programEnabled: true });
 function renderWorkflow(id: string, preview: any = null) {
   mockCursor = 0;
-  return PurchaseWorkflowDialog({ open: true, recordId: id, item: preview, canOperate: true, onOpenChange: jest.fn(), onUpdated: jest.fn(), onOrderAccepted: jest.fn(), onOrderTaskSettled: jest.fn(), onReceiptAccepted: jest.fn(), onReceiptTaskSettled: jest.fn() });
+  return PurchaseWorkflowDialog({ open: true, recordId: id, item: preview, canOperate: true, onOpenChange: jest.fn(), onUpdated: jest.fn(), onOrderAccepted: jest.fn(), onOrderTaskSettled: jest.fn(), onReceiptAccepted: jest.fn(), onReceiptTaskSettled: mockReceiptSettled });
 }
 const orderForm = (tree: ReactNode) => nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'OrderForm');
 
@@ -130,5 +133,60 @@ describe('purchase approval stale request isolation', () => {
     tree = renderWorkflow('rec-a', preview); expect(orderForm(tree)).toBeUndefined(); flushEffects();
     await flushPromises(); tree = renderWorkflow('rec-a', preview); flushEffects(); expect(orderForm(tree)).toBeUndefined();
     expect(mockSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe('independent receipt submissions', () => {
+  const originalWindow = global.window;
+  const form = (tree: ReactNode) => nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'ReceiptForm');
+  async function prepare(id: string) {
+    renderWorkflow(id); flushEffects(); await flushPromises();
+    let tree = renderWorkflow(id); flushEffects();
+    const current = form(tree); expect(current).toBeDefined();
+    current!.props.onSignerSelect({ name: '合成签收人', openId: 'ou_fixture' });
+    tree = renderWorkflow(id); flushEffects();
+    return form(tree)!;
+  }
+  beforeEach(() => {
+    jest.useFakeTimers();
+    global.window = { setTimeout, clearTimeout } as never;
+    mockSlots.length = 0; mockEffects = []; mockCursor = 0;
+    mockAccess = { role: 'admin', accountId: 'user-a', authorizationVersion: 1, purchaseBuilding: null };
+    mockGetDetail.mockReset().mockImplementation(async (id: string) => workflowDetail(id, ['receive']));
+    mockSubmitReceipt.mockReset(); mockReceiptStatus.mockReset(); mockReceiptSettled.mockReset().mockResolvedValue(true);
+  });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); global.window = originalWindow; });
+  it('allows another record while the first is awaiting acceptance and does not unlock that record when the first finishes', async () => {
+    const first = deferred(), second = deferred();
+    mockSubmitReceipt.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    (await prepare('rec-a')).props.onSubmit(); jest.runOnlyPendingTimers();
+    (await prepare('rec-b')).props.onSubmit(); jest.runOnlyPendingTimers();
+    expect(mockSubmitReceipt.mock.calls.map(args => args[0])).toEqual(['rec-a', 'rec-b']);
+    mockReceiptStatus.mockResolvedValue({ success: true, task: { status: 'completed', message: '完成', notificationWarnings: [] } });
+    first.resolve({ taskId: 'task-a', pending: true, message: '已受理' });
+    for (let i = 0; i < 5; i++) await flushPromises();
+    (await prepare('rec-b')).props.onSubmit(); jest.runOnlyPendingTimers();
+    expect(mockSubmitReceipt).toHaveBeenCalledTimes(2);
+    expect(mockReceiptSettled).toHaveBeenCalledWith('rec-a', 'completed');
+  });
+  it('keeps the same record locked while its accepted background task is still pending', async () => {
+    const status = deferred();
+    mockSubmitReceipt.mockResolvedValue({ taskId: 'task-a', pending: true, message: '已受理' });
+    mockReceiptStatus.mockReturnValue(status.promise);
+    (await prepare('rec-a')).props.onSubmit(); jest.runOnlyPendingTimers(); await flushPromises();
+    (await prepare('rec-a')).props.onSubmit(); jest.runOnlyPendingTimers();
+    expect(mockSubmitReceipt).toHaveBeenCalledTimes(1);
+  });
+  it('discards an accepted response after switching login identity', async () => {
+    const acceptance = deferred(); mockSubmitReceipt.mockReturnValue(acceptance.promise);
+    (await prepare('rec-a')).props.onSubmit(); jest.runOnlyPendingTimers();
+    mockAccess = { ...mockAccess, accountId: 'user-b' }; renderWorkflow('rec-a'); flushEffects();
+    acceptance.resolve({ taskId: 'task-a', pending: true, message: '已受理' }); await flushPromises();
+    expect(mockReceiptStatus).not.toHaveBeenCalled(); expect(mockReceiptSettled).not.toHaveBeenCalled();
+  });
+  it('requires verified current permissions before exposing receipt submission', async () => {
+    mockGetDetail.mockReturnValue(deferred().promise);
+    const tree = renderWorkflow('rec-a'); flushEffects();
+    expect(form(tree)).toBeUndefined(); expect(mockSubmitReceipt).not.toHaveBeenCalled();
   });
 });

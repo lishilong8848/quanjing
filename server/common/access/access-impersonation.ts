@@ -30,7 +30,9 @@ export function validImpersonationPayload(value: unknown, now: number): value is
   for (const key of ['issuedAt', 'expiresAt', 'actorExpiresAt']) if (!Number.isSafeInteger(payload[key])) return false;
   const issued = Number(payload.issuedAt), expires = Number(payload.expiresAt), actorExpires = Number(payload.actorExpiresAt);
   // The actor's original deadline also bounds recovery after the target expires.
+  // Kept in sync with ACCESS_SESSION_TTL_MS (24h) so a freshly issued administrator
+  // session can start impersonation without tripping this bound.
   return issued >= 0 && issued <= now && expires > issued && expires - issued <= IMPERSONATION_TTL_MS &&
-    actorExpires >= expires && actorExpires > now && actorExpires - issued <= 60 * 60 * 1000 &&
+    actorExpires >= expires && actorExpires > now && actorExpires - issued <= 24 * 60 * 60 * 1000 &&
     payload.sessionFamilyId !== payload.actorSessionFamilyId;
 }

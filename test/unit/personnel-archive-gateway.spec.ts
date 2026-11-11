@@ -1,8 +1,8 @@
 jest.mock('../../server/common/feishu/bitable-direct-read',()=>({
   ...jest.requireActual('../../server/common/feishu/bitable-direct-read'),
-  fetchBitableRecords:jest.fn(),getTenantAccessToken:jest.fn(),resolveBitableAppToken:jest.fn(),readLatestPersistedBitableRecordSnapshot:jest.fn(),
+  fetchBitableRecords:jest.fn(),getTenantAccessToken:jest.fn(),resolveBitableAppToken:jest.fn(),readLatestPersistedBitableRecordSnapshot:jest.fn(),getBitableRecordCacheGeneration:jest.fn(()=>0),
 }));
-import { fetchBitableRecords,getTenantAccessToken,resolveBitableAppToken,readLatestPersistedBitableRecordSnapshot } from '../../server/common/feishu/bitable-direct-read';
+import { fetchBitableRecords,getTenantAccessToken,resolveBitableAppToken,readLatestPersistedBitableRecordSnapshot,getBitableRecordCacheGeneration } from '../../server/common/feishu/bitable-direct-read';
 import { PersonnelArchiveGateway,PERSONAL_ARCHIVE_PHOTO_MAX_BYTES,photoToken,type PersonnelArchiveDirectory } from '../../server/common/access/personnel-archive.gateway';
 
 describe('personal archive source projection and fixed media proxy',()=>{
@@ -11,8 +11,9 @@ describe('personal archive source projection and fixed media proxy',()=>{
   beforeEach(()=>{
     process.env.FEISHU_APP_ID='cli_archive_test';process.env.FEISHU_EMPLOYEE_ONBOARDING_APP_TOKEN='bascnArchiveSynthetic';process.env.FEISHU_EMPLOYEE_ONBOARDING_TABLE_ID='tblArchiveTest';process.env.FEISHU_ORG_VIEW_ID='vewArchiveTest';
     jest.clearAllMocks();(resolveBitableAppToken as jest.Mock).mockResolvedValue('bascnArchiveSynthetic');(getTenantAccessToken as jest.Mock).mockResolvedValue('synthetic-token');
+    (getBitableRecordCacheGeneration as jest.Mock).mockReturnValue(0);
     (readLatestPersistedBitableRecordSnapshot as jest.Mock).mockResolvedValue({fetchedAt:1793235600000});
-    metas=[{field_name:'姓名',type:1},{field_name:'员工姓名',type:11},{field_name:'离职/异动情况',type:7},{field_name:'照片',type:17},{field_name:'联系方式',type:13},{field_name:'身份证号',type:1},{field_name:'密码',type:1}];
+    metas=[{field_name:'姓名',type:1},{field_name:'员工姓名',type:11},{field_name:'离职/异动情况',type:7},{field_name:'照片',type:17,field_id:'fldPhotoTest'},{field_name:'联系方式',type:13},{field_name:'身份证号',type:1},{field_name:'密码',type:1}];
     rows=[{record_id:'recArchiveTest',fields:{姓名:'合成人员',员工姓名:[{id:'ou_archive_test'}],身份证号:'11010519491231002X',联系方式:'13800000000',密码:'NEVER_READ_OR_CACHE',照片:[{file_token:'boxPhotoTest',url:'http://127.0.0.1/private',tmp_download_url:'https://arbitrary.invalid'}]}}];
     (fetchBitableRecords as jest.Mock).mockImplementation(async(_http,options)=>{const result=structuredClone(rows);options.validateRecords(result);return result;});
     http={axiosRef:{get:jest.fn(async(url:string)=>url.endsWith('/fields')?{data:{code:0,data:{items:metas,has_more:false}}}:{data:png,headers:{'content-type':'image/png'}})}};
@@ -28,7 +29,7 @@ describe('personal archive source projection and fixed media proxy',()=>{
     expect(JSON.stringify(result)).not.toMatch(/NEVER_READ_OR_CACHE|11010519491231002X|127\.0\.0\.1|arbitrary\.invalid/);
   });
   it.each(['证件照','员工照片'])('keeps schema-validated %s through both pre-persistence and return projections',async alias=>{
-    metas=metas.filter(item=>item.field_name!=='照片');metas.push({field_name:alias,type:17});
+    metas=metas.filter(item=>item.field_name!=='照片');metas.push({field_name:alias,type:17,field_id:'fldPhotoAlias'});
     rows[0].fields[alias]=rows[0].fields.照片;delete rows[0].fields.照片;
     rows[0].fields.身份证号=[{text:'11010519491231002X',type:'text'}];
     const result=await gateway.read();expect(photoToken(result.records[0])).toBe('boxPhotoTest');
@@ -75,10 +76,27 @@ describe('personal archive source projection and fixed media proxy',()=>{
     expect(result?.contentType).toBe('image/png');expect(result?.buffer).toEqual(png);
     const call=http.axiosRef.get.mock.calls.find(([url]:[string])=>url.includes('/medias/'));
     expect(call).toEqual(['https://open.feishu.cn/open-apis/drive/v1/medias/boxPhotoTest/download',expect.objectContaining({responseType:'arraybuffer',timeout:8000,maxRedirects:0,maxContentLength:PERSONAL_ARCHIVE_PHOTO_MAX_BYTES})]);
+    expect(JSON.parse(call[1].params.extra)).toEqual({bitablePerm:{tableId:'tblArchiveTest',attachments:{fldPhotoTest:{recArchiveTest:['boxPhotoTest']}}}});
   });
   it('accepts generic binary MIME only when the bytes prove a supported image',async()=>{
     const directory=await gateway.read();http.axiosRef.get.mockResolvedValue({data:png,headers:{'content-type':'application/octet-stream'}});
     expect((await gateway.photo(directory,directory.records[0]))?.contentType).toBe('image/png');
+  });
+  it('does not download without a schema-backed attachment field ID',async()=>{
+    delete metas.find(item=>item.field_name==='照片').field_id;
+    const directory=await gateway.read();http.axiosRef.get.mockClear();
+    await expect(gateway.photo(directory,directory.records[0])).rejects.toThrow('照片来源资料尚未就绪');
+    expect(http.axiosRef.get).not.toHaveBeenCalled();
+  });
+  it('uses the selected alias field ID and isolates identical tokens on different records',async()=>{
+    metas=metas.filter(item=>item.field_name!=='照片');metas.push({field_name:'证件照',type:17,field_id:'fldPhotoAlias'});
+    rows[0].fields.证件照=rows[0].fields.照片;delete rows[0].fields.照片;
+    const directory=await gateway.read();http.axiosRef.get.mockClear();
+    await gateway.photo(directory,directory.records[0]);
+    await gateway.photo(directory,{...directory.records[0],record_id:'recOther'});
+    expect(http.axiosRef.get).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(http.axiosRef.get.mock.calls[0][1].params.extra)).toEqual({bitablePerm:{tableId:'tblArchiveTest',attachments:{fldPhotoAlias:{recArchiveTest:['boxPhotoTest']}}}});
+    expect(JSON.parse(http.axiosRef.get.mock.calls[1][1].params.extra).bitablePerm.attachments.fldPhotoAlias).toEqual({recOther:['boxPhotoTest']});
   });
   it('preserves the existing onboarding ten MiB photo allowance',async()=>{
     expect(PERSONAL_ARCHIVE_PHOTO_MAX_BYTES).toBe(10*1024*1024);
@@ -98,5 +116,20 @@ describe('personal archive source projection and fixed media proxy',()=>{
     const directory=await gateway.read();http.axiosRef.get.mockClear();
     const [a,b]=await Promise.all([gateway.photo(directory,directory.records[0]),gateway.photo(directory,directory.records[0])]);
     expect(a).toEqual(b);await gateway.photo(directory,directory.records[0]);expect(http.axiosRef.get).toHaveBeenCalledTimes(1);
+  });
+  it.each([[403,'PHOTO_SOURCE_DENIED'],[404,'PHOTO_SOURCE_MISSING']])('sanitizes source HTTP %s into a fixed error code without retaining response data',async(status,code)=>{
+    const directory=await gateway.read();http.axiosRef.get.mockRejectedValue({response:{status,data:'secret'},config:{url:'secret'}});
+    const error=await gateway.photo(directory,directory.records[0]).catch(error=>error);
+    expect(error.getResponse()).toMatchObject({code});expect(JSON.stringify(error)).not.toContain('secret');
+  });
+  it('rejects an invalidated in-flight download and retries without reusing its bytes',async()=>{
+    const directory=await gateway.read();let finish!:(value:unknown)=>void;
+    http.axiosRef.get.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    const pending=gateway.photo(directory,directory.records[0]);await Promise.resolve();await Promise.resolve();
+    (getBitableRecordCacheGeneration as jest.Mock).mockReturnValue(1);
+    finish({data:png,headers:{'content-type':'image/png'}});
+    await expect(pending).rejects.toThrow('照片资料已变化');
+    http.axiosRef.get.mockClear();http.axiosRef.get.mockResolvedValue({data:png,headers:{'content-type':'image/png'}});
+    await gateway.photo(directory,directory.records[0]);expect(http.axiosRef.get).toHaveBeenCalledTimes(1);
   });
 });

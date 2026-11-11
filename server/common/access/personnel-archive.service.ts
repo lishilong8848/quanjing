@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, GatewayTimeoutException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
 import type { PersonalArchiveResponse } from '../../../shared/personnel-archive.interface';
@@ -8,6 +8,8 @@ import { AccessConfigurationService } from './access-configuration.service';
 import { PersonnelArchiveGateway, photoToken, type PersonnelArchiveDirectory } from './personnel-archive.gateway';
 import { matchesSelfServicePersonnelIdentity, resolveSelfServicePersonnelRecord } from './self-service-applicant';
 import { readPersonnelAuthorizationState } from './personnel-employment-state';
+import { withPersonnelDirectoryDeadline } from './personnel-directory-deadline';
+import { PERSONAL_PHOTO_MESSAGES } from '../../../shared/personnel-photo-errors';
 
 @Injectable()
 export class PersonnelArchiveService {
@@ -27,10 +29,21 @@ export class PersonnelArchiveService {
   }
 
   async photo(principal: AccessPrincipal) {
+    try { return await withPersonnelDirectoryDeadline(this.loadPhoto(principal)); }
+    catch (error) {
+      if (error instanceof GatewayTimeoutException) throw new GatewayTimeoutException({ code: 'PHOTO_SOURCE_TIMEOUT', message: PERSONAL_PHOTO_MESSAGES.PHOTO_SOURCE_TIMEOUT });
+      throw error;
+    }
+  }
+
+  private async loadPhoto(principal: AccessPrincipal) {
     const resolved = await this.resolve(principal);
     if (!resolved) return null;
     const photo = await this.gateway.photo(resolved.directory, resolved.record);
-    this.current(principal, resolved.actorVersion);
+    const latest = this.current(principal, resolved.actorVersion);
+    const bound = latest.account.personnelIdentity || (latest.account.loginMethod === 'personnel-password' ? latest.principal.accountId : undefined);
+    const expected = `local-external-${createHash('sha256').update(JSON.stringify([resolved.directory.appId, resolved.directory.appToken, resolved.directory.tableId, getRecordId(resolved.record)])).digest('hex')}`;
+    if (bound && bound !== expected || resolved.directory.appId !== (latest.account.appId || latest.account.personnelAppId)) throw new ForbiddenException('个人档案关联已变化，请联系管理员核对');
     return photo;
   }
 

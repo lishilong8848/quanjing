@@ -1,3 +1,4 @@
+import type { PurchaseApplicationApplicant } from '@shared/purchase-application.interface';
 import { axiosForBackend } from '@lark-apaas/client-toolkit/utils/getAxiosForBackend';
 import type { WarehouseBuilding } from '@shared/inventory-management.interface';
 import type {
@@ -34,6 +35,14 @@ async function write<T>(path: string, data: unknown, timeout = 20_000): Promise<
   });
   return response.data;
 }
+export async function searchStocktakePeople(query: string): Promise<PurchaseApplicationApplicant[]> {
+  const response = await axiosForBackend({
+    url: `${base}/people`, method: 'GET', params: { query, limit: 30 }, timeout: 60_000,
+  });
+  if (!Array.isArray(response.data)) throw new Error('盘点人员搜索返回格式无效');
+  return response.data;
+}
+
 export const getStocktakeOverview = (month: string) =>
   read<StocktakeOverview>('overview', { month });
 export async function getStocktakeSheet(

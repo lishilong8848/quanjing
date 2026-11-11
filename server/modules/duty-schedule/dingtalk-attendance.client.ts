@@ -445,6 +445,7 @@ export class DingTalkAttendanceClient {
     const approvals: DingTalkCorrectionApproval[] = [];
     let fetchedDetails = 0;
     let remainingDetails = 0;
+    const incompleteIds: string[] = [];
     for (const processInstanceId of uniqueIds) {
       const cachedApproval = cachedApprovals.get(processInstanceId);
       if (cachedApproval) {
@@ -466,6 +467,7 @@ export class DingTalkAttendanceClient {
           response.processInstance ??
           response.result,
       );
+      fetchedDetails += 1;
       const mapped = mapCorrectionApproval(instance, processInstanceId);
       if (
         !mapped ||
@@ -474,13 +476,16 @@ export class DingTalkAttendanceClient {
         !Number.isFinite(mapped.workDate) ||
         Number(mapped.workDate) <= 0
       ) {
-        throw new Error('钉钉补卡审批详情缺少员工或补卡时间，已停止同步');
+        incompleteIds.push(processInstanceId);
+        continue;
       }
       approvals.push(mapped);
-      fetchedDetails += 1;
       if (isCacheableCorrection(mapped)) {
         this.rememberCorrectionApproval(mapped);
       }
+    }
+    if (incompleteIds.length > 0) {
+      throw new Error(`钉钉补卡审批详情核验不完整：${incompleteIds.length} 条缺少员工或补卡时间，实例 ${incompleteIds.slice(0, 5).join(', ')}${remainingDetails ? `；未查询完整：本轮最多抓取 ${MAX_CORRECTION_DETAILS_PER_DAY} 条新详情，另有 ${remainingDetails} 条待下次重试` : ''}；有效详情已保留，未完成同步`);
     }
     if (remainingDetails > 0) {
       throw new Error(
@@ -885,6 +890,8 @@ function mapCorrectionApproval(
   if (!processInstanceId || !userId) return null;
   const components = Array.isArray(item.form_component_values)
     ? item.form_component_values
+    : Array.isArray(item.formComponentValues)
+      ? item.formComponentValues
     : Array.isArray(item.formValueVOS)
       ? item.formValueVOS
       : [];
@@ -893,24 +900,23 @@ function mapCorrectionApproval(
   let planText = '';
   let reason = '';
   const photoUrls: string[] = [];
+  const dates: Array<{ explicit: boolean; correctionTime: number | null; workDate: number | null; planText: string }> = [];
 
   components.forEach((component) => {
     const field = asObject(component);
     const name = text(field.name);
     const componentType = text(field.component_type ?? field.componentType);
     const valueText = text(field.value);
-    const extValueText = text(field.ext_value ?? field.extValue);
+    const extValueRaw = field.ext_value ?? field.extValue;
     if (
       componentType === 'DDDateField' ||
       name === '补卡时间' ||
       name === 'repairCheckTime'
     ) {
-      const extValue = parseJsonObject(extValueText);
-      correctionTime = nullableEpochMillis(
+      const extValue = typeof extValueRaw === 'string' ? parseJsonObject(extValueRaw) : asObject(extValueRaw);
+      dates.push({ explicit: name === '补卡时间' || name === 'repairCheckTime', correctionTime: nullableEpochMillis(
         extValue.userCheckTime ?? extValue.timeStamp ?? valueText,
-      );
-      workDate = nullableEpochMillis(extValue.workDate);
-      planText = text(extValue.planText);
+      ), workDate: nullableEpochMillis(extValue.workDate), planText: text(extValue.planText) });
     }
     if (componentType === 'TextareaField' && name === '补卡理由') {
       reason = valueText;
@@ -919,6 +925,14 @@ function mapCorrectionApproval(
       parsePhotoUrls(valueText).forEach((url) => photoUrls.push(url));
     }
   });
+
+  const candidates = dates.some(date => date.explicit) ? dates.filter(date => date.explicit) : dates;
+  const selected = candidates[0];
+  if (selected && candidates.every(date => date.correctionTime === selected.correctionTime && date.workDate === selected.workDate)) {
+    correctionTime = selected.correctionTime;
+    workDate = selected.workDate;
+    planText = selected.planText;
+  }
 
   return {
     processInstanceId,

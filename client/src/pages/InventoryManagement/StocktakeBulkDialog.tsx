@@ -1,3 +1,4 @@
+import { StocktakeDraftJournal } from './stocktake-draft-journal';
 import { useEffect, useRef, useState } from 'react';
 import { useAccess } from '@/access/AccessProvider';
 import { canUseStocktakeLines } from './stocktake-action-access';
@@ -48,19 +49,25 @@ export function StocktakeBulkDialog({
   onSaved: (sheet: StocktakeSheet) => void;
   onAccepted?: (task: StocktakeBulkTask) => void;
 }) {
+  const journal = drafts instanceof StocktakeDraftJournal ? drafts : null;
+  const journalKey = `bulk:review:${sheet.month}:${sheet.building}`;
+  type Recovery = { retry: {signature: string; request: StocktakeBulkRequest} | null; accepted: StocktakeBulkTask | null };
+  const restored = journal?.readTask<Recovery>(journalKey);
+  const savedRequest = restored?.retry?.request;
+  const validRestored = !restored || Boolean((savedRequest && savedRequest.month === sheet.month && savedRequest.building === sheet.building && savedRequest.scope === 'review' && typeof savedRequest.clientMutationId === 'string' && Array.isArray(savedRequest.lines)) || (!savedRequest && restored.accepted?.month === sheet.month && restored.accepted?.building === sheet.building && typeof restored.accepted?.id === 'string'));
   const [person, setPerson] = useState<PurchaseApplicationApplicant | null>(
-    null,
+    validRestored ? savedRequest?.confirmer || null : null,
   );
   const [phase, setPhase] = useState<
     'ready' | 'submitting' | 'accepted' | 'success' | 'error'
   >('ready');
   const [error, setError] = useState('');
   const lock = useRef(false);
-  const accepted = useRef<StocktakeBulkTask | null>(null);
+  const accepted = useRef<StocktakeBulkTask | null>(validRestored ? restored?.accepted || null : null);
   const retry = useRef<{
     signature: string;
     request: StocktakeBulkRequest;
-  } | null>(null);
+  } | null>(validRestored ? restored?.retry || null : null);
   const pending = sheet.lines.filter((line) => line.status === 'draft');
   const canConfirm = canUseStocktakeLines(useAccess(), 'confirm', pending);
   useEffect(() => {
@@ -81,10 +88,13 @@ export function StocktakeBulkDialog({
     `review:${sheet.month}:${sheet.building}:${recordId}`;
   async function submit() {
     if (lock.current) return;
+    if (!validRestored || journal?.recoveryBlocked(journalKey)) { setError(journal?.issue(journalKey) || '原批量请求记录无法核验，请联系管理员；原记录已保留'); setPhase('error'); return; }
+    const hadPendingRequest = Boolean(retry.current || accepted.current);
     setError('');
     try {
       const progress = (task: StocktakeBulkTask) => {
         accepted.current = task.status === 'error' ? null : task;
+        journal?.saveTask(journalKey, {retry: retry.current, accepted: accepted.current});
         setPhase('accepted');
         onAccepted?.(task);
       };
@@ -98,13 +108,15 @@ export function StocktakeBulkDialog({
         );
         accepted.current = null;
         retry.current = null;
+        journal?.deleteTask(journalKey);
         onSaved(result);
         setPhase('success');
         return;
       }
+      if (!retry.current && pending.some(line => drafts.get(keyFor(line.inventory.recordId))?.retry)) throw new Error('请先核对原单条盘点请求，再办理批量确认');
       if (!canConfirm) throw new Error('当前权限不能确认所选盘点条目');
       if (!person) throw new Error('请从在职员工中选择确认人');
-      const lines = buildStocktakeBulkLines(sheet, drafts);
+      const lines = retry.current?.request.lines || buildStocktakeBulkLines(sheet, drafts);
       const payload = {
         scope: 'review' as const,
         month: sheet.month,
@@ -114,11 +126,13 @@ export function StocktakeBulkDialog({
         lines,
       };
       const signature = JSON.stringify(payload);
-      if (retry.current?.signature !== signature)
+      if (!retry.current)
         retry.current = {
           signature,
           request: { ...payload, clientMutationId: crypto.randomUUID() },
         };
+      journal?.saveTask(journalKey, {retry: retry.current, accepted: accepted.current});
+      journal?.assertSaved(journalKey);
       lock.current = true;
       setPhase('submitting');
       onSubmitting(true);
@@ -129,9 +143,12 @@ export function StocktakeBulkDialog({
       pending.forEach((line) => drafts.delete(keyFor(line.inventory.recordId)));
       retry.current = null;
       accepted.current = null;
+      journal?.deleteTask(journalKey);
       onSaved(result);
       setPhase('success');
     } catch (caught) {
+      const status = (caught as {response?: {status?: number}})?.response?.status;
+      if (!hadPendingRequest && !accepted.current && status && [400, 403, 404, 409, 422].includes(status)) { retry.current = null; journal?.deleteTask(journalKey); }
       setError(stocktakeError(caught));
       setPhase('error');
     } finally {
@@ -181,7 +198,7 @@ export function StocktakeBulkDialog({
                 value={person}
                 onChange={setPerson}
                 search={searchPeople}
-                disabled={phase === 'submitting' || phase === 'accepted'}
+                disabled={phase === 'submitting' || phase === 'accepted' || Boolean(retry.current)}
               />
             </label>
             {phase === 'accepted' && (
@@ -210,7 +227,7 @@ export function StocktakeBulkDialog({
                 phase === 'submitting' ||
                 phase === 'accepted' ||
                 (!accepted.current && !canConfirm) ||
-                !pending.length
+                (!pending.length && !accepted.current && !retry.current)
               }
               onClick={() => void submit()}
             >
@@ -220,7 +237,7 @@ export function StocktakeBulkDialog({
                   ? '正在提交…'
                   : accepted.current
                     ? '查询处理结果'
-                    : '确认本楼全部条目'}
+                    : retry.current ? '核对原批量请求' : '确认本楼全部条目'}
             </Button>
           )}
         </DialogFooter>

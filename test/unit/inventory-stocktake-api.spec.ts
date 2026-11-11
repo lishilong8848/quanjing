@@ -3,6 +3,7 @@ jest.mock('@lark-apaas/client-toolkit/utils/getAxiosForBackend', () => ({
 }));
 import { axiosForBackend } from '@lark-apaas/client-toolkit/utils/getAxiosForBackend';
 import {
+  searchStocktakePeople,
   getStocktakeSheet,
   bulkConfirmStocktake,
   undoBulkStocktake,
@@ -214,5 +215,22 @@ describe('stocktake sheet HTTP response', () => {
     const error = new Error('network timeout');
     request.mockRejectedValueOnce(error);
     await expect(getStocktakeSheet('2026-10', 'A楼')).rejects.toBe(error);
+  });
+});
+
+ describe('stocktake personnel lookup', () => {
+  const request = axiosForBackend as jest.Mock;
+  beforeEach(() => jest.resetAllMocks());
+  it('uses stocktake authority without purchase or building filters', async () => {
+    const people = [{ name: '朱春华', building: 'C楼' }];
+    request.mockResolvedValueOnce({data: people});
+    await expect(searchStocktakePeople('朱春华')).resolves.toEqual(people);
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({url: '/api/inventory-management/stocktake/people', params: {query:'朱春华',limit:30}}));
+  });
+  it('separates an empty result from malformed data and transport failure', async () => {
+    request.mockResolvedValueOnce({data: []}).mockResolvedValueOnce({data:{success:false}}).mockRejectedValueOnce(new Error('timeout'));
+    await expect(searchStocktakePeople('名字')).resolves.toEqual([]);
+    await expect(searchStocktakePeople('名字')).rejects.toThrow('返回格式无效');
+    await expect(searchStocktakePeople('名字')).rejects.toThrow('timeout');
   });
 });

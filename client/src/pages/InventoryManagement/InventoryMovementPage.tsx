@@ -1,3 +1,5 @@
+import { describePendingPurchaseReadFailure, pendingPurchaseReadDisplay } from './pending-purchase-read-state';
+import { createInventoryInboundQueryPool } from './inventory-inbound-query-pool';
 import {
   useCallback,
   useEffect,
@@ -115,6 +117,8 @@ import {
   acceptInventoryInboundRecovery,
   classifyInventoryInboundFailure,
   clearInventoryInboundRecovery,
+  adoptVerifiedLegacyInboundTask,
+  isVerifiedLegacyInboundTaskResult,
   createPurchaseInboundRecoveryDraft,
   finalizeInventoryInboundRecovery,
   isInventoryInboundRecoveryDraft,
@@ -122,6 +126,8 @@ import {
   isPurchaseInboundDraft,
   isPurchaseInboundRecoveryDraft,
   readInventoryInboundRecovery,
+  readAcceptedInventoryInboundRecoveries,
+  inventoryInboundRecoveryOwner,
   saveInventoryInboundRecovery,
   subscribeInventoryInboundRecovery,
   type InventoryInboundRecovery,
@@ -281,6 +287,9 @@ export function InventoryMovementPage({
 }: InventoryMovementPageProps) {
   const principal = useAccess();
   const { principalFingerprint } = principal;
+  const inboundRecoveryOwner = inventoryInboundRecoveryOwner(principal);
+  const inboundQueryPool = useRef(createInventoryInboundQueryPool()).current;
+  const inboundRefreshRef = useRef<{ principal: string | null; promise: Promise<unknown>; dirty: boolean } | null>(null);
   const canCreate = canUseInventoryAction(principal, 'create');
   const canConfirm = canUseInventoryAction(principal, 'confirm');
   const canRefresh = canUseInventoryAction(principal, 'refresh');
@@ -306,6 +315,7 @@ export function InventoryMovementPage({
   const [refreshing, setRefreshing] = useState(false);
   const [movementError, setMovementError] = useState('');
   const [pendingError, setPendingError] = useState('');
+  const [pendingAccessDenied, setPendingAccessDenied] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [manualRetryDraft, setManualRetryDraft] =
     useState<InventoryInboundDraft>();
@@ -523,7 +533,7 @@ export function InventoryMovementPage({
   );
   const shouldRefreshOutboundApprovals =
     shouldRefreshInventoryOutboundApprovals(type, response);
-  const pendingPurchases = movementNamespaceReady
+  const pendingPurchases = movementNamespaceReady && !pendingAccessDenied
     ? inboundState.basePendingPurchases
     : [];
   const normalizedPurchaseExecutionRecordId =
@@ -676,11 +686,12 @@ export function InventoryMovementPage({
       const requestId = ++pendingRequestRef.current;
       const requestGeneration = principalRequestGenerationRef.current;
       const requestPrincipal = principalFingerprint;
-      if (!forceRefresh) setPendingLoading(true);
+      setPendingLoading(true);
       setPendingError('');
       try {
         const result = await getPendingPurchaseInbounds(forceRefresh);
         if (
+          !mountedRef.current ||
           pendingRequestRef.current !== requestId ||
           principalRequestGenerationRef.current !== requestGeneration ||
           principalRequestPrincipalRef.current !== requestPrincipal
@@ -694,19 +705,24 @@ export function InventoryMovementPage({
           mergePurchaseQueryResult(current, result.items, requestId),
         );
         setPendingError('');
+        setPendingAccessDenied(false);
         return result.items;
-      } catch {
+      } catch (error) {
         if (
+          !mountedRef.current ||
           pendingRequestRef.current !== requestId ||
           principalRequestGenerationRef.current !== requestGeneration ||
           principalRequestPrincipalRef.current !== requestPrincipal
         ) {
           return null;
         }
-        setPendingError('待采购入库清单读取失败，请检查网络或数据源后重试。');
+        const failure = describePendingPurchaseReadFailure(error);
+        setPendingError(failure.message);
+        if (failure.hidePrevious) setPendingAccessDenied(true);
         return null;
       } finally {
         if (
+          mountedRef.current &&
           pendingRequestRef.current === requestId &&
           principalRequestGenerationRef.current === requestGeneration &&
           principalRequestPrincipalRef.current === requestPrincipal
@@ -800,7 +816,7 @@ export function InventoryMovementPage({
   );
 
   const restoreSavedInboundRecovery = useCallback(() => {
-    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>();
+    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>(inboundRecoveryOwner);
     if (!recovery) {
       if (restoredRecoveryMutationIdRef.current) {
         restoredRecoveryMutationIdRef.current = '';
@@ -826,7 +842,26 @@ export function InventoryMovementPage({
     }
     applyInboundRecovery(recovery);
     return recovery;
-  }, [applyInboundRecovery]);
+  }, [applyInboundRecovery, inboundRecoveryOwner]);
+
+  const refreshInboundAfterTask = useCallback(() => {
+    if (inboundRefreshRef.current?.principal === principalFingerprint) {
+      inboundRefreshRef.current.dirty = true;
+      return inboundRefreshRef.current.promise;
+    }
+    const entry = { principal: principalFingerprint, dirty: false, promise: Promise.resolve() as Promise<unknown> };
+    entry.promise = (async () => {
+      do {
+        entry.dirty = false;
+        await Promise.allSettled([loadMovements(true), loadPendingPurchases(true)]);
+      } while (entry.dirty && mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint);
+    })();
+    inboundRefreshRef.current = entry;
+    void entry.promise.finally(() => {
+      if (inboundRefreshRef.current === entry) inboundRefreshRef.current = null;
+    });
+    return entry.promise;
+  }, [loadMovements, loadPendingPurchases, principalFingerprint]);
 
   const queryAcceptedPurchaseInboundRecovery = useCallback(
     async (recovery: InventoryInboundRecovery<InboundRecoveryDraft>) => {
@@ -843,7 +878,7 @@ export function InventoryMovementPage({
       try {
         const result = await queryPurchaseInventoryInboundTask(recovery.taskId);
         if (isInventoryInboundTaskDeferred(result)) {
-          if (mountedRef.current) {
+          if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
             toast.info(result.message || '采购入库仍在后台同步，请稍后再查。');
           }
           return;
@@ -856,18 +891,15 @@ export function InventoryMovementPage({
         }
         const finalized = finalizeInventoryInboundRecovery(
           recovery.clientMutationId,
-          'completed',
+          'completed', inboundRecoveryOwner,
         );
-        if (!mountedRef.current || !finalized) return;
-        await Promise.allSettled([
-          loadMovements(true),
-          loadPendingPurchases(true),
-        ]);
+        if (!mountedRef.current || !finalized || principalRequestPrincipalRef.current !== principalFingerprint) return;
         toast.success(result.message || '采购入库后台同步已完成');
+        await refreshInboundAfterTask();
       } catch (error) {
         const outcome = classifyInventoryInboundFailure(error, true);
         if (outcome === 'rejected') {
-          finalizeInventoryInboundRecovery(recovery.clientMutationId, 'failed');
+          finalizeInventoryInboundRecovery(recovery.clientMutationId, 'failed', inboundRecoveryOwner);
           if (
             isPurchaseInboundRecoveryDraft(recovery.draft) &&
             recovery.purchaseExecutionRecordId ===
@@ -886,7 +918,7 @@ export function InventoryMovementPage({
                   clientMutationId: undefined,
                 },
               },
-            });
+            }, inboundRecoveryOwner);
           } else if (
             isPurchaseInboundDraft(recovery.draft) &&
             recovery.purchaseExecutionRecordId ===
@@ -899,11 +931,11 @@ export function InventoryMovementPage({
               clientMutationId: recovery.clientMutationId,
               purchaseExecutionRecordId: recovery.purchaseExecutionRecordId,
               draft: { ...recovery.draft, clientMutationId: undefined },
-            });
+            }, inboundRecoveryOwner);
           }
-          if (mountedRef.current) restoreSavedInboundRecovery();
+          if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) restoreSavedInboundRecovery();
         }
-        if (mountedRef.current) {
+        if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
           toast.error(
             outcome === 'rejected'
               ? errorMessage(error, '采购入库后台任务失败，已恢复可编辑草稿。')
@@ -912,7 +944,7 @@ export function InventoryMovementPage({
         }
       }
     },
-    [loadMovements, loadPendingPurchases, restoreSavedInboundRecovery],
+    [refreshInboundAfterTask, inboundRecoveryOwner, principalFingerprint, restoreSavedInboundRecovery],
   );
 
   const applyOutboundRecovery = useCallback(
@@ -1167,6 +1199,8 @@ export function InventoryMovementPage({
     setStatus('all');
     setPage(1);
     setPendingPage(1);
+    setPendingAccessDenied(false);
+    setPendingError('');
     setInboundState(
       createInitialInventoryInboundState<MovementMutationDraft>({
         movementResponse: EMPTY_RESPONSE,
@@ -1573,8 +1607,22 @@ export function InventoryMovementPage({
   useEffect(() => {
     if (type !== 'inbound') return;
 
-    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>();
-    if (!recovery) return;
+    let recoveries: InventoryInboundRecovery<InboundRecoveryDraft>[];
+    try {
+      recoveries = inboundRecoveryOwner
+        ? readAcceptedInventoryInboundRecoveries<InboundRecoveryDraft>(inboundRecoveryOwner)
+        : [];
+    } catch (error) {
+      toast.error(errorMessage(error, '已受理入库任务无法恢复，请保留页面后重试'));
+      return;
+    }
+    const legacy = readInventoryInboundRecovery<InboundRecoveryDraft>(inboundRecoveryOwner);
+    if (legacy?.status === 'accepted' && !recoveries.some((row) => row.clientMutationId === legacy.clientMutationId)) {
+      recoveries.push(legacy);
+    }
+    const cleanups = recoveries
+      .filter((row) => !activeInboundMutationIdsRef.current.has(row.clientMutationId))
+      .map((recovery) => {
     const acceptedRecovery = recovery.status === 'accepted';
     if (
       !acceptedRecovery ||
@@ -1589,7 +1637,8 @@ export function InventoryMovementPage({
     const coordinator =
       createInventoryInboundTaskReconciliationCoordinator<InventoryMovementItem>(
         {
-          query: async () => {
+          query: () => inboundQueryPool(async () => {
+            if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return { status: 'pending' as const };
             if (recovery.kind === 'manual') {
               const result = await queryManualInventoryInboundTask(
                 recovery.taskId!,
@@ -1623,16 +1672,16 @@ export function InventoryMovementPage({
               throw new Error('恢复的采购入库任务结果与原请求不一致');
             }
             return { status: 'completed' as const, value: movement };
-          },
+          }),
           onCompleted: async (movement) => {
             const finalized = finalizeInventoryInboundRecovery(
               recovery.clientMutationId,
-              'completed',
+              'completed', inboundRecoveryOwner,
             );
             activeInboundMutationIdsRef.current.delete(
               recovery.clientMutationId,
             );
-            if (!mountedRef.current || !finalized) return;
+            if (!mountedRef.current || !finalized || principalRequestPrincipalRef.current !== principalFingerprint) return;
             setInboundState((current) =>
               confirmMutation(
                 current,
@@ -1641,10 +1690,8 @@ export function InventoryMovementPage({
                 movementRequestRef.current,
               ),
             );
-            await Promise.allSettled([
-              loadMovements(true),
-              loadPendingPurchases(true),
-            ]);
+            toast.success('入库后台同步已完成');
+            await refreshInboundAfterTask();
             if (!movement.operator) {
               window.setTimeout(() => {
                 if (
@@ -1655,7 +1702,6 @@ export function InventoryMovementPage({
                 }
               }, 2_000);
             }
-            toast.success('入库后台同步已完成');
           },
           onError: (error) => {
             const outcome = classifyInventoryInboundFailure(error, true);
@@ -1671,7 +1717,7 @@ export function InventoryMovementPage({
 
             finalizeInventoryInboundRecovery(
               recovery.clientMutationId,
-              'failed',
+              'failed', inboundRecoveryOwner,
             );
             if (
               recovery.kind === 'manual' &&
@@ -1683,7 +1729,7 @@ export function InventoryMovementPage({
                 retryMode: 'editable',
                 clientMutationId: recovery.clientMutationId,
                 draft: { ...recovery.draft, clientMutationId: undefined },
-              });
+              }, inboundRecoveryOwner);
             } else if (
               recovery.kind === 'purchase' &&
               recovery.purchaseExecutionRecordId &&
@@ -1702,12 +1748,12 @@ export function InventoryMovementPage({
                     clientMutationId: undefined,
                   },
                 },
-              });
+              }, inboundRecoveryOwner);
             }
             activeInboundMutationIdsRef.current.delete(
               recovery.clientMutationId,
             );
-            if (mountedRef.current) {
+            if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
               restoreSavedInboundRecovery();
               toast.error(
                 errorMessage(error, '入库后台任务失败，已恢复可编辑草稿。'),
@@ -1741,11 +1787,15 @@ export function InventoryMovementPage({
       coordinator.stop();
       activeInboundMutationIdsRef.current.delete(recovery.clientMutationId);
     };
+    });
+    return () => cleanups.forEach((cleanup) => cleanup?.());
   }, [
     acceptedInboundRecoveryRevision,
     loadMovements,
     loadPendingPurchases,
     principalFingerprint,
+    inboundRecoveryOwner,
+    refreshInboundAfterTask,
     restoreSavedInboundRecovery,
     type,
   ]);
@@ -1755,11 +1805,12 @@ export function InventoryMovementPage({
 
     const restoreRecovery = () => {
       restoreSavedInboundRecovery();
+      requestAcceptedInboundRecoveryCheck();
     };
 
     restoreRecovery();
     return subscribeInventoryInboundRecovery(restoreRecovery);
-  }, [restoreSavedInboundRecovery, type]);
+  }, [restoreSavedInboundRecovery, requestAcceptedInboundRecoveryCheck, type]);
 
   useEffect(() => {
     if (type !== 'outbound') return;
@@ -1898,7 +1949,7 @@ export function InventoryMovementPage({
       manualRetryDraft?.clientMutationId?.trim() ||
       restoredRecoveryMutationIdRef.current;
     restoredRecoveryMutationIdRef.current = '';
-    if (clientMutationId) clearInventoryInboundRecovery(clientMutationId);
+    if (clientMutationId) clearInventoryInboundRecovery(clientMutationId, inboundRecoveryOwner);
     setManualRetryDraft((current) =>
       current ? { ...current, clientMutationId: undefined } : current,
     );
@@ -1912,7 +1963,7 @@ export function InventoryMovementPage({
       restoredRecoveryMutationIdRef.current;
     restoredRecoveryMutationIdRef.current = '';
     dismissedInboundRecoveryMutationIdRef.current = '';
-    if (clientMutationId) clearInventoryInboundRecovery(clientMutationId);
+    if (clientMutationId) clearInventoryInboundRecovery(clientMutationId, inboundRecoveryOwner);
     setPurchaseRetryDraft((current) =>
       current ? { ...current, clientMutationId: undefined } : current,
     );
@@ -1929,7 +1980,7 @@ export function InventoryMovementPage({
     setBatchInboundQueue([]);
     setBatchInboundSubmissions([]);
     setBatchInboundIndex(-1);
-    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>();
+    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>(inboundRecoveryOwner);
     dismissedInboundRecoveryMutationIdRef.current =
       recovery?.clientMutationId || restoredRecoveryMutationIdRef.current;
     setRecoveredPurchaseExecutionId('');
@@ -2136,23 +2187,32 @@ export function InventoryMovementPage({
     let updated = journal;
     let queryError = '';
     try {
-      for (const entry of journal.entries) {
-        if ((entry.status !== 'accepted' && entry.status !== 'uncertain') || !entry.taskId) continue;
+      const outcomes = await Promise.all(journal.entries.map((entry) => inboundQueryPool(async () => {
+        if ((entry.status !== 'accepted' && entry.status !== 'uncertain') || !entry.taskId) return null;
+        if (!mountedRef.current || principalRequestPrincipalRef.current !== journal.principalFingerprint) return null;
         const request = journal.requests.find((candidate) => candidate.clientMutationId === entry.clientMutationId);
-        if (!request) continue;
+        if (!request) return null;
         try {
           const response = journal.kind === 'purchase'
             ? await getInventoryInboundTaskStatus(entry.taskId)
             : await getInventoryOutboundTaskStatus(entry.taskId, request.building);
           const task = response.task;
-          if (task.id !== entry.taskId) throw new Error('任务号不一致');
-          const status = task.status === 'completed' ? 'completed'
-            : task.status === 'failed' ? 'failed'
-              : task.status === 'uncertain' ? 'uncertain' : 'accepted';
-          updated = updateInventoryBatchTask(updated, entry.clientMutationId, status, task.message);
+          if (response.success !== true || task.id !== entry.taskId) throw new Error('任务号不一致');
+          const status = task.status === 'completed' ? 'completed' as const
+            : task.status === 'failed' ? 'failed' as const
+              : task.status === 'uncertain' ? 'uncertain' as const : 'accepted' as const;
+          return { clientMutationId: entry.clientMutationId, status, message: task.message };
         } catch (error) {
-          queryError = errorMessage(error, '任务查询失败，稍后自动重试');
+          return { error: errorMessage(error, '任务查询失败，稍后自动重试') };
         }
+      })));
+      // A retry or a new batch may have replaced this snapshot while reads were in flight.
+      const latest = readInventoryBatchJournal(journal.principalFingerprint, journal.kind);
+      if (!latest || JSON.stringify(latest) !== JSON.stringify(journal)) return;
+      for (const outcome of outcomes) {
+        if (!outcome) continue;
+        if ('error' in outcome) queryError = outcome.error || '任务查询失败，稍后自动重试';
+        else updated = updateInventoryBatchTask(updated, outcome.clientMutationId, outcome.status, outcome.message);
       }
       if (mountedRef.current && principalRequestPrincipalRef.current === journal.principalFingerprint) setBatchErrors((current) =>
         current[journal.kind] === queryError ? current : { ...current, [journal.kind]: queryError },
@@ -2514,7 +2574,7 @@ export function InventoryMovementPage({
         retryMode: 'locked',
         clientMutationId: submission.clientMutationId,
         draft: submission.draft,
-      });
+      }, inboundRecoveryOwner);
       if (!recoveryClaimed) {
         activeInboundMutationIdsRef.current.delete(submission.clientMutationId);
         const occupiedRecovery = restoreSavedInboundRecovery();
@@ -2550,8 +2610,9 @@ export function InventoryMovementPage({
               taskId: response.taskId,
               kind: 'manual',
               request: submission.request,
+              ownerKey: inboundRecoveryOwner,
             });
-            if (mountedRef.current) {
+            if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
               toast.info(
                 response.message || '入库已受理，正在后台同步，可安全离开。',
               );
@@ -2562,7 +2623,7 @@ export function InventoryMovementPage({
           }
           if (isInventoryInboundTaskDeferred(result)) {
             resumeAcceptedTask = true;
-            if (mountedRef.current) {
+            if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
               toast.info(
                 result.message || '入库仍在后台同步，稍后可继续查询。',
               );
@@ -2595,7 +2656,7 @@ export function InventoryMovementPage({
           );
           if (acceptedTask && outcome === 'unknown') {
             resumeAcceptedTask = true;
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return;
             setInboundState((current) =>
               failMutation(
                 current,
@@ -2611,7 +2672,7 @@ export function InventoryMovementPage({
           if (acceptedTask) {
             finalizeInventoryInboundRecovery(
               submission.clientMutationId,
-              'failed',
+              'failed', inboundRecoveryOwner,
             );
           }
           const retryDraft: InventoryInboundDraft = {
@@ -2625,8 +2686,8 @@ export function InventoryMovementPage({
             retryMode: outcome === 'unknown' ? 'locked' : 'editable',
             clientMutationId: submission.clientMutationId,
             draft: retryDraft,
-          });
-          if (!mountedRef.current) return;
+          }, inboundRecoveryOwner);
+          if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return;
           setInboundState((current) =>
             failMutation(current, submission.clientMutationId, submissionError),
           );
@@ -2646,12 +2707,12 @@ export function InventoryMovementPage({
         if (acceptedTask) {
           finalizeInventoryInboundRecovery(
             submission.clientMutationId,
-            'completed',
+            'completed', inboundRecoveryOwner,
           );
         } else {
-          clearInventoryInboundRecovery(submission.clientMutationId);
+          clearInventoryInboundRecovery(submission.clientMutationId, inboundRecoveryOwner);
         }
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return;
         setInboundState((current) =>
           confirmMutation(
             current,
@@ -2669,12 +2730,22 @@ export function InventoryMovementPage({
       });
       return true;
     },
-    [requestAcceptedInboundRecoveryCheck, restoreSavedInboundRecovery, canCreate, canActOnRecord],
+    [requestAcceptedInboundRecoveryCheck, restoreSavedInboundRecovery, canCreate, canActOnRecord, inboundRecoveryOwner, principalFingerprint],
   );
 
   const submitPurchaseInbound = useCallback(
     (submission: PurchaseInboundSubmission): boolean => {
       if (!canConfirm) return false;
+      try {
+        if (inboundRecoveryOwner && readAcceptedInventoryInboundRecoveries(inboundRecoveryOwner)
+          .some((row) => row.purchaseExecutionRecordId === submission.purchaseExecutionRecordId)) {
+          toast.info('该采购入库已受理，请查看原任务进度');
+          return false;
+        }
+      } catch (error) {
+        toast.error(errorMessage(error, '入库任务记录无法读取，请稍后重试'));
+        return false;
+      }
       if (
         activeInboundMutationIdsRef.current.has(submission.clientMutationId)
       ) {
@@ -2709,7 +2780,7 @@ export function InventoryMovementPage({
         clientMutationId: submission.clientMutationId,
         draft: purchaseRecoveryDraft,
         purchaseExecutionRecordId: submission.purchaseExecutionRecordId,
-      });
+      }, inboundRecoveryOwner);
       if (!recoveryClaimed) {
         activeInboundMutationIdsRef.current.delete(submission.clientMutationId);
         const occupiedRecovery = restoreSavedInboundRecovery();
@@ -2746,8 +2817,9 @@ export function InventoryMovementPage({
               taskId: response.taskId,
               kind: 'purchase',
               request: submission.request,
+              ownerKey: inboundRecoveryOwner,
             });
-            if (mountedRef.current) {
+            if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
               setConfirmingExecutionId((current) =>
                 current === submission.purchaseExecutionRecordId ? '' : current,
               );
@@ -2762,7 +2834,7 @@ export function InventoryMovementPage({
           }
           if (isInventoryInboundTaskDeferred(result)) {
             resumeAcceptedTask = true;
-            if (mountedRef.current) {
+            if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
               toast.info(
                 result.message || '采购入库仍在后台同步，稍后可继续查询。',
               );
@@ -2801,7 +2873,7 @@ export function InventoryMovementPage({
           );
           if (acceptedTask && outcome === 'unknown') {
             resumeAcceptedTask = true;
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return;
             setInboundState((current) =>
               failMutation(
                 current,
@@ -2817,7 +2889,7 @@ export function InventoryMovementPage({
           if (acceptedTask) {
             finalizeInventoryInboundRecovery(
               submission.clientMutationId,
-              'failed',
+              'failed', inboundRecoveryOwner,
             );
           }
           const retryDraft: PurchaseInboundDraft = {
@@ -2836,8 +2908,8 @@ export function InventoryMovementPage({
             clientMutationId: submission.clientMutationId,
             draft: editableRecoveryDraft,
             purchaseExecutionRecordId: submission.purchaseExecutionRecordId,
-          });
-          if (!mountedRef.current) return;
+          }, inboundRecoveryOwner);
+          if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return;
           setInboundState((current) =>
             failMutation(current, submission.clientMutationId, submissionError),
           );
@@ -2857,12 +2929,12 @@ export function InventoryMovementPage({
         if (acceptedTask) {
           finalizeInventoryInboundRecovery(
             submission.clientMutationId,
-            'completed',
+            'completed', inboundRecoveryOwner,
           );
         } else {
-          clearInventoryInboundRecovery(submission.clientMutationId);
+          clearInventoryInboundRecovery(submission.clientMutationId, inboundRecoveryOwner);
         }
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return;
         setInboundState((current) =>
           confirmMutation(
             current,
@@ -2882,7 +2954,7 @@ export function InventoryMovementPage({
         notificationWarnings.forEach((warning) => toast.warning(warning));
       })().finally(() => {
         activeInboundMutationIdsRef.current.delete(submission.clientMutationId);
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return;
         if (resumeAcceptedTask) requestAcceptedInboundRecoveryCheck();
         setConfirmingExecutionId((current) =>
           current === submission.purchaseExecutionRecordId ? '' : current,
@@ -2890,7 +2962,7 @@ export function InventoryMovementPage({
       });
       return true;
     },
-    [canConfirm, canActOnRecord,
+    [canConfirm, canActOnRecord, inboundRecoveryOwner, principalFingerprint,
       pendingPurchases,
       requestAcceptedInboundRecoveryCheck,
       restoreSavedInboundRecovery,
@@ -2930,7 +3002,18 @@ export function InventoryMovementPage({
 
   const handlePendingPurchaseAction = (item: PurchasePendingInboundItem) => {
     if (!canActOnRecord('confirm', item)) return;
-    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>();
+    try {
+      const accepted = inboundRecoveryOwner && readAcceptedInventoryInboundRecoveries<InboundRecoveryDraft>(inboundRecoveryOwner)
+        .find((row) => row.purchaseExecutionRecordId === item.executionRecordId);
+      if (accepted) {
+        void queryAcceptedPurchaseInboundRecovery(accepted);
+        return;
+      }
+    } catch (error) {
+      toast.error(errorMessage(error, '入库任务记录无法读取，请稍后重试'));
+      return;
+    }
+    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>(inboundRecoveryOwner);
     if (recovery && recovery.status === 'accepted') {
       void queryAcceptedPurchaseInboundRecovery(recovery);
       return;
@@ -2977,7 +3060,14 @@ export function InventoryMovementPage({
       toast.error(errorMessage(error, '批量任务记录无法读取'));
       return;
     }
-    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>();
+    try {
+      const accepted = inboundRecoveryOwner ? readAcceptedInventoryInboundRecoveries(inboundRecoveryOwner) : [];
+      if (items.some((item) => accepted.some((task) => task.purchaseExecutionRecordId === item.executionRecordId))) {
+        toast.info('所选采购包含已受理的入库任务，请先核对原任务进度');
+        return;
+      }
+    } catch (error) { toast.error(errorMessage(error, '入库任务记录无法读取')); return; }
+    const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>(inboundRecoveryOwner);
     if (recovery) {
       toast.info('请先处理已恢复的入库任务，再办理批量入库');
       return;
@@ -3057,8 +3147,31 @@ export function InventoryMovementPage({
     }
   }, [canDeleteMovement, response.items, selectedMovementForDeletion]);
 
+  const legacyInbound = type === 'inbound' ? readInventoryInboundRecovery() : null;
+  const reconcileLegacyInbound = async () => {
+    if (!legacyInbound || !inboundRecoveryOwner) return;
+    if (legacyInbound.status !== 'accepted' || !legacyInbound.taskId) {
+      toast.info('旧请求尚无受理回执，请联系管理员使用原申请标识核对：' + legacyInbound.clientMutationId);
+      return;
+    }
+    try {
+      const response = await getInventoryInboundTaskStatus(legacyInbound.taskId);
+      if (!isVerifiedLegacyInboundTaskResult(response, legacyInbound)) throw new Error('旧任务尚无匹配的完成回执，请稍后核对；原记录已保留');
+      if (!mountedRef.current || principalRequestPrincipalRef.current !== principalFingerprint) return;
+      if (!adoptVerifiedLegacyInboundTask(legacyInbound.clientMutationId, inboundRecoveryOwner)) throw new Error('旧任务核对结果暂不能保存，原记录已保留');
+      requestAcceptedInboundRecoveryCheck();
+      toast.success('旧入库任务身份已核对，正在恢复进度');
+    } catch (error) {
+      if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) toast.error(errorMessage(error, '旧任务无法核对，请由原办理账号重试；原记录已保留'));
+    }
+  };
+
   return (
     <section aria-labelledby={`${type}-management-title`} className="space-y-4">
+      {legacyInbound && <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        发现旧版入库请求，原记录已保留；不影响办理新单。
+        <Button variant="outline" className="ml-3" onClick={() => void reconcileLegacyInbound()}>核对旧入库任务</Button>
+      </div>}
       {type === 'outbound' &&
       (legacyOutboundCreateBlocked || legacyOutboundReconnectPending) ? (
         <div
@@ -3404,13 +3517,20 @@ export function InventoryMovementPage({
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={pendingLoading}
                     onClick={retryPendingPurchases}
                   >
                     重新加载
                   </Button>
                 </div>
               )}
-              {pendingLoading ? (
+              {pendingPurchaseReadDisplay(pendingLoading, pendingPurchases.length) === 'refreshing' && (
+                <div role="status" className="mx-4 my-3 flex items-center gap-2 text-sm text-slate-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />后台正在核对待入库清单，现有记录保持显示。
+                </div>
+              )}
+              {pendingError && pendingPurchases.length > 0 && <p className="mx-4 mb-3 text-xs text-slate-500">当前显示上次核对成功的清单；办理时仍会校验最新单据状态。</p>}
+              {pendingPurchaseReadDisplay(pendingLoading, pendingPurchases.length) === 'initial-loading' ? (
                 <div
                   role="status"
                   className="flex min-h-32 items-center justify-center gap-2 p-5 text-sm text-slate-500"
@@ -3448,7 +3568,7 @@ export function InventoryMovementPage({
                 <div className="py-8 text-center text-sm text-slate-400">
                   {pendingPurchases.length
                     ? '当前筛选暂无待采购入库记录'
-                    : '暂无待库房确认的采购物品'}
+                    : pendingError ? '清单尚未完成核对，请查看上方提示。' : '暂无待库房确认的采购物品'}
                 </div>
               )}
             </CardContent>

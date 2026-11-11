@@ -1,3 +1,4 @@
+import { StocktakeDraftJournal, stocktakeDraftJournalIdentity } from './stocktake-draft-journal';
 import { businessBuildingsForAction, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
 import { accessBuildings } from '@shared/building-access';
 import { canUsePageAction } from '../business-action-access';
@@ -145,10 +146,10 @@ export default function InventoryManagementPage() {
     activeSection === 'stocktake' && (searchParams.get('action') === 'execute' || !canReadInventory);
   const stocktakeMonth = resolveStocktakeMonth(searchParams.get('month'));
   const stocktakeScope: StocktakeScope = searchParams.get('scope') === 'review' ? 'review' : 'sample';
-  const draftIdentity = `${principalFingerprint}:${role}:${purchaseBuilding}`;
-  const stocktakeDrafts = useRef({ identity: draftIdentity, values: new Map<string, StocktakeLocalDraft>() });
+  const draftIdentity = stocktakeDraftJournalIdentity(principal);
+  const stocktakeDrafts = useRef({ identity: '', values: new Map<string, StocktakeLocalDraft>() });
   if (stocktakeDrafts.current.identity !== draftIdentity)
-    stocktakeDrafts.current = { identity: draftIdentity, values: new Map() };
+    stocktakeDrafts.current = { identity: draftIdentity, values: new StocktakeDraftJournal(principal) };
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if ([...stocktakeDrafts.current.values.values()].some(draft => draft.dirty)) {
@@ -422,7 +423,7 @@ export default function InventoryManagementPage() {
           initialBuilding={searchParams.get('building') as WarehouseBuilding | null}
           initialFilter={searchParams.get('filter') as StocktakeFilter | null}
           drafts={stocktakeDrafts.current.values}
-          key={principalFingerprint || `${role}:${purchaseBuilding}`}
+          key={draftIdentity}
           allowedBuildings={principal.effectiveAuthorization || isProfessionalBusinessPrincipal(principal) ? WAREHOUSE_BUILDINGS.filter(value => businessBuildingsForAction(principal, { module: 'stocktake', action: 'read' }).includes(value as never)) : role === 'admin' ? WAREHOUSE_BUILDINGS : WAREHOUSE_BUILDINGS.filter(value => scope?.includes(value))}
           onBack={() => setSearchParams(current => { const next = new URLSearchParams(current); next.delete('action'); next.delete('filter'); next.delete('building'); return next; })}
         />

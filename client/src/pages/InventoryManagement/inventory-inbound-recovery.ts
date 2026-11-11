@@ -6,6 +6,7 @@ import type {
   PurchasePendingInboundItem,
 } from '@shared/inventory-management.interface';
 import { WAREHOUSE_BUILDINGS } from '@shared/inventory-management.interface';
+import type { AccessPrincipal } from '@shared/access-control.interface';
 
 import type { InventoryInboundDraft } from './InventoryMovementCreateDialog';
 import type { PurchaseInboundDraft } from './PurchaseInboundConfirmationDialog';
@@ -16,6 +17,8 @@ export const INVENTORY_INBOUND_RECOVERY_EVENT =
   'inventory-management:inbound-recovery-change';
 
 const INVENTORY_INBOUND_RECOVERY_VERSION = 1;
+const ACCEPTED_INBOUND_PREFIX = 'inventory-management:inbound-accepted:';
+const MAX_ACCEPTED_INBOUND_TASKS = 20;
 
 export type InventoryInboundRecoveryKind = 'manual' | 'purchase';
 export type InventoryInboundRecoveryStatus = 'pending' | 'accepted' | 'failed';
@@ -43,10 +46,12 @@ interface StoredInventoryInboundRecovery<
   TDraft,
 > extends InventoryInboundRecovery<TDraft> {
   version: typeof INVENTORY_INBOUND_RECOVERY_VERSION;
+  ownerKey?: string;
 }
 
 const STORED_KEYS = new Set([
   'version',
+  'ownerKey',
   'kind',
   'status',
   'retryMode',
@@ -590,6 +595,7 @@ function isStoredRecovery(
     return false;
   }
 
+  if (value.ownerKey !== undefined && (typeof value.ownerKey !== 'string' || !value.ownerKey || value.ownerKey.length > 1600)) return false;
   const stored = value as unknown as StoredInventoryInboundRecovery<
     Record<string, unknown>
   >;
@@ -768,6 +774,7 @@ function dispatchRecoveryEvent(): void {
 
 export function saveInventoryInboundRecovery<TDraft>(
   recovery: InventoryInboundRecovery<TDraft>,
+  ownerKey?: string | null,
 ): boolean {
   let validRecovery = false;
   try {
@@ -792,6 +799,7 @@ export function saveInventoryInboundRecovery<TDraft>(
     }
     const stored: StoredInventoryInboundRecovery<TDraft> = {
       version: INVENTORY_INBOUND_RECOVERY_VERSION,
+      ...(ownerKey ? { ownerKey } : {}),
       kind: recovery.kind,
       status: recovery.status,
       ...(recovery.retryMode === undefined
@@ -820,11 +828,12 @@ export function saveInventoryInboundRecovery<TDraft>(
       return false;
     }
     const currentValue = storage.getItem(
-      INVENTORY_INBOUND_RECOVERY_STORAGE_KEY,
+      inboundDraftStorageKey(ownerKey),
     );
     if (currentValue !== null) {
       try {
         const current: unknown = JSON.parse(currentValue);
+        if (ownerKey && isStoredRecovery(current) && (current.ownerKey !== ownerKey || (stored.status === 'failed' && current.clientMutationId !== stored.clientMutationId))) return false;
         if (
           isStoredRecovery(current) &&
           current.clientMutationId !== recovery.clientMutationId &&
@@ -836,10 +845,12 @@ export function saveInventoryInboundRecovery<TDraft>(
         // Malformed recovery data is safe to replace with a valid snapshot.
       }
     }
-    storage.setItem(
-      INVENTORY_INBOUND_RECOVERY_STORAGE_KEY,
-      JSON.stringify(stored),
-    );
+    const serialized = JSON.stringify(stored);
+    storage.setItem(inboundDraftStorageKey(ownerKey), serialized);
+    if (storage.getItem(inboundDraftStorageKey(ownerKey)) !== serialized) return false;
+    if (ownerKey && stored.status === 'failed') {
+      storage.removeItem(acceptedInboundPrefix(ownerKey) + stored.clientMutationId);
+    }
     return true;
   } catch {
     return false;
@@ -850,22 +861,23 @@ export function saveInventoryInboundRecovery<TDraft>(
 
 export function readInventoryInboundRecovery<
   TDraft = Record<string, unknown>,
->(): InventoryInboundRecovery<TDraft> | null {
+>(ownerKey?: string | null): InventoryInboundRecovery<TDraft> | null {
   const storage = getSessionStorage();
   if (storage === null) {
     return null;
   }
   try {
-    const storedValue = storage.getItem(INVENTORY_INBOUND_RECOVERY_STORAGE_KEY);
+    const storedValue = storage.getItem(inboundDraftStorageKey(ownerKey));
     if (storedValue === null || storedValue === undefined) {
       return null;
     }
     const parsed: unknown = JSON.parse(storedValue);
     if (!isStoredRecovery(parsed)) {
-      storage.removeItem(INVENTORY_INBOUND_RECOVERY_STORAGE_KEY);
+      storage.removeItem(inboundDraftStorageKey(ownerKey));
       dispatchRecoveryEvent();
       return null;
     }
+    if (ownerKey && parsed.ownerKey !== ownerKey) return null;
     return {
       kind: parsed.kind,
       status: parsed.status,
@@ -888,7 +900,7 @@ export function readInventoryInboundRecovery<
     };
   } catch {
     try {
-      storage.removeItem(INVENTORY_INBOUND_RECOVERY_STORAGE_KEY);
+      storage.removeItem(inboundDraftStorageKey(ownerKey));
       dispatchRecoveryEvent();
     } catch {
       // An unreadable storage backend cannot retain a usable recovery.
@@ -897,11 +909,11 @@ export function readInventoryInboundRecovery<
   }
 }
 
-export function clearInventoryInboundRecovery(clientMutationId: string): void {
+export function clearInventoryInboundRecovery(clientMutationId: string, ownerKey?: string | null): void {
   try {
     const storage = getSessionStorage();
     const storedValue = storage?.getItem(
-      INVENTORY_INBOUND_RECOVERY_STORAGE_KEY,
+      inboundDraftStorageKey(ownerKey),
     );
     if (storage === null || storedValue === null || storedValue === undefined) {
       return;
@@ -911,7 +923,7 @@ export function clearInventoryInboundRecovery(clientMutationId: string): void {
       isStoredRecovery(parsed) &&
       parsed.clientMutationId === clientMutationId
     ) {
-      storage.removeItem(INVENTORY_INBOUND_RECOVERY_STORAGE_KEY);
+      storage.removeItem(inboundDraftStorageKey(ownerKey));
     }
   } catch {
     // Recovery cleanup must never block the confirmed UI state.
@@ -925,8 +937,9 @@ export function acceptInventoryInboundRecovery(input: {
   taskId: string;
   kind: InventoryInboundRecoveryKind;
   request: InventoryInboundRecoveryRequest;
+  ownerKey?: string | null;
 }): boolean {
-  const current = readInventoryInboundRecovery();
+  const current = readInventoryInboundRecovery(input.ownerKey);
   if (
     !current ||
     current.clientMutationId !== input.clientMutationId ||
@@ -948,21 +961,47 @@ export function acceptInventoryInboundRecovery(input: {
   ) {
     return false;
   }
-  return saveInventoryInboundRecovery({
+  const accepted = {
     ...current,
-    status: 'accepted',
-    retryMode: 'locked',
+    status: 'accepted' as const,
+    retryMode: 'locked' as const,
     taskId: input.taskId,
     request: input.request,
-  });
+  };
+  if (input.ownerKey !== undefined) {
+    if (!storeAcceptedInventoryInboundRecovery(accepted, input.ownerKey)) {
+      return saveInventoryInboundRecovery(accepted, input.ownerKey);
+    }
+    clearInventoryInboundRecovery(input.clientMutationId, input.ownerKey);
+    return true;
+  }
+  return saveInventoryInboundRecovery(accepted);
 }
 
 export function finalizeInventoryInboundRecovery(
   clientMutationId: string,
   status: 'running' | 'completed' | 'failed',
+  ownerKey?: string | null,
 ): boolean {
   if (status === 'running') return false;
-  const current = readInventoryInboundRecovery();
+  if (ownerKey) {
+    try {
+      const task = readAcceptedInventoryInboundRecoveries(ownerKey)
+        .find((entry) => entry.clientMutationId === clientMutationId);
+      if (task) {
+        // Keep the accepted snapshot until its editable failure draft is safely saved.
+        if (status === 'failed') return false;
+        const storage = getSessionStorage();
+        if (!storage) return false;
+        const key = acceptedInboundPrefix(ownerKey) + clientMutationId;
+        storage.removeItem(key);
+        const removed = storage.getItem(key) === null;
+        if (removed) dispatchRecoveryEvent();
+        return removed;
+      }
+    } catch { return false; }
+  }
+  const current = readInventoryInboundRecovery(ownerKey);
   if (
     !current ||
     current.status !== 'accepted' ||
@@ -970,8 +1009,65 @@ export function finalizeInventoryInboundRecovery(
   ) {
     return false;
   }
-  clearInventoryInboundRecovery(clientMutationId);
-  return readInventoryInboundRecovery()?.clientMutationId !== clientMutationId;
+  clearInventoryInboundRecovery(clientMutationId, ownerKey);
+  return readInventoryInboundRecovery(ownerKey)?.clientMutationId !== clientMutationId;
+}
+
+export function inventoryInboundRecoveryOwner(
+  principal: Pick<AccessPrincipal, 'accountId' | 'impersonation'>,
+): string | null {
+  if (!principal.accountId || principal.accountId.length > 256) return null;
+  return `${encodeURIComponent(principal.accountId)}:${encodeURIComponent(principal.impersonation?.actorAccountId || '')}`;
+}
+
+function acceptedInboundPrefix(ownerKey: string | null | undefined): string {
+  if (!ownerKey || ownerKey.length > 1600 || !/^[A-Za-z0-9_%.-]+:[A-Za-z0-9_%.-]*$/.test(ownerKey)) {
+    throw new Error('当前登录身份无法安全恢复入库任务，请重新登录');
+  }
+  return `${ACCEPTED_INBOUND_PREFIX}${ownerKey}:`;
+}
+
+export function readAcceptedInventoryInboundRecoveries<TDraft = Record<string, unknown>>(
+  ownerKey: string | null | undefined,
+): InventoryInboundRecovery<TDraft>[] {
+  const prefix = acceptedInboundPrefix(ownerKey);
+  const storage = getSessionStorage();
+  if (!storage) throw new Error('入库任务记录无法读取，请保留当前页面后重试');
+  const recoveries: InventoryInboundRecovery<TDraft>[] = [];
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    if (!key?.startsWith(prefix) || key === inboundDraftStorageKey(ownerKey)) continue;
+    const parsed: unknown = JSON.parse(storage.getItem(key) || 'null');
+    if (!isStoredRecovery(parsed) || parsed.status !== 'accepted' ||
+        key !== prefix + parsed.clientMutationId) {
+      throw new Error('入库任务记录异常，已保留原记录，请联系管理员核对');
+    }
+    recoveries.push(parsed as InventoryInboundRecovery<TDraft>);
+  }
+  return recoveries;
+}
+
+function storeAcceptedInventoryInboundRecovery(
+  recovery: InventoryInboundRecovery,
+  ownerKey: string | null,
+): boolean {
+  try {
+    const prefix = acceptedInboundPrefix(ownerKey);
+    const storage = getSessionStorage();
+    if (!storage) return false;
+    const records = readAcceptedInventoryInboundRecoveries(ownerKey);
+    const stored = { version: INVENTORY_INBOUND_RECOVERY_VERSION, ...recovery };
+    if (!isStoredRecovery(stored) || stored.status !== 'accepted') return false;
+    const existing = records.find((row) => row.clientMutationId === recovery.clientMutationId);
+    if (existing && JSON.stringify(existing) !== JSON.stringify(stored)) return false;
+    if (!existing && records.length >= MAX_ACCEPTED_INBOUND_TASKS) return false;
+    if (records.some((row) => row.clientMutationId !== recovery.clientMutationId &&
+      recovery.purchaseExecutionRecordId && row.purchaseExecutionRecordId === recovery.purchaseExecutionRecordId)) return false;
+    const key = prefix + recovery.clientMutationId;
+    const value = JSON.stringify(stored);
+    storage.setItem(key, value);
+    return storage.getItem(key) === value;
+  } catch { return false; }
 }
 
 export function subscribeInventoryInboundRecovery(
@@ -992,4 +1088,28 @@ export function subscribeInventoryInboundRecovery(
       // The browser may disable its event target after subscription.
     }
   };
+}
+
+function inboundDraftStorageKey(ownerKey?: string | null): string {
+  if (ownerKey) acceptedInboundPrefix(ownerKey);
+  return ownerKey ? INVENTORY_INBOUND_RECOVERY_STORAGE_KEY + ':' + ownerKey : INVENTORY_INBOUND_RECOVERY_STORAGE_KEY;
+}
+
+/** Only call after the server has authorized the legacy task for the current identity. */
+export function adoptVerifiedLegacyInboundTask(clientMutationId: string, ownerKey: string): boolean {
+  const legacy = readInventoryInboundRecovery();
+  if (!legacy || legacy.status !== 'accepted' || legacy.clientMutationId !== clientMutationId) return false;
+  if (!storeAcceptedInventoryInboundRecovery(legacy, ownerKey)) return false;
+  clearInventoryInboundRecovery(clientMutationId);
+  return true;
+}
+
+export function isVerifiedLegacyInboundTaskResult(response: unknown, recovery: InventoryInboundRecovery): boolean {
+  if (!isRecord(response) || response.success !== true || !isRecord(response.task)) return false;
+  const task = response.task;
+  if (task.id !== recovery.taskId || task.kind !== recovery.kind || task.status !== 'completed' || !isRecord(task.result)) return false;
+  const result = task.result;
+  return result.success === true && isRecord(result.movement) &&
+    result.movement.clientMutationId === recovery.clientMutationId &&
+    (recovery.kind === 'manual' ? result.type === 'inbound' : result.executionRecordId === recovery.purchaseExecutionRecordId);
 }

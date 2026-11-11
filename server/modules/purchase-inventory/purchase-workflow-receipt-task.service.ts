@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, ServiceUnavailableException, type OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import type { PurchaseWorkflowReceiptAcceptedResponse, PurchaseWorkflowReceiptInput, PurchaseWorkflowReceiptTask, PurchaseWorkflowReceiptTaskStatusResponse } from '../../../shared/purchase-workflow.interface';
@@ -16,16 +16,26 @@ export interface PurchaseWorkflowReceiptFiles { receiptPhotos: PurchaseWorkflowU
 const acceptingReceipts = new Map<string, { requestKey: string; promise: Promise<PurchaseWorkflowReceiptAcceptedResponse> }>();
 
 @Injectable()
-export class PurchaseWorkflowReceiptTaskService {
+export class PurchaseWorkflowReceiptTaskService implements OnModuleDestroy {
   private readonly logger = new Logger(PurchaseWorkflowReceiptTaskService.name);
-  private running = false;
+  private running: Promise<void> | undefined;
+  private stopping = false;
+  private readonly activeRecordIds = new Set<string>();
+  private readonly acceptances = new Set<Promise<unknown>>();
   private readonly files: PurchaseWebReceiptFiles;
 
   constructor(private readonly gateway: PurchaseWorkflowGateway, private readonly workflowService: PurchaseWorkflowService, private readonly store: PurchaseWorkflowStore) {
     this.files = new PurchaseWebReceiptFiles(store.webReceiptSpoolDirectory());
+    this.store.registerShutdownDrain(() => this.onModuleDestroy());
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    this.stopping = true;
+    await Promise.allSettled([...this.acceptances, ...(this.running ? [this.running] : [])]);
   }
 
   async acceptReceipt(recordId: string, session: PurchaseWorkflowSession, input: ReceiptSubmissionInput, files: PurchaseWorkflowReceiptFiles): Promise<PurchaseWorkflowReceiptAcceptedResponse> {
+    if (this.stopping) throw new ServiceUnavailableException('系统正在更新，请稍后重试原签收请求');
     if (!/^rec[A-Za-z0-9_-]+$/.test(recordId)) throw new BadRequestException('采购记录标识无效');
     if (!input || typeof input.signer !== 'string' || !input.signer.trim()) throw new BadRequestException('请填写签收人');
     if (typeof input.signerOpenId !== 'string' || !/^ou_[A-Za-z0-9_-]+$/.test(input.signerOpenId)) throw new BadRequestException('请选择签收人');
@@ -54,8 +64,12 @@ export class PurchaseWorkflowReceiptTaskService {
       return existingRequest.promise;
     }
     const request = this.accept(recordId, session, { taskId, ownerId, appId, mutationId, receipt, metadata }, uploads);
+    this.acceptances.add(request);
     acceptingReceipts.set(acceptanceKey, { requestKey, promise: request });
-    try { return await request; } finally { if (acceptingReceipts.get(acceptanceKey)?.promise === request) acceptingReceipts.delete(acceptanceKey); }
+    try { return await request; } finally {
+      this.acceptances.delete(request);
+      if (acceptingReceipts.get(acceptanceKey)?.promise === request) acceptingReceipts.delete(acceptanceKey);
+    }
   }
 
   private async accept(recordId: string, session: PurchaseWorkflowSession, submission: { taskId: string; ownerId: string; appId: string; mutationId: string; receipt: WebReceiptInput; metadata: WebReceiptFile[] }, uploads: PurchaseWorkflowUploadFile[]): Promise<PurchaseWorkflowReceiptAcceptedResponse> {
@@ -92,6 +106,7 @@ export class PurchaseWorkflowReceiptTaskService {
     try {
       await this.files.save(payload, uploads);
       task = await this.store.acceptWebReceipt(recordId, payload, () => {
+        if (this.stopping) throw new ServiceUnavailableException('系统正在更新，请稍后重试原签收请求');
         if (payload.platformIdentity) {
           if (!session.platformProof || !session.assertPlatformProof) throw new ForbiddenException('采购签收身份不可核对');
           session.assertPlatformProof('receive', prepared.record);
@@ -139,38 +154,66 @@ export class PurchaseWorkflowReceiptTaskService {
   }
 
   async recoverTask(input:PersonnelRecoveryRequest,actor:PersonnelRecoveryActor,authorize:()=>void):Promise<PersonnelRecoveryResult>{
+    if (this.stopping) throw new ServiceUnavailableException('系统正在更新，请稍后重试原签收请求');
+    const request = this.recoverAcceptedTask(input, actor, authorize);
+    this.acceptances.add(request);
+    try { return await request; } finally { this.acceptances.delete(request); }
+  }
+
+  private async recoverAcceptedTask(input:PersonnelRecoveryRequest,actor:PersonnelRecoveryActor,authorize:()=>void):Promise<PersonnelRecoveryResult>{
     assertRecoveryRequest(input);authorize();
     if (input.selections?.length) throw new BadRequestException('签收恢复不接受付款计划选择');
     const original=await this.store.findWebReceipt(input.taskId);
     if(!original?.webReceipt||original.webReceipt.appId!==process.env.FEISHU_APP_ID?.trim())throw new ConflictException('原签收任务或应用身份已变化');
     if(original.status==='failed')for(let index=0;index<original.webReceipt.files.length;index++)if(!original.webReceipt.files[index].token)await this.files.read(original.webReceipt,index);
-    const task=await this.store.recoverWebReceipt(input,actor,authorize);
+    if (this.stopping) throw new ServiceUnavailableException('系统正在更新，请稍后重试原签收请求');
+    const task=await this.store.recoverWebReceipt(input,actor,()=>{
+      if (this.stopping) throw new ServiceUnavailableException('系统正在更新，请稍后重试原签收请求');
+      authorize();
+    });
     if(task.status==='completed')return{status:'completed',message:'原签收任务已完成'};
     setImmediate(()=>{void this.runPendingTasks().catch(error=>this.logger.error('签收恢复未完成',error));});
     return{status:'pending',message:'原签收任务已受理恢复，正在后台处理'};
   }
 
-  async runPendingTasks(now: Date | number = new Date()): Promise<void> {
-    if (this.running) return;
-    this.running = true;
-    try {
+  runPendingTasks(now: Date | number = new Date()): Promise<void> {
+    if (this.stopping) return Promise.resolve();
+    if (this.running) return this.running;
+    const run = this.drainPendingTasks(now).finally(() => {
+      if (this.running === run) this.running = undefined;
+    });
+    this.running = run;
+    return run;
+  }
+
+  private async drainPendingTasks(now: Date | number): Promise<void> {
       for (const task of await this.store.listNotifications({ kind: 'web_receipt_command', status: 'completed' })) {
         if (task.webReceipt && !task.webReceipt.filesRemoved) await this.cleanup(task.webReceipt);
       }
-      for (let index = 0; index < 10; index++) {
-        const task = await this.store.takeNextNotification(now, 10 * 60_000, ['web_receipt_command']);
-        if (!task) break;
-        await this.executeTask(task);
-      }
-    } finally { this.running = false; }
+      let remaining = 10;
+      const worker = async () => {
+        while (!this.stopping && remaining > 0) {
+          remaining--;
+          const task = await this.store.takeNextNotification(now, 10 * 60_000, ['web_receipt_command'], this.activeRecordIds, () => !this.stopping);
+          if (!task) return;
+          this.activeRecordIds.add(task.recordId);
+          try { await this.executeTask(task); }
+          finally { this.activeRecordIds.delete(task.recordId); }
+        }
+      };
+      const outcomes = await Promise.allSettled([worker(), worker()]);
+      const failed = outcomes.find(result => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
   }
 
   private async executeTask(task: PurchaseWorkflowNotificationEntry): Promise<void> {
     const payload = normalizeWebReceiptCommand(task.webReceipt);
     try {
+      if (await this.pauseForShutdown(task)) return;
       if (payload.appId !== process.env.FEISHU_APP_ID?.trim()) throw new ConflictException('签收任务所属应用已变化，请核对原任务');
       const token = await this.gateway.getTenantAccessTokenAsApp();
       for (let index = 0; index < payload.files.length; index++) {
+        if (await this.pauseForShutdown(task)) return;
         const metadata = payload.files[index];
         if (metadata.token) continue;
         if (metadata.uploadStartedAt) throw new ConflictException('附件上传结果待核对，请联系管理员恢复原签收任务');
@@ -180,6 +223,7 @@ export class PurchaseWorkflowReceiptTaskService {
         await this.store.updateWebReceipt(task.key, task.claimToken, saved => { saved.files[index].token = fileToken; });
         metadata.token = fileToken;
       }
+      if (await this.pauseForShutdown(task)) return;
       const result = await this.workflowService.receiveAcceptedReceipt({ notificationKey: task.key, claimToken: task.claimToken });
       await this.store.updateWebReceipt(task.key, task.claimToken, saved => { saved.notificationWarnings = result.notificationWarnings.slice(0, 20).map(text => text.slice(0, 1000)); });
       await this.store.completeNotification(task.key, task.claimToken);
@@ -188,6 +232,12 @@ export class PurchaseWorkflowReceiptTaskService {
       if (task.attempts < 3 && !(error instanceof BadRequestException || error instanceof ConflictException || error instanceof ForbiddenException)) await this.store.rescheduleNotification(task.key, task.claimToken, '签收同步暂时失败，可恢复原任务', Date.now() + 1000);
       else await this.store.failNotification(task.key, task.claimToken, error instanceof ConflictException || error instanceof BadRequestException || error instanceof ForbiddenException ? error.message : '签收同步失败，请恢复原任务');
     }
+  }
+
+  private async pauseForShutdown(task: PurchaseWorkflowNotificationEntry): Promise<boolean> {
+    if (!this.stopping) return false;
+    await this.store.rescheduleNotification(task.key, task.claimToken, '服务更新后继续处理原签收任务', Date.now());
+    return true;
   }
 
   private async cleanup(payload: PurchaseWebReceiptCommand): Promise<void> {

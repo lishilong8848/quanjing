@@ -1,5 +1,6 @@
 import { getCurrentCsrfToken } from './csrf-token';
 import { EMPLOYEE_ONBOARDING_PHOTO_FILE_RULE } from '@shared/employee-onboarding';
+import { PERSONAL_PHOTO_MESSAGES } from '@shared/personnel-photo-errors';
 
 const PRIVATE_PATHS = new Set([
   '/api/access/personal/profile', '/api/access/personal/archive', '/api/access/personal/archive/photo',
@@ -80,7 +81,7 @@ export async function personalPrivateRequest<T>(path: PersonalPrivatePath, optio
   const cancel = () => controller.abort();
   options.signal?.addEventListener('abort', cancel, { once: true });
   let timedOut = false;
-  const timeout = globalThis.setTimeout(() => { timedOut = true; controller.abort(); }, password || archive ? 60_000 : 15_000);
+  const timeout = globalThis.setTimeout(() => { timedOut = true; controller.abort(); }, password || archive || options.photo ? 60_000 : 15_000);
   try {
     const csrf = getCurrentCsrfToken();
     const response = await fetch(url, { method: options.body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
@@ -90,7 +91,14 @@ export async function personalPrivateRequest<T>(path: PersonalPrivatePath, optio
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
     });
     if (!response.ok) {
-      if (options.photo) throw new PersonalPrivateError('个人照片读取失败，请重试', response.status);
+      if (options.photo) {
+        const body: unknown = await response.json().catch(() => null);
+        const code = body && typeof body === 'object' ? (body as { code?: unknown }).code : undefined;
+        const message = typeof code === 'string' && Object.prototype.hasOwnProperty.call(PERSONAL_PHOTO_MESSAGES, code)
+          ? PERSONAL_PHOTO_MESSAGES[code as keyof typeof PERSONAL_PHOTO_MESSAGES]
+          : response.status === 401 ? '登录状态已变化，请重新登录后重试' : response.status === 404 ? '暂无个人照片' : '个人照片读取失败，请重试';
+        throw new PersonalPrivateError(message, response.status);
+      }
       // CSRF middleware returns fixed plain text, while application errors return JSON.
       // Parse once and never attach the raw response to a public error.
       const text = await response.text().catch(() => '');

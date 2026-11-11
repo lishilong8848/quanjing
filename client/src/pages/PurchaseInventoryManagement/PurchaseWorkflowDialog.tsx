@@ -94,7 +94,10 @@ export function PurchaseWorkflowDialog({
   const principal=useAccess();
   const [detail, setDetail] = useState<PurchaseWorkflowDetail | null>(null);
   const [verifiedDetailKey, setVerifiedDetailKey] = useState('');
-  const detailKey = JSON.stringify([recordId, purchaseUiPrincipalKey(principal)]);
+  const principalKey = purchaseUiPrincipalKey(principal);
+  const detailKey = JSON.stringify([recordId, principalKey]);
+  const receiptPrincipalRef = useRef(principalKey);
+  receiptPrincipalRef.current = principalKey;
   const activeActionKey = JSON.stringify([open, detailKey]);
   const activeActionRef = useRef(activeActionKey);
   activeActionRef.current = activeActionKey;
@@ -125,7 +128,7 @@ export function PurchaseWorkflowDialog({
   const detailRequestVersion = useRef(0);
   const signerSearchTimer = useRef<number | null>(null);
   const signerSearchSequence = useRef(0);
-  const receiptSubmissionInFlight = useRef(false);
+  const receiptSubmissionGate = useRef(new PurchaseWorkflowSubmissionGate());
   const submissionGateRef = useRef(new PurchaseWorkflowSubmissionGate());
 
   const loadDetail = useCallback(async () => {
@@ -380,16 +383,21 @@ export function PurchaseWorkflowDialog({
     if (
       !allowedActions.includes('receive') ||
       !recordId ||
-      !signerOpenId ||
-      receiptSubmissionInFlight.current
+      !signerOpenId
     )
       return;
-    receiptSubmissionInFlight.current = true;
+    const submissionKey = detailKey;
+    if (!receiptSubmissionGate.current.begin(submissionKey)) return;
+    const isCurrentPrincipal = () => receiptPrincipalRef.current === principalKey;
     setError('');
     onReceiptAccepted(recordId);
     onOpenChange(false);
 
     window.setTimeout(() => {
+      if (!isCurrentPrincipal()) {
+        receiptSubmissionGate.current.finish(submissionKey);
+        return;
+      }
       void submitPurchaseWorkflowReceipt(
         recordId,
         {
@@ -402,32 +410,37 @@ export function PurchaseWorkflowDialog({
         invoices,
       )
         .then((accepted) => {
+          if (!isCurrentPrincipal()) return;
           toast.success(accepted.message);
-          void monitorPurchaseWorkflowReceiptTask(
+          return monitorPurchaseWorkflowReceiptTask(
             accepted.taskId,
             async (message, warnings) => {
+              if (!isCurrentPrincipal()) return;
               toast.success(message);
               warnings.forEach((warning) => toast.warning(warning));
               const refreshed = await onReceiptTaskSettled(
                 recordId,
                 'completed',
               );
-              if (!refreshed) toast.warning('采购清单刷新失败，请稍后刷新');
+              if (isCurrentPrincipal() && !refreshed) toast.warning('采购清单刷新失败，请稍后刷新');
             },
             async (message) => {
+              if (!isCurrentPrincipal()) return;
               const refresh = onReceiptTaskSettled(recordId, 'failed');
               toast.error(`${message}，页面状态已自动恢复`);
               await refresh;
             },
+            isCurrentPrincipal,
           );
         })
         .catch((actionError) => {
+          if (!isCurrentPrincipal()) return;
           void onReceiptTaskSettled(recordId, 'failed');
           const message = apiError(actionError, '到货签收提交失败');
           toast.error(`${message}，页面状态已自动恢复`);
         })
         .finally(() => {
-          receiptSubmissionInFlight.current = false;
+          receiptSubmissionGate.current.finish(submissionKey);
         });
     }, 0);
   }
@@ -992,11 +1005,13 @@ async function monitorPurchaseWorkflowReceiptTask(
   taskId: string,
   onCompleted: (message: string, warnings: string[]) => void | Promise<void>,
   onFailed: (message: string) => void | Promise<void>,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   const deadline = Date.now() + RECEIPT_TASK_POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  while (isCurrent() && Date.now() < deadline) {
     try {
       const response = await getPurchaseWorkflowReceiptTaskStatus(taskId);
+      if (!isCurrent()) return;
       const task = response.task;
       if (!response.success || !task) {
         await onFailed(
@@ -1020,7 +1035,7 @@ async function monitorPurchaseWorkflowReceiptTask(
     }
     await waitForReceiptTask(RECEIPT_TASK_POLL_INTERVAL_MS);
   }
-  toast.warning('签收仍在后台同步，请稍后刷新页面确认结果');
+  if (isCurrent()) toast.warning('签收仍在后台同步，请稍后刷新页面确认结果');
 }
 
 function waitForReceiptTask(durationMs: number): Promise<void> {

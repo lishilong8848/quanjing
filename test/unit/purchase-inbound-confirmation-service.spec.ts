@@ -20,6 +20,7 @@ jest.mock(
 jest.mock('../../server/common/feishu/bitable-direct-read', () => ({
   ...jest.requireActual('../../server/common/feishu/bitable-direct-read'),
   fetchBitableRecords: jest.fn(),
+  getBitableRecordCacheGeneration: jest.fn(() => 0),
   resolveBitableAppToken: jest.fn(),
 }));
 
@@ -35,6 +36,7 @@ import type {
 } from '../../shared/inventory-management.interface';
 import {
   fetchBitableRecords,
+  getBitableRecordCacheGeneration,
   resolveBitableAppToken,
 } from '../../server/common/feishu/bitable-direct-read';
 import type {
@@ -1245,6 +1247,8 @@ describe('PurchaseInboundConfirmationService', () => {
         tableName: '采购提交',
         cacheTtlMs: 4 * 60 * 60 * 1000,
         forceRefresh,
+        strict: true,
+        allowStale: false,
       });
       expect(fetchBitableRecords).toHaveBeenCalledWith(expect.anything(), {
         appToken: 'purchase-app',
@@ -1252,6 +1256,8 @@ describe('PurchaseInboundConfirmationService', () => {
         tableName: '采购执行',
         cacheTtlMs: 4 * 60 * 60 * 1000,
         forceRefresh,
+        strict: true,
+        allowStale: false,
       });
       expect(fetchBitableRecords).toHaveBeenCalledWith(expect.anything(), {
         appToken: 'warehouse-app',
@@ -1259,10 +1265,64 @@ describe('PurchaseInboundConfirmationService', () => {
         tableName: '物品类别',
         cacheTtlMs: 4 * 60 * 60 * 1000,
         forceRefresh,
+        strict: true,
+        allowStale: false,
       });
       expect(gateway.listRecords).not.toHaveBeenCalled();
     },
   );
+
+  async function flushReads() { for (let i=0;i<15;i++) await Promise.resolve(); }
+  it('coalesces ordinary pending reads and queues exactly one fresh pass after the ordinary pass',async()=>{
+    let release!:(value:any[])=>void;const wait=new Promise<any[]>(resolve=>{release=resolve;});
+    (fetchBitableRecords as jest.Mock).mockImplementation((_http,options)=>options.forceRefresh?Promise.resolve([]):wait);
+    const service=createService();const a=service.listPending(),b=service.listPending();await flushReads();
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+    const fresh=service.listPending(true),fresh2=service.listPending(true),later=service.listPending();await flushReads();
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+    release([]);await Promise.all([a,b,fresh,fresh2,later]);
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(6);
+    expect((fetchBitableRecords as jest.Mock).mock.calls.map(([,options])=>options.forceRefresh)).toEqual([false,false,false,true,true,true]);
+  });
+  it('starts a queued fresh pass even when the preceding ordinary read failed',async()=>{
+    let reject!:(error:Error)=>void;const wait=new Promise((_resolve,no)=>{reject=no;});
+    (fetchBitableRecords as jest.Mock).mockImplementation((_http,options)=>options.forceRefresh?Promise.resolve([]):wait);
+    const service=createService(),ordinary=service.listPending();const failed=expect(ordinary).rejects.toThrow('source denied');await flushReads();
+    const fresh=service.listPending(true);await flushReads();reject(new Error('source denied'));
+    await failed;await expect(fresh).resolves.toMatchObject({items:[]});expect(fetchBitableRecords).toHaveBeenCalledTimes(6);
+  });
+  it('lets ordinary callers share an already running force refresh without another pass',async()=>{
+    let release!:(value:any[])=>void;const wait=new Promise<any[]>(resolve=>{release=resolve;});
+    (fetchBitableRecords as jest.Mock).mockReturnValue(wait);
+    const service=createService(),fresh=service.listPending(true);await flushReads();
+    const ordinary=service.listPending();await flushReads();release([]);
+    await Promise.all([fresh,ordinary]);expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+  });
+  it('does not hide an authorization failure behind a concurrent read conflict',async()=>{
+    let calls=0;(fetchBitableRecords as jest.Mock).mockImplementation(()=>{calls++;return calls===1?Promise.reject(new Error('数据在读取期间已变更，请重新读取')):calls===2?Promise.reject(new Error('permission denied')):Promise.resolve([]);});
+    await expect(createService().listPending()).rejects.toThrow('permission denied');expect(calls).toBe(3);
+  });
+  it('waits for all tables before retrying a precise version conflict and forces the retry',async()=>{
+    let finish!:(value:any[])=>void;const pending=new Promise<any[]>(resolve=>{finish=resolve;});let calls=0;
+    (fetchBitableRecords as jest.Mock).mockImplementation(()=>{calls++;return calls===1?Promise.reject(new Error('数据在读取期间已变更，请重新读取')):calls<=3?pending:Promise.resolve([]);});
+    const result=createService().listPending();await flushReads();expect(calls).toBe(3);
+    finish([]);await expect(result).resolves.toMatchObject({items:[]});expect(calls).toBe(6);
+    expect((fetchBitableRecords as jest.Mock).mock.calls.slice(3).every(([,options])=>options.forceRefresh&&options.strict&&options.allowStale===false)).toBe(true);
+  });
+  it('bounds repeated conflicts at three passes and does not retry unrelated source failures',async()=>{
+    (fetchBitableRecords as jest.Mock).mockRejectedValue(new Error('数据在读取期间已变更，请重新读取'));
+    const service=createService();const conflict=await service.listPending().catch(error=>error);
+    expect(conflict.getStatus()).toBe(503);expect(conflict.message).toBe('待采购入库数据正在更新，本次核对未完成，请稍后重试');expect(fetchBitableRecords).toHaveBeenCalledTimes(9);
+    const denied=new Error('permission denied');(fetchBitableRecords as jest.Mock).mockClear().mockRejectedValue(denied);
+    await expect(service.listPending()).rejects.toBe(denied);expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+  });
+  it('retries when a table changes after it was read but before responsibility projection completes',async()=>{
+    let generation=0;(getBitableRecordCacheGeneration as jest.Mock).mockImplementation(()=>generation);
+    (fetchBitableRecords as jest.Mock).mockResolvedValue([]);
+    const ledger={purchaseResponsibilities:jest.fn(async()=>{generation=1;return {};})};
+    try {await expect(createService(undefined,ledger).listPending()).resolves.toMatchObject({items:[]});expect(fetchBitableRecords).toHaveBeenCalledTimes(6);}
+    finally {(getBitableRecordCacheGeneration as jest.Mock).mockReturnValue(0);}
+  });
 
   function createService(operationCoordinator?: {
     run<T>(

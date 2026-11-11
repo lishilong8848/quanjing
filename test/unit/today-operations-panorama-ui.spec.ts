@@ -477,7 +477,7 @@ describe('today operations panorama UI', () => {
       'client/src/pages/TodayOperationsPanorama/OperationsPanels.tsx',
     );
 
-    expect(pageSource).toMatch(/capabilities:\s*\{\s*canForceRefresh\s*\}/);
+    expect(pageSource).toContain("canUsePageAction(access, 'today_operations', 'refresh', access.capabilities.canForceRefresh)");
     expect(pageSource).toContain('canForceRefresh && forceRefresh');
     expect(pageSource).toContain('allowForceRefresh={canForceRefresh}');
     expect(operationsSource).toContain('allowForceRefresh = true');

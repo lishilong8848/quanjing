@@ -1,4 +1,10 @@
 import {
+  adoptVerifiedLegacyInboundTask,
+  isVerifiedLegacyInboundTaskResult,
+  acceptInventoryInboundRecovery,
+  finalizeInventoryInboundRecovery,
+  readAcceptedInventoryInboundRecoveries,
+  inventoryInboundRecoveryOwner,
   INVENTORY_INBOUND_RECOVERY_EVENT,
   INVENTORY_INBOUND_RECOVERY_STORAGE_KEY,
   clearInventoryInboundRecovery,
@@ -963,4 +969,75 @@ describe('inventory inbound recovery storage', () => {
     ).toBe(true);
     expect(readInventoryInboundRecovery()).toBeNull();
   });
+});
+
+ describe('independent accepted inbound task journal', () => {
+  afterEach(() => { Reflect.deleteProperty(globalThis, 'window'); });
+  const owner = 'account-a:';
+  function stage(id: string) {
+    expect(saveInventoryInboundRecovery({kind:'manual',status:'pending',retryMode:'locked',clientMutationId:id,draft:createManualDraft(id)},owner)).toBe(true);
+    expect(acceptInventoryInboundRecovery({kind:'manual',clientMutationId:id,taskId:'task-'+id,ownerKey:owner,request:{type:'inbound',mode:'existing',clientMutationId:id,catalogRecordId:'catalog-a',sku:'A001',building:'A楼',quantity:1,occurredAt:'2026-07-30T10:30:00.000Z'}})).toBe(true);
+  }
+  it('releases the draft after durable acceptance and removes only the completed task', () => {
+    installWindow(); stage('task-one'); stage('task-two');
+    expect(readInventoryInboundRecovery(owner)).toBeNull();
+    expect(readAcceptedInventoryInboundRecoveries(owner).map(row=>row.clientMutationId)).toEqual(['task-one','task-two']);
+    expect(finalizeInventoryInboundRecovery('task-one','completed',owner)).toBe(true);
+    expect(readAcceptedInventoryInboundRecoveries(owner).map(row=>row.clientMutationId)).toEqual(['task-two']);
+  });
+  it('isolates accepted tasks and pending drafts by account and impersonator', () => {
+    installWindow(); stage('task-one');
+    expect(readAcceptedInventoryInboundRecoveries('account-b:')).toEqual([]);
+    expect(finalizeInventoryInboundRecovery('task-one','completed','account-b:')).toBe(false);
+    expect(inventoryInboundRecoveryOwner({accountId:'account-a'})).toBe(owner);
+    expect(inventoryInboundRecoveryOwner({accountId:'account-a',impersonation:{actorAccountId:'admin'} as any})).not.toBe(owner);
+    expect(saveInventoryInboundRecovery({kind:'manual',status:'pending',clientMutationId:'pending',draft:createManualDraft('pending')},owner)).toBe(true);
+    expect(readInventoryInboundRecovery('account-b:')).toBeNull();
+    expect(saveInventoryInboundRecovery({kind:'manual',status:'pending',clientMutationId:'other',draft:createManualDraft('other')},'account-b:')).toBe(true);
+  });
+  it('retains failed accepted tasks until the original editable draft can be saved', () => {
+    installWindow(); stage('task-one');
+    expect(finalizeInventoryInboundRecovery('task-one','failed',owner)).toBe(false);
+    expect(readAcceptedInventoryInboundRecoveries(owner)).toHaveLength(1);
+    expect(saveInventoryInboundRecovery({kind:'manual',status:'failed',retryMode:'editable',clientMutationId:'task-one',draft:{...createManualDraft('task-one'),clientMutationId:undefined}},owner)).toBe(true);
+    expect(readAcceptedInventoryInboundRecoveries(owner)).toHaveLength(0);
+    expect(readInventoryInboundRecovery(owner)?.clientMutationId).toBe('task-one');
+  });
+  it('keeps the single-slot accepted binding if the task journal cannot be persisted', () => {
+    const {storage}=installWindow();
+    const original=storage.setItem.bind(storage);
+    storage.setItem=(key,value)=>{if(key.includes('inbound-accepted:')) throw new Error('quota'); original(key,value);};
+    stage('quota-task');
+    expect(readInventoryInboundRecovery(owner)?.status).toBe('accepted');
+    expect(readAcceptedInventoryInboundRecoveries(owner)).toHaveLength(0);
+    expect(saveInventoryInboundRecovery({kind:'manual',status:'pending',clientMutationId:'next',draft:createManualDraft('next')},owner)).toBe(false);
+  });
+  it('keeps legacy bytes while new work proceeds and adopts an accepted task only explicitly', () => {
+    const {storage}=installWindow();
+    saveInventoryInboundRecovery({kind:'manual',status:'pending',clientMutationId:'legacy-one',draft:createManualDraft('legacy-one')});
+    expect(acceptInventoryInboundRecovery({kind:'manual',clientMutationId:'legacy-one',taskId:'legacy-task',request:{type:'inbound',mode:'existing',clientMutationId:'legacy-one',catalogRecordId:'catalog-a',sku:'A001',building:'A楼',quantity:1,occurredAt:'2026-07-30T10:30:00.000Z'}})).toBe(true);
+    const bytes=storage.getItem(INVENTORY_INBOUND_RECOVERY_STORAGE_KEY);
+    stage('new-work');expect(storage.getItem(INVENTORY_INBOUND_RECOVERY_STORAGE_KEY)).toBe(bytes);
+    expect(adoptVerifiedLegacyInboundTask('legacy-one',owner)).toBe(true);
+    expect(readAcceptedInventoryInboundRecoveries(owner)).toHaveLength(2);
+    expect(readInventoryInboundRecovery()).toBeNull();
+  });
+  it('preserves unowned legacy recovery without exposing it to another login', () => {
+    installWindow();
+    expect(saveInventoryInboundRecovery({kind:'manual',status:'pending',clientMutationId:'legacy',draft:createManualDraft('legacy')})).toBe(true);
+    expect(readInventoryInboundRecovery(owner)).toBeNull();
+    expect(readInventoryInboundRecovery()?.clientMutationId).toBe('legacy');
+    expect(saveInventoryInboundRecovery({kind:'manual',status:'pending',clientMutationId:'new',draft:createManualDraft('new')},owner)).toBe(true);
+  });
+ });
+
+it('requires successful matching completed task and mutation before adopting legacy data', () => {
+ const recovery={kind:'manual' as const,status:'accepted' as const,taskId:'old-task',clientMutationId:'old-mutation',draft:{}};
+ const response={success:true,task:{id:'old-task',kind:'manual',status:'completed',result:{success:true,type:'inbound',movement:{clientMutationId:'old-mutation'}}}};
+ expect(isVerifiedLegacyInboundTaskResult(response,recovery)).toBe(true);
+ expect(isVerifiedLegacyInboundTaskResult({deferred:true,taskId:'old-task'},recovery)).toBe(false);
+ expect(isVerifiedLegacyInboundTaskResult({...response,success:false},recovery)).toBe(false);
+ expect(isVerifiedLegacyInboundTaskResult({...response,task:{...response.task,id:'other'}},recovery)).toBe(false);
+ expect(isVerifiedLegacyInboundTaskResult({...response,task:{...response.task,status:'running'}},recovery)).toBe(false);
+ expect(isVerifiedLegacyInboundTaskResult(response,{...recovery,clientMutationId:'other'})).toBe(false);
 });
