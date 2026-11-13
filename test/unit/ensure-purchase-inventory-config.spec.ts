@@ -50,6 +50,42 @@ describe('ensure-purchase-inventory-config.mjs', () => {
     }
   });
 
+  it('rejects an enabled leave field check before changing deployment configuration', async () => {
+    const root = createRoot();
+    const original = 'LEAVE_WORKFLOW_PROGRAM_ENABLED=true\nFEISHU_LEAVE_REQUEST_TABLE_ID=tbl_incorrect_scope\n';
+    writeFileSync(join(root, '.env'), original, 'utf8');
+
+    const result = await runScript(root, undefined, true, false, true);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain('Checking candidate leave workflow fields before downtime (read-only)');
+    expect(result.stderr).toContain('LEAVE_PREFLIGHT_REJECTED before downtime');
+    expect(result.stderr).not.toContain('tbl_incorrect_scope');
+    expect(readFileSync(join(root, '.env'), 'utf8')).toBe(original);
+    expect(readdirSync(root)).toEqual(['.env']);
+  });
+
+  it('honors the local leave flag override before starting a field check', async () => {
+    const root = createRoot();
+    writeFileSync(join(root, '.env'), 'LEAVE_WORKFLOW_PROGRAM_ENABLED=true\n', 'utf8');
+    writeFileSync(join(root, '.env.local'), 'LEAVE_WORKFLOW_PROGRAM_ENABLED="off"\n', 'utf8');
+
+    const result = await runScript(root, undefined, true, true, true);
+
+    expect(result.stdout).not.toContain('Checking candidate leave workflow fields');
+    expect(result.stderr).not.toContain('LEAVE_PREFLIGHT');
+  });
+
+  it('keeps the leave check active when the launcher treats a commented value as enabled', async () => {
+    const root = createRoot();
+    writeFileSync(join(root, '.env'), 'LEAVE_WORKFLOW_PROGRAM_ENABLED=false # on startup\nFEISHU_LEAVE_REQUEST_TABLE_ID=tbl_incorrect_scope\n', 'utf8');
+
+    const result = await runScript(root, undefined, true, false, true);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('LEAVE_PREFLIGHT_REJECTED before downtime');
+  });
+
   it('exits without network access or file changes when all critical values exist', async () => {
     const root = createRoot();
     const original = [
@@ -1359,16 +1395,19 @@ async function runScript(
   apiBaseUrl?: string,
   activateWorkflow = false,
   checkOnly = false,
+  checkLeaveStartup = false,
 ) {
   const args = [SCRIPT, '--root', root];
   if (apiBaseUrl) args.push('--api-base-url', apiBaseUrl);
   if (activateWorkflow) args.push('--activate-workflow');
   if (checkOnly) args.push('--check-only');
+  if (checkLeaveStartup) args.push('--check-leave-startup');
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) =>
         !key.startsWith('FEISHU_') &&
         !key.startsWith('PURCHASE_WORKFLOW_') &&
+        !key.startsWith('LEAVE_WORKFLOW_') &&
         key !== 'PUBLIC_BASE_URL',
     ),
   );

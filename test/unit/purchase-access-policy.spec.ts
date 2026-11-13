@@ -162,11 +162,13 @@ describe('PurchaseAccessPolicyService dashboard scope', () => {
 
   it('preserves the dashboard refresh health for an applicant-scoped view', () => {
     dashboard.refreshState = 'stale';
+    dashboard.refreshPending = true;
     dashboard.refreshError = '采购数据刷新失败：temporary token failure';
 
     const result = policy.scopeDashboard(applicantA, dashboard);
 
     expect(result.refreshState).toBe('stale');
+    expect(result.refreshPending).toBe(true);
     expect(result.refreshError).toBe(dashboard.refreshError);
   });
 

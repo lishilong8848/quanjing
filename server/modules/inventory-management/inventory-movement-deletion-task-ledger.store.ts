@@ -87,6 +87,15 @@ export interface InventoryMovementDeletionRecoveryState {
   };
 }
 
+export interface CompletedPurchaseInboundRollback {
+  recordId: string;
+  executionRecordId: string;
+  requestCode: string;
+  building: string;
+  sku: string;
+  completedAt: string;
+}
+
 interface TaskOwner {
   version: 1;
   token: string;
@@ -424,6 +433,27 @@ export class InventoryMovementDeletionTaskLedgerStore {
               Boolean(entry.recovery)),
         )
         .map(cloneEntry);
+    });
+  }
+
+  async completedPurchaseRollbacks(): Promise<CompletedPurchaseInboundRollback[]> {
+    return this.withLedgerLock(() => {
+      const loaded = this.readLatestAndRecover();
+      if (loaded.changed) this.persistLocked(loaded.entries);
+      return loaded.entries.flatMap((entry) => {
+        const purchase = entry.recovery?.purchase;
+        if (!purchase || entry.task.status !== 'completed' ||
+            entry.request.movementType !== 'inbound' || !entry.task.result.purchaseRolledBack ||
+            entry.task.result.recordId !== entry.request.recordId) return [];
+        return [{
+          recordId: entry.request.recordId,
+          executionRecordId: purchase.executionRecordId,
+          requestCode: purchase.requestCode,
+          building: purchase.building,
+          sku: purchase.sku,
+          completedAt: entry.task.completedAt,
+        }];
+      });
     });
   }
 

@@ -2,7 +2,10 @@ import { businessPermissionScopeKey, isProfessionalBusinessPrincipal } from '../
 import { accessBuildings } from '../../../shared/building-access';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
 import { HttpService } from '@nestjs/axios';
+import { setTimeout as wait } from 'node:timers/promises';
 import {
+  BadGatewayException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -50,6 +53,7 @@ const SCOPED_DASHBOARD_CACHE_LIMIT = 64;
 const PHOTO_METADATA_TTL_MS = 60_000;
 const PHOTO_METADATA_FIRST_READ_WAIT_MS = 800;
 const BITABLE_READ_CONFLICT = '数据在读取期间已变更，请重新读取';
+const DISPLAY_READ_RETRY_DELAYS_MS = [250, 800];
 
 const TABLES: Record<InventorySourceKey, { name: string; env: string }> = {
   inventory: {
@@ -269,7 +273,7 @@ export class InventoryManagementService
     forceRefresh = false,
     principal?: AccessPrincipal,
   ): Promise<InventoryItemsResponse> {
-    const { appToken } = await this.resolveSource();
+    const { appToken } = await this.resolveSource().catch(mapLedgerSourceError);
     const inventoryTable = TABLES.inventory;
     const catalogTable = TABLES.catalog;
     const inventoryTableId = readEnv(inventoryTable.env);
@@ -280,6 +284,7 @@ export class InventoryManagementService
     if (!catalogTableId) {
       throw new Error('物品类别主数据未配置');
     }
+    const photoGeneration = getBitableRecordCacheGeneration(appToken, inventoryTableId);
     const photosRead = this.readInventoryPhotoMetadata(appToken, inventoryTableId, forceRefresh);
     const [records, catalog] = await this.readDisplaySources([
       {
@@ -296,10 +301,10 @@ export class InventoryManagementService
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
       },
-    ]);
+    ]).catch(mapLedgerSourceError);
     const page = queryInventoryItems(projectInventoryItems(records, catalog, principal), query);
     const photos = await photosRead;
-    if (!photos) return page;
+    if (!photos || photoGeneration !== getBitableRecordCacheGeneration(appToken, inventoryTableId)) return page;
     return {
       ...page,
       items: page.items.map((item) => {
@@ -347,8 +352,7 @@ export class InventoryManagementService
       this.inventoryPhotoRead = { key, pending };
     }
     const { pending } = this.inventoryPhotoRead;
-    if (forceRefresh) await pending;
-    else if (!cached) {
+    if (!cached) {
       // Give the first sparse query a short head start without making a slow
       // Feishu response block the list.
       let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -441,13 +445,34 @@ export class InventoryManagementService
   }
 
   private async readDisplaySources(options: Parameters<typeof fetchBitableRecords>[1][]): Promise<BitableRecordItem[][]> {
-    const read = (sources: typeof options) => Promise.all(sources.map((source) => this.readSharedRecords(source)));
-    try {
-      return await read(options);
-    } catch (error) {
-      if (options.some((option) => option.forceRefresh) ||
-          !(error instanceof Error) || error.message !== BITABLE_READ_CONFLICT) throw error;
-      return read(options);
+    const verified: Array<{ generation: number; records: BitableRecordItem[] } | undefined> = [];
+    for (let attempt = 0; ; attempt++) {
+      const generations = options.map(({ appToken, tableId }) => getBitableRecordCacheGeneration(appToken, tableId));
+      try {
+        const records = await Promise.all(options.map(async (source, index) => {
+          const generation = generations[index];
+          const previous = verified[index];
+          if (previous?.generation === generation) return previous.records;
+          const rows = await this.readSharedRecords(source);
+          if (getBitableRecordCacheGeneration(source.appToken, source.tableId) === generation) {
+            verified[index] = { generation, records: rows };
+          }
+          return rows;
+        }));
+        if (options.some(({ appToken, tableId }, index) =>
+          getBitableRecordCacheGeneration(appToken, tableId) !== generations[index])) {
+          throw new Error(BITABLE_READ_CONFLICT);
+        }
+        return records;
+      } catch (error) {
+        if (options.some((option) => option.forceRefresh) ||
+            !(error instanceof Error) || error.message !== BITABLE_READ_CONFLICT) throw error;
+        const delay = DISPLAY_READ_RETRY_DELAYS_MS[attempt];
+        if (delay === undefined) {
+          throw new ServiceUnavailableException('库存数据更新较频繁，请稍后重新加载。');
+        }
+        await wait(delay);
+      }
     }
   }
 
@@ -515,6 +540,17 @@ function hasConfiguredSectionFailure(
   return Object.values(dashboard.sectionStatus).some(
     (status) => status.configured && Boolean(status.message),
   );
+}
+
+function mapLedgerSourceError(error: unknown): never {
+  if (error instanceof ForbiddenException) {
+    throw new BadGatewayException({
+      statusCode: 502,
+      code: 'INVENTORY_LEDGER_SOURCE_DENIED',
+      message: '库存台账数据源访问异常，请联系管理员核对。',
+    });
+  }
+  throw error;
 }
 
 function safeErrorMessage(error: unknown): string {

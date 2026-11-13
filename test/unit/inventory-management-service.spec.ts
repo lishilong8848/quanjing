@@ -17,6 +17,7 @@ import {
   getBitableRecordCacheGeneration,
   resolveBitableAppToken,
 } from '../../server/common/feishu/bitable-direct-read';
+import { ForbiddenException } from '@nestjs/common';
 import { InventoryManagementService } from '../../server/modules/inventory-management/inventory-management.service';
 import { describeInventoryLedgerImages } from '../../server/modules/inventory-management/inventory-inbound-photo.service';
 
@@ -128,7 +129,54 @@ describe('InventoryManagementService', () => {
     const service = new InventoryManagementService({ axiosRef: {} } as never);
     (fetchBitableRecords as jest.Mock).mockRejectedValueOnce(new Error('数据在读取期间已变更，请重新读取'));
     await expect(service.getItems({})).resolves.toMatchObject({ items: [], total: 0 });
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+  });
+
+  it('discards the ledger result when its generation changes while the catalog is still reading', async () => {
+    let inventoryGeneration = 0;
+    let resolveCatalog!: (rows: never[]) => void;
+    const delayedCatalog = new Promise<never[]>((resolve) => { resolveCatalog = resolve; });
+    (getBitableRecordCacheGeneration as jest.Mock).mockImplementation(
+      (_app, table) => table === TABLES.inventory ? inventoryGeneration : 0,
+    );
+    (fetchBitableRecords as jest.Mock).mockImplementation(async (_http, { tableId }) =>
+      tableId === TABLES.catalog ? delayedCatalog : [
+        { record_id: 'recA', fields: { 楼栋: 'A楼', 名称: inventoryGeneration ? '新库存' : '旧库存' } },
+      ],
+    );
+    const service = new InventoryManagementService({ axiosRef: {} } as never);
+    const result = service.getItems({ building: 'A楼' });
+    await new Promise((resolve) => setImmediate(resolve));
+    inventoryGeneration++;
+    resolveCatalog([]);
+    await expect(result).resolves.toMatchObject({ items: [expect.objectContaining({ name: '新库存' })] });
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+  });
+
+  it('returns a retryable error for continuing writes without reporting an empty ledger', async () => {
+    const service = new InventoryManagementService({ axiosRef: {} } as never);
+    (fetchBitableRecords as jest.Mock).mockImplementation(async (_http, { tableId }) => {
+      if (tableId === TABLES.inventory) throw new Error('数据在读取期间已变更，请重新读取');
+      return [];
+    });
+    await expect(service.getItems({})).rejects.toMatchObject({ status: 503 });
     expect(fetchBitableRecords).toHaveBeenCalledTimes(4);
+  });
+
+  it('returns a manually refreshed ledger even when its photo index is still loading', async () => {
+    const gateway = { searchRecords: jest.fn(() => new Promise(() => undefined)) };
+    const service = new InventoryManagementService({ axiosRef: {} } as never, undefined, gateway as never);
+    await expect(service.getItems({}, true)).resolves.toMatchObject({ total: 0 });
+    expect(gateway.searchRecords).toHaveBeenCalledTimes(1);
+  });
+
+  it('distinguishes Feishu table access from the current user losing access', async () => {
+    const service = new InventoryManagementService({ axiosRef: {} } as never);
+    jest.mocked(fetchBitableRecords).mockRejectedValueOnce(new ForbiddenException('source details'));
+    await expect(service.getItems({})).rejects.toMatchObject({
+      status: 502,
+      response: { code: 'INVENTORY_LEDGER_SOURCE_DENIED' },
+    });
   });
 
   it('reads the eight warehouse tables with the configured cache policy', async () => {

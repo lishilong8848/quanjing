@@ -210,6 +210,7 @@ async function ensureConfiguration({
   fetchImpl = fetch,
   activateWorkflow = false,
   checkOnly = false,
+  checkLeaveStartup = false,
 }) {
   const envPath = join(root, '.env');
   const envLocalPath = join(root, '.env.local');
@@ -225,11 +226,20 @@ async function ensureConfiguration({
   if (activateWorkflow) {
     // The field checker must use Node/dotenv quote and comment semantics, not
     // the configuration repair parser's historical line-oriented subset.
-    await checkOutboundStartupFields(root, {
+    const startupEnvironment = {
       ...stringEnvironment(process.env),
       ...parseEnv(baseFile.content.replace(/^\uFEFF/u, '')),
       ...parseEnv(localFile.content.replace(/^\uFEFF/u, '')),
-    });
+    };
+    if (checkLeaveStartup && isLeaveStartupEnabled(baseFile.content, localFile.content)) {
+      await checkStartupFields(root, { ...startupEnvironment, FEISHU_LEAVE_MIGRATION_IDENTITY: 'bot' }, {
+        name: 'leave workflow',
+        progressName: 'leave workflow',
+        prefix: 'LEAVE_PREFLIGHT',
+        filename: 'ensure-leave-workflow-fields.mjs',
+      });
+    }
+    await checkOutboundStartupFields(root, startupEnvironment);
   }
   let client;
   const getClient = () => {
@@ -384,6 +394,17 @@ async function ensureConfiguration({
   };
 }
 
+function isLeaveStartupEnabled(...envFiles) {
+  let flag = process.env.LEAVE_WORKFLOW_PROGRAM_ENABLED || '';
+  for (const content of envFiles) {
+    // Match start.ps1's case-insensitive last assignment and full-value quoting.
+    for (const match of content.matchAll(/^\s*LEAVE_WORKFLOW_PROGRAM_ENABLED\s*=([^\r\n]*)/gimu)) {
+      flag = match[1].trim().replace(/^(['"])(.*)\1$/u, '$2');
+    }
+  }
+  return !['false', '0', 'off', 'no'].includes(flag.trim().toLowerCase());
+}
+
 async function checkOutboundStartupFields(root, environment) {
   const enabled =
     [
@@ -396,12 +417,19 @@ async function checkOutboundStartupFields(root, environment) {
       clean(environment.FEISHU_WAREHOUSE_SOURCE_URL),
     );
   if (!enabled) return;
-  const script = fileURLToPath(
-    new URL('./ensure-inventory-outbound-approval-fields.mjs', import.meta.url),
-  );
+  await checkStartupFields(root, environment, {
+    name: 'outbound approval',
+    progressName: 'outbound',
+    prefix: 'OUTBOUND_PREFLIGHT',
+    filename: 'ensure-inventory-outbound-approval-fields.mjs',
+  });
+}
+
+async function checkStartupFields(root, environment, { name, progressName, prefix, filename }) {
+  const script = fileURLToPath(new URL(`./${filename}`, import.meta.url));
   const startedAt = Date.now();
   process.stdout.write(
-    '[INFO] Checking candidate outbound approval fields before downtime (read-only).\n',
+    `[INFO] Checking candidate ${name} fields before downtime (read-only).\n`,
   );
   const result = await new Promise((resolveChild, reject) => {
     // The staged candidate script uses the actual installer Node and server environment.
@@ -432,7 +460,7 @@ async function checkOutboundStartupFields(root, environment) {
       clearTimeout(timer);
       reject(
         new PublicError(
-          'OUTBOUND_PREFLIGHT_EXEC: candidate field checker could not start before downtime.',
+          `${prefix}_EXEC: candidate field checker could not start before downtime.`,
         ),
       );
     });
@@ -441,8 +469,10 @@ async function checkOutboundStartupFields(root, environment) {
       resolveChild({ code, output, timedOut });
     });
   });
-  if (result.code !== 0 || result.timedOut) {
-    let output = result.output.trim();
+  const failed = result.code !== 0 || result.timedOut;
+  let output = failed ? result.output.trim() : result.output.split(/\r?\n/u)
+    .filter((line) => line.startsWith('[WARN] [LEAVE_PREFLIGHT_')).join('\n');
+  if (output) {
     for (const [key, value] of Object.entries(environment)) {
       if (
         /SECRET|TOKEN|PASSWORD|ENCRYPT|APP_ID|SOURCE_URL|TABLE_ID/u.test(key) &&
@@ -452,12 +482,15 @@ async function checkOutboundStartupFields(root, environment) {
         output = output.split(value).join('[REDACTED]');
       }
     }
+  }
+  if (failed) {
     throw new PublicError(
-      `OUTBOUND_PREFLIGHT_REJECTED before downtime (exit=${result.code}, timeout=${result.timedOut}, elapsedMs=${Date.now() - startedAt}):\n${output || 'No checker output was returned.'}`,
+      `${prefix}_REJECTED before downtime (exit=${result.code}, timeout=${result.timedOut}, elapsedMs=${Date.now() - startedAt}):\n${output || 'No checker output was returned.'}`,
     );
   }
+  if (output) process.stdout.write(`${output}\n`);
   process.stdout.write(
-    `[OK] Candidate outbound field schema is ready before downtime (elapsedMs=${Date.now() - startedAt}).\n`,
+    `[OK] Candidate ${progressName} field schema is ready before downtime (elapsedMs=${Date.now() - startedAt}).\n`,
   );
 }
 
@@ -1357,6 +1390,7 @@ function parseArguments(argv) {
   let apiBaseUrl = DEFAULT_API_BASE_URL;
   let activateWorkflow = false;
   let checkOnly = false;
+  let checkLeaveStartup = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--activate-workflow') {
@@ -1365,6 +1399,10 @@ function parseArguments(argv) {
     }
     if (argument === '--check-only') {
       checkOnly = true;
+      continue;
+    }
+    if (argument === '--check-leave-startup') {
+      checkLeaveStartup = true;
       continue;
     }
     if (argument === '--root' || argument === '--api-base-url') {
@@ -1377,7 +1415,8 @@ function parseArguments(argv) {
     }
     throw new PublicError('Unknown command-line argument.');
   }
-  return { root, apiBaseUrl, activateWorkflow, checkOnly };
+  if (checkLeaveStartup && !activateWorkflow) throw new PublicError('--check-leave-startup requires --activate-workflow.');
+  return { root, apiBaseUrl, activateWorkflow, checkOnly, checkLeaveStartup };
 }
 
 async function main() {

@@ -31,8 +31,8 @@ import {
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const RETRY_CACHE_TTL_MS = 45 * 1000;
 const ACTIVE_SOURCE_CACHE_TTL_MS = 10 * 1000;
+const ACTIVE_DISPLAY_WAIT_MS = 800;
 const BITABLE_READ_CONFLICT = '数据在读取期间已变更，请重新读取';
-const ACTIVE_SYNC_NOTICE = '采购数据正在同步，暂显示上次成功结果。';
 const COMPLETED_WORKFLOW_STATUS = '采购完成（已入库）';
 const ACTIVE_EXECUTION_FILTER = {
   conjunction: 'and' as const,
@@ -111,6 +111,9 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
   private dashboardRequest?: Promise<PurchaseInventoryBuildResult>;
   private dashboardRequestForceRefresh = false;
   private activeDashboardRequest?: Promise<PurchaseInventoryResponse>;
+  private activeDashboardRead?: NonNullable<SectionReadResult['executionRead']> & {
+    expiresAt: number;
+  };
   private sourceSnapshot?: PurchaseInventorySourceSnapshot;
   private dashboardGeneration = 0;
   private readonly backgroundRefresh = createBitableBackgroundRefresh({
@@ -139,29 +142,58 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
     this.dashboardRequest = undefined;
     this.dashboardRequestForceRefresh = false;
     this.activeDashboardRequest = undefined;
+    this.activeDashboardRead = undefined;
     this.sourceSnapshot = undefined;
   }
 
   getDisplayDashboard(refresh: boolean | 'active'): Promise<PurchaseInventoryResponse> {
     const cached = this.dashboardCache;
-    if (refresh === true || !cached || cached.expiresAt > Date.now()) {
+    if (refresh === true || !cached) {
       return this.getDashboard(refresh);
+    }
+    const now = Date.now();
+    if (refresh === false && cached.expiresAt > now) {
+      return Promise.resolve(cached.value);
     }
     const source = this.sourceSnapshot;
     const tableId = readEnv(TABLES.executions.env);
+    const generation = source && tableId
+      ? getBitableRecordCacheGeneration(source.appToken, tableId)
+      : undefined;
+    const activeRead = this.activeDashboardRead;
+    if (cached.expiresAt > now) {
+      if (activeRead && !this.dashboardRequest && activeRead.expiresAt > now &&
+          activeRead.tableId === tableId && activeRead.appToken === source?.appToken &&
+          activeRead.generation === generation) {
+        return Promise.resolve(cached.value);
+      }
+      return this.readActiveForDisplay(cached.value);
+    }
     const executionRead = source?.sourceSections.executions.executionRead;
     if (!source || (tableId && (
       executionRead?.tableId !== tableId || executionRead.appToken !== source.appToken ||
-      executionRead.generation !== getBitableRecordCacheGeneration(source.appToken, tableId)
+      executionRead.generation !== generation
     ))) {
       return this.getDashboard(refresh);
     }
     // Only the read endpoint can display an expired result. Permission checks
     // for edits and deletions still wait for the explicit strict refresh.
     void this.getDashboard(false).catch(() => undefined);
-    return Promise.resolve(cached.value.refreshState === 'fresh'
-      ? markDashboardStale(cached.value, ACTIVE_SYNC_NOTICE)
-      : cached.value);
+    return Promise.resolve(markDashboardSyncing(cached.value));
+  }
+
+  private async readActiveForDisplay(fallback: PurchaseInventoryResponse): Promise<PurchaseInventoryResponse> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.refreshActiveDashboard(),
+        new Promise<PurchaseInventoryResponse>((resolve) => {
+          timer = setTimeout(() => resolve(markDashboardSyncing(fallback)), ACTIVE_DISPLAY_WAIT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async getDashboard(
@@ -220,6 +252,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
         );
       }
       if (requestGeneration === this.dashboardGeneration) {
+        this.activeDashboardRead = undefined;
         this.sourceSnapshot = sourceSnapshot;
         this.dashboardCache = {
           expiresAt:
@@ -246,6 +279,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
           this.dashboardCache.value,
           message,
         );
+        this.activeDashboardRead = undefined;
         this.dashboardCache = {
           expiresAt: Date.now() + RETRY_CACHE_TTL_MS,
           value: staleDashboard,
@@ -282,15 +316,31 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
     const fallbackCache = this.dashboardCache;
     const requestGeneration = this.dashboardGeneration;
     const previousSnapshot = this.sourceSnapshot;
+    const tableId = readEnv(TABLES.executions.env);
+    const executionGeneration = tableId
+      ? getBitableRecordCacheGeneration(previousSnapshot.appToken, tableId)
+      : undefined;
     const activeRequest = (async () => {
       try {
         const { dashboard, sourceSnapshot } =
           await this.buildActiveDashboard(previousSnapshot);
         if (requestGeneration !== this.dashboardGeneration) {
           return this.dashboardCache?.value ??
-            markDashboardStale(fallbackCache.value, ACTIVE_SYNC_NOTICE);
+            markDashboardSyncing(fallbackCache.value);
         }
         this.sourceSnapshot = sourceSnapshot;
+        // A read retried after a write can be returned, but cannot be reused
+        // across requests unless its generation stayed stable for the attempt.
+        this.activeDashboardRead = undefined;
+        if (executionGeneration !== undefined &&
+            executionGeneration === getBitableRecordCacheGeneration(previousSnapshot.appToken, tableId)) {
+          this.activeDashboardRead = {
+            appToken: previousSnapshot.appToken,
+            tableId,
+            generation: executionGeneration,
+            expiresAt: Date.now() + ACTIVE_SOURCE_CACHE_TTL_MS,
+          };
+        }
         this.dashboardCache = {
           expiresAt: fallbackCache.expiresAt,
           value: dashboard,
@@ -301,13 +351,13 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
           if (this.dashboardCache) return this.dashboardCache.value;
           throw error;
         }
+        this.activeDashboardRead = undefined;
+        if (isBitableReadConflict(error)) return markDashboardSyncing(fallbackCache.value);
         const message = `采购进行中数据刷新失败：${safeErrorMessage(error)}`;
         this.logger.warn(`${message}，继续使用最近一次成功看板`);
         const staleDashboard = markDashboardStale(
           fallbackCache.value,
-          isBitableReadConflict(error)
-            ? ACTIVE_SYNC_NOTICE
-            : message,
+          message,
         );
         this.dashboardCache = {
           expiresAt: fallbackCache.expiresAt,
@@ -592,6 +642,14 @@ function markDashboardStale(
     ...dashboard,
     refreshState: 'stale',
     refreshError,
+  };
+}
+
+function markDashboardSyncing(dashboard: PurchaseInventoryResponse): PurchaseInventoryResponse {
+  return {
+    ...dashboard,
+    refreshState: dashboard.refreshState === 'partial' ? 'partial' : 'stale',
+    refreshPending: true,
   };
 }
 

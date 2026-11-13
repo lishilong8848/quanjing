@@ -890,8 +890,8 @@ function Assert-LeaveWorkflowSchema {
     $fieldCheckExitCode = $fieldCheckResult.ExitCode
     $fieldCheckOutput | ForEach-Object { Write-Host $_ }
     if ($fieldCheckExitCode -ne 0) {
-      Write-Host '[ERROR] Leave workflow fields are missing, invalid, or point to the wrong table.' -ForegroundColor Red
-      Write-Host '[ERROR] Run: npm run migrate:leave-workflow-fields' -ForegroundColor Red
+      Write-Host "[ERROR] Leave workflow read-only startup check failed (exit=$fieldCheckExitCode)." -ForegroundColor Red
+      Write-Host '[ERROR] Repair fields only when LEAVE_PREFLIGHT_SCHEMA is reported. For HTTP, network, or configuration failures, investigate the reported cause.' -ForegroundColor Red
       return $false
     }
   } finally {

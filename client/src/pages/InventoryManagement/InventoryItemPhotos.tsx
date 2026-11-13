@@ -11,6 +11,8 @@ export interface InventoryItemPhotoGallery {
   images: InventoryItemImage[];
 }
 
+const thumbnailTile = 'flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 sm:size-10';
+
 export function InventoryItemPhotoThumbnail({
   name,
   images,
@@ -22,9 +24,9 @@ export function InventoryItemPhotoThumbnail({
 }) {
   if (!images?.length) {
     return (
-      <span className="flex size-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 text-[9px] leading-none text-slate-500">
-        <ImageOff className="size-3.5" aria-hidden="true" />
-        无图片
+      <span className={`${thumbnailTile} bg-slate-50 text-slate-400`} title="无图片">
+        <ImageOff className="size-4" aria-hidden="true" />
+        <span className="sr-only">无图片</span>
       </span>
     );
   }
@@ -33,7 +35,7 @@ export function InventoryItemPhotoThumbnail({
     <button
       type="button"
       aria-label={`查看${name}的物品图片，共 ${images.length} 张`}
-      className="relative flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-slate-400 outline-offset-2 hover:border-blue-400"
+      className={`${thumbnailTile} relative overflow-hidden bg-slate-50 text-slate-400 outline-offset-2 hover:border-blue-400`}
       onClick={() => onOpen({ name, images })}
     >
       <LedgerPhoto key={images[0].url} image={images[0]} thumbnail />
@@ -100,7 +102,7 @@ function LedgerPhoto({ image, thumbnail = false }: { image: InventoryItemImage; 
       loading={thumbnail ? 'lazy' : undefined}
       decoding="async"
       onError={() => setFailed(true)}
-      className={thumbnail ? 'h-full w-full object-cover' : 'max-h-[62dvh] max-w-full object-contain'}
+      className={thumbnail ? 'h-full w-full object-contain' : 'max-h-[62dvh] max-w-full object-contain'}
     />
   );
 }

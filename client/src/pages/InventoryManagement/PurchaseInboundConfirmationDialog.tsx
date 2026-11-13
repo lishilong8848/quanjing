@@ -98,6 +98,7 @@ interface PurchaseInboundConfirmationDialogProps {
   item: PurchasePendingInboundItem | null;
   initialDraft?: PurchaseInboundDraft;
   retryLocked?: boolean;
+  awaitingPendingVerification?: boolean;
   onAbandonRetry?: () => void;
   onCategoryPrepared?: (
     executionRecordId: string,
@@ -118,11 +119,11 @@ export function createPurchaseInboundDraft(
       kind: 'purchase',
       executionRecordId: item.executionRecordId,
       ...(item.responsibilityGeneration === undefined ? {} : { responsibilityGeneration: item.responsibilityGeneration }),
-      clientMutationId: prepared.clientMutationId,
+      clientMutationId: item.reopenedAfterDeletion ? undefined : prepared.clientMutationId,
       mode: 'new',
       building: prepared.building,
       quantity: String(prepared.quantity),
-      occurredAt: toLocalDateTime(new Date(prepared.occurredAt)),
+      occurredAt: toLocalDateTime(item.reopenedAfterDeletion ? now : new Date(prepared.occurredAt)),
       itemQuery: '',
       selectedItem: null,
       preparedCatalogRecordId: prepared.catalogRecordId,
@@ -209,8 +210,12 @@ export function restorePurchaseInboundDraftFromCategoryTask(
 
 export function validatePurchaseInboundDraft(
   draft: PurchaseInboundDraft,
+  maxQuantity?: number,
 ): Record<string, string> {
   const errors = validatePurchaseInboundBaseDraft(draft);
+  if (!errors.quantity && maxQuantity !== undefined && Number(draft.quantity) > maxQuantity) {
+    errors.quantity = `确认入库数量不能超过实际签收数量（${maxQuantity}）`;
+  }
 
   if (!draft.mode) {
     errors.mode = '请选择入库类型';
@@ -486,13 +491,14 @@ export function PurchaseInboundConfirmationDialog({
   retryLocked = false,
   onAbandonRetry,
   onCategoryPrepared,
+  awaitingPendingVerification = false,
   onOpenChange,
   onSubmit,
   batchPosition,
 }: PurchaseInboundConfirmationDialogProps) {
   const principal = useAccess();
-  const canConfirm = canUseInventoryAction(principal, 'confirm', item || undefined);
-  const canPrepareCategory = canUseInventoryAction(principal, 'update', item || undefined);
+  const canConfirm = (!awaitingPendingVerification || retryLocked) && canUseInventoryAction(principal, 'confirm', item || undefined);
+  const canPrepareCategory = !awaitingPendingVerification && canUseInventoryAction(principal, 'update', item || undefined);
   const [draft, setDraft] = useState<PurchaseInboundDraft | null>(null);
   const [options, setOptions] = useState<InventoryMovementOptionItem[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
@@ -517,6 +523,7 @@ export function PurchaseInboundConfirmationDialog({
     categoryTaskPhase === 'uncertain';
   const categoryTaskSpinning =
     categoryTaskPhase === 'submitting' || categoryTaskPhase === 'syncing';
+  const hasReopenedCategory = item?.reopenedAfterDeletion === true && Boolean(item.preparedCategory);
 
   useEffect(() => {
     if (!open || !item) return;
@@ -540,7 +547,7 @@ export function PurchaseInboundConfirmationDialog({
   }, [initialDraft, item, open, resetInboundPhotos]);
 
   useEffect(() => {
-    if (!open || !item) return;
+    if (!open || !item || hasReopenedCategory) return;
     const coordinator = createPurchaseInboundCategoryTaskCoordinator({
       prepareCategory: preparePurchaseInboundCategory,
       getTaskStatus: getPurchaseInboundCategoryTaskStatus,
@@ -660,7 +667,7 @@ export function PurchaseInboundConfirmationDialog({
         categoryTaskCoordinatorRef.current = null;
       }
     };
-  }, [item?.executionRecordId, onCategoryPrepared, open]);
+  }, [item?.executionRecordId, hasReopenedCategory, onCategoryPrepared, open]);
 
   useEffect(() => {
     if (
@@ -720,13 +727,15 @@ export function PurchaseInboundConfirmationDialog({
     Boolean(
       draft.preparedCatalogRecordId?.trim() && draft.generatedSku?.trim(),
     );
+  const reopenedPrepared = item.reopenedAfterDeletion === true && preparedNew;
+  const validationErrors = validatePurchaseInboundDraft(draft, item.quantity);
   const confirmDisabled =
     !canConfirm ||
     categoryTaskActive ||
     creatingStorageLocation ||
     submitting ||
     inboundPhotos.uploading ||
-    Object.keys(validatePurchaseInboundDraft(draft)).length > 0;
+    Object.keys(validationErrors).length > 0;
 
   function clearRetryMutationId(
     current: PurchaseInboundDraft,
@@ -969,7 +978,7 @@ export function PurchaseInboundConfirmationDialog({
     if (!canConfirm) { setErrors(current => ({ ...current, submit: '当前权限不能确认该采购入库' })); return; }
     if (inboundSubmitGuard.current) return;
 
-    const nextErrors = validatePurchaseInboundDraft(draft!);
+    const nextErrors = validatePurchaseInboundDraft(draft!, item!.quantity);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
@@ -994,6 +1003,7 @@ export function PurchaseInboundConfirmationDialog({
       if (accepted === false) {
         inboundSubmitGuard.current = false;
         setSubmitting(false);
+        setErrors((current) => ({ ...current, submit: '本次入库未提交，请查看页面提示后重试。' }));
         return;
       }
     } catch (error) {
@@ -1027,7 +1037,7 @@ export function PurchaseInboundConfirmationDialog({
         </DialogHeader>
 
         <fieldset
-          disabled={retryLocked || categoryTaskActive || preparedNew || inboundPhotos.uploading}
+          disabled={retryLocked || categoryTaskActive || (preparedNew && !reopenedPrepared) || inboundPhotos.uploading || submitting}
           className="min-w-0 space-y-5 border-0 p-0 py-2"
         >
           {retryLocked && (
@@ -1045,6 +1055,7 @@ export function PurchaseInboundConfirmationDialog({
                 className="w-full"
                 aria-label="入库楼栋"
                 value={draft.building}
+                disabled={reopenedPrepared}
                 onChange={(event) =>
                   changeBuilding(event.target.value as WarehouseBuilding)
                 }
@@ -1068,7 +1079,7 @@ export function PurchaseInboundConfirmationDialog({
                 }
               />
             </Field>
-            <Field label="确认入库数量" required error={errors.quantity}>
+            <Field label="确认入库数量" required error={errors.quantity || (Number(draft.quantity) > item.quantity ? validationErrors.quantity : undefined)}>
               <Input
                 type="number"
                 min={1}
@@ -1094,6 +1105,7 @@ export function PurchaseInboundConfirmationDialog({
                   variant={draft.mode === 'new' ? 'default' : 'outline'}
                   role="radio"
                   aria-checked={draft.mode === 'new'}
+                  disabled={reopenedPrepared}
                   onClick={() => changeMode('new')}
                 >
                   新增物品
@@ -1103,6 +1115,7 @@ export function PurchaseInboundConfirmationDialog({
                   variant={draft.mode === 'existing' ? 'default' : 'outline'}
                   role="radio"
                   aria-checked={draft.mode === 'existing'}
+                  disabled={reopenedPrepared}
                   onClick={() => changeMode('existing')}
                 >
                   已有物品
@@ -1171,7 +1184,7 @@ export function PurchaseInboundConfirmationDialog({
               <ErrorText message={errors.catalog || searchError} />
             </section>
           ) : draft.mode === 'new' ? (
-            <section className="space-y-4 rounded-xl border border-amber-100 bg-white p-4">
+            <fieldset disabled={preparedNew} className="min-w-0 space-y-4 rounded-xl border border-amber-100 bg-white p-4">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold text-slate-900">
                   创建库存类别并入库
@@ -1323,14 +1336,16 @@ export function PurchaseInboundConfirmationDialog({
                         : '生成新的物品类别号'}
                 </Button>
                 <span className="text-xs text-slate-500">
-                  {preparedNew
+                  {reopenedPrepared
+                    ? '沿用已生成的类别号，可重新核对入库数量和时间。'
+                    : preparedNew
                     ? '类别号已生成，本次入库参数已锁定。'
                     : categoryTaskMessage
                       ? categoryTaskMessage
                       : '请先核对并修改物品信息，再生成类别号。'}
                 </span>
               </div>
-            </section>
+            </fieldset>
           ) : (
             <section className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
               请先选择“新增物品”或“已有物品”后继续办理入库。
@@ -1338,6 +1353,9 @@ export function PurchaseInboundConfirmationDialog({
           )}
 
         </fieldset>
+        {awaitingPendingVerification && !retryLocked && (
+          <p role="status" className="text-sm text-slate-600">待入库清单核对成功后可提交，已填写的内容会保留。</p>
+        )}
         {draft.mode && (
           <InventoryInboundPhotos photos={inboundPhotos} disabled={retryLocked || categoryTaskActive || !canConfirm} />
         )}

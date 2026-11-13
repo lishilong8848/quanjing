@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -38,11 +39,14 @@ import {
   type ManualInventoryInboundTaskRequest,
 } from './inventory-inbound-task-ledger.store';
 import { InventoryMovementCommandService } from './inventory-movement-command.service';
+import { InventoryMovementDeletionTaskLedgerStore } from './inventory-movement-deletion-task-ledger.store';
 import { InventoryInboundPhotoService, normalizeInventoryInboundPhotoIds } from './inventory-inbound-photo.service';
 import { InventoryStorageLocationService } from './inventory-storage-location.service';
 import { PurchaseInboundConfirmationService } from './purchase-inbound-confirmation.service';
 import { PurchaseWorkflowService } from '../purchase-inventory/purchase-workflow.service';
 import { AccessConfigurationService } from '../../common/access/access-configuration.service';
+import { ResponseCode } from '../../common/constants/api_response_code';
+import { BusinessException } from '../../common/interfaces/exception.interface';
 
 export const INVENTORY_INBOUND_TASK_SERVICE_OPTIONS =
   'INVENTORY_INBOUND_TASK_SERVICE_OPTIONS';
@@ -95,6 +99,7 @@ export class InventoryInboundTaskService
     options: InventoryInboundTaskServiceOptions = {},
     @Optional() private readonly accessConfiguration?: AccessConfigurationService,
     @Optional() private readonly photoService?: InventoryInboundPhotoService,
+    @Optional() private readonly deletionTaskLedger?: InventoryMovementDeletionTaskLedgerStore,
   ) {
     this.retryDelayMs = positive(options.retryDelayMs, DEFAULT_RETRY_DELAY_MS);
     this.recoveryScanDelayMs = positive(
@@ -183,6 +188,9 @@ export class InventoryInboundTaskService
     }
     if (entry.task.status === 'pending') this.scheduleTask(taskId);
     if (entry.task.status === 'completed') {
+      if (await this.isDeletedPurchaseResult(entry)) {
+        throw deletedPurchaseTaskConflict();
+      }
       this.scheduleCompletionNotificationRepair(entry, entry.task.result);
     }
     return { success: true, task: toPublicInventoryInboundTask(entry.task) };
@@ -237,12 +245,24 @@ export class InventoryInboundTaskService
       this.scheduleTask(reservation.entry.task.id);
     }
     if (reservation.entry.task.status === 'completed') {
+      if (await this.isDeletedPurchaseResult(reservation.entry)) {
+        throw deletedPurchaseTaskConflict();
+      }
       this.scheduleCompletionNotificationRepair(
         reservation.entry,
         reservation.entry.task.result,
       );
     }
     return acceptedTask(reservation.entry.task);
+  }
+
+  private async isDeletedPurchaseResult(entry: InventoryInboundTaskLedgerEntry): Promise<boolean> {
+    if (entry.kind !== 'purchase' || entry.task.status !== 'completed' || !this.deletionTaskLedger) return false;
+    const request = entry.request as PurchaseInboundConfirmRequest;
+    const result = entry.task.result as PurchaseInboundConfirmResponse;
+    const rollbacks = await this.deletionTaskLedger.completedPurchaseRollbacks();
+    return rollbacks.some((rollback) => rollback.executionRecordId === request.executionRecordId &&
+      rollback.recordId === result.inboundRecordId);
   }
 
   private scheduleCompletionNotificationRepair(
@@ -461,6 +481,7 @@ export class InventoryInboundTaskService
         entry.request as PurchaseInboundConfirmRequest,
         entry.principal,
         assertOwnership,
+        entry.task.createdAt,
       );
     }
     let request = entry.request as ManualInventoryInboundTaskRequest;
@@ -487,6 +508,15 @@ export class InventoryInboundTaskService
       assertOwnership,
     );
   }
+}
+
+function deletedPurchaseTaskConflict(): BusinessException {
+  return new BusinessException(
+    ResponseCode.CONFLICT,
+    '原入库记录已删除，请在待入库清单重新提交',
+    HttpStatus.CONFLICT,
+    'PURCHASE_INBOUND_ROLLED_BACK',
+  );
 }
 
 function normalizeManualRequest(

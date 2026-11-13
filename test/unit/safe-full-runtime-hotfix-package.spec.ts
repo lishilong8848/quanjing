@@ -1965,7 +1965,7 @@ describe('safe full runtime hotfix package', () => {
     expect(startFunction).toContain('System.Diagnostics.ProcessStartInfo');
     expect(startFunction).toContain('-NoBrowser');
     expect(startFunction).toContain('$process.Start()');
-    expect(startFunction).not.toContain('-PassThru');
+    expect(startFunction).not.toContain('Start-Process');
     expect(startFunction).toContain("'System32\\cmd.exe'");
     expect(startFunction).toContain('/d /v:off /s /c');
     expect(startFunction).toContain('$startInfo.CreateNoWindow = $true');

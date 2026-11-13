@@ -380,6 +380,89 @@ describe('ensure leave workflow fields', () => {
     expect(result.stderr).not.toContain('test-tenant-token');
     expect(result.stderr).not.toContain('test-app-secret');
   });
+
+  it('recovers from a temporary token transport failure and field list throttling', () => {
+    const result = checkFields({
+      mainFields: requiredFields,
+      authFailures: [{ disconnect: true }],
+      fieldFailures: [{ status: 503, malformed: true }, { status: 200, code: 99991400 }],
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ success: true, created: [], missing: [] });
+    expect(result.stderr).toContain('[LEAVE_PREFLIGHT_NETWORK]');
+    expect(result.stderr).toContain('http=503');
+    expect(result.stderr).toContain('code=99991400');
+    expect(readCalls(openApiLog).map(({ method }) => method)).toEqual(['POST', 'POST', 'GET', 'GET', 'GET']);
+    expect(result.stderr).not.toContain('test-app-secret');
+    expect(result.stderr).not.toContain('test-base-token');
+    expect(result.stderr).not.toContain('test-tenant-token');
+  });
+
+  it.each([
+    { status: 403, code: 1254302 },
+    { status: 429, code: 99991403 },
+    { status: 429, code: 99991400, retryAfter: '60' },
+  ])('preserves diagnostic output and does not repeat a permanent or long-lived failure (%j)', failure => {
+    const result = checkFields({ mainFields: requiredFields, fieldFailures: [failure] });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`[LEAVE_PREFLIGHT_HTTP]`);
+    expect(result.stderr).toContain(`http=${failure.status}, code=${failure.code}, attempt=1/3`);
+    expect(result.stderr).not.toContain('试验密钥');
+    expect(readCalls(openApiLog).map(({ method }) => method)).toEqual(['POST', 'GET']);
+  });
+
+  it('blocks a continuing temporary failure after three attempts', () => {
+    const failure = { status: 503, code: 1255001, logId: '202611131121ABCDEF' };
+    const result = checkFields({ mainFields: requiredFields, fieldFailures: [failure, failure, failure] });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('http=503, code=1255001, logId=202611131121ABCDEF, attempt=3/3');
+    expect(readCalls(openApiLog).map(({ method }) => method)).toEqual(['POST', 'GET', 'GET', 'GET']);
+  });
+
+  it('distinguishes genuinely missing fields from an invalid field response', () => {
+    const missing = checkFields({ mainFields: requiredFields.slice(1) });
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain('[LEAVE_PREFLIGHT_SCHEMA] 缺少请休假程序审批字段');
+    expect(missing.stderr).toContain(requiredFields[0].name);
+    expect(readCalls(openApiLog).map(({ method }) => method)).toEqual(['POST', 'GET']);
+
+    const invalid = checkFields({ mainFields: null });
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain('[LEAVE_PREFLIGHT_RESPONSE]');
+    expect(invalid.stderr).not.toContain('[LEAVE_PREFLIGHT_SCHEMA]');
+    expect(readCalls(openApiLog).map(({ method }) => method)).toEqual(['POST', 'GET']);
+  });
+
+  it('does not repeat a field-creation POST when the server result is unknown', () => {
+    const result = checkFields({
+      mainFields: [], createFailures: [{ status: 503, code: 1255001 }],
+    }, '--apply');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('[LEAVE_PREFLIGHT_HTTP]');
+    expect(readCalls(openApiLog).map(({ method }) => method)).toEqual(['POST', 'GET', 'POST']);
+  });
+
+  function checkFields(state: object, mode = '--require-ready') {
+    writeFileSync(openApiState, JSON.stringify(state), 'utf8');
+    writeFileSync(openApiLog, '', 'utf8');
+    return spawnSync(process.execPath, [script, mode], {
+      encoding: 'utf8',
+      timeout: 35_000,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        LARK_OPENAPI_BASE_URL: openApiBaseUrl,
+        FEISHU_APP_ID: 'test-app-id',
+        FEISHU_APP_SECRET: '试验密钥',
+        FEISHU_LEAVE_REQUEST_APP_TOKEN: 'test-base-token',
+        FEISHU_LEAVE_REQUEST_TABLE_ID: tableId,
+      },
+    });
+  }
 });
 
 function readCalls(path: string): Array<{
@@ -449,6 +532,7 @@ const server = createServer(async (request, response) => {
   );
 
   if (url.pathname === '/auth/v3/tenant_access_token/internal') {
+    if (respondWithFailure('authFailures', request, response)) return;
     return send(response, 200, {
       code: 0,
       tenant_access_token: 'test-tenant-token',
@@ -459,6 +543,7 @@ const server = createServer(async (request, response) => {
     url.pathname === '/bitable/v1/apps/test-base-token/tables/${tableId}/fields' &&
     request.method === 'GET'
   ) {
+    if (respondWithFailure('fieldFailures', request, response)) return;
     const state = JSON.parse(readFileSync(statePath, 'utf8'));
     return send(response, 200, {
       code: 0,
@@ -469,6 +554,7 @@ const server = createServer(async (request, response) => {
     url.pathname === '/bitable/v1/apps/test-base-token/tables/${tableId}/fields' &&
     request.method === 'POST'
   ) {
+    if (respondWithFailure('createFailures', request, response)) return;
     const state = JSON.parse(readFileSync(statePath, 'utf8'));
     const fields = Array.isArray(state) ? state : state.mainFields;
     fields.push(body);
@@ -533,6 +619,26 @@ function send(response, status, payload) {
   response.statusCode = status;
   response.setHeader('content-type', 'application/json; charset=utf-8');
   response.end(JSON.stringify(payload));
+}
+
+function respondWithFailure(key, request, response) {
+  const state = JSON.parse(readFileSync(statePath, 'utf8'));
+  const failure = state[key]?.shift();
+  if (!failure) return false;
+  writeFileSync(statePath, JSON.stringify(state), 'utf8');
+  if (failure.disconnect) {
+    request.socket.destroy();
+  } else {
+    if (failure.retryAfter) response.setHeader('retry-after', failure.retryAfter);
+    if (failure.logId) response.setHeader('x-tt-logid', failure.logId);
+    if (failure.malformed) {
+      response.statusCode = failure.status;
+      response.end('proxy failure');
+    } else {
+      send(response, failure.status, { code: failure.code, msg: 'sensitive echo 试验密钥 test-base-token' });
+    }
+  }
+  return true;
 }
 `;
 }

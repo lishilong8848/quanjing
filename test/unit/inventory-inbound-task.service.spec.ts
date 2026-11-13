@@ -319,6 +319,7 @@ describe('InventoryInboundTaskService', () => {
       PURCHASE_REQUEST,
       ADMIN,
       expect.any(Function),
+      entry.task.createdAt,
     );
     expect(ledger.updateInboundTask).toHaveBeenCalledWith(
       entry.task.id,
@@ -507,6 +508,7 @@ describe('InventoryInboundTaskService', () => {
       PURCHASE_REQUEST,
       ADMIN,
       expect.any(Function),
+      entry.task.createdAt,
     );
     await service.onModuleDestroy();
   });

@@ -775,6 +775,12 @@ export function classifyInventoryInboundFailure(
   return 'unknown';
 }
 
+export function isRolledBackPurchaseInbound(error: unknown): boolean {
+  if (!isRecord(error) || !isRecord(error.response) || error.response.status !== 409) return false;
+  const data = error.response.data;
+  return isRecord(data) && isRecord(data.error) && data.error.details === 'PURCHASE_INBOUND_ROLLED_BACK';
+}
+
 export function isInventoryInboundRetryLocked(
   recovery: InventoryInboundRecovery<unknown>,
 ): boolean {
@@ -1015,7 +1021,7 @@ export function acceptInventoryInboundRecovery(input: {
 
 export function finalizeInventoryInboundRecovery(
   clientMutationId: string,
-  status: 'running' | 'completed' | 'failed',
+  status: 'running' | 'completed' | 'failed' | 'rolled-back',
   ownerKey?: string | null,
 ): boolean {
   if (status === 'running') return false;

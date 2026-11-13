@@ -31,6 +31,14 @@ describe('purchase source status UI', () => {
     );
   });
 
+  it('keeps the visible dashboard on a pending sync and retries without requiring force-refresh access', () => {
+    expect(source).toContain('const syncPending = response.refreshPending === true');
+    expect(source).toContain('if (syncPending && dashboardRef.current) return true');
+    expect(source).toContain('refreshError ?? (syncPending ? previous : null)');
+    expect(source).toContain("renderedDashboardSyncPending ? ' · 后台同步中' : ''");
+    expect(source).toContain("void loadDashboard(canForceRefresh ? true : 'active')");
+  });
+
   it('labels an optimistic cold-start dashboard as base data still syncing', () => {
     expect(source).toContain(
       "setDashboardNotice('采购基础数据正在同步，本次申请已先显示。')",

@@ -1,4 +1,4 @@
-import { describePendingPurchaseReadFailure, pendingPurchaseReadDisplay } from './pending-purchase-read-state';
+import { describePendingPurchaseReadFailure, pendingPurchaseReadDisplay, readPendingPurchaseWithRetry } from './pending-purchase-read-state';
 import { createInventoryInboundQueryPool } from './inventory-inbound-query-pool';
 import {
   useCallback,
@@ -132,6 +132,7 @@ import {
   isInventoryInboundRetryLocked,
   isPurchaseInboundDraft,
   isPurchaseInboundRecoveryDraft,
+  isRolledBackPurchaseInbound,
   readInventoryInboundRecovery,
   readAcceptedInventoryInboundRecoveries,
   inventoryInboundRecoveryOwner,
@@ -332,6 +333,8 @@ export function InventoryMovementPage({
   const [movementError, setMovementError] = useState('');
   const [pendingError, setPendingError] = useState('');
   const [pendingAccessDenied, setPendingAccessDenied] = useState(false);
+  const [pendingFallback, setPendingFallback] = useState<PurchasePendingInboundItem[] | null>(null);
+  const canStartPendingPurchase = canConfirm && !pendingAccessDenied && !pendingError && !pendingFallback;
   const [createOpen, setCreateOpen] = useState(false);
   const [manualRetryDraft, setManualRetryDraft] =
     useState<InventoryInboundDraft>();
@@ -551,9 +554,17 @@ export function InventoryMovementPage({
   );
   const shouldRefreshOutboundApprovals =
     shouldRefreshInventoryOutboundApprovals(type, response);
-  const pendingPurchases = movementNamespaceReady && !pendingAccessDenied
-    ? inboundState.basePendingPurchases
-    : [];
+  const pendingPurchases = useMemo(() => {
+    if (!movementNamespaceReady || pendingAccessDenied) return [];
+    if (!pendingFallback || inboundState.latestPurchaseRequestId > 0 || pendingPurchaseReads.peek(pendingPurchaseKey)) {
+      return inboundState.basePendingPurchases;
+    }
+    const activeIds = new Set([...inboundState.pendingMutations.values()].map(row => row.purchaseExecutionRecordId));
+    return pendingFallback.filter(item => !activeIds.has(item.executionRecordId) &&
+      !inboundState.settledPurchaseExecutionIds.has(item.executionRecordId));
+  }, [movementNamespaceReady, pendingAccessDenied, pendingFallback, pendingPurchaseKey,
+    inboundState.basePendingPurchases, inboundState.latestPurchaseRequestId,
+    inboundState.pendingMutations, inboundState.settledPurchaseExecutionIds]);
   const normalizedPurchaseExecutionRecordId =
     purchaseExecutionRecordId?.trim() || '';
   const filteredPendingPurchases = useMemo(
@@ -591,7 +602,7 @@ export function InventoryMovementPage({
 
   useEffect(() => {
     if (pendingLoading || !movementNamespaceReady) return;
-    const available = new Set(pendingPurchases.map((item) => item.executionRecordId));
+    const available = new Set(pendingPurchases.filter(item => !item.preparedCategoryInvalid).map(item => item.executionRecordId));
     setSelectedPendingIds((current) => {
       if ([...current].every((id) => available.has(id))) return current;
       return new Set([...current].filter((id) => available.has(id)));
@@ -709,26 +720,32 @@ export function InventoryMovementPage({
       const requestId = ++pendingRequestRef.current;
       const requestGeneration = principalRequestGenerationRef.current;
       const requestPrincipal = principalFingerprint;
+      const isScopeCurrent = () =>
+        mountedRef.current &&
+        principalRequestGenerationRef.current === requestGeneration &&
+        principalRequestPrincipalRef.current === requestPrincipal;
+      const isRequestCurrent = () => isScopeCurrent() && pendingRequestRef.current === requestId;
       if (!pendingPurchaseReads.peek(pendingPurchaseKey)) setPendingLoading(true);
-      setPendingError('');
       try {
         const result = await pendingPurchaseReads.read(pendingPurchaseKey, async () => {
           if (principalRequestPrincipalRef.current !== requestPrincipal ||
               (bypassCache && !mountedRef.current)) throw new Error('Inventory read scope changed');
-          const result = await getPendingPurchaseInbounds(forceRefresh);
+          const result = await readPendingPurchaseWithRetry(
+            () => getPendingPurchaseInbounds(forceRefresh),
+            isScopeCurrent,
+          );
           if (!result || !Array.isArray(result.items)) {
             throw new Error('Invalid pending purchase inbound response');
           }
           return result;
         }, bypassCache, forceRefresh);
-        if (
-          !mountedRef.current ||
-          pendingRequestRef.current !== requestId ||
-          principalRequestGenerationRef.current !== requestGeneration ||
-          principalRequestPrincipalRef.current !== requestPrincipal
-        ) {
+        if (!isRequestCurrent()) return null;
+        if (result.refreshPending) {
+          setPendingFallback(result.items);
+          setPendingError('');
           return null;
         }
+        setPendingFallback(null);
         setInboundState((current) =>
           mergePurchaseQueryResult(current, result.items, requestId),
         );
@@ -736,31 +753,32 @@ export function InventoryMovementPage({
         setPendingAccessDenied(false);
         return result.items;
       } catch (error) {
-        if (
-          !mountedRef.current ||
-          pendingRequestRef.current !== requestId ||
-          principalRequestGenerationRef.current !== requestGeneration ||
-          principalRequestPrincipalRef.current !== requestPrincipal
-        ) {
-          return null;
-        }
+        if (!isRequestCurrent()) return null;
         const failure = describePendingPurchaseReadFailure(error);
         setPendingError(failure.message);
-        if (failure.hidePrevious) setPendingAccessDenied(true);
+        if (failure.hidePrevious) {
+          setPendingAccessDenied(true);
+          setPendingFallback(null);
+        }
         return null;
       } finally {
-        if (
-          mountedRef.current &&
-          pendingRequestRef.current === requestId &&
-          principalRequestGenerationRef.current === requestGeneration &&
-          principalRequestPrincipalRef.current === requestPrincipal
-        ) {
-          setPendingLoading(false);
-        }
+        if (isRequestCurrent()) setPendingLoading(false);
       }
     },
     [principalFingerprint, accessLoading, pendingPurchaseKey, type, canRefresh],
   );
+
+  const pendingRefreshNeeded = Boolean(pendingFallback);
+  useEffect(() => {
+    if (!pendingRefreshNeeded || pendingAccessDenied || pendingError) return;
+    const timers = [3_000, 8_000, 20_000, 40_000, 75_000].map(delay => window.setTimeout(() => {
+      if (document.visibilityState !== 'hidden') void loadPendingPurchases(false, true);
+    }, delay));
+    timers.push(window.setTimeout(() => {
+      setPendingError('待入库清单仍在核对，请点击重新加载。');
+    }, 85_000));
+    return () => timers.forEach(timer => window.clearTimeout(timer));
+  }, [loadPendingPurchases, pendingAccessDenied, pendingError, pendingRefreshNeeded]);
 
   useEffect(() => {
     loadMovementsRef.current = loadMovements;
@@ -1130,6 +1148,10 @@ export function InventoryMovementPage({
     }
 
     setHighlightedExecutionId(resolution.item.executionRecordId);
+    if (resolution.item.preparedCategoryInvalid) {
+      setPurchaseDeepLinkError(resolution.item.actionReason);
+      return;
+    }
     setSelectedPending(resolution.item);
   }, [
     loadPendingPurchases,
@@ -1230,6 +1252,7 @@ export function InventoryMovementPage({
     setPendingPage(1);
     setPendingAccessDenied(false);
     setPendingError('');
+    setPendingFallback(null);
     setSelectedMovementForDeletion(null);
     setManualRetryDraft(undefined);
     setManualOutboundRetryDraft(undefined);
@@ -1729,6 +1752,17 @@ export function InventoryMovementPage({
             }
           },
           onError: (error) => {
+            if (recovery.kind === 'purchase' && isRolledBackPurchaseInbound(error)) {
+              finalizeInventoryInboundRecovery(recovery.clientMutationId, 'rolled-back', inboundRecoveryOwner);
+              clearInventoryInboundRecovery(recovery.clientMutationId, inboundRecoveryOwner);
+              activeInboundMutationIdsRef.current.delete(recovery.clientMutationId);
+              if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
+                setInboundState((current) => failMutation(current, recovery.clientMutationId, error));
+                toast.info('原入库记录已删除，请从待入库清单重新确认入库。');
+                void refreshInboundAfterTask();
+              }
+              return 'stop';
+            }
             const outcome = classifyInventoryInboundFailure(error, true);
             if (outcome !== 'rejected') {
               if (mountedRef.current && !transientFailureNotified) {
@@ -2766,7 +2800,14 @@ export function InventoryMovementPage({
 
   const submitPurchaseInbound = useCallback(
     (submission: PurchaseInboundSubmission): boolean => {
-      if (!canConfirm) return false;
+      if (!canConfirm) {
+        toast.error('当前账号没有采购入库确认权限。');
+        return false;
+      }
+      if (!canStartPendingPurchase && !purchaseRetryDraft?.clientMutationId) {
+        toast.info('请先重新加载并核对待入库清单。');
+        return false;
+      }
       try {
         if (inboundRecoveryOwner && readAcceptedInventoryInboundRecoveries(inboundRecoveryOwner)
           .some((row) => row.purchaseExecutionRecordId === submission.purchaseExecutionRecordId)) {
@@ -2798,7 +2839,16 @@ export function InventoryMovementPage({
         toast.error('采购待办上下文已失效，请刷新后重试');
         return false;
       }
-      if (!canActOnRecord('confirm', retryItem)) return false;
+      const currentPurchase = pendingPurchases.find(item => item.executionRecordId === retryItem.executionRecordId);
+      const invalidPurchase = currentPurchase?.preparedCategoryInvalid ? currentPurchase : retryItem.preparedCategoryInvalid ? retryItem : null;
+      if (invalidPurchase) {
+        toast.error(invalidPurchase.actionReason);
+        return false;
+      }
+      if (!canActOnRecord('confirm', retryItem)) {
+        toast.error('当前账号无权办理该楼栋或专业的采购入库。');
+        return false;
+      }
       const purchaseRecoveryDraft = createPurchaseInboundRecoveryDraft(
         submission.draft,
         retryItem,
@@ -2898,6 +2948,16 @@ export function InventoryMovementPage({
             throw new Error('后端返回的采购入库记录与本次请求不一致');
           }
         } catch (submissionError) {
+          if (isRolledBackPurchaseInbound(submissionError)) {
+            finalizeInventoryInboundRecovery(submission.clientMutationId, 'rolled-back', inboundRecoveryOwner);
+            clearInventoryInboundRecovery(submission.clientMutationId, inboundRecoveryOwner);
+            if (mountedRef.current && principalRequestPrincipalRef.current === principalFingerprint) {
+              setInboundState((current) => failMutation(current, submission.clientMutationId, submissionError));
+              toast.info('原入库记录已删除，请从待入库清单重新确认入库。');
+              void refreshInboundAfterTask();
+            }
+            return;
+          }
           const outcome = classifyInventoryInboundFailure(
             submissionError,
             responseReceived,
@@ -2994,8 +3054,10 @@ export function InventoryMovementPage({
       });
       return true;
     },
-    [canConfirm, canActOnRecord, inboundRecoveryOwner, principalFingerprint,
+    [canConfirm, canStartPendingPurchase, canActOnRecord, inboundRecoveryOwner, principalFingerprint,
       pendingPurchases,
+      purchaseRetryDraft?.clientMutationId,
+      refreshInboundAfterTask,
       requestAcceptedInboundRecoveryCheck,
       restoreSavedInboundRecovery,
       selectedPending,
@@ -3033,6 +3095,7 @@ export function InventoryMovementPage({
   );
 
   const handlePendingPurchaseAction = (item: PurchasePendingInboundItem) => {
+    if (!canStartPendingPurchase || item.preparedCategoryInvalid) return;
     if (!canActOnRecord('confirm', item)) return;
     try {
       const accepted = inboundRecoveryOwner && readAcceptedInventoryInboundRecoveries<InboundRecoveryDraft>(inboundRecoveryOwner)
@@ -3065,8 +3128,12 @@ export function InventoryMovementPage({
   };
 
   const beginPurchaseBatch = () => {
-    if (!canConfirm) return;
+    if (!canStartPendingPurchase) return;
     const items = pendingPurchases.filter((item) => selectedPendingIds.has(item.executionRecordId));
+    if (items.some(item => item.preparedCategoryInvalid)) {
+      toast.error('所选采购存在类别异常，请取消选择异常记录后再办理');
+      return;
+    }
     if (items.some(item => !canActOnRecord('confirm', item))) { toast.error('当前权限不能确认所选条目'); return; }
     if (items.length < 2) {
       toast.info('请至少选择两项待入库物品');
@@ -3113,8 +3180,14 @@ export function InventoryMovementPage({
   };
 
   const stagePurchaseBatch = (submission: PurchaseInboundSubmission): boolean => {
+    if (!canStartPendingPurchase) return false;
     const candidate = batchInboundQueue.find(item => item.executionRecordId === submission.purchaseExecutionRecordId);
     if (!candidate || !canActOnRecord('confirm', candidate)) return false;
+    const currentPurchase = pendingPurchases.find(item => item.executionRecordId === candidate.executionRecordId);
+    if (candidate.preparedCategoryInvalid || currentPurchase?.preparedCategoryInvalid) {
+      toast.error(currentPurchase?.actionReason || candidate.actionReason);
+      return false;
+    }
     const next = [...batchInboundSubmissions, submission];
     const following = batchInboundQueue[batchInboundIndex + 1];
     if (following) {
@@ -3533,22 +3606,27 @@ export function InventoryMovementPage({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" disabled={!canConfirm || selectedPendingIds.size < 2} onClick={beginPurchaseBatch}>
+                  <Button size="sm" disabled={!canStartPendingPurchase || selectedPendingIds.size < 2} onClick={beginPurchaseBatch}>
                     批量办理入库（{selectedPendingIds.size}）
                   </Button>
                   <Badge className="border-emerald-200 bg-white text-emerald-700">
-                    {pendingPurchases.length} 项待办
+                    {pendingPurchases.length || (!pendingLoading && !pendingFallback && !pendingError)
+                      ? `${pendingPurchases.length} 项待办`
+                      : '待核对'}
                   </Badge>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              {pendingError && (
+              {(pendingError || pendingFallback) && (
                 <div
-                  role="alert"
-                  className="m-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+                  role={pendingError ? 'alert' : 'status'}
+                  className={cn('m-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm',
+                    pendingError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-slate-50 text-slate-700')}
                 >
-                  <span>{pendingError}</span>
+                  <span>{pendingError || (pendingPurchases.length
+                    ? '正在核对最新待入库清单，当前显示上次结果。'
+                    : '正在核对待入库清单，完成后会自动更新。')}</span>
                   <Button
                     variant="outline"
                     size="sm"
@@ -3559,12 +3637,12 @@ export function InventoryMovementPage({
                   </Button>
                 </div>
               )}
-              {pendingPurchaseReadDisplay(pendingLoading, pendingPurchases.length) === 'refreshing' && (
+              {!pendingFallback && pendingPurchaseReadDisplay(pendingLoading, pendingPurchases.length) === 'refreshing' && (
                 <div role="status" className="mx-4 my-3 flex items-center gap-2 text-sm text-slate-600">
                   <Loader2 className="h-4 w-4 animate-spin" />后台正在核对待入库清单，现有记录保持显示。
                 </div>
               )}
-              {pendingError && pendingPurchases.length > 0 && <p className="mx-4 mb-3 text-xs text-slate-500">当前显示上次核对成功的清单；办理时仍会校验最新单据状态。</p>}
+              {pendingError && pendingPurchases.length > 0 && <p className="mx-4 mb-3 text-xs text-slate-500">当前显示上次核对成功的清单，重新核对成功后可办理入库。</p>}
               {pendingPurchaseReadDisplay(pendingLoading, pendingPurchases.length) === 'initial-loading' ? (
                 <div
                   role="status"
@@ -3583,6 +3661,7 @@ export function InventoryMovementPage({
                   confirmingExecutionId={confirmingExecutionId}
                   onPageChange={setPendingPage}
                   onAction={handlePendingPurchaseAction}
+                  canStart={canStartPendingPurchase}
                   selectedIds={selectedPendingIds}
                   onToggleSelection={(id) => setSelectedPendingIds((current) => {
                     const next = new Set(current);
@@ -3591,8 +3670,9 @@ export function InventoryMovementPage({
                   })}
                   onTogglePage={() => setSelectedPendingIds((current) => {
                     const next = new Set(current);
-                    const allSelected = visiblePendingPurchases.every((item) => next.has(item.executionRecordId));
-                    for (const item of visiblePendingPurchases) {
+                    const selectable = visiblePendingPurchases.filter(item => !item.preparedCategoryInvalid);
+                    const allSelected = selectable.every((item) => next.has(item.executionRecordId));
+                    for (const item of selectable) {
                       if (allSelected) next.delete(item.executionRecordId);
                       else next.add(item.executionRecordId);
                     }
@@ -3603,7 +3683,8 @@ export function InventoryMovementPage({
                 <div className="py-8 text-center text-sm text-slate-400">
                   {pendingPurchases.length
                     ? '当前筛选暂无待采购入库记录'
-                    : pendingError ? '清单尚未完成核对，请查看上方提示。' : '暂无待库房确认的采购物品'}
+                    : pendingError ? '清单尚未完成核对，请查看上方提示。'
+                      : pendingFallback ? '待入库清单正在核对。' : '暂无待库房确认的采购物品'}
                 </div>
               )}
             </CardContent>
@@ -3752,6 +3833,7 @@ export function InventoryMovementPage({
         item={selectedPending}
         initialDraft={purchaseRetryDraft}
         retryLocked={Boolean(purchaseRetryDraft?.clientMutationId)}
+        awaitingPendingVerification={Boolean(pendingFallback || pendingError || pendingAccessDenied)}
         onAbandonRetry={abandonPurchaseInboundRetry}
         onCategoryPrepared={handlePurchaseCategoryPrepared}
         onOpenChange={handlePurchaseInboundOpenChange}
@@ -3850,6 +3932,7 @@ function journalToOutboundSubmission(
 
 function PendingPurchaseRecords({
   items,
+  canStart,
   selectedIds,
   onToggleSelection,
   onTogglePage,
@@ -3862,6 +3945,7 @@ function PendingPurchaseRecords({
   onAction,
 }: {
   items: PurchasePendingInboundItem[];
+  canStart: boolean;
   selectedIds: Set<string>;
   onToggleSelection: (id: string) => void;
   onTogglePage: () => void;
@@ -3873,6 +3957,7 @@ function PendingPurchaseRecords({
   onPageChange: (page: number) => void;
   onAction: (item: PurchasePendingInboundItem) => void;
 }) {
+  const selectable = items.filter(item => !item.preparedCategoryInvalid);
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -3881,7 +3966,7 @@ function PendingPurchaseRecords({
           <thead className="bg-slate-50/80 text-xs font-semibold text-slate-500">
             <tr>
               <th className="px-3 py-3">
-                <input type="checkbox" aria-label="选择本页待入库物品" checked={items.length > 0 && items.every((item) => selectedIds.has(item.executionRecordId))} onChange={onTogglePage} />
+                <input type="checkbox" aria-label="选择本页待入库物品" disabled={!canStart || !selectable.length} checked={selectable.length > 0 && selectable.every((item) => selectedIds.has(item.executionRecordId))} onChange={onTogglePage} />
               </th>
               <th className="px-5 py-3">物品 / 类别号</th>
               <th className="px-4 py-3">采购单 / 楼栋</th>
@@ -3904,7 +3989,7 @@ function PendingPurchaseRecords({
                 )}
               >
                 <td className="px-3 py-3.5">
-                  <input type="checkbox" aria-label={`选择${item.itemName}入库`} checked={selectedIds.has(item.executionRecordId)} onChange={() => onToggleSelection(item.executionRecordId)} />
+                  <input type="checkbox" aria-label={`选择${item.itemName}入库`} disabled={!canStart || item.preparedCategoryInvalid} checked={selectedIds.has(item.executionRecordId)} onChange={() => onToggleSelection(item.executionRecordId)} />
                 </td>
                 <td className="max-w-56 px-5 py-3.5">
                   <strong className="block truncate text-slate-900">
@@ -3936,7 +4021,7 @@ function PendingPurchaseRecords({
                         : 'border-slate-200 bg-slate-50 text-slate-600'
                     }
                   >
-                    {item.preparedCategory ? '新增（已生成）' : '待选择'}
+                    {item.preparedCategoryInvalid ? '类别待核对' : item.preparedCategory ? '新增（已生成）' : '待选择'}
                   </Badge>
                   <span className="mt-1.5 block text-xs text-slate-500">
                     {item.actionReason ||
@@ -3954,6 +4039,7 @@ function PendingPurchaseRecords({
                 <td className="px-5 py-3.5 text-right">
                   <PendingPurchaseActionButton
                     item={item}
+                    canStart={canStart}
                     confirmingExecutionId={confirmingExecutionId}
                     onAction={onAction}
                   />
@@ -3976,7 +4062,7 @@ function PendingPurchaseRecords({
             )}
           >
             <div className="flex items-start justify-between gap-3">
-              <input type="checkbox" aria-label={`选择${item.itemName}入库`} checked={selectedIds.has(item.executionRecordId)} onChange={() => onToggleSelection(item.executionRecordId)} />
+              <input type="checkbox" aria-label={`选择${item.itemName}入库`} disabled={!canStart || item.preparedCategoryInvalid} checked={selectedIds.has(item.executionRecordId)} onChange={() => onToggleSelection(item.executionRecordId)} />
               <div className="min-w-0">
                 <h3 className="truncate text-sm font-semibold text-slate-900">
                   {item.itemName}
@@ -3992,7 +4078,7 @@ function PendingPurchaseRecords({
                     : 'border-slate-200 bg-slate-50 text-slate-600'
                 }
               >
-                {item.preparedCategory ? '新增（已生成）' : '待选择'}
+                {item.preparedCategoryInvalid ? '类别待核对' : item.preparedCategory ? '新增（已生成）' : '待选择'}
               </Badge>
             </div>
             <div className="mt-3 grid gap-1.5 text-xs text-slate-500">
@@ -4015,6 +4101,7 @@ function PendingPurchaseRecords({
               </span>
               <PendingPurchaseActionButton
                 item={item}
+                canStart={canStart}
                 confirmingExecutionId={confirmingExecutionId}
                 onAction={onAction}
               />
@@ -4056,10 +4143,12 @@ function PendingPurchaseRecords({
 
 function PendingPurchaseActionButton({
   item,
+  canStart,
   confirmingExecutionId,
   onAction,
 }: {
   item: PurchasePendingInboundItem;
+  canStart: boolean;
   confirmingExecutionId: string;
   onAction: (item: PurchasePendingInboundItem) => void;
 }) {
@@ -4070,7 +4159,7 @@ function PendingPurchaseActionButton({
     <Button
       size="sm"
       aria-label={`处理${item.itemName}入库`}
-      disabled={isConfirming || !canConfirm}
+      disabled={isConfirming || !canStart || !canConfirm || item.preparedCategoryInvalid}
       className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700"
       onClick={() => onAction(item)}
     >

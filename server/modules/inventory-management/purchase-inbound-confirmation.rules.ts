@@ -76,7 +76,7 @@ export function buildPendingPurchaseInbounds(input: {
   submissions: PurchaseInboundSourceRecord[];
   executions: PurchaseInboundSourceRecord[];
   catalog?: PurchaseInboundSourceRecord[];
-}): PurchasePendingInboundItem[] {
+}, markInvalidPreparedCategories = false): PurchasePendingInboundItem[] {
   const submissions = new Map<string, PurchaseInboundSourceRecord[]>();
   for (const submission of input.submissions) {
     const code = fieldText(submission.fields, ['采购编码']);
@@ -147,14 +147,21 @@ export function buildPendingPurchaseInbounds(input: {
 
       const preparedRecords =
         preparedCatalogRecords.get(executionRecordId) || [];
-      if (preparedRecords.length > 1) {
-        throw new BadRequestException(
-          '同一采购执行存在重复的预备物品类别，请联系管理员处理',
-        );
+      let preparedCategory: PurchaseInboundPreparedCategory | undefined;
+      let preparedCategoryError: string | undefined;
+      try {
+        if (preparedRecords.length > 1) {
+          throw new BadRequestException(
+            '同一采购执行存在重复的预备物品类别，请联系管理员处理',
+          );
+        }
+        if (preparedRecords[0]) {
+          preparedCategory = parsePreparedCategory(preparedRecords[0], executionRecordId);
+        }
+      } catch (error) {
+        if (!markInvalidPreparedCategories || !(error instanceof BadRequestException)) throw error;
+        preparedCategoryError = error.message;
       }
-      const preparedCategory = preparedRecords[0]
-        ? parsePreparedCategory(preparedRecords[0], executionRecordId)
-        : undefined;
 
       const sku = readPurchaseExecutionSku(fields);
       return {
@@ -189,7 +196,8 @@ export function buildPendingPurchaseInbounds(input: {
         signedAt: fieldDate(fields, ['签收时间']),
         action: 'needs_selection',
         catalogRecordId: '',
-        actionReason: '请在确认入库时选择新增或已有',
+        actionReason: preparedCategoryError ?? '请在确认入库时选择新增或已有',
+        ...(preparedCategoryError ? { preparedCategoryInvalid: true as const } : {}),
         ...(preparedCategory ? { preparedCategory } : {}),
       };
     })

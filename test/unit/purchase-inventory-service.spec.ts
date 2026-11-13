@@ -138,9 +138,10 @@ describe('PurchaseInventoryService', () => {
         service.getDisplayDashboard('active'),
       ]);
       expect(displays).toEqual([
-        expect.objectContaining({ generatedAt: first.generatedAt, refreshState: 'stale' }),
-        expect.objectContaining({ generatedAt: first.generatedAt, refreshState: 'stale' }),
+        expect.objectContaining({ generatedAt: first.generatedAt, refreshState: 'stale', refreshPending: true }),
+        expect.objectContaining({ generatedAt: first.generatedAt, refreshState: 'stale', refreshPending: true }),
       ]);
+      expect(displays.every((display) => !display.refreshError)).toBe(true);
       expect(fetchBitableRecords).toHaveBeenCalledTimes(12);
 
       const strict = service.getDashboard(true);
@@ -182,6 +183,47 @@ describe('PurchaseInventoryService', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('reuses the mapped active display across viewers until a known write invalidates it', async () => {
+    const read = jest.mocked(fetchBitableRecords);
+    const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+    await service.getDisplayDashboard(false);
+    read.mockClear();
+    read.mockResolvedValueOnce([executionRecord('before-write', '未开始（待审批）')]);
+    const first = await service.getDisplayDashboard('active');
+
+    expect(await service.getDisplayDashboard('active')).toBe(first);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(first.requests.map((item) => item.recordId)).toEqual(['before-write']);
+
+    invalidateBitableRecordCache({ appToken: 'app-token', tableId: 'tblKmajonrdwW7Z0' });
+    read.mockResolvedValueOnce([executionRecord('after-write', '未开始（待审批）')]);
+    const current = await service.getDisplayDashboard('active');
+
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(current.requests.map((item) => item.recordId)).toEqual(['after-write']);
+  });
+
+  it('bounds a slow active display read while the shared verified read keeps running', async () => {
+    const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+    const previous = await service.getDisplayDashboard(false);
+    const read = jest.mocked(fetchBitableRecords);
+    read.mockClear();
+    const gate = deferred<Awaited<ReturnType<typeof fetchBitableRecords>>>();
+    read.mockReturnValueOnce(gate.promise);
+    const background = service.getDashboard('active');
+
+    await expect(service.getDisplayDashboard('active')).resolves.toMatchObject({
+      generatedAt: previous.generatedAt,
+      refreshState: 'stale',
+      refreshPending: true,
+    });
+    expect(read).toHaveBeenCalledTimes(1);
+    gate.resolve([executionRecord('current', '未开始（待审批）')]);
+    const verified = await background;
+    expect(await service.getDisplayDashboard('active')).toBe(verified);
+    expect(verified.requests.map(item => item.recordId)).toEqual(['current']);
   });
 
   it('invalidates the dashboard and prevents an older in-flight read from restoring stale cache', async () => {
@@ -520,10 +562,12 @@ describe('PurchaseInventoryService', () => {
     expect(results[0]).toBe(results[1]);
     expect(results[0]).toMatchObject({
       refreshState: 'stale',
-      refreshError: '采购数据正在同步，暂显示上次成功结果。',
+      refreshPending: true,
       requests: old.requests,
     });
+    expect(results[0].refreshError).toBeUndefined();
     expect(read).toHaveBeenCalledTimes(2);
+    expect(await service.getDashboard(false)).toBe(old);
     expect(await service.getDashboard('active')).toMatchObject({
       refreshState: 'fresh',
     });
@@ -544,6 +588,7 @@ describe('PurchaseInventoryService', () => {
 
     expect(await active).toMatchObject({
       refreshState: 'stale',
+      refreshPending: true,
       requests: original.requests,
     });
   });

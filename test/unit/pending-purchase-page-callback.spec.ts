@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as ts from 'typescript';
-import { describePendingPurchaseReadFailure } from '../../client/src/pages/InventoryManagement/pending-purchase-read-state';
+import { describePendingPurchaseReadFailure, readPendingPurchaseWithRetry } from '../../client/src/pages/InventoryManagement/pending-purchase-read-state';
+import { createInventoryReadCache } from '../../client/src/pages/InventoryManagement/inventory-read-cache';
+import type { PurchasePendingInboundResponse } from '../../shared/inventory-management.interface';
 
 // Execute the real callback body from the page, rather than reimplementing its request guards.
 const sourcePath=path.resolve(__dirname,'../../client/src/pages/InventoryManagement/InventoryMovementPage.tsx');
@@ -15,7 +17,8 @@ find(source);
 if(!callbackText)throw new Error('Actual pending-purchase callback not found');
 function fixture(canRefresh=true,type='inbound') {
  const existing=[{executionRecordId:'already-visible'}];
- const scope={canRefresh,type,pendingRequestRef:{current:0},principalRequestGenerationRef:{current:1},principalRequestPrincipalRef:{current:'account-a'},principalFingerprint:'account-a',mountedRef:{current:true},setPendingLoading:jest.fn(),setPendingError:jest.fn(),setPendingAccessDenied:jest.fn(),setInboundState:jest.fn(),mergePurchaseQueryResult:jest.fn(),getPendingPurchaseInbounds:jest.fn(),describePendingPurchaseReadFailure};
+ const scope={canRefresh,type,accessLoading:false,pendingPurchaseKey:'account-a',pendingPurchaseReads:createInventoryReadCache<PurchasePendingInboundResponse>(value=>!value.refreshPending),pendingRequestRef:{current:0},principalRequestGenerationRef:{current:1},principalRequestPrincipalRef:{current:'account-a'},principalFingerprint:'account-a',mountedRef:{current:true},setPendingLoading:jest.fn(),setPendingError:jest.fn(),setPendingAccessDenied:jest.fn(),setPendingFallback:jest.fn(),setInboundState:jest.fn(),mergePurchaseQueryResult:jest.fn(),getPendingPurchaseInbounds:jest.fn(),describePendingPurchaseReadFailure,
+  readPendingPurchaseWithRetry:<T>(read:()=>Promise<T>,isCurrent:()=>boolean)=>readPendingPurchaseWithRetry(read,isCurrent,async()=>undefined)};
  const code=ts.transpileModule(`module.exports=function(scope){const {${Object.keys(scope).join(',')}}=scope;return (${callbackText});}`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
  const holder={exports:null as any};new Function('module',code)(holder);
  return {scope,existing,load:holder.exports(scope) as (force?:boolean)=>Promise<unknown>};
@@ -40,6 +43,7 @@ describe('real pending-purchase page callback',()=>{
   it.each(['request','generation','principal','unmount'])(`ignores stale ${outcome} after %s changes`,async boundary=>{
    const {scope,load}=fixture(),pending=deferred();scope.getPendingPurchaseInbounds.mockReturnValue(pending.promise);
    const result=load();scope.setPendingLoading.mockClear();scope.setPendingError.mockClear();
+   await Promise.resolve();
    if(boundary==='request')scope.pendingRequestRef.current++;
    if(boundary==='generation')scope.principalRequestGenerationRef.current++;
    if(boundary==='principal')scope.principalRequestPrincipalRef.current='account-b';
@@ -55,5 +59,15 @@ describe('real pending-purchase page callback',()=>{
  });
  it('rejects malformed results without replacing the last good list',async()=>{
   const {scope,load}=fixture();scope.getPendingPurchaseInbounds.mockResolvedValue({items:null});await load();expect(scope.setInboundState).not.toHaveBeenCalled();expect(scope.setPendingError).toHaveBeenLastCalledWith(expect.stringContaining('暂时无法核对'));
+ });
+ it('displays an unverified result without merging it, then recovers from the next verified GET',async()=>{
+  const {scope,load,existing}=fixture();
+  scope.getPendingPurchaseInbounds.mockResolvedValueOnce({items:existing,refreshPending:true}).mockResolvedValueOnce({items:[{executionRecordId:'verified'}]});
+  await expect(load()).resolves.toBeNull();
+  expect(scope.setPendingFallback).toHaveBeenLastCalledWith(existing);
+  expect(scope.setInboundState).not.toHaveBeenCalled();
+  await expect(load()).resolves.toEqual([{executionRecordId:'verified'}]);
+  expect(scope.setPendingFallback).toHaveBeenLastCalledWith(null);
+  expect(scope.setInboundState).toHaveBeenCalledTimes(1);
  });
 });

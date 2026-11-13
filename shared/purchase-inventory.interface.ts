@@ -101,6 +101,7 @@ export interface PurchaseInventorySectionStatus {
 export interface PurchaseInventoryResponse {
   generatedAt: string;
   refreshState?: 'fresh' | 'partial' | 'stale';
+  refreshPending?: true;
   refreshError?: string;
   summary: {
     totalRequests: number;

@@ -301,7 +301,7 @@ export default function InventoryManagementPage() {
   const [itemsRefreshing, setItemsRefreshing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardError, setDashboardError] = useState('');
-  const [itemsError, setItemsError] = useState('');
+  const [itemsError, setItemsError] = useState<{ key: string; message: string } | null>(null);
   const dashboardRequestRef = useRef(0);
   const itemsRequestRef = useRef(0);
   const currentRead = useRef({ dashboardKey, itemsViewKey, accessLoading, canReadInventory });
@@ -358,11 +358,19 @@ export default function InventoryManagementPage() {
         }, bypassCache, forceRefresh);
         if (!isCurrent()) return;
         setItemsResult({ key: itemsViewKey, value: response });
-        setItemsError('');
+        setItemsError(null);
       } catch (error) {
         if (!isCurrent()) return;
-        if (isInventoryReadDenied(error)) setItemsResult({ key: itemsViewKey, value: null });
-        setItemsError('库存台账读取失败，请稍后重试。');
+        const denied = isInventoryReadDenied(error);
+        const upstreamDenied = (error as { response?: { data?: { code?: string } } } | null)
+          ?.response?.data?.code === 'INVENTORY_LEDGER_SOURCE_DENIED';
+        if (denied) setItemsResult({ key: itemsViewKey, value: null });
+        setItemsError({
+          key: itemsViewKey,
+          message: denied ? '当前无法访问库存台账，请确认登录状态和查看权限。'
+            : upstreamDenied ? '库存台账数据源访问异常，请联系管理员核对。'
+              : '库存台账暂时无法更新，请稍后重试。',
+        });
       } finally {
         if (isCurrent()) {
           setItemsLoading(false);
@@ -574,7 +582,8 @@ export default function InventoryManagementPage() {
             items={items}
             loading={itemsLoading}
             refreshing={itemsRefreshing}
-            error={itemsError}
+            error={itemsError?.key === itemsViewKey ? itemsError.message : ''}
+            hasResult={Boolean(cachedItems)}
             searchValue={searchQuery}
             building={building}
             category={category}
@@ -604,7 +613,7 @@ export default function InventoryManagementPage() {
             }}
             onReset={resetFilters}
             onPageChange={setPage}
-            onRetry={() => void loadItems(canForceRefresh, true)}
+            onRetry={() => void loadItems(false, true)}
           />
         )}
 
@@ -870,6 +879,7 @@ interface InventoryLedgerProps {
   loading: boolean;
   refreshing: boolean;
   error: string;
+  hasResult: boolean;
   searchValue: string;
   building: WarehouseBuilding | 'all';
   category: string;
@@ -1002,8 +1012,8 @@ function InventoryLedger(props: InventoryLedgerProps) {
         {props.error && (
           <div className="m-4">
             <FeedbackBanner
-              tone="error"
-              message={props.error}
+              tone={props.hasResult ? 'warning' : 'error'}
+              message={props.hasResult ? `${props.error} 当前显示上次成功结果。` : props.error}
               action="重试"
               onAction={props.onRetry}
             />
@@ -1016,7 +1026,7 @@ function InventoryLedger(props: InventoryLedgerProps) {
           </div>
         ) : props.items.items.length ? (
           <InventoryTable items={props.items.items} />
-        ) : (
+        ) : props.error && !props.hasResult ? null : (
           <EmptyState
             title="暂无匹配的库存记录"
             detail={
@@ -1024,34 +1034,36 @@ function InventoryLedger(props: InventoryLedgerProps) {
             }
           />
         )}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
-          <span>
-            第 {props.items.page} / {props.items.totalPages} 页 · 共{' '}
-            {formatNumber(props.items.total)} 条
-          </span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label="上一页"
-              disabled={props.loading || props.items.page <= 1}
-              onClick={() => props.onPageChange(props.items.page - 1)}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label="下一页"
-              disabled={
-                props.loading || props.items.page >= props.items.totalPages
-              }
-              onClick={() => props.onPageChange(props.items.page + 1)}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+        {(!props.error || props.hasResult) && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+            <span>
+              第 {props.items.page} / {props.items.totalPages} 页 · 共{' '}
+              {formatNumber(props.items.total)} 条
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="上一页"
+                disabled={props.loading || props.items.page <= 1}
+                onClick={() => props.onPageChange(props.items.page - 1)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="下一页"
+                disabled={
+                  props.loading || props.items.page >= props.items.totalPages
+                }
+                onClick={() => props.onPageChange(props.items.page + 1)}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1062,11 +1074,10 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
-          <thead className="bg-slate-50/80 text-xs font-semibold text-slate-500">
+        <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
+          <thead className="bg-slate-50/80 text-xs font-semibold whitespace-nowrap text-slate-500">
             <tr>
-              <th className="px-5 py-3">物品 / SKU</th>
-              <th scope="col" className="w-16 px-2 py-3">图片</th>
+              <th scope="col" className="px-5 py-3">物品 / SKU</th>
               <th className="px-4 py-3">分类</th>
               <th className="px-4 py-3">楼栋 / 库位</th>
               <th className="px-4 py-3 text-right">剩余库存</th>
@@ -1082,17 +1093,21 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
                 key={item.recordId}
                 className="border-t border-slate-100 transition hover:bg-blue-50/40"
               >
-                <td className="max-w-64 px-5 py-3.5">
-                  <strong className="block truncate text-slate-900" title={item.name}>
-                    {item.name}
-                  </strong>
-                  <span className="mt-1 block truncate text-xs text-slate-400">
-                    {item.sku || '类别号待配置'} ·{' '}
-                    {item.specification || '规格待补充'}
-                  </span>
-                </td>
-                <td className="px-2 py-2">
-                  <InventoryItemPhotoThumbnail name={item.name} images={item.images} onOpen={setGallery} />
+                <td className="max-w-72 px-5 py-3.5">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <InventoryItemPhotoThumbnail name={item.name} images={item.images} onOpen={setGallery} />
+                    <div className="min-w-0">
+                      <strong className="block truncate text-slate-900" title={item.name}>
+                        {item.name}
+                      </strong>
+                      <span
+                        className="mt-1 block truncate text-xs text-slate-400"
+                        title={`${item.sku || '类别号待配置'} · ${item.specification || '规格待补充'}`}
+                      >
+                        {item.sku || '类别号待配置'} · {item.specification || '规格待补充'}
+                      </span>
+                    </div>
+                  </div>
                 </td>
                 <td className="max-w-40 px-4 py-3.5 text-slate-600">
                   <span className="block truncate">{item.primaryCategory}</span>
@@ -1108,19 +1123,19 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
                 </td>
                 <td
                   className={cn(
-                    'px-4 py-3.5 text-right font-bold tabular-nums',
+                    'px-4 py-3.5 text-right font-bold whitespace-nowrap tabular-nums',
                     item.negativeStock ? 'text-rose-700' : 'text-slate-900',
                   )}
                 >
                   {formatNumber(item.quantity)} {item.unit}
                 </td>
-                <td className="px-4 py-3.5 text-right tabular-nums text-slate-600">
+                <td className="px-4 py-3.5 text-right whitespace-nowrap tabular-nums text-slate-600">
                   {formatNumber(item.minimumQuantity)} {item.unit}
                 </td>
-                <td className="px-4 py-3.5 text-right tabular-nums text-slate-600">
+                <td className="px-4 py-3.5 text-right whitespace-nowrap tabular-nums text-slate-600">
                   {formatNumber(item.annualUsage)}
                 </td>
-                <td className="px-4 py-3.5 text-right tabular-nums text-slate-700">
+                <td className="px-4 py-3.5 text-right whitespace-nowrap tabular-nums text-slate-700">
                   {formatCurrency(item.value)}
                 </td>
                 <td className="px-5 py-3.5">
@@ -1135,13 +1150,13 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
         {items.map((item) => (
           <article
             key={item.recordId}
-            className="rounded-xl border border-[#d8e5f7] bg-white p-4"
+            className="min-w-0 rounded-xl border border-[#d8e5f7] bg-white p-4"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
+            <div className="flex items-center justify-between gap-2.5">
+              <div className="flex min-w-0 flex-1 items-center gap-2.5">
                 <InventoryItemPhotoThumbnail name={item.name} images={item.images} onOpen={setGallery} />
                 <div className="min-w-0">
-                  <h3 className="truncate text-sm font-semibold text-slate-900">
+                  <h3 className="truncate text-sm font-semibold text-slate-900" title={item.name}>
                     {item.name}
                   </h3>
                   <p className="mt-1 truncate text-xs text-slate-400">
@@ -1151,9 +1166,10 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
               </div>
               <strong
                 className={cn(
-                  'shrink-0 text-base tabular-nums',
+                  'max-w-[40%] shrink-0 truncate text-right text-base tabular-nums',
                   item.negativeStock ? 'text-rose-700' : 'text-slate-900',
                 )}
+                title={`${formatNumber(item.quantity)} ${item.unit}`}
               >
                 {formatNumber(item.quantity)} {item.unit}
               </strong>

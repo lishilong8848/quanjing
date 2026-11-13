@@ -53,6 +53,7 @@ import {
   validateMovementCreateRequest,
 } from './inventory-movement-command.rules';
 import { InventoryManagementService } from './inventory-management.service';
+import type { CompletedPurchaseInboundRollback } from './inventory-movement-deletion-task-ledger.store';
 import { InventoryOutboundWorkflowService } from './inventory-outbound-workflow.service';
 import {
   assertInventoryPhotoReceipt,
@@ -125,6 +126,7 @@ export interface TrustedInventoryInboundOptions {
   expectedCatalogRecordId?: string;
   expectedSku?: string;
   assertOwnership?: InventoryWriteOwnershipGuard;
+  reopenedAfterDeletion?: CompletedPurchaseInboundRollback;
 }
 
 export type InventoryWriteOwnershipGuard = () => Promise<void>;
@@ -135,6 +137,7 @@ interface RunningStrictInbound {
   requirePreparedCatalog: boolean;
   expectedCatalogRecordId: string;
   expectedSku: string;
+  deletedInboundRecordId?: string;
   promise: Promise<TrustedInventoryInboundResult>;
 }
 
@@ -150,6 +153,7 @@ interface StrictMarkerSnapshot {
   inventoryMarker?: BitableRecordItem;
   inboundMarker?: BitableRecordItem;
   fingerprint: string;
+  retainedFingerprint?: string;
 }
 
 interface StrictInboundFingerprints {
@@ -525,6 +529,10 @@ export class InventoryMovementCommandService {
     const expectedCatalogRecordId = clean(options.expectedCatalogRecordId);
     const expectedSku = normalizeSku(options.expectedSku);
     const assertOwnership = options.assertOwnership;
+    const reopened = options.reopenedAfterDeletion;
+    if (reopened && sourceKey !== `采购:${reopened.executionRecordId}`) {
+      throw new BadRequestException('采购入库回退记录与当前申请不一致');
+    }
     const building = parseBuilding(request.building);
     const normalizedRequest =
       request.mode === 'new'
@@ -539,7 +547,10 @@ export class InventoryMovementCommandService {
 
     const fingerprints = buildStrictInboundFingerprints(normalizedRequest);
     const fingerprint = inboundMarkerFingerprint(fingerprints.current, normalizedRequest.photoIds);
-    const completed = this.completedBySourceKey.get(sourceKey);
+    // A purchase source can become writable again after a confirmed deletion.
+    // Always reconcile its live movement marker; a cached completion can outlive it.
+    const cacheCompletion = sourceKey.startsWith('手工:');
+    const completed = cacheCompletion ? this.completedBySourceKey.get(sourceKey) : undefined;
     if (completed) {
       if (
         Date.now() - completed.completedAt >
@@ -571,7 +582,8 @@ export class InventoryMovementCommandService {
         active.recoverOnly !== recoverOnly ||
         active.requirePreparedCatalog !== requirePreparedCatalog ||
         active.expectedCatalogRecordId !== expectedCatalogRecordId ||
-        active.expectedSku !== expectedSku
+        active.expectedSku !== expectedSku ||
+        active.deletedInboundRecordId !== reopened?.recordId
       ) {
         throw new ConflictException('clientMutationId 已被不同的入库请求占用');
       }
@@ -601,6 +613,7 @@ export class InventoryMovementCommandService {
               invalidateManagementCache,
               assertOwnership,
               principal,
+              reopened,
             ),
           )
         : this.createStrictExistingInboundOnce(
@@ -611,13 +624,14 @@ export class InventoryMovementCommandService {
             invalidateManagementCache,
             assertOwnership,
             principal,
+            reopened,
           ),
     );
     const invalidatingOperation = operation.then((result) => {
       invalidateManagementCache();
       const completedAt = Date.now();
       if (
-        completedAt - operationStartedAt >=
+        cacheCompletion && completedAt - operationStartedAt >=
         STRICT_INBOUND_TRANSPORT_TIMEOUT_MS
       ) {
         this.rememberCompletedInbound(
@@ -636,6 +650,7 @@ export class InventoryMovementCommandService {
       requirePreparedCatalog,
       expectedCatalogRecordId,
       expectedSku,
+      deletedInboundRecordId: reopened?.recordId,
       promise: invalidatingOperation,
     });
     const clearRunning = () => {
@@ -687,6 +702,7 @@ export class InventoryMovementCommandService {
     onPersistedStage: () => void,
     assertOwnership?: InventoryWriteOwnershipGuard,
     principal?: AccessPrincipal,
+    reopened?: CompletedPurchaseInboundRollback,
   ): Promise<TrustedInventoryInboundResult> {
     const config = await this.resolveStrictInboundConfig();
     if (!recoverOnly) {
@@ -696,7 +712,7 @@ export class InventoryMovementCommandService {
       );
     }
     const preflight = await withInventoryStage('核对多维表入库幂等记录', () =>
-      this.loadStrictMarkerSnapshot(config, sourceKey, fingerprints, request.photoIds, request),
+      this.loadStrictMarkerSnapshot(config, sourceKey, fingerprints, request.photoIds, request, reopened),
     );
     const fingerprint = preflight.fingerprint;
     if (requirePreparedCatalog && !preflight.catalogMarker) {
@@ -755,7 +771,7 @@ export class InventoryMovementCommandService {
       catalogRecord,
       '入库创建标识',
       sourceKey,
-      fingerprint,
+      preflight.retainedFingerprint || fingerprint,
       TABLES.catalog.name,
     );
     const catalogItem = parsePersistedCatalog(catalogRecord);
@@ -782,7 +798,7 @@ export class InventoryMovementCommandService {
           location: request.newItem.location,
         }),
         入库创建标识: sourceKey,
-        入库请求指纹: fingerprint,
+        入库请求指纹: preflight.retainedFingerprint || fingerprint,
       };
       await assertWriteOwnership(assertOwnership);
       const recordId = await withInventoryStage('写入库存台账', () =>
@@ -807,7 +823,7 @@ export class InventoryMovementCommandService {
       inventoryRecord,
       '入库创建标识',
       sourceKey,
-      fingerprint,
+      preflight.retainedFingerprint || fingerprint,
       TABLES.inventory.name,
     );
     const inventoryItem = parsePersistedInventory(inventoryRecord);
@@ -851,6 +867,7 @@ export class InventoryMovementCommandService {
     onPersistedStage: () => void,
     assertOwnership?: InventoryWriteOwnershipGuard,
     principal?: AccessPrincipal,
+    reopened?: CompletedPurchaseInboundRollback,
   ): Promise<TrustedInventoryInboundResult> {
     const config = await this.resolveStrictInboundConfig();
     if (!recoverOnly) {
@@ -865,6 +882,8 @@ export class InventoryMovementCommandService {
         sourceKey,
         singleStrictInboundFingerprint(fingerprint),
         request.photoIds,
+        undefined,
+        reopened,
       ),
     );
     if (recoverOnly && !preflight.inboundMarker) {
@@ -878,6 +897,9 @@ export class InventoryMovementCommandService {
     );
     const catalogItem = parsePersistedCatalog(catalogRecord);
     assertExistingCatalogMatchesRequest(catalogItem, request);
+    if (preflight.retainedFingerprint && getRecordId(preflight.catalogMarker!) !== catalogItem.recordId) {
+      throw new BadRequestException('请使用原采购已生成的物品类别重新入库');
+    }
     const inventoryRecords = await this.gateway.searchRecords({
       appToken: config.appToken,
       tableId: config.inventoryTableId,
@@ -1055,6 +1077,7 @@ export class InventoryMovementCommandService {
     fingerprints: StrictInboundFingerprints,
     photoIds?: string[],
     request?: TrustedInventoryNewInboundRequest,
+    reopened?: CompletedPurchaseInboundRollback,
   ): Promise<StrictMarkerSnapshot> {
     const [catalog, inventory, inbound] = await Promise.all([
       withInventoryStage('核对物品类别入库标记', () =>
@@ -1101,7 +1124,29 @@ export class InventoryMovementCommandService {
       TABLES.inbound.name,
     );
     const authoritativeMarker = catalogMarker || inventoryMarker;
-    const fingerprint = authoritativeMarker
+    if (reopened) {
+      const deleted = await this.gateway.tryGetRecord(
+        config.appToken, config.inboundTableId, reopened.recordId, TABLES.inbound.name,
+      );
+      if (deleted || (inboundMarker && getRecordId(inboundMarker) === reopened.recordId)) {
+        throw new ServiceUnavailableException('原入库记录删除结果尚未核实，请稍后重试');
+      }
+    }
+    const retainedFingerprint = reopened && authoritativeMarker &&
+      fieldText(authoritativeMarker.fields, ['入库请求指纹']);
+    if (reopened && authoritativeMarker) {
+      if (!retainedFingerprint || !catalogMarker || !inventoryMarker) {
+        throw consistencyConflict('原采购物品类别或库存台账标记不完整');
+      }
+      const catalogItem = parsePersistedCatalog(catalogMarker);
+      const inventoryItem = parsePersistedInventory(inventoryMarker);
+      if (catalogItem.sku !== reopened.sku || catalogItem.building !== reopened.building) {
+        throw consistencyConflict('原采购物品类别与已删除入库记录不一致');
+      }
+      assertCatalogInventoryAssociation(catalogItem, inventoryItem);
+      if (request) assertPreparedCatalogLocationIdCompatible(catalogMarker, request);
+    }
+    const fingerprint = authoritativeMarker && !retainedFingerprint
       ? assertPersistedMarkerFingerprint(
           authoritativeMarker,
           '入库创建标识',
@@ -1123,7 +1168,7 @@ export class InventoryMovementCommandService {
           record,
           markerField,
           sourceKey,
-          record === inboundMarker ? inboundMarkerFingerprint(fingerprint, photoIds) : fingerprint,
+          record === inboundMarker ? inboundMarkerFingerprint(fingerprint, photoIds) : retainedFingerprint || fingerprint,
           tableName,
         );
       }
@@ -1133,6 +1178,7 @@ export class InventoryMovementCommandService {
       inventoryMarker,
       inboundMarker,
       fingerprint,
+      ...(retainedFingerprint ? { retainedFingerprint } : {}),
     };
   }
 

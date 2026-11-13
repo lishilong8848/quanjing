@@ -319,6 +319,7 @@ export default function PurchaseOverviewPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dashboardNotice, setDashboardNotice] = useState<string | null>(null);
+  const [dashboardSyncPending, setDashboardSyncPending] = useState(false);
   const dashboardRef = useRef(dashboardState);
   const readScopeRef = useRef<ReturnType<typeof purchaseDashboardReadScope.activate>>(undefined);
   const dashboardAccessRef = useRef({ canReadDashboard, expiresAt: access.expiresAt });
@@ -350,6 +351,7 @@ export default function PurchaseOverviewPage() {
   const renderedDashboardNotice = principalMatchesRenderedData
     ? dashboardNotice
     : null;
+  const renderedDashboardSyncPending = principalMatchesRenderedData && dashboardSyncPending;
   const applicationListRef = useRef<HTMLElement>(null);
   const executionListRef = useRef<HTMLElement>(null);
 
@@ -392,6 +394,16 @@ export default function PurchaseOverviewPage() {
         ) {
           return false;
         }
+        const incomplete = response.refreshState === 'partial' || response.refreshState === 'stale';
+        const syncPending = response.refreshPending === true;
+        const refreshError = incomplete
+          ? response.refreshError || (syncPending ? null : '采购数据暂未完全同步，当前显示最近一次可用结果。')
+          : null;
+        setDashboardSyncPending(syncPending);
+        setLoadError((previous) => refreshError ?? (syncPending ? previous : null));
+        // The server is returning a prior snapshot. Keep any newer visible work
+        // in place until a verified response arrives, including optimistic changes.
+        if (syncPending && dashboardRef.current) return true;
         const responseIds = new Set(
           response.requests.map((item) => item.recordId),
         );
@@ -416,13 +428,6 @@ export default function PurchaseOverviewPage() {
         dashboardRef.current = visibleResponse;
         setDashboard(visibleResponse);
         setDashboardNotice(null);
-        setLoadError(
-          response.refreshState === 'partial' ||
-            response.refreshState === 'stale'
-            ? response.refreshError ||
-                '采购数据暂未完全同步，当前显示最近一次可用结果。'
-            : null,
-        );
         return true;
       } catch {
         if (
@@ -431,6 +436,7 @@ export default function PurchaseOverviewPage() {
         ) {
           return false;
         }
+        setDashboardSyncPending(false);
         setLoadError('采购数据读取失败，请检查网络或飞书数据源后重试。');
         if (dashboardRef.current?.refreshError?.includes('正在加载')) {
           setDashboardNotice('采购基础数据尚未同步，本次申请已先显示。');
@@ -488,6 +494,7 @@ export default function PurchaseOverviewPage() {
     setDashboard(null);
     setLoadError(null);
     setDashboardNotice(null);
+    setDashboardSyncPending(false);
     loadInitialDashboard();
   }, [loadInitialDashboard, principalKey]);
 
@@ -810,8 +817,7 @@ export default function PurchaseOverviewPage() {
   }
 
   function requestForceRefresh() {
-    if (!canForceRefresh) return;
-    void loadDashboard(true);
+    void loadDashboard(canForceRefresh ? true : 'active');
   }
 
   function refreshDashboardAfterMutation(mode: DashboardRefreshMode = true): Promise<boolean> {
@@ -928,7 +934,7 @@ export default function PurchaseOverviewPage() {
           renderedDashboardNotice
             ? '基础数据同步中'
             : dashboard
-              ? formatUpdatedAt(dashboard.generatedAt)
+              ? `${formatUpdatedAt(dashboard.generatedAt)}${renderedDashboardSyncPending ? ' · 后台同步中' : ''}`
               : '同步中'
         }
         refreshing={refreshing}

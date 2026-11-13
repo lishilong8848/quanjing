@@ -10,6 +10,7 @@ import {
   clearInventoryInboundRecovery,
   createPurchaseInboundRecoveryDraft,
   isPurchaseInboundRecoveryDraft,
+  isRolledBackPurchaseInbound,
   readInventoryInboundRecovery,
   saveInventoryInboundRecovery,
   subscribeInventoryInboundRecovery,
@@ -1036,6 +1037,15 @@ describe('inventory inbound recovery storage', () => {
     expect(saveInventoryInboundRecovery({kind:'manual',status:'failed',retryMode:'editable',clientMutationId:'task-one',draft:{...createManualDraft('task-one'),clientMutationId:undefined}},owner)).toBe(true);
     expect(readAcceptedInventoryInboundRecoveries(owner)).toHaveLength(0);
     expect(readInventoryInboundRecovery(owner)?.clientMutationId).toBe('task-one');
+  });
+  it('recognizes the exact rollback conflict and removes only the superseded task', () => {
+    const error = { response: { status: 409, data: { error: { details: 'PURCHASE_INBOUND_ROLLED_BACK' } } } };
+    expect(isRolledBackPurchaseInbound(error)).toBe(true);
+    expect(isRolledBackPurchaseInbound({ response: { status: 409, data: { error: { details: 'other' } } } })).toBe(false);
+    expect(isRolledBackPurchaseInbound({ response: { ...error.response, status: 500 } })).toBe(false);
+    installWindow(); stage('task-one'); stage('task-two');
+    expect(finalizeInventoryInboundRecovery('task-one', 'rolled-back', owner)).toBe(true);
+    expect(readAcceptedInventoryInboundRecoveries(owner).map(row => row.clientMutationId)).toEqual(['task-two']);
   });
   it('keeps the single-slot accepted binding if the task journal cannot be persisted', () => {
     const {storage}=installWindow();

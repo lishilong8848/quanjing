@@ -714,6 +714,22 @@ describe('inventory inbound optimistic state', () => {
       purchaseExecutionRecordId: 'exec-confirmed',
       purchaseSnapshot: purchase,
     });
+
+    const reopened = { ...purchase, reopenedAfterDeletion: true, inboundRollbackRecordId: 'real:purchase-confirmed-1' };
+    const afterDeletion = mergePurchaseQueryResult(result, [reopened], 2);
+    expect(afterDeletion.basePendingPurchases).toEqual([reopened]);
+    expect(afterDeletion.confirmedOverlays.size).toBe(0);
+    const next = beginMutation(afterDeletion, {
+      clientMutationId: 'purchase-reopened-2',
+      draft: createDraft('重新入库', 'purchase'),
+      optimisticMovement: createMovement({ recordId: 'temp:purchase-reopened-2' }),
+      startedAt: 200,
+      purchaseExecutionRecordId: 'exec-confirmed',
+    });
+    expect(next.pendingMutations.has('purchase-reopened-2')).toBe(true);
+    expect(mergePurchaseQueryResult(next, [reopened], 3).basePendingPurchases).toEqual([]);
+    const completedAgain = confirmMutation(next, 'purchase-reopened-2', createMovement({ recordId: 'real:purchase-reopened-2' }));
+    expect(mergePurchaseQueryResult(completedAgain, [reopened], 4).basePendingPurchases).toEqual([]);
   });
 
   it('keeps a settled purchase execution hidden and rejects a new mutation for it', () => {

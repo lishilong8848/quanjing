@@ -1295,6 +1295,58 @@ describe('PurchaseInboundConfirmationService', () => {
   );
 
   async function flushReads() { for (let i=0;i<15;i++) await Promise.resolve(); }
+  it.each([false, true])('keeps slow display reads in flight without confirming old rows (warm=%s)', async (warm) => {
+    let generation = 0;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    jest.mocked(getBitableRecordCacheGeneration).mockImplementation(() => generation);
+    const service = createService();
+    try {
+      const previous = warm ? await service.listPendingForDisplay() : undefined;
+      generation++;
+      jest.mocked(fetchBitableRecords).mockClear().mockImplementation(async (_http, { tableId }) => {
+        await gate;
+        return tableId === TABLES.execution ? [] : pendingReadRecords(tableId);
+      });
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      const display = service.listPendingForDisplay();
+      const authoritative = service.listPending();
+      await flushReads();
+      await jest.advanceTimersByTimeAsync(warm ? 1500 : 6000);
+      await expect(display).resolves.toEqual({
+        generatedAt: previous?.generatedAt ?? '',
+        items: previous?.items ?? [],
+        refreshPending: true,
+      });
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+      release();
+      await expect(authoritative).resolves.toMatchObject({ items: [] });
+      await expect(service.listPendingForDisplay()).resolves.toMatchObject({ items: [] });
+    } finally {
+      release();
+      jest.useRealTimers();
+      jest.mocked(getBitableRecordCacheGeneration).mockReturnValue(0);
+    }
+  });
+
+  it('shows a single invalid prepared category without blocking other pending rows or allowing strict reads', async () => {
+    const other = { ...execution(), record_id: 'exec-good' };
+    jest.mocked(fetchBitableRecords).mockImplementation(async (_http, { tableId }) =>
+      tableId === TABLES.execution ? [execution(), other]
+        : tableId === TABLES.catalog ? [preparedCatalog(), { ...preparedCatalog(), record_id: 'catalog-duplicate' }]
+          : pendingReadRecords(tableId),
+    );
+    const service = createService();
+    await expect(service.listPendingForDisplay()).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({ executionRecordId: 'exec-1', preparedCategoryInvalid: true }),
+        expect.objectContaining({ executionRecordId: 'exec-good' }),
+      ],
+    });
+    await expect(service.listPending()).rejects.toThrow('重复');
+    expect(gateway.updateRecord).not.toHaveBeenCalled();
+  });
+
   it('reuses a recent pending projection while reading handover generations on each request', async () => {
     let responsibilityGeneration = 1;
     const ledger = {
@@ -1383,6 +1435,23 @@ describe('PurchaseInboundConfirmationService', () => {
     finally {(getBitableRecordCacheGeneration as jest.Mock).mockReturnValue(0);}
   });
 
+  it('only forces the table whose generation changed on the retry', async () => {
+    let executionGeneration = 0;
+    const generations = jest.mocked(getBitableRecordCacheGeneration);
+    generations.mockImplementation((_app, table) => table === TABLES.execution ? executionGeneration : 0);
+    const ledger = { purchaseResponsibilities: jest.fn(async () => { executionGeneration = 1; return {}; }) };
+    try {
+      await expect(createService(undefined, ledger).listPendingForDisplay()).resolves.toMatchObject({
+        items: [expect.objectContaining({ executionRecordId: 'exec-1' })],
+      });
+      const forcedTables = jest.mocked(fetchBitableRecords).mock.calls
+        .filter(([, options]) => options.forceRefresh).map(([, options]) => options.tableId);
+      expect(forcedTables).toEqual([TABLES.execution]);
+    } finally {
+      generations.mockReturnValue(0);
+    }
+  });
+
   function createService(operationCoordinator?: {
     run<T>(
       resourceKeys: readonly string[],
@@ -1412,6 +1481,7 @@ describe('PurchaseInboundConfirmationService', () => {
 
 interface PurchaseConfirmationTestService {
   listPending(forceRefresh?: boolean): Promise<unknown>;
+  listPendingForDisplay(forceRefresh?: boolean): ReturnType<PurchaseInboundConfirmationService['listPendingForDisplay']>;
   ensureCompletionNotificationOutbox(executionRecordId: string): Promise<void>;
   prepareCategory(
     request: PurchaseInboundCategoryPrepareTestRequest,

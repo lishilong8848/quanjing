@@ -799,6 +799,7 @@ async function createFixture(options?: {
       ),
       [
         "if (!process.argv.includes('--activate-workflow')) process.exit(97);",
+        "if (!process.argv.includes('--check-leave-startup')) process.exit(96);",
         ...(options.candidateConfigurationPreflightExitCode === 0
           ? [
               "process.stdout.write('fixture purchase configuration is valid\\n');",

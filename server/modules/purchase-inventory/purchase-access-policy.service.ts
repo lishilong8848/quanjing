@@ -303,6 +303,7 @@ function buildScopedDashboard(
   return {
     generatedAt: dashboard.generatedAt,
     ...(dashboard.refreshState ? { refreshState: dashboard.refreshState } : {}),
+    ...(dashboard.refreshPending ? { refreshPending: true } : {}),
     ...(dashboard.refreshError ? { refreshError: dashboard.refreshError } : {}),
     summary: {
       totalRequests: requests.length,

@@ -6370,7 +6370,7 @@ function Invoke-CandidateStartupConfigurationPreflight {
   try {
     $ErrorActionPreference = 'Continue'
     $preflightOutput = @(
-      & $nodePath $preflightScript --root $Root --activate-workflow 2>&1
+      & $nodePath $preflightScript --root $Root --activate-workflow --check-leave-startup 2>&1
     )
     $preflightExitCode = $LASTEXITCODE
   } finally {

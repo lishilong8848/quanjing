@@ -98,7 +98,7 @@ export const inventoryDashboardReads = createInventoryReadCache<InventoryManagem
 );
 export const inventoryItemReads = createInventoryReadCache<InventoryItemsResponse>();
 export const inventoryMovementReads = createInventoryReadCache<InventoryMovementsResponse>();
-export const pendingPurchaseReads = createInventoryReadCache<PurchasePendingInboundResponse>();
+export const pendingPurchaseReads = createInventoryReadCache<PurchasePendingInboundResponse>(value => !value.refreshPending);
 export const inventoryProgressReads = createInventoryReadCache<StocktakeOverview>();
 
 export function invalidateInventoryMovementReads() {

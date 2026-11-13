@@ -1,9 +1,22 @@
+import { setTimeout as delay } from 'node:timers/promises';
+
 const TABLE_ID = 'tblpCzmTT3EapaUY';
 const SOURCE_URL =
   'https://vnet.feishu.cn/wiki/G7oUwGdwaiTmimk8i2ecGTWOn4d?table=tblpCzmTT3EapaUY&view=vewHyBE14E';
 const DEFAULT_OPENAPI_BASE_URL = 'https://open.feishu.cn/open-apis';
 const MAX_OPENAPI_PAGES = 100;
 const OPENAPI_TIMEOUT_MS = 15_000;
+const READ_CHECK_BUDGET_MS = 30_000;
+const MAX_READ_ATTEMPTS = 3;
+const MAX_RETRY_DELAY_MS = 5_000;
+const TRANSIENT_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const TRANSIENT_FEISHU_CODES = new Set([1254290, 99991400]);
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'TimeoutError',
+]);
+const FIELD_GATE_PREFIX = 'LEAVE_PREFLIGHT';
+const readDeadline = performance.now() + READ_CHECK_BUDGET_MS;
 let openApiTenantAccessToken = '';
 const REQUIRED_FIELDS = [
   select('审批来源', ['飞书工作流', '程序卡片']),
@@ -54,69 +67,74 @@ const args = process.argv.slice(2);
 const apply = args.includes('--apply');
 const requireReady = args.includes('--require-ready');
 const withShiftDetails = args.includes('--with-shift-details');
-const configuredTableId = firstEnv(
-  'FEISHU_LEAVE_REQUEST_TABLE_ID',
-  'FEISHU_LEAVE_SUBSTITUTE_TABLE_ID',
-);
-if (configuredTableId && configuredTableId !== TABLE_ID) {
-  fail('请休假工作流字段迁移只允许目标请休假表');
-}
-const baseToken = firstEnv(
-  'FEISHU_LEAVE_REQUEST_APP_TOKEN',
-  'FEISHU_LEAVE_SUBSTITUTE_APP_TOKEN',
-  'FEISHU_MAIN_APP_TOKEN',
-  'FEISHU_BITABLE_APP_TOKEN',
-);
-if (!baseToken) {
-  fail('缺少请休假多维表 app token，不能检查程序审批字段');
-}
+class FieldGateError extends Error {}
 
-const current = await listFields(baseToken, TABLE_ID, '读取请休假工作流字段');
-const currentByName = new Map(
-  extractFields(current)
-    .map((field) => [fieldName(field), field])
-    .filter(([name]) => Boolean(name)),
-);
-const missing = [];
-for (const required of REQUIRED_FIELDS) {
-  const field = currentByName.get(required.name);
-  if (!field) {
-    missing.push(required);
-    continue;
+async function main() {
+  const configuredTableId = firstEnv(
+    'FEISHU_LEAVE_REQUEST_TABLE_ID',
+    'FEISHU_LEAVE_SUBSTITUTE_TABLE_ID',
+  );
+  if (configuredTableId && configuredTableId !== TABLE_ID) {
+    fail('请休假工作流字段迁移只允许目标请休假表');
   }
-  if (!isExpectedField(field, required)) {
-    fail(`字段“${required.name}”已存在，但类型或多选配置不兼容`);
+  const baseToken = firstEnv(
+    'FEISHU_LEAVE_REQUEST_APP_TOKEN',
+    'FEISHU_LEAVE_SUBSTITUTE_APP_TOKEN',
+    'FEISHU_MAIN_APP_TOKEN',
+    'FEISHU_BITABLE_APP_TOKEN',
+  );
+  if (!baseToken) {
+    fail('缺少请休假多维表 app token，不能检查程序审批字段');
   }
-}
 
-if (requireReady && missing.length > 0) {
-  fail(
-    `缺少请休假程序审批字段：${missing.map((item) => item.name).join('、')}`,
+  const current = await listFields(baseToken, TABLE_ID, '读取请休假工作流字段');
+  const currentByName = new Map(
+    extractFields(current)
+      .map((field) => [fieldName(field), field])
+      .filter(([name]) => Boolean(name)),
+  );
+  const missing = [];
+  for (const required of REQUIRED_FIELDS) {
+    const field = currentByName.get(required.name);
+    if (!field) {
+      missing.push(required);
+      continue;
+    }
+    if (!isExpectedField(field, required)) {
+      fail(`字段“${required.name}”已存在，但类型或多选配置不兼容`, 'SCHEMA');
+    }
+  }
+
+  if (requireReady && missing.length > 0) {
+    fail(
+      `缺少请休假程序审批字段：${missing.map((item) => item.name).join('、')}`,
+      'SCHEMA',
+    );
+  }
+
+  if (apply) {
+    for (const field of missing) await createField(baseToken, TABLE_ID, field);
+  }
+
+  const shiftDetails = withShiftDetails
+    ? await ensureShiftDetailSchema(baseToken)
+    : undefined;
+
+  process.stdout.write(
+    `${JSON.stringify({
+      success: true,
+      dryRun: !apply,
+      tableId: TABLE_ID,
+      sourceUrl: SOURCE_URL,
+      existing: REQUIRED_FIELDS.filter((item) =>
+        currentByName.has(item.name),
+      ).map((item) => item.name),
+      created: apply ? missing.map((item) => item.name) : [],
+      missing: apply ? [] : missing.map((item) => item.name),
+      ...(shiftDetails ? { shiftDetails } : {}),
+    })}\n`,
   );
 }
-
-if (apply) {
-  for (const field of missing) await createField(baseToken, TABLE_ID, field);
-}
-
-const shiftDetails = withShiftDetails
-  ? await ensureShiftDetailSchema(baseToken)
-  : undefined;
-
-process.stdout.write(
-  `${JSON.stringify({
-    success: true,
-    dryRun: !apply,
-    tableId: TABLE_ID,
-    sourceUrl: SOURCE_URL,
-    existing: REQUIRED_FIELDS.filter((item) =>
-      currentByName.has(item.name),
-    ).map((item) => item.name),
-    created: apply ? missing.map((item) => item.name) : [],
-    missing: apply ? [] : missing.map((item) => item.name),
-    ...(shiftDetails ? { shiftDetails } : {}),
-  })}\n`,
-);
 
 function text(name) {
   return {
@@ -204,7 +222,7 @@ async function ensureShiftDetailSchema(token) {
     (table) => tableName(table) === SHIFT_DETAIL_TABLE_NAME,
   );
   if (namedTables.length > 1) {
-    fail(`多维表中存在重复表名“${SHIFT_DETAIL_TABLE_NAME}”`);
+    fail(`多维表中存在重复表名“${SHIFT_DETAIL_TABLE_NAME}”`, 'SCHEMA');
   }
   const configuredDetailTableId = firstEnv(
     'FEISHU_LEAVE_SHIFT_DETAIL_TABLE_ID',
@@ -220,7 +238,7 @@ async function ensureShiftDetailSchema(token) {
   if (!detailTableId) detailTableId = configuredDetailTableId;
   let tableCreated = false;
   if (!detailTableId) {
-    if (requireReady) fail(`缺少多维表“${SHIFT_DETAIL_TABLE_NAME}”`);
+    if (requireReady) fail(`缺少多维表“${SHIFT_DETAIL_TABLE_NAME}”`, 'SCHEMA');
     if (!apply) {
       return {
         tableName: SHIFT_DETAIL_TABLE_NAME,
@@ -258,12 +276,12 @@ async function ensureShiftDetailSchema(token) {
       continue;
     }
     if (!isExpectedField(field, expected)) {
-      fail(`字段“${expected.name}”已存在，但类型或关联配置不兼容`);
+      fail(`字段“${expected.name}”已存在，但类型或关联配置不兼容`, 'SCHEMA');
     }
   }
   if (requireReady && missing.length) {
     fail(
-      `缺少请假替班班次明细字段：${missing.map((item) => item.name).join('、')}`,
+      `缺少请假替班班次明细字段：${missing.map((item) => item.name).join('、')}`, 'SCHEMA',
     );
   }
   if (apply) {
@@ -325,18 +343,19 @@ async function listFields(token, targetTableId, operation) {
       )}/fields?${query}`,
     );
     const data = payload?.data;
-    if (Array.isArray(data?.items)) items.push(...data.items);
+    if (!Array.isArray(data?.items)) fail(`飞书字段列表响应缺少 items：${operation}`, 'RESPONSE');
+    items.push(...data.items);
     if (!data?.has_more) return { data: { items } };
 
     const nextPageToken = String(data?.page_token || '').trim();
     if (!nextPageToken || seenPageTokens.has(nextPageToken)) {
-      fail('飞书字段分页返回了空或重复的 page_token，已拒绝继续');
+      fail('飞书字段分页返回了空或重复的 page_token，已拒绝继续', 'RESPONSE');
     }
     seenPageTokens.add(nextPageToken);
     pageToken = nextPageToken;
   }
 
-  fail('飞书字段分页超过安全页数限制，已拒绝继续');
+  fail('飞书字段分页超过安全页数限制，已拒绝继续', 'RESPONSE');
 }
 
 async function createField(token, targetTableId, field) {
@@ -351,42 +370,88 @@ async function createField(token, targetTableId, field) {
 
 async function requestOpenApi(operation, path, options = {}) {
   const authenticated = options.authenticated !== false;
+  const method = options.method || 'GET';
+  const readonly = !apply && (method === 'GET' || !authenticated);
   const headers = { 'Content-Type': 'application/json; charset=utf-8' };
   if (authenticated) {
     headers.Authorization = `Bearer ${await getOpenApiTenantAccessToken()}`;
   }
 
-  let response;
-  try {
-    response = await fetch(`${openApiBaseUrl()}${path}`, {
-      method: options.method || 'GET',
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: AbortSignal.timeout(OPENAPI_TIMEOUT_MS),
-    });
-  } catch {
-    fail(`飞书 OpenAPI 请求失败：${operation}`);
-  }
+  const url = `${openApiBaseUrl()}${path}`;
+  const attempts = readonly ? MAX_READ_ATTEMPTS : 1;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const remaining = readonly ? Math.floor(readDeadline - performance.now()) : OPENAPI_TIMEOUT_MS;
+    if (remaining <= 0) fail(`飞书只读检查达到总时限：${operation}`, 'NETWORK');
+    let response;
+    let payload;
+    let failure;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        signal: AbortSignal.timeout(Math.min(remaining, OPENAPI_TIMEOUT_MS)),
+      });
+      payload = await response.json();
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        failure = response?.ok
+          ? { kind: 'RESPONSE', detail: 'invalid-json', transient: false }
+          : httpFailure(response);
+      } else {
+        const code = error?.cause?.code || error?.code || error?.name || '';
+        const safeCode = /^[A-Za-z0-9_]{1,64}$/u.test(code) ? code : 'unknown';
+        failure = { kind: 'NETWORK', detail: `cause=${safeCode}`, transient: TRANSIENT_NETWORK_CODES.has(safeCode) };
+      }
+    }
+    if (!failure && response.ok && payload && payload.code === 0) return payload;
+    if (!failure) failure = httpFailure(response, payload);
 
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    fail(`飞书 OpenAPI 返回了无法解析的响应：${operation}`);
+    const waitMs = retryDelay(response, attempt);
+    const detail = `${operation}（${failure.detail}, attempt=${attempt}/${attempts}）`;
+    if (!failure.transient || attempt === attempts || waitMs > MAX_RETRY_DELAY_MS || performance.now() + waitMs >= readDeadline) {
+      if (apply && failure.kind === 'HTTP' && payload) {
+        const message = safeApiMessage(payload.msg || payload.message || 'unknown');
+        fail(`飞书 OpenAPI 拒绝请求：${operation}（code=${Number(payload.code) || 'unknown'}，msg=${message}）`, 'HTTP');
+      }
+      fail(`飞书 OpenAPI 检查失败：${detail}`, failure.kind);
+    }
+    process.stderr.write(`[WARN] [${FIELD_GATE_PREFIX}_${failure.kind}] 飞书只读检查重试：${detail}, waitMs=${waitMs}\n`);
+    await delay(waitMs);
   }
-  if (!response.ok || (payload?.code !== undefined && payload.code !== 0)) {
-    const code = Number.isFinite(Number(payload?.code))
-      ? String(Number(payload.code))
-      : 'unknown';
-    const message = String(payload?.msg || payload?.message || 'unknown')
-      .replace(/[\r\n]+/gu, ' ')
-      .trim()
-      .slice(0, 200);
-    fail(
-      `飞书 OpenAPI 拒绝请求：${operation}（code=${code}，msg=${message}）`,
-    );
+}
+
+function httpFailure(response, payload) {
+  const status = response?.status || 'unknown';
+  const apiCode = Number(payload?.code);
+  const logId = response?.headers.get('x-tt-logid') || response?.headers.get('x-request-id') || '';
+  const logDetail = /^[A-Za-z0-9_-]{8,80}$/u.test(logId) ? `, logId=${logId}` : '';
+  const detail = `http=${status}, code=${Number.isSafeInteger(apiCode) ? apiCode : 'unknown'}${logDetail}`;
+  if (response?.ok && !Number.isSafeInteger(apiCode)) {
+    return { kind: 'RESPONSE', detail, transient: false };
   }
-  return payload;
+  // Monthly quota exhaustion is not a short-lived rate limit.
+  const transient = apiCode !== 99991403 && (TRANSIENT_HTTP_STATUSES.has(status) || TRANSIENT_FEISHU_CODES.has(apiCode));
+  return { kind: 'HTTP', detail, transient };
+}
+
+function retryDelay(response, attempt) {
+  const header = (response?.headers.get('x-ogw-ratelimit-reset') || response?.headers.get('retry-after') || '').trim();
+  const resetMs = !header ? 0 : /^\d+(?:\.\d+)?$/u.test(header)
+    ? Number(header) * 1000
+    : Date.parse(header) - Date.now();
+  return Number.isFinite(resetMs) ? Math.max(attempt * 500, Math.ceil(resetMs)) : Infinity;
+}
+
+function safeApiMessage(value) {
+  let message = String(value).replace(/[\u0000-\u001f\u007f]+/gu, ' ').trim();
+  const sensitive = [TABLE_ID, openApiTenantAccessToken, ...Object.entries(process.env)
+    .filter(([key]) => /SECRET|TOKEN|PASSWORD|ENCRYPT|APP_ID|SOURCE_URL|TABLE_ID/u.test(key))
+    .map(([, value]) => value?.trim())]
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  for (const value of sensitive) message = message.replaceAll(value, '[REDACTED]');
+  return message.slice(0, 160);
 }
 
 async function getOpenApiTenantAccessToken() {
@@ -409,7 +474,7 @@ async function getOpenApiTenantAccessToken() {
     payload?.tenant_access_token || payload?.data?.tenant_access_token || '',
   ).trim();
   if (!token) {
-    fail('飞书 OpenAPI 鉴权响应缺少 tenant_access_token');
+    fail('飞书 OpenAPI 鉴权响应缺少 tenant_access_token', 'RESPONSE');
   }
   openApiTenantAccessToken = token;
   return token;
@@ -511,7 +576,17 @@ function firstEnv(...names) {
   return '';
 }
 
-function fail(message) {
+function fail(message, kind = 'CONFIG') {
+  throw new FieldGateError(`[${FIELD_GATE_PREFIX}_${kind}] ${message}`);
+}
+
+try {
+  await main();
+} catch (error) {
+  const message = error instanceof FieldGateError
+    ? error.message
+    : `[${FIELD_GATE_PREFIX}_INTERNAL] 请休假字段检查发生异常`;
   process.stderr.write(`${message}\n`);
-  process.exit(1);
+  // Allow stderr to drain before the process exits.
+  process.exitCode = 1;
 }

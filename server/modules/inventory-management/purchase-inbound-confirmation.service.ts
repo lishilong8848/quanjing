@@ -1,8 +1,10 @@
 import { assertProfessionalBitableRecord, assertProfessionalRecordScope, recordProfessionalSpecialty } from '../../common/access/professional-record-scope';
 import { HttpService } from '@nestjs/axios';
 import {
+  BadGatewayException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   Optional,
@@ -48,6 +50,10 @@ import {
 import { InventoryMovementOperationCoordinator } from './inventory-movement-operation-coordinator';
 import { InventoryInboundTaskLedgerStore } from './inventory-inbound-task-ledger.store';
 import {
+  InventoryMovementDeletionTaskLedgerStore,
+  type CompletedPurchaseInboundRollback,
+} from './inventory-movement-deletion-task-ledger.store';
+import {
   escapeBaseFilterText,
   InventoryWorkflowGateway,
   InventoryWorkflowRecordNotFoundError,
@@ -64,6 +70,9 @@ import { InventoryStorageLocationService } from './inventory-storage-location.se
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const PENDING_PROJECTION_TTL_MS = 10_000;
+const PENDING_DISPLAY_WAIT_MS = 1500;
+const PENDING_COLD_DISPLAY_WAIT_MS = 6000;
+const PENDING_DISPLAY_MAX_AGE_MS = 5 * 60_000;
 
 interface PurchaseInboundConfig {
   purchaseAppToken: string;
@@ -109,6 +118,7 @@ export class PurchaseInboundConfirmationService {
   private readonly running = new Map<string, RunningPurchaseInbound>();
   private readonly pendingReads = new Map<string, { ordinary?: Promise<PurchasePendingInboundResponse>; fresh?: Promise<PurchasePendingInboundResponse> }>();
   private pendingProjection?: PendingInboundProjection;
+  private pendingDisplay?: { key: string; response: PurchasePendingInboundResponse };
 
   constructor(
     private readonly httpService: HttpService,
@@ -119,12 +129,61 @@ export class PurchaseInboundConfirmationService {
     @Optional()
     private readonly operationCoordinator?: InventoryMovementOperationCoordinator,
     @Optional() private readonly inboundTaskLedger?: InventoryInboundTaskLedgerStore,
+    @Optional() private readonly deletionTaskLedger?: InventoryMovementDeletionTaskLedgerStore,
   ) {}
 
   async listPending(
     forceRefresh = false,
   ): Promise<PurchasePendingInboundResponse> {
-    const config = await this.resolveConfig();
+    const response = await this.readPending(forceRefresh);
+    const invalid = response.items.find(item => item.preparedCategoryInvalid);
+    if (invalid) throw new BadRequestException(invalid.actionReason);
+    return response;
+  }
+
+  async listPendingForDisplay(
+    forceRefresh = false,
+  ): Promise<PurchasePendingInboundResponse> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const config = await this.resolveConfig();
+      const key = JSON.stringify([readEnv('FEISHU_APP_ID'), config]);
+      const request = this.readPending(forceRefresh, config);
+      if (forceRefresh) return await request;
+      const lastRead = this.pendingDisplay;
+      const previous = lastRead?.key === key &&
+        Date.now() - Date.parse(lastRead.response.generatedAt) <= PENDING_DISPLAY_MAX_AGE_MS
+        ? lastRead.response : undefined;
+      return await Promise.race([
+        request,
+        new Promise<PurchasePendingInboundResponse>((resolve) => {
+          timer = setTimeout(() => resolve({
+            generatedAt: previous?.generatedAt ?? '',
+            items: structuredClone(previous?.items ?? []),
+            refreshPending: true,
+          }), previous ? PENDING_DISPLAY_WAIT_MS : PENDING_COLD_DISPLAY_WAIT_MS);
+        }),
+      ]);
+    } catch (error) {
+      // The caller's authorization is checked by the route before this
+      // read. A 403 here describes the Feishu application's data access.
+      if (!(error instanceof ForbiddenException)) throw error;
+      this.logger.warn('待采购入库清单读取失败：飞书应用无来源表读取权限');
+      throw new BadGatewayException({
+        statusCode: 502,
+        code: 'INVENTORY_PENDING_SOURCE_DENIED',
+        message: '待采购入库数据源访问异常，请联系管理员核对。',
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async readPending(
+    forceRefresh: boolean,
+    resolvedConfig?: PurchaseInboundConfig,
+  ): Promise<PurchasePendingInboundResponse> {
+    const config = resolvedConfig ?? await this.resolveConfig();
     const key = JSON.stringify([readEnv('FEISHU_APP_ID'), config]);
     let reads = this.pendingReads.get(key);
     if (!reads) { reads = {}; this.pendingReads.set(key, reads); }
@@ -147,55 +206,97 @@ export class PurchaseInboundConfirmationService {
   }
 
   private async readPendingSnapshot(config: PurchaseInboundConfig, key: string, forceRefresh: boolean): Promise<PurchasePendingInboundResponse> {
+    const sources = [
+      [config.purchaseAppToken, config.submissionTableId],
+      [config.purchaseAppToken, config.executionTableId],
+      [config.warehouseAppToken, config.catalogTableId],
+    ];
+    const currentGenerations = () => sources.map(([app, table]) => getBitableRecordCacheGeneration(app, table));
+    let forceTables = sources.map(() => forceRefresh);
     for (let attempt = 0; ; attempt++) {
-      try { return await this.readPendingSnapshotOnce(config, key, forceRefresh || attempt > 0); }
+      const generations = currentGenerations();
+      try {
+        return await this.readPendingSnapshotOnce(
+          config, key, generations, currentGenerations, forceTables, attempt > 0,
+        );
+      }
       catch (error) {
         if (!isPendingReadConflict(error)) throw error;
-        if (attempt >= 2) throw new ServiceUnavailableException('待采购入库数据正在更新，本次核对未完成，请稍后重试');
+        if (attempt >= 2) throw new ServiceUnavailableException({
+          statusCode: 503,
+          code: 'INVENTORY_PENDING_READ_CONFLICT',
+          message: '待采购入库数据正在更新，本次核对未完成，请稍后重试',
+        });
+        // Re-read only the changed tables from Feishu. Other tables can reuse
+        // the verified records already read in this request.
+        const changed = currentGenerations().map((value, index) => value !== generations[index]);
+        forceTables = changed.some(Boolean) ? changed : sources.map(() => true);
       }
     }
   }
 
-  private async readPendingSnapshotOnce(config: PurchaseInboundConfig, key: string, forceRefresh: boolean): Promise<PurchasePendingInboundResponse> {
-    const sources = [[config.purchaseAppToken, config.submissionTableId], [config.purchaseAppToken, config.executionTableId], [config.warehouseAppToken, config.catalogTableId]];
-    const currentGenerations = () => sources.map(([app, table]) => getBitableRecordCacheGeneration(app, table));
-    const generations = currentGenerations();
+  private async readPendingSnapshotOnce(
+    config: PurchaseInboundConfig,
+    key: string,
+    generations: number[],
+    currentGenerations: () => number[],
+    forceTables: boolean[],
+    isRetry: boolean,
+  ): Promise<PurchasePendingInboundResponse> {
     let projection = this.pendingProjection;
     const isCurrent = (values: number[]) => values.every((generation, index) => generation === generations[index]);
-    if (forceRefresh || !projection || projection.key !== key || projection.expiresAt <= Date.now() || !isCurrent(projection.generations)) {
-      if (this.pendingProjection?.key === key) this.pendingProjection = undefined;
-      const snapshot = await this.readPendingSourceTables(config, forceRefresh);
+    if (forceTables.some(Boolean) || isRetry || !projection || projection.key !== key || projection.expiresAt <= Date.now() || !isCurrent(projection.generations)) {
+      const snapshot = await this.readPendingSourceTables(config, forceTables);
       const now = Date.now();
       projection = {
         key,
         generations,
         generatedAt: new Date(now).toISOString(),
         expiresAt: now + PENDING_PROJECTION_TTL_MS,
-        items: buildPendingPurchaseInbounds(snapshot),
+        items: buildPendingPurchaseInbounds(snapshot, true),
       };
     }
     // Handover can change independently of the Feishu tables. Keep the ledger
     // lookup live even when the purchase and catalog projection is reusable.
-    const responsibilities = this.inboundTaskLedger ? await this.inboundTaskLedger.purchaseResponsibilities() : {};
+    const [responsibilities, rollbacks] = await Promise.all([
+      this.inboundTaskLedger?.purchaseResponsibilities() ?? {},
+      this.deletionTaskLedger?.completedPurchaseRollbacks() ?? [],
+    ]);
+    const reopened = new Map<string, CompletedPurchaseInboundRollback>();
+    for (const entry of rollbacks) {
+      const key = purchaseRollbackKey(entry.executionRecordId, entry.requestCode, entry.building);
+      const previous = reopened.get(key);
+      if (!previous || entry.completedAt >= previous.completedAt) reopened.set(key, entry);
+    }
     if (!isCurrent(currentGenerations())) throw new Error(PENDING_READ_CONFLICT);
     this.pendingProjection = projection;
-    return {
+    const response: PurchasePendingInboundResponse = {
       generatedAt: projection.generatedAt,
       items: projection.items.map(item => {
         const plan = responsibilities[item.executionRecordId];
-        return plan ? { ...item, responsibilityGeneration: plan.generation } : item;
+        const rollback = reopened.get(purchaseRollbackKey(item.executionRecordId, item.requestCode, item.building));
+        return {
+          ...item,
+          ...(plan ? { responsibilityGeneration: plan.generation } : {}),
+          ...(rollback
+            ? { reopenedAfterDeletion: true, inboundRollbackRecordId: rollback.recordId }
+            : {}),
+        };
       }),
     };
+    this.pendingDisplay = { key, response };
+    return response;
   }
 
-  private async readPendingSourceTables(config: PurchaseInboundConfig, forceRefresh: boolean): Promise<PurchaseInboundSnapshot> {
+  private async readPendingSourceTables(config: PurchaseInboundConfig, forceTables: boolean[]): Promise<PurchaseInboundSnapshot> {
+    const [refreshSubmissions, refreshExecutions, refreshCatalog] = forceTables;
     const settled = await Promise.allSettled([
       fetchBitableRecords(this.httpService, {
         appToken: config.purchaseAppToken,
         tableId: config.submissionTableId,
         tableName: '采购提交',
         cacheTtlMs: CACHE_TTL_MS,
-        forceRefresh,
+        forceRefresh: refreshSubmissions,
         strict: true,
         allowStale: false,
       }),
@@ -204,7 +305,7 @@ export class PurchaseInboundConfirmationService {
         tableId: config.executionTableId,
         tableName: '采购执行',
         cacheTtlMs: CACHE_TTL_MS,
-        forceRefresh,
+        forceRefresh: refreshExecutions,
         strict: true,
         allowStale: false,
       }),
@@ -213,7 +314,7 @@ export class PurchaseInboundConfirmationService {
         tableId: config.catalogTableId,
         tableName: '物品类别',
         cacheTtlMs: CACHE_TTL_MS,
-        forceRefresh,
+        forceRefresh: refreshCatalog,
         strict: true,
         allowStale: false,
       }),
@@ -228,6 +329,7 @@ export class PurchaseInboundConfirmationService {
     request: PurchaseInboundConfirmRequest,
     principal: AccessPrincipal,
     assertOwnership?: InventoryWriteOwnershipGuard,
+    acceptedAt?: string,
   ): Promise<PurchaseInboundConfirmResponse> {
     const executionRecordId = clean(request?.executionRecordId);
     if (!executionRecordId) {
@@ -240,7 +342,8 @@ export class PurchaseInboundConfirmationService {
     const fingerprint = buildPurchaseBusinessFingerprint(normalizedRequest);
     const active = this.running.get(executionRecordId);
     if (active) {
-      await this.authorizeRequest(normalizedRequest, principal);
+      const authorization = await this.authorizeRequest(normalizedRequest, principal);
+      await this.resolvePurchaseRollback(normalizedRequest, authorization, acceptedAt);
       if (active.fingerprint !== fingerprint) {
         throw new ConflictException('该采购执行正在处理另一份入库请求');
       }
@@ -253,12 +356,14 @@ export class PurchaseInboundConfirmationService {
         '读取并校验采购执行记录',
         () => this.authorizeRequest(normalizedRequest, principal),
       );
+      const rollback = await this.resolvePurchaseRollback(normalizedRequest, authorization, acceptedAt);
       return withInventoryStage('处理采购入库', () =>
         this.confirmOnce(
           normalizedRequest,
           principal,
           authorization,
           assertOwnership,
+          rollback,
         ),
       );
     };
@@ -343,6 +448,7 @@ export class PurchaseInboundConfirmationService {
     principal: AccessPrincipal,
     authorization: AuthorizedPurchaseInbound,
     assertOwnership?: InventoryWriteOwnershipGuard,
+    rollback?: CompletedPurchaseInboundRollback,
   ): Promise<PurchaseInboundConfirmResponse> {
     const {
       config,
@@ -428,24 +534,18 @@ export class PurchaseInboundConfirmationService {
         `采购:${request.executionRecordId}`,
         trustedRequest,
         principal,
-        strictNewRequest
+        recoverOnly || strictNewRequest || assertOwnership || rollback
           ? {
               ...(recoverOnly ? { recoverOnly: true } : {}),
-              requirePreparedCatalog: true,
-              expectedCatalogRecordId: clean(
-                strictNewRequest.preparedCatalogRecordId,
-              ),
-              expectedSku: normalizeSku(strictNewRequest.generatedSku),
+              ...(strictNewRequest ? {
+                requirePreparedCatalog: true,
+                expectedCatalogRecordId: clean(strictNewRequest.preparedCatalogRecordId),
+                expectedSku: normalizeSku(strictNewRequest.generatedSku),
+              } : {}),
               ...(assertOwnership ? { assertOwnership } : {}),
+              ...(rollback ? { reopenedAfterDeletion: rollback } : {}),
             }
-          : recoverOnly
-            ? {
-                recoverOnly: true,
-                ...(assertOwnership ? { assertOwnership } : {}),
-              }
-            : assertOwnership
-              ? { assertOwnership }
-              : undefined,
+          : undefined,
       );
     const movement = trustedResult.response.movement;
 
@@ -474,6 +574,30 @@ export class PurchaseInboundConfirmationService {
       movement,
     );
     return buildPurchaseResponse(request.executionRecordId, trustedResult, []);
+  }
+
+  private async resolvePurchaseRollback(
+    request: PurchaseInboundConfirmRequest,
+    { execution, executionBuilding }: AuthorizedPurchaseInbound,
+    acceptedAt?: string,
+  ): Promise<CompletedPurchaseInboundRollback | undefined> {
+    const entries = await this.deletionTaskLedger?.completedPurchaseRollbacks() ?? [];
+    const requestCode = fieldText(execution.fields, ['采购编码']);
+    const latest = entries.filter((entry) =>
+      entry.executionRecordId === request.executionRecordId && entry.requestCode === requestCode &&
+      entry.building === executionBuilding,
+    ).reduce<CompletedPurchaseInboundRollback | undefined>((newest, entry) =>
+      !newest || entry.completedAt >= newest.completedAt ? entry : newest, undefined);
+    if (latest) {
+      const storedTask = acceptedAt === undefined && request.clientMutationId
+        ? await this.inboundTaskLedger?.findInboundByMutationId(request.clientMutationId)
+        : undefined;
+      const originalAcceptedAt = acceptedAt ?? storedTask?.task.createdAt;
+      if (originalAcceptedAt && originalAcceptedAt <= latest.completedAt) {
+        throw new ConflictException('原入库记录已删除，请在待入库清单重新提交');
+      }
+    }
+    return latest;
   }
 
   private scheduleCompletionNotificationOutbox(
@@ -624,6 +748,10 @@ export class PurchaseInboundConfirmationService {
     }
     return config;
   }
+}
+
+function purchaseRollbackKey(executionRecordId: string, requestCode: string, building: string): string {
+  return JSON.stringify([executionRecordId, requestCode, building]);
 }
 
 const PENDING_READ_CONFLICT = '数据在读取期间已变更，请重新读取';

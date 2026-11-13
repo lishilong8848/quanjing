@@ -110,6 +110,7 @@ describe('purchase inbound confirmation ui', () => {
     ) => Record<string, any>;
     validatePurchaseInboundDraft: (
       draft: Record<string, any>,
+      maxQuantity?: number,
     ) => Record<string, string>;
     buildPurchaseInboundSubmission: (input: {
       item: PurchasePendingInboundItem;
@@ -284,7 +285,7 @@ describe('purchase inbound confirmation ui', () => {
   });
 
   it('restores a prepared category from the server pending snapshot', () => {
-    const { createPurchaseInboundDraft } = loadPureHelpers();
+    const { createPurchaseInboundDraft, validatePurchaseInboundDraft } = loadPureHelpers();
     const item = createPendingPurchase({
       preparedCategory: {
         catalogRecordId: 'catalog-prepared-1',
@@ -327,6 +328,16 @@ describe('purchase inbound confirmation ui', () => {
         unit: '台',
         minimumQuantity: '5',
       },
+    });
+    const reopened = createPurchaseInboundDraft({ ...item, reopenedAfterDeletion: true }, new Date(2026, 10, 13, 14, 30));
+    expect(reopened).toMatchObject({
+      clientMutationId: undefined,
+      occurredAt: '2026-11-13T14:30',
+      preparedCatalogRecordId: 'catalog-prepared-1',
+      generatedSku: 'HJ008',
+    });
+    expect(validatePurchaseInboundDraft({ ...reopened, quantity: '5' }, 4)).toMatchObject({
+      quantity: '确认入库数量不能超过实际签收数量（4）',
     });
   });
 
@@ -681,7 +692,7 @@ describe('purchase inbound confirmation ui', () => {
     expect(dialog).toContain('retryLocked?: boolean');
     expect(dialog).toContain('<fieldset');
     expect(dialog).toContain(
-      'disabled={retryLocked || categoryTaskActive || preparedNew || inboundPhotos.uploading}',
+      'disabled={retryLocked || categoryTaskActive || (preparedNew && !reopenedPrepared) || inboundPhotos.uploading || submitting}',
     );
     expect(dialog).toContain('恢复草稿已锁定');
     expect(page).toContain('createPurchaseInboundRecoveryDraft');

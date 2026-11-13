@@ -22,6 +22,7 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
 import { AdminOnly, ProfessionalScoped } from '../../common/access/unified-access.decorators';
+import { BusinessException } from '../../common/interfaces/exception.interface';
 import type {
   CreateInventoryMovementDeletionRequest,
   InventoryMovementCreateRequest,
@@ -487,7 +488,7 @@ export class InventoryManagementController {
     @Query('refresh') refresh = 'false',
   ) {
     const principal = requirePrincipal(request);
-    const pending = await this.purchaseInboundService.listPending(
+    const pending = await this.purchaseInboundService.listPendingForDisplay(
       isRefreshRequested(refresh),
     );
     return scopePendingPurchaseInbounds(principal, pending);
@@ -682,7 +683,9 @@ function assertInventoryBatch<T extends { clientMutationId?: string }>(
 }
 
 function isDefiniteBatchRejection(error: unknown): boolean {
-  return error instanceof HttpException && error.getStatus() >= 400 && error.getStatus() < 500;
+  const status = error instanceof HttpException ? error.getStatus()
+    : error instanceof BusinessException ? error.httpStatus : undefined;
+  return status !== undefined && status >= 400 && status < 500;
 }
 
 function batchErrorMessage(error: unknown): string {

@@ -1538,6 +1538,7 @@ export async function getPendingPurchaseInbounds(
     params: { refresh: forceRefresh ? '1' : '0' },
     timeout: 120_000,
   });
+  assertSuccessfulBackendResponse(response);
   return response.data;
 }
 

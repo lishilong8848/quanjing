@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { InventoryItemPhotoThumbnail } from '../../client/src/pages/InventoryManagement/InventoryItemPhotos';
 
-describe('inventory ledger image column', () => {
+describe('inventory ledger item thumbnails', () => {
   it('renders a visible placeholder with no image request when the item has no photo', () => {
     const html = renderToStaticMarkup(
       <InventoryItemPhotoThumbnail name="测试物品" images={[]} onOpen={jest.fn()} />,
@@ -25,11 +25,14 @@ describe('inventory ledger image column', () => {
     expect(html).not.toContain('无图片');
   });
 
-  it('places the thumbnail in its own desktop column and keeps it on the mobile card', () => {
+  it('keeps the thumbnail with the item name on desktop and mobile without changing column order', () => {
     const page = readFileSync(join(process.cwd(), 'client/src/pages/InventoryManagement/index.tsx'), 'utf8');
     const table = page.slice(page.indexOf('function InventoryTable('), page.indexOf('function InventoryRiskBadges('));
-    expect(table).toMatch(/<th scope="col"[^>]*>图片<\/th>/);
-    expect(table).toMatch(/<td[^>]*>\s*<InventoryItemPhotoThumbnail[^>]*\/>\s*<\/td>/);
-    expect(table.match(/<InventoryItemPhotoThumbnail/g)).toHaveLength(2);
+    const headers = [...table.matchAll(/<th\s[^>]*>([^<]+)<\/th>/g)].map(([, label]) => label);
+    expect(headers).toEqual(['物品 / SKU', '分类', '楼栋 / 库位', '剩余库存', '最小库存', '年度频次', '库存价值', '状态']);
+    const firstCell = table.match(/<td[^>]*>([\s\S]*?)<\/td>/)?.[1];
+    expect(firstCell).toMatch(/items-center[^>]*>\s*<InventoryItemPhotoThumbnail[^>]*\/>[\s\S]*\{item\.name\}[\s\S]*\{item\.sku/);
+    const mobileCards = table.slice(table.indexOf('<article'));
+    expect(mobileCards).toMatch(/items-center[^>]*>\s*<InventoryItemPhotoThumbnail[^>]*\/>[\s\S]*\{item\.name\}[\s\S]*\{item\.sku/);
   });
 });

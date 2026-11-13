@@ -512,6 +512,9 @@ export type PurchasePendingInboundAction =
 
 export interface PurchasePendingInboundItem {
   responsibilityGeneration?: number;
+  reopenedAfterDeletion?: boolean;
+  inboundRollbackRecordId?: string;
+  preparedCategoryInvalid?: true;
   specialty?: string;
   executionRecordId: string;
   submissionRecordId: string;
@@ -536,6 +539,7 @@ export interface PurchasePendingInboundItem {
 export interface PurchasePendingInboundResponse {
   generatedAt: string;
   items: PurchasePendingInboundItem[];
+  refreshPending?: true;
 }
 
 export interface PurchaseInboundNewItemInput extends InventoryNewItemInput {

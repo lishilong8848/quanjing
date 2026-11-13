@@ -62,11 +62,13 @@ describe('inventory secondary pages UI', () => {
     );
 
     expect(page).toMatch(
-      /if \(\s*!response\s*\|\|\s*!Array\.isArray\(response\.items\)\s*\|\|\s*!Array\.isArray\(response\.categories\)\s*\|\|\s*!Number\.isFinite\(response\.total\)\s*\|\|\s*!Number\.isFinite\(response\.page\)\s*\|\|\s*!Number\.isFinite\(response\.totalPages\)\s*\)/,
+      /if \(\s*!result\s*\|\|\s*!Array\.isArray\(result\.items\)\s*\|\|\s*!Array\.isArray\(result\.categories\)\s*\|\|\s*!Number\.isFinite\(result\.total\)\s*\|\|\s*!Number\.isFinite\(result\.page\)\s*\|\|\s*!Number\.isFinite\(result\.totalPages\)\s*\)/,
     );
     expect(
       page.indexOf("throw new Error('Invalid inventory items response')"),
-    ).toBeLessThan(page.indexOf('setItems(response)'));
+    ).toBeLessThan(page.indexOf('setItemsResult({ key: itemsViewKey, value: response })'));
+    expect(page).toContain('当前显示上次成功结果');
+    expect(page).toContain('onRetry={() => void loadItems(false, true)}');
   });
 
   it('force-refreshes both the dashboard and ledger from the manual refresh action', () => {

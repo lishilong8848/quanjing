@@ -58,7 +58,7 @@ export interface InventoryInboundOptimisticState<TDraft> {
     ConfirmedInventoryInboundOverlay<TDraft>
   >;
   settledMutationIds: ReadonlySet<string>;
-  settledPurchaseExecutionIds: ReadonlySet<string>;
+  settledPurchaseExecutionIds: ReadonlyMap<string, string>;
   basePendingPurchases: readonly PurchasePendingInboundItem[];
   latestMovementRequestId: number;
   latestPurchaseRequestId: number;
@@ -78,7 +78,7 @@ export function createInitialInventoryInboundState<TDraft>(
     pendingMutations: new Map(),
     confirmedOverlays: new Map(),
     settledMutationIds: new Set(),
-    settledPurchaseExecutionIds: new Set(),
+    settledPurchaseExecutionIds: new Map(),
     basePendingPurchases: [...(options.pendingPurchases ?? [])],
     latestMovementRequestId: 0,
     latestPurchaseRequestId: 0,
@@ -281,13 +281,12 @@ export function confirmMutation<TDraft>(
     clientMutationId,
     MAX_SETTLED_INBOUND_MUTATIONS,
   );
-  let settledPurchaseExecutionIds: ReadonlySet<string> =
-    state.settledPurchaseExecutionIds;
+  let settledPurchaseExecutionIds = state.settledPurchaseExecutionIds;
   if (pendingMutation.purchaseExecutionRecordId !== undefined) {
-    settledPurchaseExecutionIds = addBoundedValue(
+    settledPurchaseExecutionIds = rememberSettledPurchase(
       state.settledPurchaseExecutionIds,
       pendingMutation.purchaseExecutionRecordId,
-      MAX_SETTLED_PURCHASE_EXECUTIONS,
+      canonicalMovement.recordId,
     );
   }
 
@@ -397,16 +396,17 @@ export function mergeMovementQueryResult<TDraft>(
     return state;
   }
 
-  const authoritativeMutationIds = new Set(
+  const authoritativeMovements = new Map(
     response.items.flatMap((movement) =>
-      movement.clientMutationId ? [movement.clientMutationId] : [],
+      movement.clientMutationId ? [[movement.clientMutationId, movement] as const] : [],
     ),
   );
   let pendingMutations = state.pendingMutations;
   let settledMutationIds = state.settledMutationIds;
   let settledPurchaseExecutionIds = state.settledPurchaseExecutionIds;
   for (const [clientMutationId, mutation] of state.pendingMutations) {
-    if (!authoritativeMutationIds.has(clientMutationId)) continue;
+    const movement = authoritativeMovements.get(clientMutationId);
+    if (!movement) continue;
     if (pendingMutations === state.pendingMutations) {
       pendingMutations = new Map(state.pendingMutations);
     }
@@ -419,10 +419,10 @@ export function mergeMovementQueryResult<TDraft>(
       MAX_SETTLED_INBOUND_MUTATIONS,
     );
     if (mutation.purchaseExecutionRecordId !== undefined) {
-      settledPurchaseExecutionIds = addBoundedValue(
+      settledPurchaseExecutionIds = rememberSettledPurchase(
         settledPurchaseExecutionIds,
         mutation.purchaseExecutionRecordId,
-        MAX_SETTLED_PURCHASE_EXECUTIONS,
+        movement.recordId,
       );
     }
   }
@@ -431,7 +431,7 @@ export function mergeMovementQueryResult<TDraft>(
   for (const [clientMutationId, overlay] of state.confirmedOverlays) {
     if (
       requestId <= overlay.movementQueryWatermark ||
-      (!authoritativeMutationIds.has(clientMutationId) &&
+      (!authoritativeMovements.has(clientMutationId) &&
         !response.items.some(
           (movement) => movement.recordId === overlay.movement.recordId,
         ))
@@ -457,21 +457,19 @@ export function mergeMovementQueryResult<TDraft>(
   };
 }
 
-function collectHiddenPurchaseExecutionIds<TDraft>(
-  state: InventoryInboundOptimisticState<TDraft>,
-): Set<string> {
-  const hiddenExecutionIds = new Set(state.settledPurchaseExecutionIds);
-  for (const mutation of state.pendingMutations.values()) {
-    if (mutation.purchaseExecutionRecordId !== undefined) {
-      hiddenExecutionIds.add(mutation.purchaseExecutionRecordId);
-    }
+function rememberSettledPurchase(
+  values: ReadonlyMap<string, string>,
+  executionRecordId: string,
+  inboundRecordId: string,
+): ReadonlyMap<string, string> {
+  const next = new Map(values);
+  next.delete(executionRecordId);
+  next.set(executionRecordId, inboundRecordId);
+  if (next.size > MAX_SETTLED_PURCHASE_EXECUTIONS) {
+    const oldest = next.keys().next().value;
+    if (oldest !== undefined) next.delete(oldest);
   }
-  for (const mutation of state.confirmedOverlays.values()) {
-    if (mutation.purchaseExecutionRecordId !== undefined) {
-      hiddenExecutionIds.add(mutation.purchaseExecutionRecordId);
-    }
-  }
-  return hiddenExecutionIds;
+  return next;
 }
 
 export function mergePurchaseQueryResult<TDraft>(
@@ -483,12 +481,27 @@ export function mergePurchaseQueryResult<TDraft>(
     return state;
   }
 
-  const hiddenExecutionIds = collectHiddenPurchaseExecutionIds(state);
+  const activeExecutionIds = new Set([...state.pendingMutations.values()].map((mutation) => mutation.purchaseExecutionRecordId));
+  const settledPurchaseExecutionIds = new Map(state.settledPurchaseExecutionIds);
+  const confirmedOverlays = new Map(state.confirmedOverlays);
+  const visiblePurchases = purchases.filter((purchase) => {
+    const id = purchase.executionRecordId;
+    if (activeExecutionIds.has(id)) return false;
+    const settledRecordId = settledPurchaseExecutionIds.get(id);
+    if (!settledRecordId) return true;
+    // Only an authoritative rollback of this exact movement can release it.
+    if (purchase.inboundRollbackRecordId !== settledRecordId) return false;
+    settledPurchaseExecutionIds.delete(id);
+    for (const [mutationId, overlay] of confirmedOverlays) {
+      if (overlay.purchaseExecutionRecordId === id && overlay.movement.recordId === settledRecordId) confirmedOverlays.delete(mutationId);
+    }
+    return true;
+  });
   return {
     ...state,
-    basePendingPurchases: purchases.filter(
-      (purchase) => !hiddenExecutionIds.has(purchase.executionRecordId),
-    ),
+    basePendingPurchases: visiblePurchases,
+    settledPurchaseExecutionIds,
+    confirmedOverlays,
     latestPurchaseRequestId: requestId,
   };
 }
