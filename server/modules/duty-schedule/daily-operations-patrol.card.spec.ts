@@ -28,6 +28,17 @@ describe('daily operations patrol card', () => {
     expect(text).not.toContain('workflowType');
   });
 
+  it('labels the facility row with the exact evaluated day (patrol date - 1)', () => {
+    const card = buildDailyOperationsPatrolCard(
+      report([
+        { ...normal('facility', '用电 / PUE / 水耗'), evaluatedDate: '2026-09-06' },
+      ]),
+      {},
+    );
+    const text = JSON.stringify(card);
+    expect(text).toContain('核对日 2026-09-06（巡视日前一日）');
+  });
+
   it('renders a red card and caps expanded issue details at eight', () => {
     const issues = Array.from({ length: 10 }, (_, index) => ({
       id: `issue-${index + 1}`,

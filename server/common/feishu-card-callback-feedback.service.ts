@@ -10,7 +10,7 @@ import { CALLBACK_FEEDBACK_KINDS, FeishuCardCallbackFeedbackStore, type Callback
 const API = 'https://open.feishu.cn/open-apis';
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const labels: Record<CallbackFeedbackKind, string> = { leave: '请休假', overtime: '加班', purchase: '采购', inventory_outbound: '出库',
+const labels: Record<CallbackFeedbackKind, string> = { profile_change: '个人资料变更', leave: '请休假', overtime: '加班', purchase: '采购', inventory_outbound: '出库',
   threshold_adjustment: '阈值审批', today_operations_followup: '异常跟进', today_operations_anomaly: '今日航图异常' };
 function enabled(): boolean {
   const profile = process.env.FEISHU_CARD_ACTION_CONSUMER_PROFILE?.trim().toLowerCase();

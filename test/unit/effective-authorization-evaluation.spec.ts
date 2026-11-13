@@ -2,6 +2,7 @@ import { decideBusinessPermission, personalPermissionPagePaths, validEffectiveAu
 import type { PersonalPermissionRule, BusinessPermissionTarget } from '../../shared/business-permissions';
 import type { AccessPrincipal } from '../../shared/access-control.interface';
 import type { AuthorizationGrantSnapshot, AuthorizationOverrides, EffectiveAuthorization } from '../../shared/authorization-profile';
+import { validRequestedPermissions } from '../../shared/personnel-permission-request.interface';
 
 const empty=():AuthorizationOverrides=>({rules:[],allowPages:[],denyPages:[]});
 const rule=(id:string,effect:'allow'|'deny',building:'A楼'|'B楼'|null=null):PersonalPermissionRule=>({id,effect,module:'purchase',actions:['read','update'],buildings:building?[building]:null,specialties:null});
@@ -83,9 +84,17 @@ describe('effective policy precedence and isolated handover sources',()=>{
     expect(decideBusinessPermission(principal(policy),{module:'leave_requests',action:'read'}).allowed).toBe(false);
     expect(personalPermissionPagePaths(principal(policy),[])).not.toContain('/monthly-schedule');
   });
-  it('static page grants remain usable without granting a business data scope',()=>{
+  it('preserves legacy grants for a retired page without exposing it in active permissions',()=>{
     const policy=profile();policy.baseline.pages=['/exhaust-valve-map','/nantong-base'];
-    expect(personalPermissionPagePaths(principal(policy),[])).toEqual(expect.arrayContaining(policy.baseline.pages));
+    expect(validEffectiveAuthorization(policy)).toBe(true);
+    expect(personalPermissionPagePaths(principal(policy),[])).toContain('/nantong-base');
+    expect(personalPermissionPagePaths(principal(policy),[])).not.toContain('/exhaust-valve-map');
+    const legacyRequest = [
+      { kind: 'page', path: '/exhaust-valve-map' },
+      { kind: 'action', module: 'exhaust_valves', action: 'read', buildings: null, specialties: null },
+    ];
+    expect(validRequestedPermissions(legacyRequest, true)).toBe(true);
+    expect(validRequestedPermissions(legacyRequest)).toBe(false);
   });
   it('rejects nested, excess or administrator handover grants without partial allowance',()=>{
     const policy=profile();const source=grant([rule('allow','allow')]);policy.baseline.grantSnapshots=Array.from({length:9},()=>source);

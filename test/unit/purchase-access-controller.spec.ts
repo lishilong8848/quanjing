@@ -73,7 +73,7 @@ const ACCESS_PRINCIPAL_FINGERPRINT = 'A'.repeat(43);
 const OTHER_ACCESS_PRINCIPAL_FINGERPRINT = 'B'.repeat(43);
 
 describe('PurchaseInventoryController purchase access gateways', () => {
-  let inventoryService: { getDashboard: jest.Mock };
+  let inventoryService: { getDisplayDashboard: jest.Mock };
   let deletionService: { deleteRecords: jest.Mock };
   let editService: { updateRecord: jest.Mock };
   let onlineApprovalService: {
@@ -100,7 +100,7 @@ describe('PurchaseInventoryController purchase access gateways', () => {
   let controller: any;
 
   beforeEach(() => {
-    inventoryService = { getDashboard: jest.fn() };
+    inventoryService = { getDisplayDashboard: jest.fn() };
     deletionService = { deleteRecords: jest.fn() };
     editService = { updateRecord: jest.fn() };
     onlineApprovalService = {
@@ -171,39 +171,39 @@ describe('PurchaseInventoryController purchase access gateways', () => {
     await expect(controller.getDashboard({})).rejects.toBeInstanceOf(
       ForbiddenException,
     );
-    expect(inventoryService.getDashboard).not.toHaveBeenCalled();
+    expect(inventoryService.getDisplayDashboard).not.toHaveBeenCalled();
   });
 
   it('ignores applicant refresh requests before scoping the cached dashboard', async () => {
     const full = { marker: 'full' };
     const scoped = { marker: 'scoped' };
-    inventoryService.getDashboard.mockResolvedValue(full);
+    inventoryService.getDisplayDashboard.mockResolvedValue(full);
     policy.scopeDashboard.mockReturnValue(scoped);
 
     await expect(
       controller.getDashboard(requestFor(applicantA), 'true'),
     ).resolves.toBe(scoped);
-    expect(inventoryService.getDashboard).toHaveBeenCalledWith(false);
+    expect(inventoryService.getDisplayDashboard).toHaveBeenCalledWith(false);
     expect(policy.scopeDashboard).toHaveBeenCalledWith(applicantA, full, false);
   });
 
   it('allows applicants to refresh active purchase records without granting a full refresh', async () => {
-    inventoryService.getDashboard.mockResolvedValue({});
+    inventoryService.getDisplayDashboard.mockResolvedValue({});
 
     await controller.getDashboard(requestFor(applicantA), 'active');
 
-    expect(inventoryService.getDashboard).toHaveBeenCalledWith('active');
+    expect(inventoryService.getDisplayDashboard).toHaveBeenCalledWith('active');
   });
 
   it('keeps explicit dashboard refresh available to full purchase roles', async () => {
-    inventoryService.getDashboard.mockResolvedValue({});
+    inventoryService.getDisplayDashboard.mockResolvedValue({});
 
     await controller.getDashboard(
       requestFor(principal('purchase_admin')),
       'true',
     );
 
-    expect(inventoryService.getDashboard).toHaveBeenCalledWith(true);
+    expect(inventoryService.getDisplayDashboard).toHaveBeenCalledWith(true);
   });
 
   it('limits applicant options to the session building without changing other options', () => {

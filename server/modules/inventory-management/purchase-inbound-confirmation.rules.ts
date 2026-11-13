@@ -14,6 +14,64 @@ export interface PurchaseInboundSourceRecord {
   fields?: Record<string, unknown>;
 }
 
+const EXECUTION_BUILDING_FIELDS = [
+  '申请楼栋',
+  '申请楼栋（多楼请选E楼，备注里填写详情）',
+  '申请楼栋（多楼请选H楼，备注里填写详情）',
+];
+
+export function readPurchaseExecutionBuilding(fields: PurchaseInboundSourceRecord['fields']): WarehouseBuilding | null {
+  return normalizePurchaseInboundBuilding(firstPopulatedText(fields, EXECUTION_BUILDING_FIELDS));
+}
+
+export function normalizePurchaseInboundBuilding(value: string): WarehouseBuilding | null {
+  const text = value.trim().toUpperCase();
+  const building = /^([ABCDEH])(?:楼|栋)?$/u.exec(text);
+  const normalized = building ? `${building[1]}楼` : text;
+  return isWarehouseBuilding(normalized) ? normalized : null;
+}
+
+export function readPurchaseExecutionSku(
+  fields: PurchaseInboundSourceRecord['fields'],
+  completed = false,
+): string {
+  // Confirmation writes 物品类别码; the pending list shows the warehouse's suggestion.
+  const preferred = completed ? ['物品类别码', '物品类别码（库房）'] : ['物品类别码（库房）', '物品类别码'];
+  return normalizeSku(firstPopulatedText(fields, [...preferred, '物品类别号', '物品类别号（单选）']));
+}
+
+export function readPurchaseExecutionQuantity(fields: PurchaseInboundSourceRecord['fields']): number {
+  return readBitableQuantity(fields, ['实际采购数量', '采购申请数量']);
+}
+
+export function readBitableQuantity(fields: PurchaseInboundSourceRecord['fields'], names: string[]): number {
+  for (const name of names) {
+    const raw = fields?.[name];
+    if (isEmptyQuantityField(raw)) continue;
+    const values = displayValues(raw);
+    if (values.length !== 1) return 0;
+    const value = values[0];
+    if (!/^(?:\d+|\d{1,3}(?:[,，]\d{3})+)(?:\.\d+)?$/u.test(value)) return 0;
+    const quantity = Number(value.replace(/[,，]/gu, ''));
+    return Number.isFinite(quantity) ? quantity : 0;
+  }
+  return 0;
+}
+
+function isEmptyQuantityField(value: unknown): boolean {
+  if (value == null || (typeof value === 'string' && !value.trim())) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  return isRecord(value) && Object.hasOwn(value, 'value') && isEmptyQuantityField(value.value);
+}
+
+function firstPopulatedText(fields: PurchaseInboundSourceRecord['fields'], names: string[]): string {
+  for (const name of names) {
+    const value = displayValues(fields?.[name]).join('、');
+    if (value) return value;
+  }
+  return '';
+}
+
 export function buildPendingPurchaseInbounds(input: {
   submissions: PurchaseInboundSourceRecord[];
   executions: PurchaseInboundSourceRecord[];
@@ -46,7 +104,7 @@ export function buildPendingPurchaseInbounds(input: {
       const fields = execution.fields || {};
       const executionRecordId = getRecordId(execution);
       const requestCode = fieldText(fields, ['采购编码']);
-      const quantity = fieldNumber(fields, ['实际采购数量', '采购申请数量']);
+      const quantity = readPurchaseExecutionQuantity(fields);
       const signed = fieldChecked(
         fieldValue(fields, [
           '到货签收确认（签收内容填写完成后点击）',
@@ -84,11 +142,7 @@ export function buildPendingPurchaseInbounds(input: {
       const submission =
         submissionMatches.length === 1 ? submissionMatches[0] : undefined;
       const submissionFields = submission?.fields || {};
-      const building = fieldBuilding(fields, [
-        '申请楼栋',
-        '申请楼栋（多楼请选E楼，备注里填写详情）',
-        '申请楼栋（多楼请选H楼，备注里填写详情）',
-      ]);
+      const building = readPurchaseExecutionBuilding(fields);
       if (!building) return null;
 
       const preparedRecords =
@@ -102,11 +156,7 @@ export function buildPendingPurchaseInbounds(input: {
         ? parsePreparedCategory(preparedRecords[0], executionRecordId)
         : undefined;
 
-      const sku = fieldText(fields, [
-        '物品类别码（库房）',
-        '物品类别码',
-        '物品类别号',
-      ]);
+      const sku = readPurchaseExecutionSku(fields);
       return {
         executionRecordId,
         specialty: fieldText(fields, ['专业']),
@@ -438,13 +488,6 @@ function fieldText(
     .trim();
 }
 
-function fieldNumber(fields: Record<string, unknown>, names: string[]): number {
-  const value = fieldValue(fields, names);
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const parsed = Number(displayValues(value).join(''));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function fieldBuilding(
   fields: Record<string, unknown> | undefined,
   names: string[],
@@ -493,7 +536,7 @@ function displayValues(value: unknown): string[] {
   }
   if (typeof value === 'object') {
     const object = value as Record<string, unknown>;
-    for (const key of ['text', 'name', 'value']) {
+    for (const key of ['text', 'name', 'value', 'select', 'label']) {
       const values = displayValues(object[key]);
       if (values.length) return values;
     }

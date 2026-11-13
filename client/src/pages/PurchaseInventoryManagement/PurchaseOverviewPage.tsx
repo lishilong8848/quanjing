@@ -2,6 +2,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,7 @@ import { useAccess } from '@/access/AccessProvider';
 import { hasBusinessPermissionSomewhere } from '@shared/business-permissions';
 import { purchaseUiPrincipal, purchaseUiPrincipalKey } from './purchase-ui-principal';
 import {
+  canAccessPage,
   canCreatePurchaseApplication,
   canDeleteCompletedPurchaseRecords,
   canDeletePurchaseRecord,
@@ -65,6 +67,7 @@ import { PurchaseDeleteDialog } from './PurchaseDeleteDialog';
 import { PurchaseOnlineApprovalDialog } from './PurchaseOnlineApprovalDialog';
 import { PurchaseWorkflowDialog } from './PurchaseWorkflowDialog';
 import { canCheckPurchaseWorkflowActions } from './purchase-workflow-action.logic';
+import { createPurchaseDashboardReadCache, type DashboardRefreshMode } from './purchase-dashboard-read-cache';
 import {
   buildPendingPurchaseApplicationItems,
   buildPurchaseAnomalies,
@@ -93,13 +96,13 @@ import {
 const AUTO_REFRESH_MS = 4 * 60 * 60 * 1000;
 const ACTIVE_AUTO_REFRESH_MS = 15 * 1000;
 const EMPTY_REQUESTS: PurchaseInventoryRequestItem[] = [];
-
-type DashboardRefreshMode = boolean | 'active';
+const purchaseDashboardReadScope = createPurchaseDashboardReadCache(getPurchaseInventoryDashboard);
 
 interface DashboardRequestInFlight {
   mode: DashboardRefreshMode;
   principalKey: string;
   promise: Promise<boolean>;
+  sequence: number;
   queuedForceRefresh?: Promise<boolean>;
 }
 
@@ -254,7 +257,16 @@ export default function PurchaseOverviewPage() {
     () => purchaseUiPrincipal(access),
     [access],
   );
-  const principalKey = purchaseUiPrincipalKey(principal);
+  const canReadDashboard = !access.isChangingIdentity && !access.requiresPasswordChange &&
+    !access.isConfirmingIdentity &&
+    (access.expiresAt === null || access.expiresAt > Date.now()) &&
+    canAccessPage(access.role, PURCHASE_INVENTORY_MANAGEMENT_PATH, access.pagePaths);
+  const principalKey = JSON.stringify([
+    purchaseUiPrincipalKey(principal),
+    access.pagePermissionsRevision,
+    canReadDashboard,
+  ]);
+  const readScopeKey = canReadDashboard && principal.principalFingerprint ? principalKey : null;
   const canCreateApplication = canCreatePurchaseApplication(principal);
   const canDeleteCompletedRecords =
     canDeleteCompletedPurchaseRecords(principal);
@@ -302,12 +314,14 @@ export default function PurchaseOverviewPage() {
     useState<PurchaseExecutionFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [dashboardState, setDashboard] =
-    useState<PurchaseInventoryResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+    useState<PurchaseInventoryResponse | null>(() => purchaseDashboardReadScope.recentSnapshot(readScopeKey));
+  const [loading, setLoading] = useState(!dashboardState);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dashboardNotice, setDashboardNotice] = useState<string | null>(null);
-  const dashboardRef = useRef<PurchaseInventoryResponse | null>(null);
+  const dashboardRef = useRef(dashboardState);
+  const readScopeRef = useRef<ReturnType<typeof purchaseDashboardReadScope.activate>>(undefined);
+  const dashboardAccessRef = useRef({ canReadDashboard, expiresAt: access.expiresAt });
   const optimisticItemSnapshotsRef = useRef<
     Map<string, PurchaseInventoryRequestItem>
   >(new Map());
@@ -322,12 +336,16 @@ export default function PurchaseOverviewPage() {
   const previousPrincipalKeyRef = useRef(principalKey);
   const activePrincipalKeyRef = useRef(principalKey);
   const canForceRefreshRef = useRef(canForceRefresh);
-  canForceRefreshRef.current = canForceRefresh;
-  activePrincipalKeyRef.current = principalKey;
+  useLayoutEffect(() => {
+    activePrincipalKeyRef.current = principalKey;
+    dashboardAccessRef.current = { canReadDashboard, expiresAt: access.expiresAt };
+    canForceRefreshRef.current = canForceRefresh;
+    readScopeRef.current = purchaseDashboardReadScope.activate(readScopeKey);
+  }, [principalKey, canReadDashboard, canForceRefresh, readScopeKey, access.expiresAt]);
   const principalMatchesRenderedData =
-    previousPrincipalKeyRef.current === principalKey;
+    canReadDashboard && previousPrincipalKeyRef.current === principalKey;
   const dashboard = principalMatchesRenderedData ? dashboardState : null;
-  const renderedLoading = principalMatchesRenderedData ? loading : true;
+  const renderedLoading = canReadDashboard && (principalMatchesRenderedData ? loading : true);
   const renderedLoadError = principalMatchesRenderedData ? loadError : null;
   const renderedDashboardNotice = principalMatchesRenderedData
     ? dashboardNotice
@@ -338,13 +356,18 @@ export default function PurchaseOverviewPage() {
   const loadDashboard = useCallback(function runDashboardRequest(
     refresh: DashboardRefreshMode = false,
   ): Promise<boolean> {
+    const { canReadDashboard, expiresAt } = dashboardAccessRef.current;
+    if (!canReadDashboard || (expiresAt !== null && expiresAt <= Date.now())) {
+      return Promise.resolve(false);
+    }
     if (refresh === true && !canForceRefreshRef.current) refresh = false;
     const requestPrincipalKey = activePrincipalKeyRef.current;
     const currentRequest = dashboardRequestInFlightRef.current;
     if (currentRequest && currentRequest.principalKey === requestPrincipalKey) {
       if (refresh === true && currentRequest.mode !== true) {
         currentRequest.queuedForceRefresh ??= currentRequest.promise.then(() =>
-          activePrincipalKeyRef.current === requestPrincipalKey
+          activePrincipalKeyRef.current === requestPrincipalKey &&
+          currentRequest.sequence === dashboardRequestSequenceRef.current
             ? runDashboardRequest(true)
             : false,
         );
@@ -360,7 +383,9 @@ export default function PurchaseOverviewPage() {
     let requestState: DashboardRequestInFlight;
     const promise = (async () => {
       try {
-        const response = await getPurchaseInventoryDashboard(refresh);
+        const response = await (
+          readScopeRef.current?.read(refresh) ?? getPurchaseInventoryDashboard(refresh)
+        );
         if (
           activePrincipalKeyRef.current !== requestPrincipalKey ||
           dashboardRequestSequenceRef.current !== requestSequence
@@ -428,22 +453,21 @@ export default function PurchaseOverviewPage() {
       mode: refresh,
       principalKey: requestPrincipalKey,
       promise,
+      sequence: requestSequence,
     };
     dashboardRequestInFlightRef.current = requestState;
     return promise;
   }, []);
 
   const loadInitialDashboard = useCallback(() => {
-    const requestPrincipalKey = activePrincipalKeyRef.current;
-    void loadDashboard(false).then((loaded) => {
-      if (
-        loaded &&
-        activePrincipalKeyRef.current === requestPrincipalKey &&
-        document.visibilityState !== 'hidden'
-      ) {
-        void loadDashboard('active');
-      }
-    });
+    if (!dashboardRef.current) {
+      void loadDashboard(false);
+    } else if (
+      document.visibilityState !== 'hidden' &&
+      readScopeRef.current?.shouldRefresh(ACTIVE_AUTO_REFRESH_MS)
+    ) {
+      void loadDashboard('active');
+    }
   }, [loadDashboard]);
 
   useEffect(() => {
@@ -469,7 +493,8 @@ export default function PurchaseOverviewPage() {
 
   useEffect(() => {
     const refreshActiveDashboard = () => {
-      if (document.visibilityState !== 'hidden') {
+      if (document.visibilityState !== 'hidden' &&
+          (readScopeRef.current?.shouldRefresh(ACTIVE_AUTO_REFRESH_MS) ?? true)) {
         void loadDashboard('active');
       }
     };
@@ -479,7 +504,9 @@ export default function PurchaseOverviewPage() {
       ACTIVE_AUTO_REFRESH_MS,
     );
     const fullTimer = window.setInterval(
-      () => void loadDashboard(false),
+      () => {
+        if (document.visibilityState !== 'hidden') void loadDashboard(false);
+      },
       AUTO_REFRESH_MS,
     );
     window.addEventListener('focus', refreshActiveDashboard);
@@ -733,6 +760,7 @@ export default function PurchaseOverviewPage() {
     mutationId: string,
     request: PurchaseApplicationBatchRequest,
   ) {
+    readScopeRef.current?.invalidate();
     const pendingItems = buildPendingPurchaseApplicationItems(
       request,
       mutationId,
@@ -778,7 +806,7 @@ export default function PurchaseOverviewPage() {
       ),
     );
     if (!result?.created.length) return true;
-    return loadDashboard('active');
+    return refreshDashboardAfterMutation('active');
   }
 
   function requestForceRefresh() {
@@ -786,14 +814,19 @@ export default function PurchaseOverviewPage() {
     void loadDashboard(true);
   }
 
-  async function refreshDashboardAfterMutation(): Promise<boolean> {
-    return loadDashboard(true);
+  function refreshDashboardAfterMutation(mode: DashboardRefreshMode = true): Promise<boolean> {
+    if (activePrincipalKeyRef.current !== principalKey) return Promise.resolve(false);
+    readScopeRef.current?.invalidate();
+    dashboardRequestSequenceRef.current += 1;
+    dashboardRequestInFlightRef.current = null;
+    return loadDashboard(mode === true && !canForceRefresh ? 'active' : mode);
   }
 
   function applyOptimisticApproval(
     item: PurchaseInventoryRequestItem,
     decision: 'approved' | 'rejected',
   ) {
+    readScopeRef.current?.invalidate();
     rememberOptimisticSnapshot(item.recordId, item);
     updateDashboardState((current) =>
       applyPurchaseApprovalOptimisticUpdate(current, item.recordId, decision),
@@ -801,6 +834,7 @@ export default function PurchaseOverviewPage() {
   }
 
   function applyOptimisticReceipt(recordId: string) {
+    readScopeRef.current?.invalidate();
     const currentItem = dashboardRef.current?.requests.find(
       (item) =>
         item.recordId === recordId || item.executionRecordId === recordId,
@@ -816,6 +850,7 @@ export default function PurchaseOverviewPage() {
     actualQuantity: number,
     actualAmount: number,
   ) {
+    readScopeRef.current?.invalidate();
     const currentItem = dashboardRef.current?.requests.find(
       (item) =>
         item.recordId === recordId || item.executionRecordId === recordId,
@@ -843,7 +878,7 @@ export default function PurchaseOverviewPage() {
       );
     }
     optimisticItemSnapshotsRef.current.delete(recordId);
-    return loadDashboard(refresh);
+    return refreshDashboardAfterMutation(refresh);
   }
 
   function rememberOptimisticSnapshot(
@@ -879,7 +914,7 @@ export default function PurchaseOverviewPage() {
       return next;
     });
     setDeleteItems([]);
-    requestForceRefresh();
+    void refreshDashboardAfterMutation();
   }
 
   return (

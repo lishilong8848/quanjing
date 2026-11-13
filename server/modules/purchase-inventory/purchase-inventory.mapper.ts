@@ -75,6 +75,35 @@ const STAGES: PurchaseInventoryStage[] = [
   'stocked',
 ];
 
+export function buildPurchaseInventoryStableView(
+  input: Pick<BuildPurchaseInventoryViewInput, 'catalog' | 'employees' | 'inventory' | 'inbound' | 'outbound'>,
+) {
+  const catalog = buildCatalogIndex(input.catalog);
+  const inventoryView = buildInventory(input.inventory, catalog.bySku);
+  const recentInbound = buildMovements(input.inbound, 'inbound', catalog.bySku);
+  const recentOutbound = buildMovements(input.outbound, 'outbound', catalog.bySku);
+  return {
+    catalog,
+    employeeBuildingByName: buildEmployeeBuildingIndex(input.employees ?? []),
+    summary: {
+      catalogItems: input.catalog.length,
+      inventorySkus: inventoryView.skuCount,
+      availableQuantity: inventoryView.availableQuantity,
+      inventoryValue: roundMoney(inventoryView.inventoryValue),
+      lowStockSkus: inventoryView.lowStockCount,
+      pendingInbound: recentInbound.filter((item) => item.status.includes('待入库')).length,
+    },
+    inventory: {
+      categoryBreakdown: inventoryView.categoryBreakdown,
+      alerts: inventoryView.alerts,
+    },
+    movements: {
+      recentInbound: recentInbound.slice(0, 50),
+      recentOutbound: recentOutbound.slice(0, 50),
+    },
+  };
+}
+
 export function derivePurchaseStage(input: StageInput): {
   stage: PurchaseInventoryStage;
   statusLabel: string;
@@ -109,23 +138,13 @@ export function derivePurchaseStage(input: StageInput): {
 
 export function buildPurchaseInventoryView(
   input: BuildPurchaseInventoryViewInput,
+  stable = buildPurchaseInventoryStableView(input),
 ): PurchaseInventoryResponse {
-  const catalog = buildCatalogIndex(input.catalog);
-  const employeeBuildingByName = buildEmployeeBuildingIndex(
-    input.employees ?? [],
-  );
   const requests = buildRequests(
     input.submissions,
     input.executions,
-    catalog,
-    employeeBuildingByName,
-  );
-  const inventoryView = buildInventory(input.inventory, catalog.bySku);
-  const recentInbound = buildMovements(input.inbound, 'inbound', catalog.bySku);
-  const recentOutbound = buildMovements(
-    input.outbound,
-    'outbound',
-    catalog.bySku,
+    stable.catalog,
+    stable.employeeBuildingByName,
   );
   const stageCounts = createStageCounts(requests);
 
@@ -143,25 +162,12 @@ export function buildPurchaseInventoryView(
       actualAmount: roundMoney(
         requests.reduce((sum, request) => sum + (request.actualAmount ?? 0), 0),
       ),
-      catalogItems: input.catalog.length,
-      inventorySkus: inventoryView.skuCount,
-      availableQuantity: inventoryView.availableQuantity,
-      inventoryValue: roundMoney(inventoryView.inventoryValue),
-      lowStockSkus: inventoryView.lowStockCount,
-      pendingInbound: recentInbound.filter((item) =>
-        item.status.includes('待入库'),
-      ).length,
+      ...stable.summary,
       stageCounts,
     },
     requests,
-    inventory: {
-      categoryBreakdown: inventoryView.categoryBreakdown,
-      alerts: inventoryView.alerts,
-    },
-    movements: {
-      recentInbound: recentInbound.slice(0, 50),
-      recentOutbound: recentOutbound.slice(0, 50),
-    },
+    inventory: stable.inventory,
+    movements: stable.movements,
     sectionStatus: input.sectionStatus,
   };
 }

@@ -63,6 +63,28 @@ describe('device history scope and freshness', () => {
     expect(response.devices).toEqual([]);
     expect(repairs.getState).not.toHaveBeenCalled();
   });
+
+  it('refreshes both sources from the summary and recomputes the device count', async () => {
+    const { ledger, repairs, service } = make();
+    const next = { ...asset, id: 'new-asset' };
+    const added = {
+      record_id: 'new-repair',
+      fields: { 台账关联状态: '已关联', 关联台账记录ID: next.id, 流程: '维修完成' },
+    };
+    expect((await service.getDevices('A楼')).devices).toHaveLength(1);
+    ledger.getDashboardState.mockResolvedValueOnce({ refreshing: true, dashboard: { stale: false } });
+    repairs.getState.mockResolvedValue({
+      snapshot: { version: 'r2', fetchedAt: Date.now(), records: [...records, added] },
+      refreshing: false, stale: false, error: '',
+    });
+    expect((await service.getDevices('A楼', true)).refreshing).toBe(true);
+    expect(ledger.getDashboardState).toHaveBeenLastCalledWith(true, undefined);
+    expect(repairs.getState).toHaveBeenLastCalledWith(true);
+    ledger.getHistoryAssets.mockResolvedValue({ assets: [asset, next], snapshotId: 'l2', stale: false });
+    expect((await service.getDevices('A楼')).devices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ asset: next, completed: 1, pending: 0 }),
+    ]));
+  });
   it('rejects a building move between authorization and reading the identity snapshot', async () => {
     const { ledger, repairs, service } = make();
     ledger.getHistoryAssets.mockResolvedValue({

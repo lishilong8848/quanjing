@@ -1,7 +1,8 @@
-import type { InventoryOutboundMovementCreateRequest } from '../../shared/inventory-management.interface';
+import type { InventoryOutboundMovementCreateRequest, PurchaseExistingInboundConfirmRequest } from '../../shared/inventory-management.interface';
 import {
   applyInventoryBatchAcceptance,
   createInventoryBatchJournal,
+  inventoryBatchMutationId,
   readInventoryBatchJournal,
   saveInventoryBatchJournal,
   updateInventoryBatchTask,
@@ -22,6 +23,26 @@ function requests(): InventoryOutboundMovementCreateRequest[] {
 }
 
 describe('inventory batch acceptance', () => {
+  it('keeps the preallocated item IDs that staged purchase photos are bound to', () => {
+    const batchId = 'a'.repeat(32);
+    const photoId = 'b'.repeat(64);
+    const input = [1, 2].map((index): PurchaseExistingInboundConfirmRequest => ({
+      executionRecordId: `purchase-${index}`,
+      clientMutationId: inventoryBatchMutationId('purchase', batchId, index),
+      mode: 'existing',
+      building: 'A楼',
+      catalogRecordId: 'catalog-1',
+      sku: 'SKU-1',
+      quantity: 1,
+      occurredAt: '2026-09-29T00:00:00.000Z',
+      photoIds: [photoId],
+    }));
+    const journal = createInventoryBatchJournal('purchase', 'principal', input, ['甲', '乙'], batchId);
+    expect(journal.requests).toEqual(input);
+    expect(() => createInventoryBatchJournal('purchase', 'principal', input, ['甲', '乙'], 'c'.repeat(32)))
+      .toThrow('照片与入库请求编号不一致');
+  });
+
   it('requires distinct mutation ids before any batch is sent', () => {
     const input = requests();
     input[1].clientMutationId = input[0].clientMutationId;

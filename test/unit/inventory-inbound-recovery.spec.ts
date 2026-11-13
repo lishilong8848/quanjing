@@ -14,6 +14,7 @@ import {
   saveInventoryInboundRecovery,
   subscribeInventoryInboundRecovery,
 } from '../../client/src/pages/InventoryManagement/inventory-inbound-recovery';
+import { inventoryInboundPhotoPath, isInventoryLedgerPhotoPath } from '../../client/src/pages/InventoryManagement/inventory-inbound-photos';
 
 interface InventoryInboundAcceptedRecoveryApi {
   acceptInventoryInboundRecovery: (input: {
@@ -154,6 +155,39 @@ function createPurchaseDraft(
 }
 
 describe('inventory inbound recovery storage', () => {
+  it('uses only protected ledger image routes with the backend versioned selector', () => {
+    const path = '/api/inventory-management/items/recLedger1/images/0-e0e0beef12345678';
+    expect(isInventoryLedgerPhotoPath(path)).toBe(true);
+    expect(isInventoryLedgerPhotoPath(path.replace('0-e0e0beef12345678', '0'))).toBe(false);
+    expect(isInventoryLedgerPhotoPath(`https://other.example${path}`)).toBe(false);
+  });
+
+  it('retains staged photos with the original request and rejects unrelated staged IDs', () => {
+    installWindow();
+    const clientMutationId = 'manual-mutation-1';
+    const id = 'a'.repeat(64);
+    const draft = {
+      ...createManualDraft(clientMutationId),
+      photos: [{ id, name: '绝缘手套.jpg', url: inventoryInboundPhotoPath('A楼', clientMutationId, id) }],
+    };
+    expect(saveInventoryInboundRecovery({ kind: 'manual', status: 'pending', clientMutationId, draft })).toBe(true);
+    const request = {
+      type: 'inbound' as const,
+      mode: 'new' as const,
+      building: draft.building,
+      clientMutationId,
+      quantity: 8,
+      occurredAt: '2026-07-30T10:30:00.000Z',
+      newItem: draft.newItem,
+      photoIds: ['b'.repeat(64)],
+    };
+    expect(acceptInventoryInboundRecovery({ kind: 'manual', clientMutationId, taskId: 'task-1', request })).toBe(false);
+    expect(acceptInventoryInboundRecovery({
+      kind: 'manual', clientMutationId, taskId: 'task-1', request: { ...request, photoIds: [id] },
+    })).toBe(true);
+    expect(readInventoryInboundRecovery()).toMatchObject({ draft, request: { photoIds: [id] } });
+  });
+
   it.each([17, null, {}])(
     'rejects malformed specialty %p instead of weakening the draft schema',
     (specialty) => {

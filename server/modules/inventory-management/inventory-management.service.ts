@@ -1,10 +1,13 @@
-import { isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
+import { businessPermissionScopeKey, isProfessionalBusinessPrincipal } from '../../../shared/business-permissions';
 import { accessBuildings } from '../../../shared/building-access';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
 import { HttpService } from '@nestjs/axios';
 import {
   Injectable,
   Logger,
+  NotFoundException,
+  Optional,
+  ServiceUnavailableException,
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
@@ -24,17 +27,29 @@ import {
 import {
   createBitableBackgroundRefresh,
   fetchBitableRecords,
+  getRecordId,
   getBitableRecordCacheGeneration,
   resolveBitableAppToken,
   type BitableRecordItem,
 } from '../../common/feishu/bitable-direct-read';
 import {
   buildInventoryManagementSnapshot,
+  projectInventoryItems,
+  projectInventoryMovementRows,
   queryInventoryItems,
   queryInventoryMovements,
+  scopedInventoryItem,
 } from './inventory-management.mapper';
+import { describeInventoryLedgerImages, findInventoryLedgerImage, INVENTORY_PHOTO_FIELD, InventoryInboundPhotoService } from './inventory-inbound-photo.service';
+import { InventoryWorkflowGateway } from './inventory-workflow.gateway';
+import { canPerformBusinessAction } from '../../../shared/business-permissions';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
+const SCOPED_DASHBOARD_TTL_MS = 30_000;
+const SCOPED_DASHBOARD_CACHE_LIMIT = 64;
+const PHOTO_METADATA_TTL_MS = 60_000;
+const PHOTO_METADATA_FIRST_READ_WAIT_MS = 800;
+const BITABLE_READ_CONFLICT = '数据在读取期间已变更，请重新读取';
 
 const TABLES: Record<InventorySourceKey, { name: string; env: string }> = {
   inventory: {
@@ -76,17 +91,26 @@ interface SectionReadResult {
   status: InventoryManagementSourceStatus;
 }
 
+interface DashboardCacheEntry {
+  expiresAt: number;
+  value?: InventoryManagementDashboard;
+  request?: Promise<InventoryManagementDashboard>;
+}
+
 @Injectable()
 export class InventoryManagementService
   implements OnModuleInit, OnModuleDestroy
 {
   private readonly logger = new Logger(InventoryManagementService.name);
-  private dashboardCache?: {
+  private readonly dashboards = new Map<string, DashboardCacheEntry>();
+  private inventoryPhotoMetadata?: {
+    key: string;
     expiresAt: number;
-    value: InventoryManagementDashboard;
+    photos: Map<string, NonNullable<InventoryItemsResponse['items'][number]['images']>>;
   };
-  private dashboardRequest?: Promise<InventoryManagementDashboard>;
-  private dashboardGeneration = 0;
+  private inventoryPhotoRead?: { key: string; pending: Promise<void> };
+  private inventoryPhotoRetryAfter?: { key: string; at: number };
+  private attachmentField?: { key: string; expiresAt: number; pending: Promise<string> };
   private readonly backgroundRefresh = createBitableBackgroundRefresh({
     name: InventoryManagementService.name,
     warm: async () => {
@@ -97,7 +121,11 @@ export class InventoryManagementService
     },
   });
 
-  constructor(private readonly httpService: HttpService) {}
+  constructor(
+    private readonly httpService: HttpService,
+    @Optional() private readonly photoService?: InventoryInboundPhotoService,
+    @Optional() private readonly inventoryGateway?: InventoryWorkflowGateway,
+  ) {}
 
   onModuleInit(): void {
     this.backgroundRefresh.start();
@@ -109,68 +137,61 @@ export class InventoryManagementService
 
   invalidateCache(): void {
     this.sourceReads.clear();
-    this.dashboardGeneration += 1;
-    this.dashboardCache = undefined;
-    this.dashboardRequest = undefined;
+    this.dashboards.clear();
+    this.inventoryPhotoMetadata = undefined;
+    this.inventoryPhotoRead = undefined;
+    this.inventoryPhotoRetryAfter = undefined;
   }
 
   async getDashboard(
     forceRefresh = false,
     principal?: AccessPrincipal,
   ): Promise<InventoryManagementDashboard> {
-    if (principal && (isProfessionalBusinessPrincipal(principal) || accessBuildings(principal) !== null)) return this.buildDashboard(forceRefresh, principal);
-    const now = Date.now();
-    if (
-      !forceRefresh &&
-      this.dashboardCache &&
-      this.dashboardCache.expiresAt > now
-    ) {
-      return this.dashboardCache.value;
-    }
-    if (this.dashboardRequest) {
-      const activeRequest = this.dashboardRequest;
-      if (!forceRefresh) {
-        return activeRequest;
-      }
+    const scoped = principal && (isProfessionalBusinessPrincipal(principal) || accessBuildings(principal) !== null)
+      ? principal
+      : undefined;
+    const key = scoped ? businessPermissionScopeKey(scoped) : '';
+    let entry = this.dashboards.get(key);
+    if (!forceRefresh && entry?.value && entry.expiresAt > Date.now()) return entry.value;
+    if (entry?.request) {
+      if (!forceRefresh) return entry.request;
       try {
-        await activeRequest;
+        await entry.request;
       } catch {
         // A forced refresh still needs a fresh attempt after an older read fails.
       }
-      return this.getDashboard(true);
+      return this.getDashboard(true, principal);
     }
-
-    const requestGeneration = this.dashboardGeneration;
-    const request = this.buildDashboard(forceRefresh);
-    this.dashboardRequest = request;
-    try {
-      const dashboard = await request;
-      if (requestGeneration !== this.dashboardGeneration) {
+    if (!entry) {
+      entry = { expiresAt: 0 };
+      if (scoped && this.dashboards.size >= SCOPED_DASHBOARD_CACHE_LIMIT) {
+        const removable = [...this.dashboards].find(([scope, state]) => scope && !state.request);
+        if (removable) this.dashboards.delete(removable[0]);
+      }
+      if (!scoped || this.dashboards.size < SCOPED_DASHBOARD_CACHE_LIMIT) this.dashboards.set(key, entry);
+    }
+    const state = entry;
+    const request = this.buildDashboard(forceRefresh, scoped).then((dashboard) => {
+      if (hasConfiguredSectionFailure(dashboard)) {
+        if (state.value && !scoped) {
+          this.logger.warn('库存数据刷新不完整，继续使用最近一次成功看板并等待下次刷新');
+          return state.value;
+        }
         return dashboard;
       }
-      if (this.dashboardCache && hasConfiguredSectionFailure(dashboard)) {
-        this.logger.warn(
-          '库存数据刷新不完整，继续使用最近一次成功看板并等待下次刷新',
-        );
-        return this.dashboardCache.value;
-      }
-      this.dashboardCache = {
-        expiresAt: Date.now() + CACHE_TTL_MS,
-        value: dashboard,
-      };
+      state.value = dashboard;
+      state.expiresAt = Date.now() + (scoped ? SCOPED_DASHBOARD_TTL_MS : CACHE_TTL_MS);
       return dashboard;
-    } catch (error) {
-      if (this.dashboardCache) {
-        this.logger.warn(
-          `库存数据刷新失败，继续使用最近一次成功看板：${safeErrorMessage(error)}`,
-        );
-        return this.dashboardCache.value;
-      }
-      throw error;
+    }).catch((error) => {
+      if (!state.value || scoped) throw error;
+      this.logger.warn(`库存数据刷新失败，继续使用最近一次成功看板：${safeErrorMessage(error)}`);
+      return state.value;
+    });
+    state.request = request;
+    try {
+      return await request;
     } finally {
-      if (this.dashboardRequest === request) {
-        this.dashboardRequest = undefined;
-      }
+      if (state.request === request) state.request = undefined;
     }
   }
 
@@ -225,7 +246,8 @@ export class InventoryManagementService
     const generation = getBitableRecordCacheGeneration(options.appToken, options.tableId);
     // Raw records only: each caller still applies its own current permission and query filters.
     // Keep forced/normal/strict reads distinct and never join a read predating an invalidation.
-    const key = JSON.stringify([options, generation]);
+    const key = JSON.stringify([options.appToken, options.tableId, options.forceRefresh === true,
+      options.strict === true, options.cacheTtlMs, generation]);
     let request = this.sourceReads.get(key);
     if (!request) {
       request = fetchBitableRecords(this.httpService, options);
@@ -237,7 +259,7 @@ export class InventoryManagementService
     }
     const records = await request;
     if (generation !== getBitableRecordCacheGeneration(options.appToken, options.tableId)) {
-      throw new Error('数据在读取期间已变更，请重新读取');
+      throw new Error(BITABLE_READ_CONFLICT);
     }
     return records;
   }
@@ -247,7 +269,7 @@ export class InventoryManagementService
     forceRefresh = false,
     principal?: AccessPrincipal,
   ): Promise<InventoryItemsResponse> {
-    const { appToken, sourceUrl } = await this.resolveSource();
+    const { appToken } = await this.resolveSource();
     const inventoryTable = TABLES.inventory;
     const catalogTable = TABLES.catalog;
     const inventoryTableId = readEnv(inventoryTable.env);
@@ -258,40 +280,122 @@ export class InventoryManagementService
     if (!catalogTableId) {
       throw new Error('物品类别主数据未配置');
     }
-    const [records, catalog] = await Promise.all([
-      this.readSharedRecords({
+    const photosRead = this.readInventoryPhotoMetadata(appToken, inventoryTableId, forceRefresh);
+    const [records, catalog] = await this.readDisplaySources([
+      {
         appToken,
         tableId: inventoryTableId,
         tableName: inventoryTable.name,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
-      }),
-      this.readSharedRecords({
+      },
+      {
         appToken,
         tableId: catalogTableId,
         tableName: catalogTable.name,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
-      }),
+      },
     ]);
-    const emptyStatus = createEmptySectionStatus();
-    emptyStatus.inventory = { configured: true, count: records.length };
-    const snapshot = buildInventoryManagementSnapshot({
-      principal,
-      generatedAt: new Date().toISOString(),
-      sourceUrl,
-      inventory: records,
-      catalog,
-      inbound: [],
-      outbound: [],
-      borrow: [],
-      prices: [],
-      stocktakeSummaries: [],
-      managers: [],
-      sectionStatus: emptyStatus,
-    });
+    const page = queryInventoryItems(projectInventoryItems(records, catalog, principal), query);
+    const photos = await photosRead;
+    if (!photos) return page;
+    return {
+      ...page,
+      items: page.items.map((item) => {
+        const images = photos.get(item.recordId);
+        return images ? { ...item, images } : item.images ? { ...item, images: undefined } : item;
+      }),
+    };
+  }
 
-    return queryInventoryItems(snapshot.items, query);
+  private async readInventoryPhotoMetadata(appToken: string, tableId: string, forceRefresh: boolean) {
+    if (!this.inventoryGateway) return undefined;
+    const generation = getBitableRecordCacheGeneration(appToken, tableId);
+    const key = JSON.stringify([appToken, tableId, generation]);
+    const cached = this.inventoryPhotoMetadata?.key === key ? this.inventoryPhotoMetadata : undefined;
+    const now = Date.now();
+    if (!forceRefresh && cached && cached.expiresAt > now) return cached.photos;
+    if (!forceRefresh && this.inventoryPhotoRetryAfter?.key === key && this.inventoryPhotoRetryAfter.at > now) {
+      return cached?.photos;
+    }
+    if (this.inventoryPhotoRead?.key !== key) {
+      const gateway = this.inventoryGateway;
+      const pending = gateway.searchRecords({
+        appToken,
+        tableId,
+        tableName: '库存台账物品图片',
+        fieldNames: [INVENTORY_PHOTO_FIELD],
+        filter: { conjunction: 'and', conditions: [{ field_name: INVENTORY_PHOTO_FIELD, operator: 'isNotEmpty', value: [] }] },
+      }).then((rows) => {
+        if (this.inventoryPhotoRead?.pending !== pending ||
+            getBitableRecordCacheGeneration(appToken, tableId) !== generation) return;
+        const photos = new Map(rows.flatMap((row) => {
+          const id = getRecordId(row);
+          const images = describeInventoryLedgerImages(id, row.fields?.[INVENTORY_PHOTO_FIELD]);
+          return images.length ? [[id, images] as const] : [];
+        }));
+        this.inventoryPhotoMetadata = { key, photos, expiresAt: Date.now() + PHOTO_METADATA_TTL_MS };
+      }).catch((error) => {
+        if (this.inventoryPhotoRead?.pending === pending) {
+          this.inventoryPhotoRetryAfter = { key, at: Date.now() + 15_000 };
+        }
+        this.logger.warn(`库存台账图片更新失败：${safeErrorMessage(error)}`);
+      }).finally(() => {
+        if (this.inventoryPhotoRead?.pending === pending) this.inventoryPhotoRead = undefined;
+      });
+      this.inventoryPhotoRead = { key, pending };
+    }
+    const { pending } = this.inventoryPhotoRead;
+    if (forceRefresh) await pending;
+    else if (!cached) {
+      // Give the first sparse query a short head start without making a slow
+      // Feishu response block the list.
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([pending, new Promise<void>((resolve) => {
+          timeout = setTimeout(resolve, PHOTO_METADATA_FIRST_READ_WAIT_MS);
+        })]);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    const latest = this.inventoryPhotoMetadata;
+    return latest?.key === key ? latest.photos : undefined;
+  }
+
+  async readItemImage(principal: AccessPrincipal, recordId: string, imageIndex: string, thumbnail = false) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(recordId) || !/^\d{1,6}-[a-f0-9]{16}$/.test(imageIndex)) {
+      throw new NotFoundException('物品图片不存在');
+    }
+    if (!this.photoService || !this.inventoryGateway) throw new ServiceUnavailableException('物品图片服务尚未就绪');
+    const { appToken } = await this.resolveSource();
+    const tableId = readEnv(TABLES.inventory.env);
+    const catalogTableId = readEnv(TABLES.catalog.env);
+    if (!tableId || !catalogTableId) throw new ServiceUnavailableException('库存台账未配置');
+    const [record, catalog] = await Promise.all([
+      this.inventoryGateway.tryGetRecord(appToken, tableId, recordId, TABLES.inventory.name),
+      this.readSharedRecords({ appToken, tableId: catalogTableId, tableName: TABLES.catalog.name, cacheTtlMs: CACHE_TTL_MS }),
+    ]);
+    const item = record && scopedInventoryItem(record, catalog, principal);
+    if (!record || !item || !canPerformBusinessAction(principal, {
+      module: 'inventory', action: 'read', building: item.building, specialty: item.specialty,
+    })) throw new NotFoundException('物品图片不存在');
+    const fileToken = findInventoryLedgerImage(record.fields?.[INVENTORY_PHOTO_FIELD], imageIndex);
+    const key = JSON.stringify([appToken, tableId]);
+    if (this.attachmentField?.key !== key || this.attachmentField.expiresAt < Date.now()) {
+      const pending = this.inventoryGateway.getAttachmentFieldId(appToken, tableId, INVENTORY_PHOTO_FIELD, TABLES.inventory.name);
+      const field = { key, expiresAt: Date.now() + 10 * 60_000, pending };
+      this.attachmentField = field;
+      void pending.catch(() => {
+        if (this.attachmentField === field) this.attachmentField = undefined;
+      });
+    }
+    const fieldId = await this.attachmentField.pending;
+    const context = { tableId, recordId, fieldId };
+    return thumbnail
+      ? this.photoService.downloadThumbnail(fileToken, context)
+      : this.photoService.download(fileToken, context);
   }
 
   async getMovements(
@@ -299,7 +403,7 @@ export class InventoryManagementService
     forceRefresh = false,
     principal?: AccessPrincipal,
   ): Promise<InventoryMovementsResponse> {
-    const { appToken, sourceUrl } = await this.resolveSource();
+    const { appToken } = await this.resolveSource();
     const selectedTable = TABLES[query.type];
     const inventoryTableId = readEnv(TABLES.inventory.env);
     const catalogTableId = readEnv(TABLES.catalog.env);
@@ -308,53 +412,43 @@ export class InventoryManagementService
     if (!catalogTableId) throw new Error('物品类别主数据未配置');
     if (!movementTableId) throw new Error(`${selectedTable.name}未配置`);
 
-    const [inventory, catalog, movementRecords] = await Promise.all([
-      this.readSharedRecords({
+    const [inventory, catalog, movementRecords] = await this.readDisplaySources([
+      {
         appToken,
         tableId: inventoryTableId,
         tableName: TABLES.inventory.name,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
-      }),
-      this.readSharedRecords({
+      },
+      {
         appToken,
         tableId: catalogTableId,
         tableName: TABLES.catalog.name,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
-      }),
-      this.readSharedRecords({
+      },
+      {
         appToken,
         tableId: movementTableId,
         tableName: selectedTable.name,
         cacheTtlMs: CACHE_TTL_MS,
         forceRefresh,
-      }),
+      },
     ]);
 
-    const emptyStatus = createEmptySectionStatus();
-    emptyStatus.inventory = { configured: true, count: inventory.length };
-    emptyStatus.catalog = { configured: true, count: catalog.length };
-    emptyStatus[query.type] = {
-      configured: true,
-      count: movementRecords.length,
-    };
-    const snapshot = buildInventoryManagementSnapshot({
-      principal,
-      generatedAt: new Date().toISOString(),
-      sourceUrl,
-      inventory,
-      catalog,
-      inbound: query.type === 'inbound' ? movementRecords : [],
-      outbound: query.type === 'outbound' ? movementRecords : [],
-      borrow: query.type === 'borrow' ? movementRecords : [],
-      prices: [],
-      stocktakeSummaries: [],
-      managers: [],
-      sectionStatus: emptyStatus,
-    });
+    const rows = projectInventoryMovementRows(movementRecords, query.type, inventory, catalog, principal);
+    return queryInventoryMovements({ [query.type]: rows }, query);
+  }
 
-    return queryInventoryMovements(snapshot.movements, query);
+  private async readDisplaySources(options: Parameters<typeof fetchBitableRecords>[1][]): Promise<BitableRecordItem[][]> {
+    const read = (sources: typeof options) => Promise.all(sources.map((source) => this.readSharedRecords(source)));
+    try {
+      return await read(options);
+    } catch (error) {
+      if (options.some((option) => option.forceRefresh) ||
+          !(error instanceof Error) || error.message !== BITABLE_READ_CONFLICT) throw error;
+      return read(options);
+    }
   }
 
   private async resolveSource(): Promise<{
@@ -413,18 +507,6 @@ export class InventoryManagementService
       };
     }
   }
-}
-
-function createEmptySectionStatus(): Record<
-  InventorySourceKey,
-  InventoryManagementSourceStatus
-> {
-  return Object.fromEntries(
-    (Object.keys(TABLES) as InventorySourceKey[]).map((key) => [
-      key,
-      { configured: false, count: 0 },
-    ]),
-  ) as Record<InventorySourceKey, InventoryManagementSourceStatus>;
 }
 
 function hasConfiguredSectionFailure(

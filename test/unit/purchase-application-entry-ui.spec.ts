@@ -399,6 +399,15 @@ describe('purchase application dashboard entry', () => {
     expect(source).not.toContain('canManageWorkflow');
   });
 
+  it('reads a cached dashboard only for a permitted, established session and activates it after render', () => {
+    expect(source).toContain('canAccessPage(access.role, PURCHASE_INVENTORY_MANAGEMENT_PATH, access.pagePaths)');
+    expect(source).toContain('!access.isChangingIdentity && !access.requiresPasswordChange');
+    expect(source).toContain('canReadDashboard && previousPrincipalKeyRef.current === principalKey');
+    expect(source).toContain('purchaseDashboardReadScope.recentSnapshot(readScopeKey)');
+    expect(source).toMatch(/useLayoutEffect\(\(\) => \{[\s\S]*purchaseDashboardReadScope\.activate\(readScopeKey\)/);
+    expect(source).toContain('if (!canReadDashboard || (expiresAt !== null && expiresAt <= Date.now()))');
+  });
+
   it('drops every stale application-dialog response by principal generation', () => {
     expect(dialog).toContain('PurchasePrincipalRequestGate');
     expect(dialog).toContain('principalGeneration');

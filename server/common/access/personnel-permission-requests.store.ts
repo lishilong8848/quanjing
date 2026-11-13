@@ -148,7 +148,7 @@ function keys(value: Record<string, unknown>, allowed: readonly string[]): boole
 function validRequest(value: unknown): value is StoredPermissionRequest {
   if (!record(value) || !keys(value, ['id','version','accountId','applicantIdentity','applicantName','permissions','reason','status','createdAt','updatedAt','reviewerAccountId','reviewerName','comment','verifiedConfigurationRevision']) ||
     !text(value.id, 128) || !text(value.accountId) || !text(value.applicantIdentity, 512) || !text(value.applicantName, 100) ||
-    !prose(value.reason) || !validRequestedPermissions(value.permissions) || !timestamp(value.createdAt) || !timestamp(value.updatedAt)) return false;
+    !prose(value.reason) || !validRequestedPermissions(value.permissions, true) || !timestamp(value.createdAt) || !timestamp(value.updatedAt)) return false;
   if (!Number.isSafeInteger(value.version) || Number(value.version) < 1) return false;
   if (value.status === 'pending' || value.status === 'cancelled') return (value.status !== 'cancelled' || Number(value.version) >= 2) && value.reviewerAccountId === undefined && value.reviewerName === undefined && value.comment === undefined && value.verifiedConfigurationRevision === undefined;
   if (!['approved','rejected'].includes(String(value.status)) || Number(value.version) < 2 || !text(value.reviewerAccountId) || !text(value.reviewerName, 100) ||

@@ -44,7 +44,14 @@ import {
   type InventoryMovementDeletionTaskLedgerEntry,
 } from './inventory-movement-deletion-task-ledger.store';
 import { InventoryMovementOperationCoordinator } from './inventory-movement-operation-coordinator';
-import { buildPendingPurchaseInbounds } from './purchase-inbound-confirmation.rules';
+import {
+  buildPendingPurchaseInbounds,
+  normalizePurchaseInboundBuilding,
+  readBitableQuantity,
+  readPurchaseExecutionBuilding,
+  readPurchaseExecutionQuantity,
+  readPurchaseExecutionSku,
+} from './purchase-inbound-confirmation.rules';
 import {
   InventoryWorkflowGateway,
   InventoryWorkflowRecordDefinitelyNotDeletedError,
@@ -560,7 +567,6 @@ export class InventoryMovementDeletionService
         );
         return;
       }
-      assertProfessionalBitableRecord(entry.principal, execution);
       assertRecoveredPurchaseMatches(
         entry.principal,
         recovery,
@@ -670,6 +676,7 @@ export class InventoryMovementDeletionService
       throw new BadRequestException('入库记录楼栋与关联采购执行楼栋不一致');
     }
     assertInventoryMovementDeletionScope(principal, identity.building);
+    assertProfessionalRecordScope(principal, recordProfessionalSpecialty(execution), identity.building);
     assertPurchaseMovementLink(movement, identity);
     const schemas = await this.gateway.getFieldSchemas(
       config.appToken,
@@ -936,7 +943,7 @@ function movementTableId(
 }
 
 function extractMovementBuilding(record: BitableRecordItem): string {
-  return extractDisplayText(record.fields?.['楼栋']).split('、')[0].trim();
+  return normalizePurchaseInboundBuilding(extractDisplayText(record.fields?.['楼栋'])) ?? '';
 }
 
 function purchaseExecutionId(record: BitableRecordItem): string {
@@ -987,21 +994,16 @@ function purchaseExecutionIdentity(record: BitableRecordItem): {
   sku: string;
   quantity: number;
 } {
-  const building = fieldText(record, [
-    '申请楼栋',
-    '申请楼栋（多楼请选E楼，备注里填写详情）',
-    '申请楼栋（多楼请选H楼，备注里填写详情）',
-  ]).split('、')[0];
+  const building = readPurchaseExecutionBuilding(record.fields);
   const requestCode = fieldText(record, ['采购编码']);
-  const sku = normalizeSku(
-    fieldText(record, ['物品类别码', '物品类别号', '物品类别号（单选）']),
-  );
-  const quantity = fieldNumber(record, ['实际采购数量', '采购申请数量']);
-  if (!building || !requestCode || !sku || quantity <= 0) {
-    throw new BadRequestException(
-      '关联采购执行记录的楼栋、采购编码、类别号或数量无效',
-    );
+  const sku = readPurchaseExecutionSku(record.fields, true);
+  const quantity = readPurchaseExecutionQuantity(record.fields);
+  if (!building) throw new BadRequestException('关联采购执行记录的申请楼栋为空或无效');
+  if (!requestCode || requestCode.includes('、')) throw new BadRequestException('关联采购执行记录的采购编码为空或无效');
+  if (!sku || sku.includes('、') || /^opt[A-Za-z0-9_-]+$/iu.test(sku)) {
+    throw new BadRequestException('关联采购执行记录的物品类别号为空或无效');
   }
+  if (quantity <= 0) throw new BadRequestException('关联采购执行记录的采购数量为空或无效');
   return { building, requestCode, sku, quantity };
 }
 
@@ -1012,16 +1014,9 @@ function assertPurchaseMovementLink(
   const movementSku = normalizeSku(fieldText(movement, ['物品类别号']));
   const quantity = movementQuantity('inbound', movement);
   const requestCode = fieldText(movement, ['采购编码']);
-  if (
-    !movementSku ||
-    movementSku !== purchase.sku ||
-    quantity !== purchase.quantity ||
-    (requestCode && requestCode !== purchase.requestCode)
-  ) {
-    throw new BadRequestException(
-      '入库记录与关联采购执行的类别号、数量或采购编码不一致',
-    );
-  }
+  if (!movementSku || movementSku !== purchase.sku) throw new BadRequestException('入库记录与关联采购执行的物品类别号不一致');
+  if (quantity !== purchase.quantity) throw new BadRequestException('入库记录与关联采购执行的数量不一致');
+  if (requestCode && requestCode !== purchase.requestCode) throw new BadRequestException('入库记录与关联采购执行的采购编码不一致');
 }
 
 function assertRecoveredMovementMatches(
@@ -1051,6 +1046,7 @@ function assertRecoveredPurchaseMatches(
 ): void {
   const actual = purchaseExecutionIdentity(execution);
   assertInventoryMovementDeletionScope(principal, actual.building);
+  assertProfessionalRecordScope(principal, recordProfessionalSpecialty(execution), actual.building);
   if (
     actual.building !== recovery.movement.building ||
     actual.building !== expected.building ||
@@ -1074,31 +1070,17 @@ function isPendingPurchaseExecution(record: BitableRecordItem): boolean {
 
 function fieldText(record: BitableRecordItem, names: string[]): string {
   for (const name of names) {
-    if (Object.prototype.hasOwnProperty.call(record.fields || {}, name)) {
-      return extractDisplayText(record.fields?.[name]).trim();
-    }
+    const value = extractDisplayText(record.fields?.[name]).trim();
+    if (value) return value;
   }
   return '';
-}
-
-function fieldNumber(record: BitableRecordItem, names: string[]): number {
-  for (const name of names) {
-    if (!Object.prototype.hasOwnProperty.call(record.fields || {}, name)) {
-      continue;
-    }
-    const raw = record.fields?.[name];
-    if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
-    const parsed = Number(extractDisplayText(raw).replace(/,/gu, '').trim());
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
 }
 
 function movementQuantity(
   movementType: InventoryMovementDeletionType,
   record: BitableRecordItem,
 ): number {
-  return fieldNumber(record, [
+  return readBitableQuantity(record.fields, [
     movementType === 'inbound' ? '入库数量' : '出库数量',
   ]);
 }

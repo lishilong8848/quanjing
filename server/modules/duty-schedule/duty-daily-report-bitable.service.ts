@@ -53,6 +53,18 @@ interface FeishuAttachmentValue {
 
 const DEFAULT_DAILY_REPORT_APP_TOKEN = 'MliKbC3fXa8PXrsndKscmxjdn1g';
 const DEFAULT_DAILY_REPORT_TABLE_ID = 'tblxfd0HA9kDZQ3w';
+// The bitable gained a single-select 楼栋 field; one daily-report record is kept
+// per building for each date+shift, so the same screenshot set is mirrored into
+// all seven rows and readers can take any one of them.
+const DEFAULT_DAILY_REPORT_BUILDINGS = [
+  'A楼',
+  'B楼',
+  'C楼',
+  'D楼',
+  'E楼',
+  'H楼',
+  '110站',
+];
 const CHINA_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 @Injectable()
 export class DutyDailyReportBitableService {
@@ -69,60 +81,220 @@ export class DutyDailyReportBitableService {
   }): Promise<DutyDailyReportScreenshotResult> {
     const date = this.normalizeDate(options.date) || this.formatDateKey(new Date());
     const token = await this.getTenantAccessToken();
-    const record = await this.requireDailyReportRecordWithToken(
-      token,
-      date,
-      options.shift,
-    );
-    const fileName = options.fileName || `nantong-duty-${date}-${record.shiftLabel}.png`;
-    const latestRecord = await this.getRecordById(token, record.recordId);
-    const previousAttachments = this.extractAttachmentValues(
-      latestRecord.fields?.[this.getScreenshotFieldName()],
-    );
-    const existingAttachment = previousAttachments.find(
-      (attachment) => attachment.name === fileName,
-    );
-    if (existingAttachment && !options.replaceExisting) {
+    const shiftLabel = this.getShiftLabel(options.shift);
+    // One record per building for this date+shift; create any missing building idempotently.
+    // resolveBuildingRecords returns each record's current screenshot attachments (read from the
+    // same listing), so no extra per-record fetch is needed.
+    const buildingRecords = await this.resolveBuildingRecords(token, date, shiftLabel);
+    const fileName = options.fileName || `nantong-duty-${date}-${shiftLabel}.png`;
+    const screenshotField = this.getScreenshotFieldName();
+
+    const states = buildingRecords.map((br) => ({
+      building: br.building,
+      recordId: br.recordId,
+      created: br.created,
+      attachments: br.attachments,
+      hasFile: br.attachments.some((a) => a.name === fileName),
+    }));
+
+    const anyCreated = states.some((s) => s.created);
+    const primary = states[0];
+    const needsWrite = states.filter((s) => options.replaceExisting || !s.hasFile);
+    if (!needsWrite.length) {
       this.logger.log(
-        `日报截图已存在，跳过重复上传：date=${date}, shift=${record.shiftLabel}, record=${record.recordId}, file=${fileName}`,
+        `日报截图已存在于全部 ${states.length} 条楼栋记录，跳过重复上传：date=${date}, shift=${shiftLabel}, file=${fileName}`,
       );
       return {
-        ...record,
-        fileToken: existingAttachment.file_token,
-        attachmentCount: previousAttachments.length,
+        date,
+        shift: options.shift,
+        shiftLabel,
+        recordId: primary.recordId,
+        created: anyCreated,
+        fileToken: primary.attachments.find((a) => a.name === fileName)?.file_token || '',
+        attachmentCount: primary.attachments.length,
         appended: false,
       };
     }
 
+    // Upload the image once and mirror the same file_token into every building record.
     const fileToken = await this.uploadBitableAttachment(token, {
       image: options.image,
       fileName,
     });
-    const nextAttachments = existingAttachment
-      ? previousAttachments.map((attachment) => (
-          attachment.file_token === existingAttachment.file_token
-            ? { file_token: fileToken }
-            : attachment
-        ))
-      : this.appendAttachment(previousAttachments, fileToken);
+    let attachmentCount = primary.attachments.length;
+    for (const s of needsWrite) {
+      const existing = s.attachments.find((a) => a.name === fileName);
+      const nextAttachments = existing
+        ? s.attachments.map((a) =>
+            a.file_token === existing.file_token ? { file_token: fileToken } : a,
+          )
+        : this.appendAttachment(s.attachments, fileToken);
+      await this.updateRecord(token, s.recordId, {
+        [screenshotField]: nextAttachments.map((a) => ({ file_token: a.file_token })),
+      });
+      attachmentCount = nextAttachments.length;
+    }
 
-    await this.updateRecord(token, record.recordId, {
-      [this.getScreenshotFieldName()]: nextAttachments.map((attachment) => ({
-        file_token: attachment.file_token,
-      })),
-    });
-
-    this.logger.log(existingAttachment
-      ? `日报截图已替换：date=${date}, shift=${record.shiftLabel}, record=${record.recordId}, file=${fileName}, attachments=${nextAttachments.length}`
-      : `日报截图已追加到多维表：date=${date}, shift=${record.shiftLabel}, record=${record.recordId}, attachments=${nextAttachments.length}`,
+    this.logger.log(
+      `日报截图已写入 ${needsWrite.length}/${states.length} 条楼栋记录：date=${date}, shift=${shiftLabel}, file=${fileName}, attachments=${attachmentCount}`,
     );
-
     return {
-      ...record,
+      date,
+      shift: options.shift,
+      shiftLabel,
+      recordId: primary.recordId,
+      created: anyCreated,
       fileToken,
-      attachmentCount: nextAttachments.length,
+      attachmentCount,
       appended: true,
     };
+  }
+
+  /**
+   * Ensure one record per building (default 7) exists for the date+shift, creating
+   * only the missing buildings (idempotent). Legacy records that predate the 楼栋
+   * field (empty building) are adopted into missing buildings rather than left as
+   * strays, so a date+shift never accumulates duplicate rows.
+   */
+  private async resolveBuildingRecords(
+    token: string,
+    date: string,
+    shiftLabel: string,
+  ): Promise<
+    Array<{
+      building: string;
+      recordId: string;
+      created: boolean;
+      attachments: FeishuAttachmentValue[];
+    }>
+  > {
+    const buildings = this.getBuildings();
+    const buildingField = this.getBuildingFieldName();
+    const screenshotField = this.getScreenshotFieldName();
+    const records = await this.listDailyReportRecords(token);
+    const matches = records.filter((record) => {
+      const fields = record.fields || {};
+      return (
+        this.extractDateKey(fields[this.getDateFieldName()]) === date &&
+        this.extractText(fields[this.getShiftFieldName()]) === shiftLabel
+      );
+    });
+    const byBuilding = new Map<string, FeishuBitableRecord>();
+    const legacy: FeishuBitableRecord[] = [];
+    for (const record of matches) {
+      if (!this.getRecordId(record)) continue;
+      const building = this.extractText((record.fields || {})[buildingField]);
+      if (building) {
+        if (!byBuilding.has(building)) byBuilding.set(building, record);
+      } else {
+        legacy.push(record);
+      }
+    }
+    const missing = buildings.filter((building) => !byBuilding.has(building));
+    // Only inspect field types when a record actually needs to be created.
+    let dateIsDateTime = false;
+    if (missing.length > legacy.length) {
+      const types = await this.getFieldTypes(token);
+      dateIsDateTime = types.get(this.getDateFieldName()) === 5;
+    }
+    const attachmentsOf = (record: FeishuBitableRecord | undefined) =>
+      record ? this.extractAttachmentValues(record.fields?.[screenshotField]) : [];
+    const result: Array<{
+      building: string;
+      recordId: string;
+      created: boolean;
+      attachments: FeishuAttachmentValue[];
+    }> = [];
+    for (const building of buildings) {
+      const existing = byBuilding.get(building);
+      if (existing) {
+        result.push({
+          building,
+          recordId: this.getRecordId(existing),
+          created: false,
+          attachments: attachmentsOf(existing),
+        });
+        continue;
+      }
+      const legacyRecord = legacy.shift();
+      if (legacyRecord) {
+        const legacyId = this.getRecordId(legacyRecord);
+        await this.updateRecord(token, legacyId, { [buildingField]: building });
+        result.push({
+          building,
+          recordId: legacyId,
+          created: false,
+          attachments: attachmentsOf(legacyRecord),
+        });
+        continue;
+      }
+      const recordId = await this.createDailyReportRecord(
+        token,
+        date,
+        shiftLabel,
+        building,
+        dateIsDateTime,
+      );
+      result.push({ building, recordId, created: true, attachments: [] });
+    }
+    return result;
+  }
+
+  private async getFieldTypes(token: string): Promise<Map<string, number>> {
+    const response = await this.httpService.axiosRef.get(
+      `https://open.feishu.cn/open-apis/bitable/v1/apps/${this.getAppToken()}/tables/${this.getTableId()}/fields`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { page_size: 100 },
+        timeout: 30_000,
+      },
+    );
+    if (response.data?.code !== 0) {
+      throw new Error(
+        `读取日报多维表字段失败：${response.data?.msg || response.data?.code}`,
+      );
+    }
+    const items = response.data?.data?.items || [];
+    return new Map(
+      items.map((field: { field_name?: string; type?: number }) => [
+        field.field_name,
+        field.type,
+      ]),
+    );
+  }
+
+  private async createDailyReportRecord(
+    token: string,
+    date: string,
+    shiftLabel: string,
+    building: string,
+    dateIsDateTime: boolean,
+  ): Promise<string> {
+    const fields: Record<string, unknown> = {
+      // Date fields (type 5) take epoch millis at China midnight, which round-trips
+      // through extractDateKey; text date fields take the YYYY-MM-DD string.
+      [this.getDateFieldName()]: dateIsDateTime
+        ? Date.parse(`${date}T00:00:00+08:00`)
+        : date,
+      [this.getShiftFieldName()]: shiftLabel,
+      [this.getBuildingFieldName()]: building,
+    };
+    const response = await this.httpService.axiosRef.post(
+      `https://open.feishu.cn/open-apis/bitable/v1/apps/${this.getAppToken()}/tables/${this.getTableId()}/records`,
+      { fields },
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 30_000,
+      },
+    );
+    const recordId =
+      response.data?.data?.record?.record_id || response.data?.data?.record?.id;
+    if (response.data?.code !== 0 || typeof recordId !== 'string' || !recordId) {
+      throw new Error(
+        `创建日报楼栋记录失败（${building}）：${response.data?.msg || response.data?.code || '响应缺少 record_id'}`,
+      );
+    }
+    return recordId;
   }
 
   private async requireDailyReportRecordWithToken(
@@ -160,8 +332,10 @@ export class DutyDailyReportBitableService {
       );
     });
 
-    if (matches.length > 1) {
-      this.logger.warn(`日报多维表存在重复条目：date=${date}, shift=${shiftLabel}, count=${matches.length}`);
+    // Multiple records per date+shift are expected now (one per 楼栋); readers take
+    // any one. Only flag genuine duplicates beyond the configured building count.
+    if (matches.length > this.getBuildings().length) {
+      this.logger.warn(`日报多维表存在超出楼栋数的重复条目：date=${date}, shift=${shiftLabel}, count=${matches.length}`);
     }
 
     return matches[0] || null;
@@ -402,6 +576,22 @@ export class DutyDailyReportBitableService {
 
   private getScreenshotFieldName(): string {
     return readEnv('FEISHU_DAILY_REPORT_SCREENSHOT_FIELD') || '日报截图';
+  }
+
+  private getBuildingFieldName(): string {
+    return readEnv('FEISHU_DAILY_REPORT_BUILDING_FIELD') || '楼栋';
+  }
+
+  private getBuildings(): string[] {
+    const raw = readEnv('FEISHU_DAILY_REPORT_BUILDINGS');
+    if (raw) {
+      const list = raw
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (list.length) return list;
+    }
+    return [...DEFAULT_DAILY_REPORT_BUILDINGS];
   }
 
 }

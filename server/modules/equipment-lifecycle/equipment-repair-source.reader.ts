@@ -1,11 +1,12 @@
 import type { HttpService } from '@nestjs/axios';
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import {
   getTenantAccessToken,
   type BitableRecordItem,
 } from '../../common/feishu/bitable-direct-read';
+import { replaceCacheFile } from '../../common/feishu/cache-file-replacement';
 
 export const EQUIPMENT_REPAIR_FIELDS = [
   '维修单号',
@@ -86,14 +87,19 @@ export async function persistRepairSnapshot(
 ): Promise<void> {
   const value = { fingerprint, fetchedAt, records };
   const file = cachePath();
-  await mkdir(join(file, '..'), { recursive: true });
-  const temporary = `${file}.${process.pid}.tmp`;
-  await writeFile(
-    temporary,
-    JSON.stringify({ ...value, checksum: checksum(value) }),
-    'utf8',
-  );
-  await rename(temporary, file);
+  await mkdir(dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(
+      temporary,
+      JSON.stringify({ ...value, checksum: checksum(value) }),
+      { encoding: 'utf8', flag: 'wx' },
+    );
+    // EquipmentRepairSourceService serializes reads and publication in one flight.
+    await replaceCacheFile(temporary, file, { strict: true, assertCurrentRead: () => {} });
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined);
+  }
 }
 
 export async function fetchEquipmentRepairRecords(

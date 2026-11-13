@@ -14,6 +14,7 @@ import type {
   StocktakeBulkRequest,
   StocktakeSheet,
   StocktakeBulkTask,
+  StocktakeBulkFailure,
 } from '@shared/inventory-stocktake.interface';
 import type { PurchaseApplicationApplicant } from '@shared/purchase-application.interface';
 import type { StocktakeLocalDraft } from './InventoryStocktakeRow';
@@ -27,6 +28,7 @@ import {
 } from './inventory-stocktake.api';
 import {
   buildStocktakeBulkLines,
+  confirmedStocktakeBulkDraftIds,
   stocktakeError,
 } from './inventory-stocktake.logic';
 
@@ -62,6 +64,8 @@ export function StocktakeBulkDialog({
     'ready' | 'submitting' | 'accepted' | 'success' | 'error'
   >('ready');
   const [error, setError] = useState('');
+  // Per-line failures from a partial bulk confirm; each stays draft and recoverable.
+  const [bulkFailures, setBulkFailures] = useState<StocktakeBulkFailure[]>([]);
   const lock = useRef(false);
   const accepted = useRef<StocktakeBulkTask | null>(validRestored ? restored?.accepted || null : null);
   const retry = useRef<{
@@ -86,6 +90,22 @@ export function StocktakeBulkDialog({
   }, [open]);
   const keyFor = (recordId: string) =>
     `review:${sheet.month}:${sheet.building}:${recordId}`;
+  const finish = (result: StocktakeSheet) => {
+    const failures = accepted.current?.status === 'success'
+      ? accepted.current.failures ?? []
+      : result.latestBulk?.failures ?? [];
+    const submittedIds = retry.current?.request.lines.map(line => line.recordId)
+      ?? pending.map(line => line.inventory.recordId);
+    for (const id of confirmedStocktakeBulkDraftIds(result.lines, submittedIds, failures)) {
+      drafts.delete(keyFor(id));
+    }
+    retry.current = null;
+    accepted.current = null;
+    journal?.deleteTask(journalKey);
+    onSaved(result);
+    setBulkFailures(failures);
+    setPhase('success');
+  };
   async function submit() {
     if (lock.current) return;
     if (!validRestored || journal?.recoveryBlocked(journalKey)) { setError(journal?.issue(journalKey) || '原批量请求记录无法核验，请联系管理员；原记录已保留'); setPhase('error'); return; }
@@ -103,14 +123,7 @@ export function StocktakeBulkDialog({
         setPhase('accepted');
         onSubmitting(true);
         const result = await waitStocktakeBulkTask(accepted.current, progress);
-        pending.forEach((line) =>
-          drafts.delete(keyFor(line.inventory.recordId)),
-        );
-        accepted.current = null;
-        retry.current = null;
-        journal?.deleteTask(journalKey);
-        onSaved(result);
-        setPhase('success');
+        finish(result);
         return;
       }
       if (!retry.current && pending.some(line => drafts.get(keyFor(line.inventory.recordId))?.retry)) throw new Error('请先核对原单条盘点请求，再办理批量确认');
@@ -140,12 +153,7 @@ export function StocktakeBulkDialog({
         retry.current.request,
         progress,
       );
-      pending.forEach((line) => drafts.delete(keyFor(line.inventory.recordId)));
-      retry.current = null;
-      accepted.current = null;
-      journal?.deleteTask(journalKey);
-      onSaved(result);
-      setPhase('success');
+      finish(result);
     } catch (caught) {
       const status = (caught as {response?: {status?: number}})?.response?.status;
       if (!hadPendingRequest && !accepted.current && status && [400, 403, 404, 409, 422].includes(status)) { retry.current = null; journal?.deleteTask(journalKey); }
@@ -171,15 +179,32 @@ export function StocktakeBulkDialog({
         className="border-blue-100 bg-white"
       >
         <DialogTitle>
-          {phase === 'success' ? '核盘已确认' : '一键确认库存核盘'}
+          {phase === 'success'
+            ? bulkFailures.length ? '核盘部分确认' : '核盘已确认'
+            : '一键确认库存核盘'}
         </DialogTitle>
         <DialogDescription className="sr-only">
           确认当前楼栋全部待确认库存条目
         </DialogDescription>
         {phase === 'success' ? (
-          <p role="status" className="text-sm text-green-700">
-            {sheet.building}库存核盘已确认，飞书同步中
-          </p>
+          bulkFailures.length ? (
+            <div className="space-y-2">
+              <p role="status" className="text-sm text-amber-700">
+                {sheet.building}库存核盘部分确认：{bulkFailures.length} 项未确认，仍为草稿可单独重试；已确认项飞书同步中
+              </p>
+              <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                {bulkFailures.map((failure) => (
+                  <li key={failure.recordId}>
+                    {failure.name}：{failure.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p role="status" className="text-sm text-green-700">
+              {sheet.building}库存核盘已确认，飞书同步中
+            </p>
+          )
         ) : (
           <>
             <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3 text-sm">

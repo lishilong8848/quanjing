@@ -36,6 +36,18 @@ describe('盘点清单交互规则', () => {
       '差异说明',
     );
   });
+  it('clears only submitted drafts confirmed by that bulk receipt', () => {
+    const lines = [
+      { status: 'confirmed', inventory: { recordId: 'accepted' } },
+      { status: 'confirmed', inventory: { recordId: 'accepted-later' } },
+      { status: 'draft', inventory: { recordId: 'still-draft' } },
+      { status: 'confirmed', inventory: { recordId: 'other-task' } },
+    ];
+    const failures = [{ recordId: 'accepted-later', name: '物品', reason: '库存已变化' }];
+    expect(logic().confirmedStocktakeBulkDraftIds(
+      lines, ['accepted', 'accepted-later', 'still-draft', 'missing'], failures,
+    )).toEqual(['accepted']);
+  });
   it('groups room names without merging the two distinct 315 locations', () => {
     const room = logic().stocktakeWarehouse;
     expect(room('A-315-4-1')).toBe('A-315');

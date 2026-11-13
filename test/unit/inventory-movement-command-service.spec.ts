@@ -26,6 +26,7 @@ import {
 } from '../../server/common/feishu/bitable-direct-read';
 import { getWarehouseInventoryLocationFieldName } from '../../server/common/config/warehouse-inventory-location.config';
 import { InventoryMovementCommandService } from '../../server/modules/inventory-management/inventory-movement-command.service';
+import { InventoryInboundPhotoService } from '../../server/modules/inventory-management/inventory-inbound-photo.service';
 
 const ENV_KEYS = [
   'FEISHU_WAREHOUSE_SOURCE_URL',
@@ -2378,6 +2379,88 @@ describe('InventoryMovementCommandService', () => {
     expect(recordsByTable[TABLES.catalog]).toHaveLength(1);
     expect(recordsByTable[TABLES.inventory]).toHaveLength(1);
     expect(recordsByTable[TABLES.inbound]).toHaveLength(1);
+  });
+
+  it('recovers the committed inbound and its ledger attachment after a lost update response', async () => {
+    installStatefulGateway();
+    const attachments = [{ file_token: 'image-token-first' }, { file_token: 'image-token-second' }];
+    const prepare = jest.fn().mockResolvedValue(attachments);
+    const photos = { prepare } as unknown as InventoryInboundPhotoService;
+    const operator = { role: 'admin', accountId: 'operator', purchaseBuilding: null } as const;
+    const request = {
+      type: 'inbound', mode: 'existing', clientMutationId: 'manual-with-photos',
+      building: 'A楼', sku: 'A101', catalogRecordId: 'catalog-a101',
+      quantity: 2, occurredAt: '2026-07-12T10:00:00.000Z',
+      photoIds: ['a'.repeat(64), 'b'.repeat(64)],
+    } as const;
+    const mutableRequest = { ...request, photoIds: [...request.photoIds] };
+    const createService = () => new InventoryMovementCommandService(
+      { axiosRef: {} } as never, gateway as never, undefined, undefined, photos,
+    );
+    gateway.updateRecord.mockImplementationOnce(async (_app, table, id, fields) => {
+      const record = recordsByTable[table].find((item) => item.record_id === id)!;
+      Object.assign(record.fields, fields);
+      throw new Error('response lost');
+    });
+    await expect(createService().createMovement(mutableRequest, operator)).rejects.toThrow('response lost');
+    expect(recordsByTable[TABLES.inbound]).toHaveLength(1);
+    expect(recordsByTable[TABLES.inbound][0].fields['物品图片']).toEqual(attachments);
+    await expect(createService().createMovement(mutableRequest, operator)).resolves.toMatchObject({
+      success: true, recordId: recordsByTable[TABLES.inbound][0].record_id,
+    });
+    expect(gateway.createRecord).toHaveBeenCalledTimes(1);
+    expect(gateway.updateRecord).toHaveBeenCalledTimes(1);
+    expect(recordsByTable[TABLES.inventory][0].fields['物品图片']).toEqual(attachments);
+    await expect(createService().createMovement({ ...mutableRequest, photoIds: ['c'.repeat(64)] }, operator))
+      .rejects.toThrow('入库请求指纹不一致');
+  });
+
+  it('adds photos for a newly created item without changing the prepared category fingerprint', async () => {
+    recordsByTable[TABLES.catalog] = [];
+    recordsByTable[TABLES.inventory] = [];
+    installStatefulGateway();
+    const attachments = [{ file_token: 'new-item-photo' }];
+    const service = new InventoryMovementCommandService(
+      { axiosRef: {} } as never, gateway as never, undefined, undefined,
+      { prepare: jest.fn().mockResolvedValue(attachments) } as never,
+    );
+    const operator = { role: 'admin', accountId: 'operator', purchaseBuilding: null } as const;
+    const sourceKey = '采购:exec-prepared-photos';
+    const input = trustedNewRequest('purchase-prepare-photos');
+    const prepared = await service.prepareTrustedNewInboundCatalog(sourceKey, input, operator);
+    gateway.updateRecord.mockImplementationOnce(async (_app, table, id, fields) => {
+      const record = recordsByTable[table].find((item) => item.record_id === id)!;
+      Object.assign(record.fields, fields);
+    });
+    const result = await service.createTrustedInbound(sourceKey, {
+      ...input, clientMutationId: 'purchase-confirm-photos', photoIds: ['a'.repeat(64)],
+    }, operator, {
+      requirePreparedCatalog: true, expectedCatalogRecordId: prepared.catalogRecordId, expectedSku: prepared.sku,
+    });
+    expect(result.catalogRecordId).toBe(prepared.catalogRecordId);
+    expect(recordsByTable[TABLES.catalog]).toHaveLength(1);
+    expect(recordsByTable[TABLES.catalog][0].fields['物品图片']).toBeUndefined();
+    expect(recordsByTable[TABLES.inventory][0].fields['物品图片']).toEqual(attachments);
+    expect(recordsByTable[TABLES.inbound][0].fields['物品图片']).toEqual(attachments);
+  });
+
+  it('leaves existing ledger images untouched and records this inbound’s own attachments', async () => {
+    installStatefulGateway();
+    const prior = [{ file_token: 'prior-ledger-photo' }];
+    const attachments = [{ file_token: 'current-inbound-photo' }];
+    recordsByTable[TABLES.inventory][0].fields['物品图片'] = prior;
+    const service = new InventoryMovementCommandService(
+      { axiosRef: {} } as never, gateway as never, undefined, undefined,
+      { prepare: jest.fn().mockResolvedValue(attachments) } as never,
+    );
+    await service.createMovement({
+      type: 'inbound', mode: 'existing', clientMutationId: 'manual-preserve-photos',
+      building: 'A楼', sku: 'A101', catalogRecordId: 'catalog-a101',
+      quantity: 2, occurredAt: '2026-07-12T10:00:00.000Z', photoIds: ['a'.repeat(64)],
+    }, { role: 'admin', accountId: 'operator', purchaseBuilding: null });
+    expect(gateway.updateRecord).not.toHaveBeenCalled();
+    expect(recordsByTable[TABLES.inventory][0].fields['物品图片']).toEqual(prior);
+    expect(recordsByTable[TABLES.inbound][0].fields['物品图片']).toEqual(attachments);
   });
 
   it.each([

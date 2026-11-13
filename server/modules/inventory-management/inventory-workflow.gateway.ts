@@ -21,6 +21,7 @@ interface ListRecordsOptions extends RecordSourceOptions {
 
 interface SearchRecordsOptions extends RecordSourceOptions {
   filter?: BitableRecordSearchFilter;
+  fieldNames?: readonly string[];
 }
 
 type ReadRecordsRequest =
@@ -29,6 +30,7 @@ type ReadRecordsRequest =
 
 export interface InventoryWorkflowFieldSchema {
   fieldName: string;
+  fieldId?: string;
   type: number | null;
   uiType: string;
   /** Field-type capability only; actual write permission is still enforced by Feishu. */
@@ -37,6 +39,7 @@ export interface InventoryWorkflowFieldSchema {
 
 interface InventoryWorkflowRawField {
   field_name?: unknown;
+  field_id?: unknown;
   type?: unknown;
   ui_type?: unknown;
 }
@@ -227,9 +230,10 @@ export class InventoryWorkflowGateway {
           request.mode === 'search'
             ? await this.httpService.axiosRef.post(
                 `${url}/search`,
-                request.options.filter
-                  ? { filter: request.options.filter }
-                  : {},
+                {
+                  ...(request.options.filter ? { filter: request.options.filter } : {}),
+                  ...(request.options.fieldNames?.length ? { field_names: request.options.fieldNames } : {}),
+                },
                 {
                   ...config,
                   params: { page_size: 500, page_token: pageToken },
@@ -754,14 +758,30 @@ export class InventoryWorkflowGateway {
       if (!fieldName || schemas.has(fieldName)) return;
       const parsedType = Number(field.type);
       const type = Number.isInteger(parsedType) ? parsedType : null;
+      const fieldId = clean(field.field_id);
       schemas.set(fieldName, {
         fieldName,
+        ...(fieldId ? { fieldId } : {}),
         type,
         uiType: clean(field.ui_type),
         writable: type !== null && WRITABLE_RECORD_FIELD_TYPES.has(type),
       });
     });
     return [...schemas.values()];
+  }
+
+  async getAttachmentFieldId(
+    appToken: string,
+    tableId: string,
+    fieldName: string,
+    tableName: string,
+  ): Promise<string> {
+    const fields = await this.getFieldSchemas(appToken, tableId, tableName);
+    const field = fields.find((candidate) => candidate.fieldName === fieldName);
+    if (field?.type !== 17 || !field.fieldId) {
+      throw new Error(`${tableName}缺少有效的「${fieldName}」附件字段`);
+    }
+    return field.fieldId;
   }
 
   async sendInteractiveCard(

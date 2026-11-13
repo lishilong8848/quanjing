@@ -62,7 +62,24 @@ export interface InventoryManagementSourceStatus {
   message?: string;
 }
 
+export const INVENTORY_INBOUND_PHOTO_MAX_COUNT = 5;
+export const INVENTORY_INBOUND_PHOTO_MAX_BYTES = 8 * 1024 * 1024;
+
+export interface InventoryItemImage {
+  url: string;
+  name: string;
+}
+
+export interface InventoryInboundStagedPhoto extends InventoryItemImage {
+  id: string;
+}
+
+export interface InventoryInboundPhotoUploadResponse {
+  photos: InventoryInboundStagedPhoto[];
+}
+
 export interface InventoryManagementItem {
+  images?: InventoryItemImage[];
   specialty?: string;
   recordId: string;
   sku: string;
@@ -204,6 +221,7 @@ interface InventoryMovementCreateRequestBase {
 
 export interface InventoryNewInboundMovementCreateRequest extends InventoryMovementCreateRequestBase {
   type: 'inbound';
+  photoIds?: string[];
   clientMutationId: string;
   mode: 'new';
   catalogRecordId?: never;
@@ -213,6 +231,7 @@ export interface InventoryNewInboundMovementCreateRequest extends InventoryMovem
 
 export interface InventoryExistingInboundMovementCreateRequest extends InventoryMovementCreateRequestBase {
   type: 'inbound';
+  photoIds?: string[];
   clientMutationId: string;
   mode: 'existing';
   catalogRecordId: string;
@@ -621,6 +640,7 @@ export interface PurchaseInboundLegacyNewItemInput {
 
 interface PurchaseInboundConfirmRequestBase {
   responsibilityGeneration?: number;
+  photoIds?: string[];
   executionRecordId: string;
   quantity: number;
   occurredAt: string;

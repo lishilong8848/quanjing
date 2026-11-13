@@ -3,6 +3,7 @@ import type {
   StocktakeOverview,
   StocktakeDraft,
   StocktakeBulkRequest,
+  StocktakeBulkFailure,
   StocktakeSheet,
 } from '@shared/inventory-stocktake.interface';
 import type {
@@ -10,6 +11,18 @@ import type {
   WarehouseBuilding,
 } from '@shared/inventory-management.interface';
 import { stocktakeWarehouse as sharedStocktakeWarehouse } from '@shared/inventory-stocktake-warehouse';
+export function confirmedStocktakeBulkDraftIds(
+  lines: StocktakeLine[],
+  submittedIds: string[],
+  failures: StocktakeBulkFailure[],
+) {
+  const failedIds = new Set(failures.map(failure => failure.recordId));
+  const confirmedIds = new Set(lines
+    .filter(line => line.status === 'confirmed')
+    .map(line => line.inventory.recordId));
+  return submittedIds.filter(id => confirmedIds.has(id) && !failedIds.has(id));
+}
+
 export const stocktakeCurrentMonth = () =>
   new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7);
 export function stocktakeGenerationErrors(
@@ -101,6 +114,9 @@ export interface StocktakeWarehouseGroup {
   total: number;
   confirmed: number;
 }
+// Reuse one collator across regroups; constructing a new Intl.Collator on every
+// groupStocktakeLines call (i.e. on every row save/filter) is wasteful.
+const STOCKTAKE_COLLATOR = new Intl.Collator('zh-CN', { numeric: true });
 export function groupStocktakeLines(
   lines: StocktakeLine[],
 ): StocktakeWarehouseGroup[] {
@@ -111,7 +127,7 @@ export function groupStocktakeLines(
     items.push(line);
     groups.set(name, items);
   }
-  const compare = new Intl.Collator('zh-CN', { numeric: true }).compare;
+  const compare = STOCKTAKE_COLLATOR.compare;
   return [...groups]
     .sort(([a], [b]) => compare(a, b))
     .map(([name, items]) => ({

@@ -64,6 +64,11 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
   const [phase, setPhase] = useState<
     'ready' | 'submitting' | 'success' | 'error'
   >(cached?.retry ? 'error' : 'ready');
+  // Tracks which action is in flight so the UI can distinguish 暂存中 from 确认中
+  // instead of collapsing both into a single "保存中".
+  const [submittingMode, setSubmittingMode] = useState<
+    'draft' | 'confirm' | 'refresh-line' | null
+  >(null);
   const [error, setError] = useState(cached?.retry ? '上次保存结果待核对，请使用原请求重试。' : '');
   const dirty = isStocktakeDraftDirty(line, { quantity, person, note });
   const inFlight = useRef(false);
@@ -161,6 +166,7 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
     catch (caught) { setPhase('error'); setError(stocktakeError(caught)); return; }
     inFlight.current = true;
     setPhase('submitting');
+    setSubmittingMode(mode);
     setError('');
     onBusy(line.inventory.recordId, true);
     try {
@@ -181,6 +187,7 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
       setError(stocktakeError(caught));
     } finally {
       inFlight.current = false;
+      setSubmittingMode(null);
       onBusy(line.inventory.recordId, false);
     }
   }
@@ -279,12 +286,30 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
       </div>
       <div className="stocktake-row-actions">
         {line.status === 'confirmed' ? (
-          <Badge
-            variant="outline"
-            className="border-green-200 bg-green-50 text-green-700"
-          >
-            已确认
-          </Badge>
+          line.sync?.status === 'error' ? (
+            <Badge
+              variant="outline"
+              role="alert"
+              className="border-amber-300 bg-amber-50 text-amber-800"
+            >
+              已确认 · 结果待核对
+            </Badge>
+          ) : line.sync && line.sync.status !== 'success' ? (
+            <Badge
+              variant="outline"
+              role="status"
+              className="border-blue-200 bg-blue-50 text-blue-700"
+            >
+              已确认 · 后台同步中
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              className="border-green-200 bg-green-50 text-green-700"
+            >
+              已确认
+            </Badge>
+          )
         ) : (
           <>
             <Button
@@ -293,14 +318,22 @@ export const InventoryStocktakeRow = memo(function InventoryStocktakeRow({
               disabled={actionLocked || !canUpdate || (unresolved && retryMode !== 'draft')}
               onClick={() => void submit('draft')}
             >
-              {unresolved && retryMode === 'draft' ? '核对原暂存' : '暂存'}
+              {phase === 'submitting' && submittingMode === 'draft'
+                ? '暂存中'
+                : unresolved && retryMode === 'draft'
+                  ? '核对原暂存'
+                  : '暂存'}
             </Button>
             <Button
               size="sm"
               disabled={actionLocked || !canConfirm || (unresolved && retryMode !== 'confirm')}
               onClick={() => void submit('confirm')}
             >
-              {phase === 'submitting' ? '保存中' : unresolved && retryMode === 'confirm' ? '核对原确认' : '确认'}
+              {phase === 'submitting' && submittingMode === 'confirm'
+                ? '确认中'
+                : unresolved && retryMode === 'confirm'
+                  ? '核对原确认'
+                  : '确认'}
             </Button>
           </>
         )}

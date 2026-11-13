@@ -18,11 +18,15 @@ import {
   createBitableBackgroundRefresh,
   fetchBitableRecords,
   extractDisplayText,
+  getBitableRecordCacheGeneration,
   getRecordId,
   resolveBitableAppToken,
   type BitableRecordItem,
 } from '../../common/feishu/bitable-direct-read';
-import { buildPurchaseInventoryView } from './purchase-inventory.mapper';
+import {
+  buildPurchaseInventoryStableView,
+  buildPurchaseInventoryView,
+} from './purchase-inventory.mapper';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const RETRY_CACHE_TTL_MS = 45 * 1000;
@@ -75,12 +79,14 @@ const TABLES: Record<
 interface SectionReadResult {
   records: BitableRecordItem[];
   status: PurchaseInventorySectionStatus;
+  executionRead?: { appToken: string; tableId: string; generation: number };
 }
 
 interface PurchaseInventorySourceSnapshot {
   appToken: string;
   sourceSections: Record<PurchaseInventorySourceSectionKey, SectionReadResult>;
   employees: BitableRecordItem[];
+  stableView: ReturnType<typeof buildPurchaseInventoryStableView>;
   employeeError?: string;
   globalRefreshError?: string;
 }
@@ -134,6 +140,28 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
     this.dashboardRequestForceRefresh = false;
     this.activeDashboardRequest = undefined;
     this.sourceSnapshot = undefined;
+  }
+
+  getDisplayDashboard(refresh: boolean | 'active'): Promise<PurchaseInventoryResponse> {
+    const cached = this.dashboardCache;
+    if (refresh === true || !cached || cached.expiresAt > Date.now()) {
+      return this.getDashboard(refresh);
+    }
+    const source = this.sourceSnapshot;
+    const tableId = readEnv(TABLES.executions.env);
+    const executionRead = source?.sourceSections.executions.executionRead;
+    if (!source || (tableId && (
+      executionRead?.tableId !== tableId || executionRead.appToken !== source.appToken ||
+      executionRead.generation !== getBitableRecordCacheGeneration(source.appToken, tableId)
+    ))) {
+      return this.getDashboard(refresh);
+    }
+    // Only the read endpoint can display an expired result. Permission checks
+    // for edits and deletions still wait for the explicit strict refresh.
+    void this.getDashboard(false).catch(() => undefined);
+    return Promise.resolve(cached.value.refreshState === 'fresh'
+      ? markDashboardStale(cached.value, ACTIVE_SYNC_NOTICE)
+      : cached.value);
   }
 
   async getDashboard(
@@ -346,6 +374,9 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
             ] as const;
           }
 
+          const executionRead = key === 'executions'
+            ? { appToken, tableId, generation: getBitableRecordCacheGeneration(appToken, tableId) }
+            : undefined;
           try {
             const records = await this.readDashboardRecords({
               appToken,
@@ -361,6 +392,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
               {
                 records,
                 status: { configured: true, count: records.length },
+                executionRead,
               },
             ] as const;
           } catch (error) {
@@ -371,6 +403,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
               key,
               {
                 records: fallbackSnapshot?.sourceSections[key]?.records ?? [],
+                executionRead: fallbackSnapshot?.sourceSections[key]?.executionRead,
                 status: {
                   configured: true,
                   count:
@@ -393,6 +426,13 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
       appToken,
       sourceSections,
       employees: employeeRead.records,
+      stableView: buildPurchaseInventoryStableView({
+        catalog: sourceSections.catalog.records,
+        employees: employeeRead.records,
+        inventory: sourceSections.inventory.records,
+        inbound: sourceSections.inbound.records,
+        outbound: sourceSections.outbound.records,
+      }),
       ...(employeeRead.message ? { employeeError: employeeRead.message } : {}),
     };
 
@@ -436,6 +476,8 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
       sourceSections: {
         ...sourceSnapshot.sourceSections,
         executions: {
+          // A filtered read retains completed rows from the prior full read.
+          executionRead: sourceSnapshot.sourceSections.executions.executionRead,
           records: executionRecords,
           status: { configured: true, count: executionRecords.length },
         },
@@ -451,7 +493,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
   private buildDashboardFromSnapshot(
     sourceSnapshot: PurchaseInventorySourceSnapshot,
   ): PurchaseInventoryResponse {
-    const { sourceSections, employees } = sourceSnapshot;
+    const { sourceSections, employees, stableView } = sourceSnapshot;
     const sections: Record<PurchaseInventorySectionKey, SectionReadResult> = {
       submissions: sourceSections.executions,
       ...sourceSections,
@@ -474,7 +516,7 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
       inbound: sections.inbound.records,
       outbound: sections.outbound.records,
       sectionStatus,
-    });
+    }, stableView);
     const refreshErrors = [
       ...new Set(
         [

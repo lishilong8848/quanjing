@@ -43,9 +43,10 @@ describe('purchase record edit UI', () => {
     expect(dialog).toContain("apiError(saveError, '提交失败，请稍后重试')");
     expect(dialog).toContain('请至少修改一项采购数据后再提交');
     expect(overview).toContain(
-      'async function refreshDashboardAfterMutation(): Promise<boolean>',
+      'function refreshDashboardAfterMutation(mode: DashboardRefreshMode = true): Promise<boolean>',
     );
-    expect(overview).toContain('return loadDashboard(true);');
+    expect(overview).toContain('readScopeRef.current?.invalidate();');
+    expect(overview).toContain("return loadDashboard(mode === true && !canForceRefresh ? 'active' : mode);");
     expect(overview).toContain('onSaved={refreshDashboardAfterMutation}');
   });
 

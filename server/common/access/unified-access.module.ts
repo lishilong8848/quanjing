@@ -78,7 +78,7 @@ import { PersonnelArchiveCorrectionsService } from './personnel-archive-correcti
       useExisting: UnifiedAccessGuard,
     },
   ],
-  exports: [UnifiedAccessService, FeishuAccessService, AccessConfigurationService, AccessConfigurationDirectory],
+  exports: [PersonnelProfileChangesService, PersonnelProfileChangesStore, PersonnelProfileNotificationsService, UnifiedAccessService, FeishuAccessService, AccessConfigurationService, AccessConfigurationDirectory],
 })
 export class UnifiedAccessModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

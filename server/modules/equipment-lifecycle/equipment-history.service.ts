@@ -38,7 +38,7 @@ export class EquipmentHistoryService {
       devices: [],
       error: '',
     };
-    const state = await this.ledger.getDashboardState(false, principal);
+    const state = await this.ledger.getDashboardState(refresh, principal);
     if (!state.dashboard || state.dashboard.stale)
       return {
         ...empty,
@@ -70,7 +70,7 @@ export class EquipmentHistoryService {
     return {
       ...empty,
       status: 'ready',
-      refreshing: source.refreshing,
+      refreshing: source.refreshing || state.refreshing,
       stale: source.stale,
       error: source.error,
       updatedAt: new Date(source.snapshot.fetchedAt).toISOString(),
@@ -120,8 +120,8 @@ export class EquipmentHistoryService {
     }, principal);
     if (!page.items.length)
       throw new NotFoundException('设备不存在或无查看权限');
-    const ledgerState = await this.ledger.getDashboardState(refresh, principal);
-    if (ledgerState.refreshing && (refresh || ledgerState.dashboard?.stale))
+    const ledgerState = await this.ledger.getDashboardState(false, principal);
+    if (ledgerState.refreshing && (!ledgerState.dashboard || ledgerState.dashboard.stale))
       return { ...empty, refreshing: true };
     if (!ledgerState.dashboard || ledgerState.dashboard.stale)
       return {

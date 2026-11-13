@@ -7,6 +7,8 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
@@ -52,6 +54,13 @@ import {
 } from './inventory-movement-command.rules';
 import { InventoryManagementService } from './inventory-management.service';
 import { InventoryOutboundWorkflowService } from './inventory-outbound-workflow.service';
+import {
+  assertInventoryPhotoReceipt,
+  INVENTORY_PHOTO_FIELD,
+  InventoryInboundPhotoService,
+  inventoryPhotoFieldIsEmpty,
+  normalizeInventoryInboundPhotoIds,
+} from './inventory-inbound-photo.service';
 import {
   InventoryWorkflowGateway,
   type InventoryWorkflowFieldSchema,
@@ -191,12 +200,14 @@ export class InventoryMovementCommandService {
   >();
   private readonly serialBySecondaryCategory = new Map<string, Promise<void>>();
   private readonly serialBySourceKey = new Map<string, Promise<void>>();
+  private readonly serialByLedgerPhoto = new Map<string, Promise<void>>();
 
   constructor(
     private readonly httpService: HttpService,
     private readonly gateway: InventoryWorkflowGateway,
     private readonly managementService?: InventoryManagementService,
     private readonly outboundService?: InventoryOutboundWorkflowService,
+    @Optional() private readonly photoService?: InventoryInboundPhotoService,
   ) {}
 
   async getOptions(
@@ -265,6 +276,9 @@ export class InventoryMovementCommandService {
     await this.assertProfessionalRequest(principal, request);
     const type = parseType(request.type);
     const building = parseBuilding(request.building);
+    if ('photoIds' in request && type !== 'inbound') {
+      throw new BadRequestException('物品照片仅适用于入库');
+    }
     if (type === 'outbound') {
       const outboundRequest = request as InventoryOutboundMovementCreateRequest;
       if (!clean(outboundRequest.clientMutationId)) {
@@ -523,8 +537,8 @@ export class InventoryMovementCommandService {
       validateMovementCreateRequest(normalizedRequest, undefined);
     }
 
-    const fingerprint = buildStrictInboundFingerprint(normalizedRequest);
     const fingerprints = buildStrictInboundFingerprints(normalizedRequest);
+    const fingerprint = inboundMarkerFingerprint(fingerprints.current, normalizedRequest.photoIds);
     const completed = this.completedBySourceKey.get(sourceKey);
     if (completed) {
       if (
@@ -586,15 +600,17 @@ export class InventoryMovementCommandService {
               expectedSku,
               invalidateManagementCache,
               assertOwnership,
+              principal,
             ),
           )
         : this.createStrictExistingInboundOnce(
             normalizedRequest,
             sourceKey,
-            fingerprint,
+            fingerprints.current,
             recoverOnly,
             invalidateManagementCache,
             assertOwnership,
+            principal,
           ),
     );
     const invalidatingOperation = operation.then((result) => {
@@ -670,6 +686,7 @@ export class InventoryMovementCommandService {
     expectedSku: string,
     onPersistedStage: () => void,
     assertOwnership?: InventoryWriteOwnershipGuard,
+    principal?: AccessPrincipal,
   ): Promise<TrustedInventoryInboundResult> {
     const config = await this.resolveStrictInboundConfig();
     if (!recoverOnly) {
@@ -679,7 +696,7 @@ export class InventoryMovementCommandService {
       );
     }
     const preflight = await withInventoryStage('核对多维表入库幂等记录', () =>
-      this.loadStrictMarkerSnapshot(config, sourceKey, fingerprints, request),
+      this.loadStrictMarkerSnapshot(config, sourceKey, fingerprints, request.photoIds, request),
     );
     const fingerprint = preflight.fingerprint;
     if (requirePreparedCatalog && !preflight.catalogMarker) {
@@ -693,6 +710,7 @@ export class InventoryMovementCommandService {
     ) {
       throw new BadRequestException('未找到可恢复的采购入库记录');
     }
+    const photos = await this.prepareInboundPhotos(config, request, principal, assertOwnership);
 
     let catalogRecord = preflight.catalogMarker;
     if (!catalogRecord) {
@@ -800,11 +818,12 @@ export class InventoryMovementCommandService {
       request,
       catalogItem.sku,
       sourceKey,
-      fingerprint,
+      inboundMarkerFingerprint(fingerprint, request.photoIds),
       recoverOnly,
       preflight.inboundMarker,
       onPersistedStage,
       assertOwnership,
+      photos,
     );
     const inboundItem = parsePersistedInbound(inboundRecord);
     assertInboundMatchesRequest(
@@ -813,8 +832,9 @@ export class InventoryMovementCommandService {
       inventoryItem,
       request,
       sourceKey,
-      fingerprint,
+      inboundMarkerFingerprint(fingerprint, request.photoIds),
     );
+    await this.backfillInventoryPhotos(config, inventoryItem, photos, assertOwnership);
     return buildPersistedInboundResult(
       catalogItem,
       inventoryItem,
@@ -830,6 +850,7 @@ export class InventoryMovementCommandService {
     recoverOnly: boolean,
     onPersistedStage: () => void,
     assertOwnership?: InventoryWriteOwnershipGuard,
+    principal?: AccessPrincipal,
   ): Promise<TrustedInventoryInboundResult> {
     const config = await this.resolveStrictInboundConfig();
     if (!recoverOnly) {
@@ -843,6 +864,7 @@ export class InventoryMovementCommandService {
         config,
         sourceKey,
         singleStrictInboundFingerprint(fingerprint),
+        request.photoIds,
       ),
     );
     if (recoverOnly && !preflight.inboundMarker) {
@@ -875,17 +897,19 @@ export class InventoryMovementCommandService {
     assertCatalogInventoryAssociation(catalogItem, inventoryItem);
     const option = toMovementOption(catalogItem, inventoryItem);
     validateMovementCreateRequest(request, option);
+    const photos = await this.prepareInboundPhotos(config, request, principal, assertOwnership);
 
     const inboundRecord = await this.createOrReuseInboundRecord(
       config,
       request,
       catalogItem.sku,
       sourceKey,
-      fingerprint,
+      inboundMarkerFingerprint(fingerprint, request.photoIds),
       recoverOnly,
       preflight.inboundMarker,
       onPersistedStage,
       assertOwnership,
+      photos,
     );
     const inboundItem = parsePersistedInbound(inboundRecord);
     assertInboundMatchesRequest(
@@ -894,8 +918,9 @@ export class InventoryMovementCommandService {
       inventoryItem,
       request,
       sourceKey,
-      fingerprint,
+      inboundMarkerFingerprint(fingerprint, request.photoIds),
     );
+    await this.backfillInventoryPhotos(config, inventoryItem, photos, assertOwnership);
     return buildPersistedInboundResult(
       catalogItem,
       inventoryItem,
@@ -916,6 +941,7 @@ export class InventoryMovementCommandService {
     existing?: BitableRecordItem,
     onPersistedStage?: () => void,
     assertOwnership?: InventoryWriteOwnershipGuard,
+    photos: readonly { file_token: string }[] = [],
   ): Promise<BitableRecordItem> {
     if (existing) {
       assertPersistedMarker(
@@ -925,6 +951,15 @@ export class InventoryMovementCommandService {
         fingerprint,
         TABLES.inbound.name,
       );
+      if (photos.length) {
+        // The attachment was written atomically with the inbound row. Read the
+        // exact row on recovery in case the marker search returned a projection.
+        const current = await this.gateway.getRecord(
+          config.appToken, config.inboundTableId, getRecordId(existing), TABLES.inbound.name,
+        );
+        assertInventoryPhotoReceipt(current.fields?.[INVENTORY_PHOTO_FIELD], photos);
+        return current;
+      }
       return existing;
     }
     if (recoverOnly) {
@@ -938,6 +973,7 @@ export class InventoryMovementCommandService {
       入库日期: Date.parse(request.occurredAt),
       入库来源: sourceKey,
       入库请求指纹: fingerprint,
+      ...(photos.length ? { [INVENTORY_PHOTO_FIELD]: photos } : {}),
     };
     await assertWriteOwnership(assertOwnership);
     const recordId = await withInventoryStage('写入入库记录', () =>
@@ -964,13 +1000,60 @@ export class InventoryMovementCommandService {
       fingerprint,
       TABLES.inbound.name,
     );
+    assertInventoryPhotoReceipt(created.fields?.[INVENTORY_PHOTO_FIELD], photos);
     return created;
+  }
+
+  private async prepareInboundPhotos(
+    config: StrictInboundConfig,
+    request: TrustedInventoryInboundRequest,
+    principal?: AccessPrincipal,
+    assertOwnership?: InventoryWriteOwnershipGuard,
+  ) {
+    if (!request.photoIds?.length) return [];
+    if (!principal || !this.photoService) throw new ServiceUnavailableException('入库照片服务尚未就绪');
+    return withInventoryStage('上传物品图片', () => this.photoService!.prepare(
+      principal, request.building, request.clientMutationId, request.photoIds!,
+      config.appToken, config.inboundTableId, config.inventoryTableId, assertOwnership,
+    ));
+  }
+
+  private async backfillInventoryPhotos(
+    config: StrictInboundConfig,
+    inventory: PersistedInventoryItem,
+    photos: readonly { file_token: string }[],
+    assertOwnership?: InventoryWriteOwnershipGuard,
+  ): Promise<void> {
+    if (!photos.length) return;
+    const key = JSON.stringify([config.appToken, config.inventoryTableId, inventory.recordId]);
+    await withInventoryStage('回填库存台账物品图片', () => this.runSerialInMap(this.serialByLedgerPhoto, key, async () => {
+      const readLedger = () => this.gateway.getRecord(
+        config.appToken, config.inventoryTableId, inventory.recordId, TABLES.inventory.name,
+      );
+      await assertWriteOwnership(assertOwnership);
+      const current = await readLedger();
+      if (getRecordId(current) !== inventory.recordId ||
+          normalizeSku(fieldText(current.fields, ['物品类别号'])) !== inventory.sku ||
+          fieldBuilding(current.fields, ['楼栋']) !== inventory.building) {
+        throw new ServiceUnavailableException('入库已保存，库存台账物品关联待核对');
+      }
+      if (!inventoryPhotoFieldIsEmpty(current.fields?.[INVENTORY_PHOTO_FIELD])) return;
+      await assertWriteOwnership(assertOwnership);
+      await this.gateway.updateRecord(
+        config.appToken, config.inventoryTableId, inventory.recordId,
+        { [INVENTORY_PHOTO_FIELD]: photos }, TABLES.inventory.name,
+      );
+      this.managementService?.invalidateCache();
+      const updated = await readLedger();
+      assertInventoryPhotoReceipt(updated.fields?.[INVENTORY_PHOTO_FIELD], photos);
+    }));
   }
 
   private async loadStrictMarkerSnapshot(
     config: StrictInboundConfig,
     sourceKey: string,
     fingerprints: StrictInboundFingerprints,
+    photoIds?: string[],
     request?: TrustedInventoryNewInboundRequest,
   ): Promise<StrictMarkerSnapshot> {
     const [catalog, inventory, inbound] = await Promise.all([
@@ -1017,26 +1100,19 @@ export class InventoryMovementCommandService {
       sourceKey,
       TABLES.inbound.name,
     );
-    const authoritativeMarker =
-      catalogMarker || inventoryMarker || inboundMarker;
+    const authoritativeMarker = catalogMarker || inventoryMarker;
     const fingerprint = authoritativeMarker
       ? assertPersistedMarkerFingerprint(
           authoritativeMarker,
-          catalogMarker
-            ? '入库创建标识'
-            : inventoryMarker
-              ? '入库创建标识'
-              : '入库来源',
+          '入库创建标识',
           sourceKey,
           fingerprints,
-          catalogMarker
-            ? TABLES.catalog.name
-            : inventoryMarker
-              ? TABLES.inventory.name
-              : TABLES.inbound.name,
+          catalogMarker ? TABLES.catalog.name : TABLES.inventory.name,
           catalogMarker ? request : undefined,
         )
-      : fingerprints.current;
+      : (inboundMarker && [...fingerprints.accepted].find((candidate) =>
+          inboundMarkerFingerprint(candidate, photoIds) === fieldText(inboundMarker.fields, ['入库请求指纹']))) ||
+        fingerprints.current;
     for (const [record, markerField, tableName] of [
       [catalogMarker, '入库创建标识', TABLES.catalog.name],
       [inventoryMarker, '入库创建标识', TABLES.inventory.name],
@@ -1047,7 +1123,7 @@ export class InventoryMovementCommandService {
           record,
           markerField,
           sourceKey,
-          fingerprint,
+          record === inboundMarker ? inboundMarkerFingerprint(fingerprint, photoIds) : fingerprint,
           tableName,
         );
       }
@@ -1295,7 +1371,7 @@ function hasStrictInboundSignal(
   request: InventoryMovementCreateRequest,
 ): boolean {
   const value = request as unknown as Record<string, unknown>;
-  return ['mode', 'clientMutationId', 'newItem'].some((field) =>
+  return ['mode', 'clientMutationId', 'newItem', 'photoIds'].some((field) =>
     Object.prototype.hasOwnProperty.call(value, field),
   );
 }
@@ -1346,6 +1422,7 @@ function normalizeNewInboundRequest(
     type: 'inbound',
     mode: 'new',
     clientMutationId: clean(request.clientMutationId),
+    photoIds: normalizeInventoryInboundPhotoIds(request.photoIds),
     building,
     quantity: request.quantity,
     occurredAt: clean(request.occurredAt),
@@ -1380,6 +1457,7 @@ function normalizeExistingInboundRequest(
     type: 'inbound',
     mode: 'existing',
     clientMutationId: clean(request.clientMutationId),
+    photoIds: normalizeInventoryInboundPhotoIds(request.photoIds),
     catalogRecordId: clean(request.catalogRecordId),
     sku: clean(request.sku).toUpperCase(),
     building,
@@ -1474,6 +1552,11 @@ function singleStrictInboundFingerprint(
   fingerprint: string,
 ): StrictInboundFingerprints {
   return { current: fingerprint, accepted: new Set([fingerprint]) };
+}
+
+function inboundMarkerFingerprint(base: string, photoIds?: readonly string[]): string {
+  if (!photoIds?.length) return base;
+  return createHash('sha256').update(JSON.stringify({ base, photoIds })).digest('hex');
 }
 
 function buildStrictInboundFingerprints(

@@ -58,7 +58,7 @@ export function buildDailyOperationsPatrolCard(
     { tag: 'hr' },
     {
       tag: 'markdown',
-      content: `<font color="grey">指标口径：最新完整日较前 2 个有效日均值变化达到 50% · 生成时间 ${formatShanghaiDateTime(report.generatedAt)}</font>`,
+      content: `<font color="grey">用电 / PUE / 水耗仅核对巡视日前 3 个自然日。前一日较其前 2 日均值变化达 50% 时提示异常，所需数据缺失时标为数据异常。生成时间 ${formatShanghaiDateTime(report.generatedAt)}</font>`,
     },
     ...actionElements,
   );
@@ -104,7 +104,9 @@ function buildCheckRow(
         elements: [
           {
             tag: 'markdown',
-            content: `**${escapeMarkdown(check.label)}**`,
+            content: check.evaluatedDate
+              ? `**${escapeMarkdown(check.label)}**\n<font color="grey">核对日 ${escapeMarkdown(check.evaluatedDate)}（巡视日前一日）</font>`
+              : `**${escapeMarkdown(check.label)}**`,
           },
         ],
       },

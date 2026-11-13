@@ -381,6 +381,8 @@ export class PersonnelProfileChangesService {
     )
       throw new ForbiddenException('不能审核本人或关联账号的申请');
   }
+  hasCardReviewReceipt(accountId:string,input:ReviewProfileChange):boolean{const state=this.store.read();const receipt=state.mutations[hash(['review',accountId,input.clientMutationId])];return !!receipt&&receipt.id===input.requestId&&receipt.fingerprint===hash(input)&&!!state.requests[input.requestId];}
+  assertCardReview(principal:AccessPrincipal,requestId:string):{status:StoredProfileChange['status'];version:number}{const actor=this.verify(principal,true);const row=this.store.read().requests[requestId];if(!row)throw new BadRequestException('申请不存在');this.denySelf(actor,row);return {status:row.status,version:row.version};}
   review(principal: AccessPrincipal, input: ReviewProfileChange) {
     return this.tracked(() => this.reviewAccepted(principal, input));
   }
@@ -473,6 +475,15 @@ export class PersonnelProfileChangesService {
       void this.run(row.id).catch(() =>
         this.logger.warn('资料变更已受理，等待恢复'),
       );
+    else if (row.status === 'rejected') {
+      // Promptly notify the applicant of a rejection; the completed path is
+      // woken from mark(). A notification failure must never alter the decision.
+      try {
+        this.notifications?.wake();
+      } catch {
+        /* result notification is best-effort */
+      }
+    }
     return present(row);
   }
   cancel(principal: AccessPrincipal, input: CancelProfileChange) {

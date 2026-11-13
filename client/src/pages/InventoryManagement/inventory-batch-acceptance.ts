@@ -62,11 +62,22 @@ function storageKey(
   return `inventory-batch-v1:${principalFingerprint}:${kind}`;
 }
 
+export function createInventoryBatchId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/gu, '')
+    : `${Date.now().toString(16).padStart(12, '0')}${Math.random().toString(16).slice(2).padEnd(20, '0').slice(0, 20)}`;
+}
+
+export function inventoryBatchMutationId(kind: InventoryBatchKind, batchId: string, position: number): string {
+  return `inventory_batch_${kind === 'purchase' ? 'inbound' : 'outbound'}_${batchId}_${position}`;
+}
+
 export function createInventoryBatchJournal(
   kind: InventoryBatchKind,
   principalFingerprint: string,
   requests: InventoryBatchRequest[],
   labels: string[],
+  batchId = createInventoryBatchId(),
 ): InventoryBatchJournal {
   if (
     !principalFingerprint ||
@@ -80,14 +91,14 @@ export function createInventoryBatchJournal(
   if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
     throw new Error('批量操作编号无效或重复');
   }
-  const batchId =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/gu, '')
-      : `${Date.now().toString(16).padStart(12, '0')}${Math.random().toString(16).slice(2).padEnd(20, '0').slice(0, 20)}`;
-  const normalizedRequests = requests.map((request, index) => ({
-    ...request,
-    clientMutationId: `inventory_batch_${kind === 'purchase' ? 'inbound' : 'outbound'}_${batchId}_${index + 1}`,
-  }));
+  if (!/^[a-f0-9]{32}$/.test(batchId)) throw new Error('批量操作编号无效');
+  const normalizedRequests = requests.map((request, index) => {
+    const clientMutationId = inventoryBatchMutationId(kind, batchId, index + 1);
+    if ('photoIds' in request && request.photoIds?.length && request.clientMutationId !== clientMutationId) {
+      throw new Error('照片与入库请求编号不一致');
+    }
+    return { ...request, clientMutationId };
+  });
   return {
     version: 1,
     kind,

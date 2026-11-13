@@ -41,7 +41,9 @@ export function detectFacilityMetricIssues(
   for (const metric of input.metrics) {
     const history = normalizedHistory(metric.history);
     const historyByDate = new Map(history.map((period) => [period.date, period]));
-    const missingDates = requiredDates.filter((date) => !historyByDate.has(date));
+    const missingDates = requiredDates.filter(
+      (date) => !historyByDate.get(date)?.rows.length,
+    );
     if (missingDates.length > 0) {
       issues.push(
         issue(
@@ -58,16 +60,31 @@ export function detectFacilityMetricIssues(
       continue;
     }
 
-    const [current, ...priorPeriods] = requiredDates.map(
+    const [current, ...baselines] = requiredDates.map(
       (date) => historyByDate.get(date)!,
     );
-    const baselines = priorPeriods.slice(0, compareDays);
+    const currentBuildings = new Set(current.rows.map((row) => row.building));
+    const missingBuildings = new Set(
+      baselines.flatMap((period) => period.rows.map((row) => row.building)),
+    );
+    for (const building of missingBuildings) {
+      if (currentBuildings.has(building)) continue;
+      issues.push(
+        issue(
+          'facility',
+          `${building} ${metric.label}日数据缺失`,
+          `${current.date} ${building}未取得有效${metric.label}值`,
+          current.date,
+          'unavailable',
+          `${metric.key}:${building}:current`,
+        ),
+      );
+    }
     for (const row of current.rows) {
       const baselineValues = baselines.map((period) =>
         period.rows.find((candidate) => candidate.building === row.building)?.value,
       );
       if (
-        baselineValues.length !== compareDays ||
         baselineValues.some(
           (value) => value === undefined || !Number.isFinite(value) || value <= 0,
         )
@@ -76,7 +93,7 @@ export function detectFacilityMetricIssues(
           issue(
             'facility',
             `${metric.label}数据不足`,
-            `${row.building}缺少前${compareDays}个有效日正数值`,
+            `${row.building}缺少前${compareDays}个自然日的有效正数值`,
             current.date,
             'unavailable',
             `${metric.key}:${row.building}:baseline`,
@@ -84,20 +101,6 @@ export function detectFacilityMetricIssues(
         );
         continue;
       }
-      if (!Number.isFinite(row.value)) {
-        issues.push(
-          issue(
-            'facility',
-            `${metric.label}数据不足`,
-            `${row.building}当前值无效`,
-            current.date,
-            'unavailable',
-            `${metric.key}:${row.building}:current`,
-          ),
-        );
-        continue;
-      }
-
       evaluated += 1;
       const baseline =
         (baselineValues as number[]).reduce((sum, value) => sum + value, 0) /
@@ -118,12 +121,29 @@ export function detectFacilityMetricIssues(
     }
   }
 
-  return finishCheck(
-    'facility',
-    '用电 / PUE / 水耗',
-    issues,
-    evaluated ? `已检查 ${evaluated} 个楼栋指标` : '未获得可判断指标',
-  );
+  if (input.metrics.length === 0) {
+    issues.push(
+      issue(
+        'facility',
+        '用电 / PUE / 水耗无可判断数据',
+        `${shiftDate(input.businessDate, -1)} 及其前 ${compareDays} 日均未取得可比对的楼栋指标`,
+        requiredDates[0],
+        'unavailable',
+        'facility:no-evaluable-data',
+      ),
+    );
+  }
+  return {
+    ...finishCheck(
+      'facility',
+      '用电 / PUE / 水耗',
+      issues,
+      evaluated
+        ? `已检查 ${requiredDates[0]} 的 ${evaluated} 个楼栋指标（较前 ${compareDays} 日均值）`
+        : '未获得可判断指标',
+    ),
+    evaluatedDate: requiredDates[0],
+  };
 }
 
 export function detectScheduleRisks(

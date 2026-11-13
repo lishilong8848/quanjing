@@ -1,5 +1,5 @@
 import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
-import * as fs from 'node:fs';
+import fs = require('node:fs');
 import {
   existsSync,
   mkdtempSync,
@@ -239,7 +239,8 @@ describe('InventoryMovementDeletionTaskLedgerStore', () => {
   });
 
   it('persists a completed terminal result across restart', async () => {
-    const store = new InventoryMovementDeletionTaskLedgerStore(ledgerPath);
+    const now = () => new Date('2026-08-13T01:01:00.000Z');
+    const store = new InventoryMovementDeletionTaskLedgerStore(ledgerPath, { now });
     await store.reserve(pendingEntry());
     const claimed = await store.claimPending(
       'inventory-movement-deletion-task-1',
@@ -258,7 +259,7 @@ describe('InventoryMovementDeletionTaskLedgerStore', () => {
       },
     });
 
-    const restarted = new InventoryMovementDeletionTaskLedgerStore(ledgerPath);
+    const restarted = new InventoryMovementDeletionTaskLedgerStore(ledgerPath, { now });
     expect(
       (await restarted.findByTaskId('inventory-movement-deletion-task-1'))
         ?.task,

@@ -62,6 +62,7 @@ describe('inventory movement deletion controller', () => {
     {},
     {},
     {},
+    {},
     deletionService,
   );
   const principal: AccessPrincipal = {

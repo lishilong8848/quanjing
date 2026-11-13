@@ -80,6 +80,7 @@ import type {
   InventoryItemsResponse,
   InventoryManagementDashboard,
   InventoryInboundAcceptedResponse,
+  InventoryInboundPhotoUploadResponse,
   InventoryInboundTaskKind,
   InventoryInboundTaskStatusResponse,
   InventoryMovementDeletionAcceptedResponse,
@@ -1229,6 +1230,27 @@ export async function createInventoryMovement(
   const accepted = response.data as InventoryInboundAcceptedResponse;
   assertInventoryInboundAccepted(accepted, 'manual');
   return accepted;
+}
+
+export async function uploadInventoryInboundPhotos(
+  building: WarehouseBuilding,
+  clientMutationId: string,
+  photos: File[],
+  signal?: AbortSignal,
+): Promise<InventoryInboundPhotoUploadResponse> {
+  const form = new FormData();
+  form.append('building', building);
+  form.append('clientMutationId', clientMutationId);
+  photos.forEach((photo) => form.append('photos', photo));
+  const response = await axiosForBackend({
+    url: '/api/inventory-management/inbound-photos',
+    method: 'POST',
+    data: form,
+    signal,
+    timeout: 90_000,
+  });
+  assertSuccessfulBackendResponse(response);
+  return response.data;
 }
 
 export async function getInventoryInboundTaskStatus(

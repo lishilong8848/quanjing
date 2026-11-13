@@ -130,6 +130,7 @@ const INVENTORY_ADMIN_EXACT_REQUESTS = new Set([
   'GET /api/purchase-inventory/applicant-search',
   'POST /api/inventory-management/storage-locations',
   'POST /api/inventory-management/movements',
+  'POST /api/inventory-management/inbound-photos',
   'POST /api/inventory-management/movements/deletions',
   'POST /api/inventory-management/outbounds',
   'POST /api/inventory-management/outbounds/batch',
@@ -144,6 +145,10 @@ const INVENTORY_ADMIN_OUTBOUND_TASK_PATH =
   /^\/api\/inventory-management\/outbounds\/tasks\/[a-z0-9_-]{1,160}$/;
 const INVENTORY_ADMIN_INBOUND_TASK_PATH =
   /^\/api\/inventory-management\/inbounds\/tasks\/[a-z0-9_-]{1,160}$/;
+const INVENTORY_ADMIN_ITEM_IMAGE_PATH =
+  /^\/api\/inventory-management\/items\/[a-z0-9_-]{1,128}\/images\/\d{1,6}-[a-f0-9]{16}$/;
+const INVENTORY_ADMIN_STAGED_IMAGE_PATH =
+  /^\/api\/inventory-management\/inbound-photos\/[^/]{1,48}\/[a-z0-9_-]{8,128}\/[a-f0-9]{64}$/;
 const INVENTORY_ADMIN_PURCHASE_INBOUND_CATEGORY_TASK_PATH =
   /^\/api\/inventory-management\/purchase-inbounds\/category-tasks\/[a-z0-9_-]{1,160}$/;
 const INVENTORY_ADMIN_MOVEMENT_DELETION_TASK_PATH =
@@ -850,6 +855,8 @@ function canInventoryAdministratorAccess(
     (normalizedMethod === 'GET' &&
       (INVENTORY_ADMIN_OUTBOUND_TASK_PATH.test(path) ||
         INVENTORY_ADMIN_INBOUND_TASK_PATH.test(path) ||
+        INVENTORY_ADMIN_ITEM_IMAGE_PATH.test(path) ||
+        INVENTORY_ADMIN_STAGED_IMAGE_PATH.test(path) ||
         INVENTORY_ADMIN_PURCHASE_INBOUND_CATEGORY_TASK_PATH.test(path) ||
         INVENTORY_ADMIN_MOVEMENT_DELETION_TASK_PATH.test(path)))
   );

@@ -26,6 +26,8 @@ export interface DailyOperationsPatrolCheckResult {
   count: number;
   summary: string;
   issues: DailyOperationsPatrolIssue[];
+  /** The single day a facility metric check actually evaluated (patrol date - 1). */
+  evaluatedDate?: string;
 }
 
 export interface DailyOperationsPatrolFacilityMetric {

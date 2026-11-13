@@ -59,11 +59,38 @@ function compatible(a: unknown, b: unknown): boolean {
   );
 }
 
+function matchConfirmedRepairBindings(
+  assets: readonly HistoryLedgerAsset[],
+  records: readonly BitableRecordItem[],
+): Map<string, RepairAssociation> {
+  const byId = new Map<string, HistoryLedgerAsset | null>();
+  for (const asset of assets) {
+    if (asset.id) byId.set(asset.id, byId.has(asset.id) ? null : asset);
+  }
+  return new Map(records.map((record) => {
+    const fields = record.fields || {};
+    const id = text(fields['关联台账记录ID']);
+    const asset = byId.get(id);
+    const match: RepairAssociation = { assetId: null, reason: '' };
+    if (text(fields['台账关联状态']) !== '已关联' || !id) {
+      match.reason = '关联待确认或未填写台账记录ID';
+    } else if (!asset) {
+      match.reason = '关联台账记录不存在或不唯一';
+    } else if (!floor(asset.building) || asset.kind !== 'detail' || asset.quantity !== 1) {
+      match.reason = '关联对象不是有效的单台设备';
+    } else {
+      match.assetId = asset.id;
+    }
+    return [getRecordId(record), match];
+  }));
+}
+
 export function matchEquipmentRepair(
   assets: readonly HistoryLedgerAsset[],
   records: readonly BitableRecordItem[],
   requireBinding = true,
 ): Map<string, RepairAssociation> {
+  if (requireBinding) return matchConfirmedRepairBindings(assets, records);
   const index = new Map<string, HistoryLedgerAsset[]>();
   for (const asset of assets) {
     const key = `${floor(asset.building)}|${norm(asset.sourceCode)}`;
@@ -126,13 +153,6 @@ export function matchEquipmentRepair(
       if (tags.some((m) => `${m[1]}-${m[2]}-${m[3]}-${m[4]}` !== norm(code)))
         reason = '故障描述出现其他设备编号';
     }
-    if (
-      !reason &&
-      requireBinding &&
-      (text(f['台账关联状态']) !== '已关联' ||
-        text(f['关联台账记录ID']) !== asset?.id)
-    )
-      reason = '关联待确认或关联对象已变化';
     result.set(getRecordId(record), {
       assetId: reason ? null : asset!.id,
       reason,

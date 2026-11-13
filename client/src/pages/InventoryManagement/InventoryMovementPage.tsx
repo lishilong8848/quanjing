@@ -52,6 +52,13 @@ import {
   waitForPurchaseInventoryInboundTask,
 } from '@/api';
 import { useAccess } from '@/access/AccessProvider';
+import {
+  invalidateInventoryMovementReads,
+  inventoryMovementReads,
+  inventoryReadScope,
+  isInventoryReadDenied,
+  pendingPurchaseReads,
+} from './inventory-read-cache';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -165,7 +172,9 @@ import {
 import { resolvePendingPurchaseDeepLink } from './logic';
 import {
   applyInventoryBatchAcceptance,
+  createInventoryBatchId,
   createInventoryBatchJournal,
+  inventoryBatchMutationId,
   readInventoryBatchJournal,
   saveInventoryBatchJournal,
   updateInventoryBatchTask,
@@ -287,6 +296,12 @@ export function InventoryMovementPage({
 }: InventoryMovementPageProps) {
   const principal = useAccess();
   const { principalFingerprint } = principal;
+  const accessLoading = principal.isLoading || principal.isChangingIdentity || principal.isConfirmingIdentity;
+  const readScope = inventoryReadScope(principal);
+  const movementCacheKey = (query: { page: number; building: string; status: string }) =>
+    readScope ? JSON.stringify([readScope, type, query.page, searchQuery.trim(), query.building, query.status]) : null;
+  const initialMovementKey = movementCacheKey({ page: 1, building: 'all', status: 'all' });
+  const pendingPurchaseKey = type === 'inbound' ? readScope : null;
   const inboundRecoveryOwner = inventoryInboundRecoveryOwner(principal);
   const inboundQueryPool = useRef(createInventoryInboundQueryPool()).current;
   const inboundRefreshRef = useRef<{ principal: string | null; promise: Promise<unknown>; dirty: boolean } | null>(null);
@@ -298,7 +313,8 @@ export function InventoryMovementPage({
   currentPrincipalRef.current = principal;
   const [inboundState, setInboundState] = useState(() =>
     createInitialInventoryInboundState<MovementMutationDraft>({
-      movementResponse: EMPTY_RESPONSE,
+      movementResponse: inventoryMovementReads.peek(initialMovementKey) ?? EMPTY_RESPONSE,
+      pendingPurchases: pendingPurchaseReads.peek(pendingPurchaseKey)?.items,
     }),
   );
   const [deletionState, setDeletionState] = useState(() =>
@@ -310,8 +326,8 @@ export function InventoryMovementPage({
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
   const [pendingPage, setPendingPage] = useState(1);
-  const [movementLoading, setMovementLoading] = useState(true);
-  const [pendingLoading, setPendingLoading] = useState(type === 'inbound');
+  const [movementLoading, setMovementLoading] = useState(() => !inventoryMovementReads.peek(initialMovementKey));
+  const [pendingLoading, setPendingLoading] = useState(() => type === 'inbound' && !pendingPurchaseReads.peek(pendingPurchaseKey));
   const [refreshing, setRefreshing] = useState(false);
   const [movementError, setMovementError] = useState('');
   const [pendingError, setPendingError] = useState('');
@@ -348,6 +364,7 @@ export function InventoryMovementPage({
     useState<PurchasePendingInboundItem | null>(null);
   const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(() => new Set());
   const [batchInboundIndex, setBatchInboundIndex] = useState(-1);
+  const [batchInboundId, setBatchInboundId] = useState('');
   const [batchInboundQueue, setBatchInboundQueue] = useState<PurchasePendingInboundItem[]>([]);
   const [batchInboundSubmissions, setBatchInboundSubmissions] = useState<PurchaseInboundSubmission[]>([]);
   const [batchJournals, setBatchJournals] = useState<Partial<Record<InventoryBatchKind, InventoryBatchJournal>>>({});
@@ -364,6 +381,7 @@ export function InventoryMovementPage({
   const movementRequestRef = useRef(0);
   const outboundApprovalRefreshInFlightRef = useRef(false);
   const pendingRequestRef = useRef(0);
+  const activeMovementKey = movementCacheKey({ page, building, status });
   const principalRequestGenerationRef = useRef(0);
   const principalRequestPrincipalRef = useRef(principalFingerprint);
   const loadMovementsRef = useRef<
@@ -384,7 +402,7 @@ export function InventoryMovementPage({
     useRef<InventoryOutboundCreationRuntime | null>(null);
   const movementDeletionCoordinatorRef =
     useRef<InventoryMovementDeletionCoordinator | null>(null);
-  const outboundPrincipalNamespaceRef = useRef<string | null>(null);
+  const outboundPrincipalNamespaceRef = useRef(getInventoryOutboundCreationTaskStorageKey(principalFingerprint));
   const mountedRef = useRef(true);
   const restoredRecoveryMutationIdRef = useRef('');
   const dismissedInboundRecoveryMutationIdRef = useRef('');
@@ -581,39 +599,38 @@ export function InventoryMovementPage({
   }, [movementNamespaceReady, pendingLoading, pendingPurchases]);
 
   const loadMovements = useCallback(
-    async (forceRefresh = false) => {
+    async (forceRefresh = false, bypassCache = forceRefresh) => {
+      if (accessLoading) return;
       forceRefresh = forceRefresh && canRefresh;
       const requestId = ++movementRequestRef.current;
       const requestGeneration = principalRequestGenerationRef.current;
       const requestPrincipal = principalFingerprint;
-      if (!forceRefresh) setMovementLoading(true);
+      if (!inventoryMovementReads.peek(activeMovementKey)) setMovementLoading(true);
       setMovementError('');
       try {
-        const result = await getInventoryManagementMovements(
-          {
+        const result = await inventoryMovementReads.read(activeMovementKey, async () => {
+          if (principalRequestPrincipalRef.current !== requestPrincipal ||
+              (bypassCache && !mountedRef.current)) throw new Error('Inventory read scope changed');
+          const result = await getInventoryManagementMovements({
             type,
             page,
             pageSize: PAGE_SIZE,
             search: searchQuery.trim(),
             building,
             status,
-          },
-          forceRefresh,
-        );
+          }, forceRefresh);
+          if (!result || !Array.isArray(result.items) || !result.summary ||
+              !Array.isArray(result.summary.statusCounts)) {
+            throw new Error('Invalid inventory movement response');
+          }
+          return result;
+        }, bypassCache, forceRefresh);
         if (
-          movementRequestRef.current !== requestId ||
+          !mountedRef.current || movementRequestRef.current !== requestId ||
           principalRequestGenerationRef.current !== requestGeneration ||
           principalRequestPrincipalRef.current !== requestPrincipal
         ) {
           return;
-        }
-        if (
-          !result ||
-          !Array.isArray(result.items) ||
-          !result.summary ||
-          !Array.isArray(result.summary.statusCounts)
-        ) {
-          throw new Error('Invalid inventory movement response');
         }
         const runtime = outboundCreationRuntimeRef.current;
         const activeMutationIds = new Set(
@@ -633,7 +650,7 @@ export function InventoryMovementPage({
           );
         }
         if (
-          movementRequestRef.current !== requestId ||
+          !mountedRef.current || movementRequestRef.current !== requestId ||
           principalRequestGenerationRef.current !== requestGeneration ||
           principalRequestPrincipalRef.current !== requestPrincipal
         ) {
@@ -646,20 +663,24 @@ export function InventoryMovementPage({
           mergeInventoryMovementDeletionQueryResult(current, result, requestId),
         );
         setMovementError('');
-      } catch {
+      } catch (error) {
         if (
-          movementRequestRef.current !== requestId ||
+          !mountedRef.current || movementRequestRef.current !== requestId ||
           principalRequestGenerationRef.current !== requestGeneration ||
           principalRequestPrincipalRef.current !== requestPrincipal
         ) {
           return;
+        }
+        if (isInventoryReadDenied(error)) {
+          setInboundState(createInitialInventoryInboundState<MovementMutationDraft>({ movementResponse: EMPTY_RESPONSE }));
+          setDeletionState(createInitialInventoryMovementDeletionState());
         }
         setMovementError(
           `${meta.title}数据读取失败，请检查网络或数据源后重试。`,
         );
       } finally {
         if (
-          movementRequestRef.current === requestId &&
+          mountedRef.current && movementRequestRef.current === requestId &&
           principalRequestGenerationRef.current === requestGeneration &&
           principalRequestPrincipalRef.current === requestPrincipal
         ) {
@@ -668,10 +689,12 @@ export function InventoryMovementPage({
       }
     },
     [
+      activeMovementKey,
       building,
       meta.title,
       canRefresh,
       page,
+      accessLoading,
       principalFingerprint,
       searchQuery,
       status,
@@ -680,16 +703,24 @@ export function InventoryMovementPage({
   );
 
   const loadPendingPurchases = useCallback(
-    async (forceRefresh = false) => {
+    async (forceRefresh = false, bypassCache = forceRefresh) => {
       forceRefresh = forceRefresh && canRefresh;
-      if (type !== 'inbound') return [];
+      if (type !== 'inbound' || accessLoading) return [];
       const requestId = ++pendingRequestRef.current;
       const requestGeneration = principalRequestGenerationRef.current;
       const requestPrincipal = principalFingerprint;
-      setPendingLoading(true);
+      if (!pendingPurchaseReads.peek(pendingPurchaseKey)) setPendingLoading(true);
       setPendingError('');
       try {
-        const result = await getPendingPurchaseInbounds(forceRefresh);
+        const result = await pendingPurchaseReads.read(pendingPurchaseKey, async () => {
+          if (principalRequestPrincipalRef.current !== requestPrincipal ||
+              (bypassCache && !mountedRef.current)) throw new Error('Inventory read scope changed');
+          const result = await getPendingPurchaseInbounds(forceRefresh);
+          if (!result || !Array.isArray(result.items)) {
+            throw new Error('Invalid pending purchase inbound response');
+          }
+          return result;
+        }, bypassCache, forceRefresh);
         if (
           !mountedRef.current ||
           pendingRequestRef.current !== requestId ||
@@ -697,9 +728,6 @@ export function InventoryMovementPage({
           principalRequestPrincipalRef.current !== requestPrincipal
         ) {
           return null;
-        }
-        if (!result || !Array.isArray(result.items)) {
-          throw new Error('Invalid pending purchase inbound response');
         }
         setInboundState((current) =>
           mergePurchaseQueryResult(current, result.items, requestId),
@@ -731,7 +759,7 @@ export function InventoryMovementPage({
         }
       }
     },
-    [principalFingerprint, type, canRefresh],
+    [principalFingerprint, accessLoading, pendingPurchaseKey, type, canRefresh],
   );
 
   useEffect(() => {
@@ -845,6 +873,7 @@ export function InventoryMovementPage({
   }, [applyInboundRecovery, inboundRecoveryOwner]);
 
   const refreshInboundAfterTask = useCallback(() => {
+    invalidateInventoryMovementReads();
     if (inboundRefreshRef.current?.principal === principalFingerprint) {
       inboundRefreshRef.current.dirty = true;
       return inboundRefreshRef.current.promise;
@@ -1114,7 +1143,7 @@ export function InventoryMovementPage({
       void openPendingPurchaseDeepLink();
       return;
     }
-    void loadPendingPurchases();
+    void loadPendingPurchases(false, true);
   }, [
     loadPendingPurchases,
     normalizedPurchaseExecutionRecordId,
@@ -1201,12 +1230,6 @@ export function InventoryMovementPage({
     setPendingPage(1);
     setPendingAccessDenied(false);
     setPendingError('');
-    setInboundState(
-      createInitialInventoryInboundState<MovementMutationDraft>({
-        movementResponse: EMPTY_RESPONSE,
-      }),
-    );
-    setDeletionState(createInitialInventoryMovementDeletionState());
     setSelectedMovementForDeletion(null);
     setManualRetryDraft(undefined);
     setManualOutboundRetryDraft(undefined);
@@ -1313,6 +1336,7 @@ export function InventoryMovementPage({
         return;
       }
       if (event.type === 'completed') {
+        invalidateInventoryMovementReads();
         setInboundState((current) =>
           confirmMutation(
             current,
@@ -1505,6 +1529,7 @@ export function InventoryMovementPage({
         return;
       }
       if (event.type === 'completed') {
+        invalidateInventoryMovementReads();
         movementDeletionUncertainNotifiedRef.current.delete(
           event.journal.clientMutationId,
         );
@@ -1980,6 +2005,7 @@ export function InventoryMovementPage({
     setBatchInboundQueue([]);
     setBatchInboundSubmissions([]);
     setBatchInboundIndex(-1);
+    setBatchInboundId('');
     const recovery = readInventoryInboundRecovery<InboundRecoveryDraft>(inboundRecoveryOwner);
     dismissedInboundRecoveryMutationIdRef.current =
       recovery?.clientMutationId || restoredRecoveryMutationIdRef.current;
@@ -2155,6 +2181,7 @@ export function InventoryMovementPage({
     kind: InventoryBatchKind,
     requests: InventoryBatchJournal['requests'],
     labels: string[],
+    batchId?: string,
   ): boolean => {
     if (kind === 'purchase' ? !canConfirm : !canCreate) return false;
     if (!principalFingerprint) {
@@ -2169,7 +2196,7 @@ export function InventoryMovementPage({
         toast.info('请先等待或核对上一批任务完成');
         return false;
       }
-      const journal = createInventoryBatchJournal(kind, principalFingerprint, requests, labels);
+      const journal = createInventoryBatchJournal(kind, principalFingerprint, requests, labels, batchId);
       saveInventoryBatchJournal(journal);
       setBatchJournals((current) => ({ ...current, [kind]: journal }));
       setBatchErrors((current) => ({ ...current, [kind]: '' }));
@@ -2219,11 +2246,13 @@ export function InventoryMovementPage({
       );
       if (updated !== journal) {
         saveInventoryBatchJournal(updated);
+        const completed = updated.entries.some((entry, index) =>
+          entry.status === 'completed' && journal.entries[index]?.status !== 'completed',
+        );
+        if (completed) invalidateInventoryMovementReads();
         if (mountedRef.current && principalRequestPrincipalRef.current === journal.principalFingerprint) {
           setBatchJournals((current) => ({ ...current, [journal.kind]: updated }));
-          if (updated.entries.some((entry, index) =>
-            entry.status === 'completed' && journal.entries[index]?.status !== 'completed'
-          )) {
+          if (completed) {
             if (journal.kind === 'outbound') void loadMovementsRef.current?.(true);
             else void loadPendingPurchases(true);
           }
@@ -2481,6 +2510,7 @@ export function InventoryMovementPage({
           }
 
           clearInventoryOutboundRecovery(clientMutationId);
+          invalidateInventoryMovementReads();
           if (!mountedRef.current) return;
           setInboundState((current) =>
             confirmMutation(
@@ -2704,6 +2734,7 @@ export function InventoryMovementPage({
           return;
         }
 
+        invalidateInventoryMovementReads();
         if (acceptedTask) {
           finalizeInventoryInboundRecovery(
             submission.clientMutationId,
@@ -2926,6 +2957,7 @@ export function InventoryMovementPage({
           return;
         }
 
+        invalidateInventoryMovementReads();
         if (acceptedTask) {
           finalizeInventoryInboundRecovery(
             submission.clientMutationId,
@@ -3073,6 +3105,7 @@ export function InventoryMovementPage({
       return;
     }
     setBatchInboundQueue(items);
+    setBatchInboundId(createInventoryBatchId());
     setBatchInboundSubmissions([]);
     setBatchInboundIndex(0);
     setPurchaseRetryDraft(undefined);
@@ -3095,11 +3128,13 @@ export function InventoryMovementPage({
       'purchase',
       next.map((entry) => entry.request),
       next.map((entry) => `${entry.optimisticMovement.name} · ${entry.request.quantity} ${entry.optimisticMovement.unit}`),
+      batchInboundId,
     );
     if (!started) return false;
     setBatchInboundQueue([]);
     setBatchInboundSubmissions([]);
     setBatchInboundIndex(-1);
+    setBatchInboundId('');
     setSelectedPendingIds(new Set());
     return true;
   };
@@ -3620,7 +3655,7 @@ export function InventoryMovementPage({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void loadMovements()}
+              onClick={() => void loadMovements(false, true)}
             >
               重新加载
             </Button>
@@ -3636,7 +3671,7 @@ export function InventoryMovementPage({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void loadMovements()}
+              onClick={() => void loadMovements(false, true)}
             >
               重新加载
             </Button>
@@ -3705,6 +3740,7 @@ export function InventoryMovementPage({
           onOpenChange={setCreateOpen}
           initialBuilding={building === 'all' ? undefined : building}
           onCreated={() => {
+            invalidateInventoryMovementReads();
             if (page !== 1) setPage(1);
             else void loadMovements(true);
           }}
@@ -3719,7 +3755,11 @@ export function InventoryMovementPage({
         onAbandonRetry={abandonPurchaseInboundRetry}
         onCategoryPrepared={handlePurchaseCategoryPrepared}
         onOpenChange={handlePurchaseInboundOpenChange}
-        batchPosition={batchInboundIndex >= 0 ? { current: batchInboundIndex + 1, total: batchInboundQueue.length } : undefined}
+        batchPosition={batchInboundIndex >= 0 ? {
+          current: batchInboundIndex + 1,
+          total: batchInboundQueue.length,
+          clientMutationId: inventoryBatchMutationId('purchase', batchInboundId, batchInboundIndex + 1),
+        } : undefined}
         onSubmit={batchInboundIndex >= 0 ? stagePurchaseBatch : submitPurchaseInbound}
       />
       <InventoryOutboundConfirmationDialog

@@ -34,6 +34,7 @@ describe('daily operations patrol rules', () => {
 
     expect(result.status).toBe('alert');
     expect(result.count).toBe(1);
+    expect(result.evaluatedDate).toBe('2026-09-06');
     expect(result.issues[0]).toMatchObject({
       check: 'facility',
       title: 'A楼 PUE 上升 50%',
@@ -98,6 +99,67 @@ describe('daily operations patrol rules', () => {
 
     expect(result.status).toBe('unavailable');
     expect(result.issues[0].detail).toContain('2026-09-14 PUE未取得完整有效日数据');
+  });
+
+  it('reports an empty metric day even if another metric can be compared', () => {
+    const result = detectFacilityMetricIssues({
+      businessDate: '2026-09-17',
+      metrics: [
+        {
+          key: 'pue',
+          label: 'PUE',
+          unit: '',
+          history: [
+            period('2026-09-16', {}),
+            period('2026-09-15', { A楼: 1 }),
+            period('2026-09-14', { A楼: 1 }),
+          ],
+        },
+        {
+          key: 'water',
+          label: '水耗',
+          unit: '吨',
+          history: ['2026-09-16', '2026-09-15', '2026-09-14'].map(
+            (date) => period(date, { A楼: 10 }),
+          ),
+        },
+      ],
+    });
+
+    expect(result.status).toBe('unavailable');
+    expect(result.count).toBe(1);
+    expect(result.issues[0]).toMatchObject({
+      check: 'facility',
+      severity: 'unavailable',
+      date: '2026-09-16',
+      title: '2026-09-16 PUE日数据缺失或不完整',
+    });
+  });
+
+  it('reports a missing building on the evaluated day when baseline dates have that building', () => {
+    const result = detectFacilityMetricIssues({
+      businessDate: '2026-11-01',
+      metrics: [{
+        key: 'pue',
+        label: 'PUE',
+        unit: '',
+        history: [
+          period('2026-11-01', { A楼: 5, B楼: 5 }),
+          period('2026-10-31', { A楼: 1 }),
+          period('2026-10-30', { A楼: 1, B楼: 1 }),
+          period('2026-10-29', { A楼: 1, B楼: 1 }),
+        ],
+      }],
+    });
+
+    expect(result.status).toBe('unavailable');
+    expect(result.evaluatedDate).toBe('2026-10-31');
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0]).toMatchObject({
+      title: 'B楼 PUE日数据缺失',
+      date: '2026-10-31',
+      severity: 'unavailable',
+    });
   });
 
   it('finds same-day white-to-night and previous-night-to-white risks', () => {

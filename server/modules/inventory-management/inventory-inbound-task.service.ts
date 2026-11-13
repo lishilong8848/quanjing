@@ -38,6 +38,7 @@ import {
   type ManualInventoryInboundTaskRequest,
 } from './inventory-inbound-task-ledger.store';
 import { InventoryMovementCommandService } from './inventory-movement-command.service';
+import { InventoryInboundPhotoService, normalizeInventoryInboundPhotoIds } from './inventory-inbound-photo.service';
 import { InventoryStorageLocationService } from './inventory-storage-location.service';
 import { PurchaseInboundConfirmationService } from './purchase-inbound-confirmation.service';
 import { PurchaseWorkflowService } from '../purchase-inventory/purchase-workflow.service';
@@ -93,6 +94,7 @@ export class InventoryInboundTaskService
     @Inject(INVENTORY_INBOUND_TASK_SERVICE_OPTIONS)
     options: InventoryInboundTaskServiceOptions = {},
     @Optional() private readonly accessConfiguration?: AccessConfigurationService,
+    @Optional() private readonly photoService?: InventoryInboundPhotoService,
   ) {
     this.retryDelayMs = positive(options.retryDelayMs, DEFAULT_RETRY_DELAY_MS);
     this.recoveryScanDelayMs = positive(
@@ -194,6 +196,17 @@ export class InventoryInboundTaskService
   ): Promise<InventoryInboundAcceptedResponse> {
     const principalFingerprint = clean(principalFingerprintValue);
     if (!principalFingerprint) throw new ForbiddenException('登录身份不可用');
+    const photoIds = normalizeInventoryInboundPhotoIds(request.photoIds);
+    if (photoIds?.length) {
+      if (!this.photoService || !request.building || !request.clientMutationId) {
+        throw new BadRequestException('请使用当前入库表单上传物品照片');
+      }
+      const existing = await this.taskLedger.findInboundByMutationId(request.clientMutationId);
+      if (existing && existing.principalFingerprint !== principalFingerprint) {
+        throw new ForbiddenException('无权继续该入库照片申请');
+      }
+      if (!existing) await this.photoService.assertStaged(principal, request.building, request.clientMutationId, photoIds);
+    }
     const timestamp = this.now().toISOString();
     const entry: InventoryInboundTaskLedgerEntry = {
       kind,

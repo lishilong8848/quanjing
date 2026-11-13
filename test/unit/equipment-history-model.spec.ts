@@ -47,29 +47,30 @@ describe('two-table equipment repair identity', () => {
       matchEquipmentRepair(
         [...ledger(), { ...ledger()[0], id: 'duplicate' }],
         [repair()],
+        false,
       ).get('repair-1')?.assetId,
     ).toBeNull());
   it('does not match another building', () =>
     expect(
       matchEquipmentRepair(ledger(), [
         repair({ '所属数据中心/楼栋-使用': 'B楼' }),
-      ]).get('repair-1')?.assetId,
+      ], false).get('repair-1')?.assetId,
     ).toBeNull());
   it('rejects conflicting formal/legacy identity', () =>
     expect(
       matchEquipmentRepair(ledger(), [
         repair({ '设备编号-L': 'A-311-CRAH-02' }),
-      ]).get('repair-1')?.assetId,
+      ], false).get('repair-1')?.assetId,
     ).toBeNull());
   it('preserves suffixes and leading zeroes', () =>
     expect(
       matchEquipmentRepair(ledger(), [
         repair({ 设备编号: 'A-311-CRAH-1', '设备编号-L': 'A-311-CRAH-1' }),
-      ]).get('repair-1')?.assetId,
+      ], false).get('repair-1')?.assetId,
     ).toBeNull());
   it('rejects a conflicting equipment name', () =>
     expect(
-      matchEquipmentRepair(ledger(), [repair({ 设备名称: '风扇' })]).get(
+      matchEquipmentRepair(ledger(), [repair({ 设备名称: '风扇' })], false).get(
         'repair-1',
       )?.assetId,
     ).toBeNull());
@@ -77,13 +78,13 @@ describe('two-table equipment repair identity', () => {
     expect(
       matchEquipmentRepair(ledger(), [
         repair({ '故障发生现象描述-L': 'A-312-CRAH-01压力表故障' }),
-      ]).get('repair-1')?.assetId,
+      ], false).get('repair-1')?.assetId,
     ).toBeNull());
   it('also rejects contradictions in the current fault field', () =>
     expect(
       matchEquipmentRepair(ledger(), [
         repair({ 故障发生现象描述: 'A-312-CRAH-01压力表故障' }),
-      ]).get('repair-1')?.assetId,
+      ], false).get('repair-1')?.assetId,
     ).toBeNull());
   it('does not require CMDB or follow-up records', () =>
     expect(
@@ -100,6 +101,20 @@ describe('two-table equipment repair identity', () => {
         repair({ 关联台账记录ID: 'old-asset' }),
       ]).get('repair-1')?.assetId,
     ).toBeNull());
+  it('uses the confirmed record ID when repair descriptions are incomplete or stale', () => {
+    const asset = ledger()[0];
+    const other = { ...asset, id: 'asset-b' };
+    const rows = [repair({
+      设备编号: '',
+      '设备编号-L': '',
+      设备名称: '旧称',
+      '所属数据中心/楼栋-使用': '',
+      关联台账记录ID: 'asset-b',
+    })];
+    expect(matchEquipmentRepair([asset, other], rows).get('repair-1')?.assetId).toBe('asset-b');
+    expect(matchEquipmentRepair([asset], rows).get('repair-1')?.assetId).toBeNull();
+    expect(matchEquipmentRepair([other, other], rows).get('repair-1')?.assetId).toBeNull();
+  });
   it('honours a source pending-confirmation decision', () =>
     expect(
       matchEquipmentRepair(ledger(), [repair({ 台账关联状态: '待确认' })]).get(

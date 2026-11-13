@@ -76,23 +76,27 @@ export class PersonnelProfileChangesGateway {
     if (
       response.data?.code !== 0 ||
       !response.data?.data?.record?.fields ||
+      typeof response.data.data.record.fields !== 'object' ||
+      Array.isArray(response.data.data.record.fields) ||
       response.data?.data?.record?.record_id !== source.recordId
     )
       throw new ServiceUnavailableException('人员资料核对失败，请重试');
     const record = response.data.data.record;
+    if (!Object.prototype.hasOwnProperty.call(record.fields, '离职/异动情况')) {
+      const metadata = await this.metadata(source);
+      const employment = metadata.find(field => field.field_name === '离职/异动情况');
+      if (employment?.type === 7) record.fields = { ...record.fields, '离职/异动情况': false };
+    }
     if (readPersonnelAuthorizationState(record.fields) !== 'active')
       throw new ConflictException('人员在职状态已变化');
     return record;
   }
-  async fields(
-    source: ProfileSource,
-    keys: ProfileChangeField[],
-    record: BitableRecordItem,
-  ) {
+  private async metadata(source: ProfileSource) {
     await this.verifySource(source);
     const metadata: any[] = [];
     let page: string | undefined;
     const seen = new Set<string>();
+    const names = new Set<string>();
     do {
       const response = await this.http.axiosRef.get(
         `${API}/bitable/v1/apps/${source.appToken}/tables/${source.tableId}/fields`,
@@ -103,10 +107,15 @@ export class PersonnelProfileChangesGateway {
       );
       if (
         response.data?.code !== 0 ||
-        !Array.isArray(response.data?.data?.items)
+        !Array.isArray(response.data?.data?.items) ||
+        typeof response.data?.data?.has_more !== 'boolean'
       )
         throw new ServiceUnavailableException('人员字段核对失败');
-      metadata.push(...response.data.data.items);
+      for (const field of response.data.data.items) {
+        if (!field || typeof field.field_name !== 'string' || !field.field_name || !Number.isInteger(field.type) || names.has(field.field_name)) throw new ServiceUnavailableException('人员字段核对失败');
+        names.add(field.field_name);
+        metadata.push(field);
+      }
       page = response.data.data.has_more
         ? response.data.data.page_token
         : undefined;
@@ -121,6 +130,14 @@ export class PersonnelProfileChangesGateway {
         seen.add(page);
       }
     } while (page);
+    return metadata;
+  }
+  async fields(
+    source: ProfileSource,
+    keys: ProfileChangeField[],
+    record: BitableRecordItem,
+  ) {
+    const metadata = await this.metadata(source);
     const result: Partial<Record<ProfileChangeField, string>> = {};
     for (const key of keys) {
       const names = aliases[key];

@@ -25,6 +25,7 @@ import {
 import type { LedgerAsset } from '@shared/equipment-ledger.interface';
 import type { EquipmentHistoryDevicesState } from '@shared/equipment-history.interface';
 import { classifyLedgerAsset } from '@shared/equipment-ledger-classification';
+import { formatUpdatedAt } from '../EquipmentLifecycleDashboard/model';
 import { getEquipmentHistoryDevices } from './api';
 import { useLedgerQuery, type LedgerCache } from './use-ledger-query';
 import {
@@ -35,6 +36,10 @@ import {
 } from './repair-device-view';
 import './repair-devices.css';
 import { createRepairDialogFocus } from './repair-dialog-focus';
+
+const REPAIR_REVALIDATE_MS = 60_000;
+const REPAIR_POLL_MS = 1_500;
+const REPAIR_WAIT_MS = 90_000;
 
 export function RepairDevicesCard({
   cache,
@@ -57,15 +62,47 @@ export function RepairDevicesCard({
   );
   const started = useRef(Date.now());
   const [expired, setExpired] = useState(false);
+  const retry = query.retry;
+  const beginRefresh = useCallback(
+    (force: boolean) => {
+      forceRefresh.current = force;
+      started.current = Date.now();
+      setExpired(false);
+      retry();
+    },
+    [retry],
+  );
+  const refreshing = Boolean(
+    query.data?.refreshing || query.data?.status === 'loading',
+  );
   useEffect(() => {
-    if (!query.data?.refreshing && query.data?.status !== 'loading') return;
-    if (Date.now() - started.current > 90000) {
+    if (query.loading) return;
+    const polling = refreshing && !expired && !query.error;
+    if (polling && Date.now() - started.current >= REPAIR_WAIT_MS) {
       setExpired(true);
       return;
     }
-    const timer = setTimeout(query.retry, 1500);
-    return () => clearTimeout(timer);
-  }, [query.data, query.retry]);
+    const check = () => {
+      if (document.hidden) return;
+      clearTimeout(timer);
+      if (!polling) {
+        beginRefresh(false);
+      } else if (Date.now() - started.current >= REPAIR_WAIT_MS) {
+        setExpired(true);
+      } else {
+        retry();
+      }
+    };
+    const timer = setTimeout(
+      check,
+      polling ? REPAIR_POLL_MS : REPAIR_REVALIDATE_MS,
+    );
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [beginRefresh, expired, query.error, query.loading, refreshing, retry]);
   const [open, setOpen] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const deviceList = useRef<HTMLDivElement>(null);
@@ -94,6 +131,7 @@ export function RepairDevicesCard({
   const completed = devices.reduce((n, d) => n + d.completed, 0);
   const pending = devices.reduce((n, d) => n + d.pending, 0);
   const ready = query.data?.status === 'ready';
+  const updatedAt = query.data?.updatedAt;
   const error =
     query.error ||
     query.data?.error ||
@@ -257,12 +295,7 @@ export function RepairDevicesCard({
     setStatus(nextStatus);
     setOpen(true);
   };
-  const reset = () => {
-    forceRefresh.current = true;
-    started.current = Date.now();
-    setExpired(false);
-    query.retry();
-  };
+  const reset = () => beginRefresh(true);
   return (
     <>
       <Card className="equipment-repair-card" data-slot="card">
@@ -350,9 +383,16 @@ export function RepairDevicesCard({
             </p>
           ) : !ready ? (
             <p role="status">正在读取维修设备…</p>
-          ) : query.data?.stale ? (
-            <p role="status">当前展示最近成功读取的维修记录</p>
+          ) : refreshing || query.loading || query.data?.stale ? (
+            <p role="status">
+              {refreshing || query.loading
+                ? '正在更新维修记录。'
+                : '当前展示最近成功读取的维修记录。'}
+            </p>
           ) : null}
+          {ready && updatedAt && (
+            <p>最近同步 {formatUpdatedAt(updatedAt)}</p>
+          )}
         </CardContent>
       </Card>
       <Dialog open={open} onOpenChange={changeOpen}>

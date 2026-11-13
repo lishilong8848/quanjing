@@ -25,13 +25,8 @@ describe('DutyDailyReportTaskCoordinatorService', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('has no report-record creation task or fallback', () => {
-    const sources = [
-      'duty-daily-report-local-scheduler.service.ts',
-      'duty-daily-report-task-coordinator.service.ts',
-      'duty-daily-report-bitable.service.ts',
-      'duty-schedule.automation.ts',
-    ].map((fileName) =>
+  it('centralizes report-record creation in the bitable service, keeping scheduler paths creation-free', () => {
+    const read = (fileName: string) =>
       readFileSync(
         join(
           process.cwd(),
@@ -39,10 +34,20 @@ describe('DutyDailyReportTaskCoordinatorService', () => {
           fileName,
         ),
         'utf8',
-      ),
-    );
+      );
+    const bitableSource = read('duty-daily-report-bitable.service.ts');
+    const schedulerSources = [
+      'duty-daily-report-local-scheduler.service.ts',
+      'duty-daily-report-task-coordinator.service.ts',
+      'duty-schedule.automation.ts',
+    ].map(read);
 
-    for (const source of sources) {
+    // Per-building record creation is centralized in the bitable service and is
+    // idempotent by date+shift+楼栋, so it is the single allowed creator.
+    expect(bitableSource).toContain('createDailyReportRecord');
+    expect(bitableSource).toContain('resolveBuildingRecords');
+    // The scheduler/coordinator/automation paths must not create records ad hoc.
+    for (const source of schedulerSources) {
       expect(source).not.toContain("'white-record'");
       expect(source).not.toContain("'night-record'");
       expect(source).not.toContain('ensureDailyReportRecord');

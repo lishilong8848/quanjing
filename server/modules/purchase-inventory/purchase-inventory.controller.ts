@@ -118,7 +118,7 @@ export class PurchaseInventoryController {
         ? 'active'
         : principal.role !== 'purchase_applicant' &&
           (refresh === '1' || refresh === 'true');
-    const dashboard = await this.service.getDashboard(shouldRefresh);
+    const dashboard = await this.service.getDisplayDashboard(shouldRefresh);
     return this.accessPolicy.scopeDashboard(principal, dashboard, req.accessPageRead === true);
   }
 

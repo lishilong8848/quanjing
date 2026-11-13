@@ -1,3 +1,4 @@
+import { PersonnelProfileCardActionService } from '../../common/access/personnel-profile-card-action.service';
 import { HttpModule, HttpService } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { readEnv } from '../../common/config/external-services.config';
@@ -114,6 +115,7 @@ function purchasePlatformRecoveryOptions(): { enabled: boolean } {
     PurchaseBatchAttachmentTicketService,
     PurchaseLifecycleAttachmentAccessRuntime,
     PurchaseManagerApprovalScheduler,
+    PersonnelProfileCardActionService,
     FeishuCardActionRouter,
     FeishuCardCallbackFeedbackService,
     {

@@ -44,9 +44,11 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { WarehouseStorageLocationField } from './WarehouseStorageLocationField';
+import { InventoryInboundPhotos, useInventoryInboundPhotos } from './InventoryInboundPhotos';
 import type {
   InventoryExistingInboundMovementCreateRequest,
   InventoryInboundItemMode,
+  InventoryInboundStagedPhoto,
   InventoryMovementCreateRequest,
   InventoryMovementItem,
   InventoryMovementOptionItem,
@@ -102,6 +104,7 @@ const INVENTORY_OUTBOUND_REASON_MAX_LENGTH_ERROR =
 
 export interface InventoryInboundDraft {
   clientMutationId?: string;
+  photos?: InventoryInboundStagedPhoto[];
   mode: InventoryInboundItemMode;
   building: WarehouseBuilding;
   quantity: string;
@@ -290,6 +293,7 @@ export function buildInventoryInboundSubmission({
 
   const quantity = Number(draft.quantity);
   const occurredAt = new Date(draft.occurredAt).toISOString();
+  const photoIds = draft.photos?.map((photo) => photo.id);
   const draftSnapshot: InventoryInboundDraft = {
     ...draft,
     clientMutationId: mutationId,
@@ -315,6 +319,7 @@ export function buildInventoryInboundSubmission({
       building: draft.building,
       quantity,
       occurredAt,
+      ...(photoIds?.length ? { photoIds } : {}),
     };
     optimisticFields = {
       sku: selectedItem.sku.trim(),
@@ -340,6 +345,7 @@ export function buildInventoryInboundSubmission({
       building: draft.building,
       quantity,
       occurredAt,
+      ...(photoIds?.length ? { photoIds } : {}),
       newItem,
     };
     optimisticFields = {
@@ -634,6 +640,8 @@ export function InventoryMovementCreateDialog({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [creatingStorageLocation, setCreatingStorageLocation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const inboundPhotos = useInventoryInboundPhotos();
+  const resetInboundPhotos = inboundPhotos.reset;
   const requestSequence = useRef(0);
   const inboundSubmitGuard = useRef(false);
   const outboundSubmitGuard = useRef(false);
@@ -642,6 +650,7 @@ export function InventoryMovementCreateDialog({
     type === 'outbound' ? INVENTORY_OUTBOUND_REASON_MAX_LENGTH : undefined;
 
   useEffect(() => {
+    resetInboundPhotos(open && type === 'inbound' ? initialDraft?.photos : undefined);
     if (!open) return;
     requestSequence.current += 1;
     inboundSubmitGuard.current = false;
@@ -718,7 +727,7 @@ export function InventoryMovementCreateDialog({
     setErrors(restoredReasonError ? { reason: restoredReasonError } : {});
     setItemError('');
     setCreatingStorageLocation(false);
-  }, [initialBuilding, initialDraft, initialOutboundDraft, open, type]);
+  }, [initialBuilding, initialDraft, initialOutboundDraft, open, resetInboundPhotos, type]);
 
   useEffect(() => {
     if (
@@ -1098,7 +1107,7 @@ export function InventoryMovementCreateDialog({
     return Object.keys(next).length === 0;
   }
 
-  function submitInbound() {
+  async function submitInbound() {
     if (!canCreate) { setErrors({ submit: '当前权限不能新增入库' }); return; }
     if (inboundSubmitGuard.current || creatingStorageLocation) return;
 
@@ -1121,8 +1130,11 @@ export function InventoryMovementCreateDialog({
       const clientMutationId =
         retryClientMutationId?.trim() || createClientMutationId();
       setRetryClientMutationId(clientMutationId);
+      const photos = inboundPhotos.files.length || inboundPhotos.staged.length
+        ? await inboundPhotos.prepare(draft.building, clientMutationId)
+        : [];
       const submission = buildInventoryInboundSubmission({
-        draft,
+        draft: { ...draft, ...(photos.length ? { photos } : {}) },
         clientMutationId,
         startedAt: Date.now(),
       });
@@ -1262,7 +1274,7 @@ export function InventoryMovementCreateDialog({
     <Dialog
       open={open}
       onOpenChange={(value) => {
-        if (type === 'borrow' && submitting) return;
+        if ((type === 'borrow' && submitting) || (type === 'inbound' && inboundPhotos.uploading)) return;
         onOpenChange(value);
       }}
     >
@@ -1294,7 +1306,7 @@ export function InventoryMovementCreateDialog({
         </DialogHeader>
 
         <fieldset
-          disabled={type !== 'borrow' && retryLocked}
+          disabled={(type !== 'borrow' && retryLocked) || (type === 'inbound' && inboundPhotos.uploading)}
           className="max-h-[calc(90vh-142px)] min-w-0 flex-1 overflow-y-auto border-0 px-5 py-5 max-sm:max-h-none"
         >
           {type !== 'borrow' && retryLocked && (
@@ -1762,6 +1774,11 @@ export function InventoryMovementCreateDialog({
               </div>
             )}
 
+            {type === 'inbound' && (
+              <div className="sm:col-span-2">
+                <InventoryInboundPhotos photos={inboundPhotos} disabled={retryLocked || !canCreate} />
+              </div>
+            )}
             <div className="sm:col-span-2 flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-xs leading-5 text-emerald-800">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
@@ -1786,6 +1803,7 @@ export function InventoryMovementCreateDialog({
               type="button"
               variant="outline"
               onClick={onAbandonRetry}
+              disabled={inboundPhotos.uploading}
               className="border-amber-300 text-amber-800 hover:bg-amber-50"
             >
               放弃原编号并编辑
@@ -1794,14 +1812,14 @@ export function InventoryMovementCreateDialog({
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={type === 'borrow' && submitting}
+            disabled={(type === 'borrow' && submitting) || (type === 'inbound' && inboundPhotos.uploading)}
           >
             取消
           </Button>
           <Button
             onClick={() => {
               if (type === 'inbound') {
-                submitInbound();
+                void submitInbound();
                 return;
               }
               if (type === 'outbound') {
@@ -1813,7 +1831,7 @@ export function InventoryMovementCreateDialog({
             disabled={
               !canCreate || (type === 'borrow'
                 ? submitting || itemLoading
-                : itemLoading || (type === 'inbound' && creatingStorageLocation))
+                : itemLoading || (type === 'inbound' && (creatingStorageLocation || inboundPhotos.uploading)))
             }
             className="min-w-28 bg-blue-600 hover:bg-blue-700"
           >

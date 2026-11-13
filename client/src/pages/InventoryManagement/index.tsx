@@ -1,4 +1,5 @@
 import { StocktakeDraftJournal, stocktakeDraftJournalIdentity } from './stocktake-draft-journal';
+import { InventoryItemPhotoPreview, InventoryItemPhotoThumbnail, type InventoryItemPhotoGallery } from './InventoryItemPhotos';
 import { businessBuildingsForAction, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
 import { accessBuildings } from '@shared/building-access';
 import { canUsePageAction } from '../business-action-access';
@@ -8,6 +9,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -62,6 +64,13 @@ import { WAREHOUSE_BUILDINGS } from '@shared/inventory-management.interface';
 
 import { ManagementHeader } from '../PurchaseInventoryManagement/ManagementHeader';
 import { getStocktakeOverview } from './inventory-stocktake.api';
+import {
+  inventoryDashboardReads,
+  inventoryItemReads,
+  inventoryProgressReads,
+  inventoryReadScope,
+  isInventoryReadDenied,
+} from './inventory-read-cache';
 import { StocktakeMonthPicker } from './StocktakeMonthPicker';
 import type { StocktakeOverview } from '@shared/inventory-stocktake.interface';
 import type { StocktakeScope } from '@shared/inventory-stocktake.interface';
@@ -87,6 +96,7 @@ import {
 } from './InventorySectionNav';
 
 const AUTO_REFRESH_MS = 4 * 60 * 60 * 1000;
+const LEDGER_REFRESH_MS = 60_000;
 const PAGE_SIZE = 20;
 const EMPTY_ITEMS: InventoryItemsResponse = {
   items: [],
@@ -124,10 +134,12 @@ export default function InventoryManagementPage() {
   const {
     role,
     purchaseBuilding, buildings,
-    principalFingerprint,
-    isLoading: accessLoading,
+    isLoading,
+    isChangingIdentity,
+    isConfirmingIdentity,
     capabilities,
   } = principal;
+  const accessLoading = isLoading || isChangingIdentity || isConfirmingIdentity;
   const canEdit = canUsePageAction(principal, 'inventory', 'create', capabilities.canEdit);
   const canForceRefresh = canUsePageAction(principal, 'inventory', 'refresh', capabilities.canForceRefresh);
   const canReadInventory = canUsePageAction(principal, 'inventory', 'read', true);
@@ -187,28 +199,37 @@ export default function InventoryManagementPage() {
     activeSection === 'overview' ||
     (activeSection === 'stocktake' && !executingStocktake));
   const showHeaderRefresh = needsDashboard || activeSection === 'ledger';
-  const [dashboard, setDashboard] =
-    useState<InventoryManagementDashboard | null>(null);
+  const readScope = inventoryReadScope(principal);
+  const dashboardKey = canReadInventory && !accessLoading ? readScope : null;
+  const [dashboardResult, setDashboardResult] = useState<{
+    key: string | null;
+    value: InventoryManagementDashboard | null;
+  } | null>(null);
+  const dashboard = dashboardResult?.key === dashboardKey && !accessLoading && canReadInventory
+    ? dashboardResult.value
+    : inventoryDashboardReads.peek(dashboardKey) ?? null;
   const [progressResult, setProgressResult] = useState<{
     key: string;
     value: StocktakeOverview;
   } | null>(null);
-  const progressCache = useRef(new Map<string, StocktakeOverview>());
-  const progressKey = `${principalFingerprint}:${role}:${purchaseBuilding}:${stocktakeMonth}`;
+  const progressKey = JSON.stringify([readScope, stocktakeMonth]);
+  const progressCacheKey = readScope && !accessLoading && canReadStocktake ? progressKey : null;
   const executionProgress =
-    progressResult?.key === progressKey ? progressResult.value : null;
+    progressResult?.key === progressKey && !accessLoading && canReadStocktake
+      ? progressResult.value
+      : inventoryProgressReads.peek(progressCacheKey) ?? null;
   const [progressRevision, setProgressRevision] = useState(0);
   const [executionProgressLoading, setExecutionProgressLoading] =
     useState(false);
   const [executionProgressError, setExecutionProgressError] = useState('');
   const reloadStocktakeProgress = useCallback(() => {
-    progressCache.current.delete(progressKey);
+    if (progressCacheKey) inventoryProgressReads.invalidate(progressCacheKey);
     setProgressRevision((value) => value + 1);
-  }, [progressKey]);
+  }, [progressCacheKey]);
   useEffect(() => {
-    if (!canReadStocktake || activeSection !== 'stocktake') return;
+    if (accessLoading || !canReadStocktake || activeSection !== 'stocktake') return;
     if (executingStocktake) {
-      progressCache.current.delete(progressKey);
+      if (progressCacheKey) inventoryProgressReads.invalidate(progressCacheKey);
       return;
     }
     if (!canExecuteStocktake) {
@@ -218,26 +239,16 @@ export default function InventoryManagementPage() {
     }
     let cancelled = false;
     setExecutionProgressError('');
-    const cached = progressCache.current.get(progressKey);
-    if (cached) {
-      setProgressResult({ key: progressKey, value: cached });
-      setExecutionProgressLoading(false);
-      return;
-    }
-    setExecutionProgressLoading(true);
-    getStocktakeOverview(stocktakeMonth)
+    setExecutionProgressLoading(!inventoryProgressReads.peek(progressCacheKey));
+    inventoryProgressReads.read(progressCacheKey, () => getStocktakeOverview(stocktakeMonth))
       .then((result) => {
         if (cancelled) return;
-        progressCache.current.set(progressKey, result);
-        if (progressCache.current.size > 24)
-          progressCache.current.delete(
-            progressCache.current.keys().next().value!,
-          );
         setProgressResult({ key: progressKey, value: result });
       })
-      .catch(() => {
-        if (!cancelled)
-          setExecutionProgressError('该月盘点进度读取失败，请重试。');
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (isInventoryReadDenied(error)) setProgressResult(null);
+        setExecutionProgressError('该月盘点进度读取失败，请重试。');
       })
       .finally(() => {
         if (!cancelled) setExecutionProgressLoading(false);
@@ -247,14 +258,19 @@ export default function InventoryManagementPage() {
     };
   }, [
     activeSection,
+    accessLoading,
     executingStocktake,
     canExecuteStocktake,
     progressKey,
+    progressCacheKey,
     stocktakeMonth,
     canReadStocktake,
     progressRevision,
   ]);
-  const [items, setItems] = useState<InventoryItemsResponse>(EMPTY_ITEMS);
+  const [itemsResult, setItemsResult] = useState<{
+    key: string;
+    value: InventoryItemsResponse | null;
+  } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearch = useDeferredValue(searchQuery);
   const [building, setBuilding] = useState<WarehouseBuilding | 'all'>('all');
@@ -262,78 +278,99 @@ export default function InventoryManagementPage() {
   const [risk, setRisk] = useState<InventoryRiskFilter>('all');
   const [sort, setSort] = useState<InventorySortOption>('risk');
   const [page, setPage] = useState(1);
-  const [detailSelection, setDetailSelection] =
-    useState<InventoryDetailSelection | null>(null);
+  const search = deferredSearch.trim();
+  const itemsQuery = useMemo(() => ({ page, pageSize: PAGE_SIZE, search, building, category, risk, sort }),
+    [page, search, building, category, risk, sort]);
+  const itemsViewKey = JSON.stringify([readScope, itemsQuery]);
+  const itemsCacheKey = dashboardKey ? itemsViewKey : null;
+  const cachedItems = itemsResult?.key === itemsViewKey
+    ? itemsResult.value
+    : inventoryItemReads.peek(itemsCacheKey);
+  const items = !accessLoading && canReadInventory ? cachedItems ?? EMPTY_ITEMS : EMPTY_ITEMS;
+  const [scopedDetailSelection, setScopedDetailSelection] = useState<{
+    key: string | null;
+    value: InventoryDetailSelection | null;
+  } | null>(null);
+  const detailSelection = scopedDetailSelection?.key === dashboardKey
+    ? scopedDetailSelection.value
+    : null;
+  const setDetailSelection = (value: InventoryDetailSelection | null) =>
+    setScopedDetailSelection({ key: dashboardKey, value });
   const [loading, setLoading] = useState(true);
-  const [itemsLoading, setItemsLoading] = useState(true);
+  const [itemsLoading, setItemsLoading] = useState(() => !cachedItems);
   const [itemsRefreshing, setItemsRefreshing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardError, setDashboardError] = useState('');
   const [itemsError, setItemsError] = useState('');
-  const dashboardRef = useRef<InventoryManagementDashboard | null>(null);
-  const itemsRef = useRef<InventoryItemsResponse | null>(null);
+  const dashboardRequestRef = useRef(0);
   const itemsRequestRef = useRef(0);
+  const currentRead = useRef({ dashboardKey, itemsViewKey, accessLoading, canReadInventory });
+  currentRead.current = { dashboardKey, itemsViewKey, accessLoading, canReadInventory };
 
-  const loadDashboard = useCallback(async (forceRefresh = false) => {
-    if (!dashboardRef.current) setLoading(true);
+  const loadDashboard = useCallback(async (forceRefresh = false, bypassCache = forceRefresh) => {
+    if (accessLoading || !canReadInventory) return;
+    const requestId = ++dashboardRequestRef.current;
+    const isCurrent = () => dashboardRequestRef.current === requestId &&
+      !currentRead.current.accessLoading && currentRead.current.canReadInventory &&
+      currentRead.current.dashboardKey === dashboardKey;
+    setLoading(true);
     try {
-      const response = await getInventoryManagementDashboard(forceRefresh);
-      dashboardRef.current = response;
-      setDashboard(response);
+      const response = await inventoryDashboardReads.read(dashboardKey, async () => {
+        if (currentRead.current.accessLoading || currentRead.current.dashboardKey !== dashboardKey) {
+          throw new Error('Inventory read scope changed');
+        }
+        const result = await getInventoryManagementDashboard(forceRefresh);
+        if (!result?.sectionStatus) throw new Error('Invalid inventory dashboard response');
+        return result;
+      }, bypassCache, forceRefresh);
+      if (!isCurrent()) return;
+      setDashboardResult({ key: dashboardKey, value: response });
       setDashboardError('');
-    } catch {
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (isInventoryReadDenied(error)) setDashboardResult({ key: dashboardKey, value: null });
       setDashboardError('库存驾驶舱读取失败，请检查网络或飞书数据源后重试。');
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, []);
+  }, [accessLoading, canReadInventory, dashboardKey]);
 
   const loadItems = useCallback(
-    async (forceRefresh = false) => {
+    async (forceRefresh = false, bypassCache = forceRefresh) => {
+      if (accessLoading || !canReadInventory) return;
       const requestId = ++itemsRequestRef.current;
-      if (itemsRef.current) {
-        setItemsRefreshing(true);
-      } else {
-        setItemsLoading(true);
-      }
+      const isCurrent = () => itemsRequestRef.current === requestId &&
+        !currentRead.current.accessLoading && currentRead.current.canReadInventory &&
+        currentRead.current.itemsViewKey === itemsViewKey;
+      setItemsLoading(true);
+      setItemsRefreshing(Boolean(inventoryItemReads.peek(itemsCacheKey)));
       try {
-        const response = await getInventoryManagementItems(
-          {
-            page,
-            pageSize: PAGE_SIZE,
-            search: deferredSearch.trim(),
-            building,
-            category,
-            risk,
-            sort,
-          },
-          forceRefresh,
-        );
-        if (itemsRequestRef.current !== requestId) return;
-        if (
-          !response ||
-          !Array.isArray(response.items) ||
-          !Array.isArray(response.categories) ||
-          !Number.isFinite(response.total) ||
-          !Number.isFinite(response.page) ||
-          !Number.isFinite(response.totalPages)
-        ) {
-          throw new Error('Invalid inventory items response');
-        }
-        itemsRef.current = response;
-        setItems(response);
+        const response = await inventoryItemReads.read(itemsCacheKey, async () => {
+          if (currentRead.current.accessLoading || currentRead.current.itemsViewKey !== itemsViewKey) {
+            throw new Error('Inventory read scope changed');
+          }
+          const result = await getInventoryManagementItems(itemsQuery, forceRefresh);
+          if (
+            !result || !Array.isArray(result.items) || !Array.isArray(result.categories) ||
+            !Number.isFinite(result.total) || !Number.isFinite(result.page) || !Number.isFinite(result.totalPages)
+          ) throw new Error('Invalid inventory items response');
+          return result;
+        }, bypassCache, forceRefresh);
+        if (!isCurrent()) return;
+        setItemsResult({ key: itemsViewKey, value: response });
         setItemsError('');
-      } catch {
-        if (itemsRequestRef.current !== requestId) return;
+      } catch (error) {
+        if (!isCurrent()) return;
+        if (isInventoryReadDenied(error)) setItemsResult({ key: itemsViewKey, value: null });
         setItemsError('库存台账读取失败，请稍后重试。');
       } finally {
-        if (itemsRequestRef.current === requestId) {
+        if (isCurrent()) {
           setItemsLoading(false);
           setItemsRefreshing(false);
         }
       }
     },
-    [building, category, deferredSearch, page, risk, sort],
+    [accessLoading, canReadInventory, itemsCacheKey, itemsQuery, itemsViewKey],
   );
 
   useEffect(() => {
@@ -345,12 +382,17 @@ export default function InventoryManagementPage() {
   }, [activeSection, loadItems]);
 
   useEffect(() => {
+    if (activeSection === 'ledger') {
+      const timer = window.setInterval(() => {
+        if (document.visibilityState !== 'hidden') void loadItems();
+      }, LEDGER_REFRESH_MS);
+      return () => window.clearInterval(timer);
+    }
     const timer = window.setInterval(() => {
       if (needsDashboard) {
         if (activeSection === 'stocktake') reloadStocktakeProgress();
         void loadDashboard();
       }
-      if (activeSection === 'ledger') void loadItems();
     }, AUTO_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [activeSection, loadDashboard, loadItems, needsDashboard, reloadStocktakeProgress]);
@@ -472,7 +514,7 @@ export default function InventoryManagementPage() {
             tone="error"
             message={dashboardError}
             action="重新加载"
-            onAction={() => void refreshAll()}
+            onAction={() => void loadDashboard(canForceRefresh, true)}
           />
         )}
         {needsDashboard && sourceIssues.length > 0 && (
@@ -562,15 +604,15 @@ export default function InventoryManagementPage() {
             }}
             onReset={resetFilters}
             onPageChange={setPage}
-            onRetry={() => void loadItems(canForceRefresh)}
+            onRetry={() => void loadItems(canForceRefresh, true)}
           />
         )}
 
-        {(activeSection === 'inbound' ||
+        {!accessLoading && canReadInventory && (activeSection === 'inbound' ||
           activeSection === 'outbound' ||
           activeSection === 'borrow') && (
           <InventoryMovementPage
-            key={activeSection}
+            key={JSON.stringify([activeSection, readScope])}
             type={activeSection}
             searchQuery=""
             canConfirmOutbound={
@@ -1016,6 +1058,7 @@ function InventoryLedger(props: InventoryLedgerProps) {
 }
 
 function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
+  const [gallery, setGallery] = useState<InventoryItemPhotoGallery | null>(null);
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -1023,6 +1066,7 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
           <thead className="bg-slate-50/80 text-xs font-semibold text-slate-500">
             <tr>
               <th className="px-5 py-3">物品 / SKU</th>
+              <th scope="col" className="w-16 px-2 py-3">图片</th>
               <th className="px-4 py-3">分类</th>
               <th className="px-4 py-3">楼栋 / 库位</th>
               <th className="px-4 py-3 text-right">剩余库存</th>
@@ -1039,16 +1083,16 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
                 className="border-t border-slate-100 transition hover:bg-blue-50/40"
               >
                 <td className="max-w-64 px-5 py-3.5">
-                  <strong
-                    className="block truncate text-slate-900"
-                    title={item.name}
-                  >
+                  <strong className="block truncate text-slate-900" title={item.name}>
                     {item.name}
                   </strong>
                   <span className="mt-1 block truncate text-xs text-slate-400">
                     {item.sku || '类别号待配置'} ·{' '}
                     {item.specification || '规格待补充'}
                   </span>
+                </td>
+                <td className="px-2 py-2">
+                  <InventoryItemPhotoThumbnail name={item.name} images={item.images} onOpen={setGallery} />
                 </td>
                 <td className="max-w-40 px-4 py-3.5 text-slate-600">
                   <span className="block truncate">{item.primaryCategory}</span>
@@ -1094,13 +1138,16 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
             className="rounded-xl border border-[#d8e5f7] bg-white p-4"
           >
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="truncate text-sm font-semibold text-slate-900">
-                  {item.name}
-                </h3>
-                <p className="mt-1 truncate text-xs text-slate-400">
-                  {item.sku || '类别号待配置'} · {item.primaryCategory}
-                </p>
+              <div className="flex min-w-0 items-center gap-3">
+                <InventoryItemPhotoThumbnail name={item.name} images={item.images} onOpen={setGallery} />
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold text-slate-900">
+                    {item.name}
+                  </h3>
+                  <p className="mt-1 truncate text-xs text-slate-400">
+                    {item.sku || '类别号待配置'} · {item.primaryCategory}
+                  </p>
+                </div>
               </div>
               <strong
                 className={cn(
@@ -1120,6 +1167,7 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
           </article>
         ))}
       </div>
+      {gallery && <InventoryItemPhotoPreview gallery={gallery} onClose={() => setGallery(null)} />}
     </>
   );
 }

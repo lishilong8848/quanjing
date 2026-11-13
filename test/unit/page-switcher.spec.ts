@@ -39,7 +39,6 @@ const EXPECTED_ADMIN_PATHS = [
   '/equipment-ledger-management',
   '/threshold-management',
   '/equipment-patrol-dashboard',
-  '/exhaust-valve-map',
   '/purchase-inventory-management',
   '/inventory-management',
   '/operations-tools-management',
@@ -91,7 +90,7 @@ describe('global page navigation directory', () => {
       EXPECTED_DOMAIN_LABELS,
     );
     expect(groupedPages.map((domain) => domain.pages.length)).toEqual([
-      2, 3, 3, 4, 5, 4, 4,
+      2, 3, 3, 4, 4, 4, 4,
     ]);
     expect(
       groupedPages.flatMap((domain) => domain.pages.map((page) => page.path)),
@@ -133,11 +132,6 @@ describe('global page navigation directory', () => {
         path: '/equipment-patrol-dashboard',
         external: false,
       },
-      {
-        label: '设备定位',
-        path: '/exhaust-valve-map',
-        external: false,
-      },
     ]);
     expect(navigationSource).toContain('target="_blank"');
     expect(navigationSource).toContain('rel="noopener noreferrer"');
@@ -148,16 +142,13 @@ describe('global page navigation directory', () => {
 
     expect(pages.map((page) => page.path)).toEqual([
       '/nantong-base',
-      '/today-operations-panorama',
-      '/monthly-operations',
       '/monthly-schedule',
-      '/system-monthly-report',
     ]);
     expect(
       getAccessibleNavigationDomains('guest').map((domain) => domain.label),
-    ).toEqual(['平台门户', '运营指挥', '人员保障', '知识交付']);
+    ).toEqual(['平台门户', '人员保障']);
     expect(
-      pages.find((page) => page.path === '/today-operations-panorama')?.label,
+      getAccessibleSwitcherPages('site_member').find((page) => page.path === '/today-operations-panorama')?.label,
     ).toBe('今日航图');
     expect(
       pages.some((page) => page.path === '/campus-operations-dashboard'),

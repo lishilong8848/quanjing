@@ -279,6 +279,84 @@ describe('盘点执行服务', () => {
         .actualQuantity,
     ).toBe(0);
   });
+  it('isolates a stale-stock line and confirms the rest with a per-line failure receipt', async () => {
+    const { service, start, sheet, source, store, items } =
+      await setupReview();
+    const staleRecordId = sheet.lines[5].inventory.recordId;
+    // One line's stock changed after load, so its fingerprint no longer matches.
+    (source as any).currentMany = jest.fn().mockResolvedValue(
+      items.map((i: any) =>
+        i.recordId === staleRecordId ? { ...i, quantity: 99 } : i,
+      ),
+    );
+    const request = {
+      ...start,
+      scope: 'review' as const,
+      expectedVersion: sheet.version,
+      clientMutationId: 'bulk-partial-001',
+      confirmer: person,
+      lines: sheet.lines.map((l: any) => ({
+        recordId: l.inventory.recordId,
+        expectedVersion: l.version,
+        actualQuantity: null,
+        confirmer: null,
+        note: '',
+      })),
+    };
+    // Partial success must not throw: valid lines confirm, the stale line is isolated.
+    await service.confirmReview(request, actor, 'session1');
+    const persisted = new InventoryStocktakeStore(store.path).read();
+    const reviewLines = persisted.sheets[0].review!.lines;
+    expect(
+      reviewLines.find((l: any) => l.inventory.recordId === staleRecordId)
+        ?.status,
+    ).toBe('draft');
+    expect(
+      reviewLines.filter((l: any) => l.status === 'confirmed'),
+    ).toHaveLength(sheet.lines.length - 1);
+    const batch = persisted.bulkBatches!.find(
+      (b: any) => b.month === start.month && b.building === 'A楼',
+    );
+    expect(batch!.count).toBe(sheet.lines.length - 1);
+    expect(batch!.before.every((b: any) => b.recordId !== staleRecordId)).toBe(
+      true,
+    );
+    expect(batch!.failures).toEqual([
+      expect.objectContaining({
+        recordId: staleRecordId,
+        reason: expect.stringContaining('库存已变化'),
+      }),
+    ]);
+  });
+  it('omits skipped stock details outside the reader’s professional scope', async () => {
+    const { service, start, sheet, source, store, items } = await setupReview();
+    const failedId = sheet.lines[0].inventory.recordId;
+    store.update(state => {
+      for (const line of state.sheets[0].review!.lines) {
+        line.inventory.specialty = line.inventory.recordId === failedId ? '暖通' : '电气';
+      }
+      return true;
+    });
+    (source as any).currentMany.mockResolvedValue(items.map(i =>
+      i.recordId === failedId ? { ...i, quantity: 99 } : i,
+    ));
+    const request = {
+      ...start, scope: 'review', expectedVersion: sheet.version,
+      clientMutationId: 'bulk-partial-scoped', confirmer: person,
+      lines: sheet.lines.map(l => ({
+        recordId: l.inventory.recordId, expectedVersion: l.version,
+        actualQuantity: null, confirmer: null, note: '',
+      })),
+    };
+    const result = await service.confirmReview(request, actor, 'session1');
+    expect(result.latestBulk?.failures).toEqual([expect.objectContaining({ recordId: failedId })]);
+    const scoped = service.get(start.month, 'A楼', {
+      role: 'professional_admin', purchaseBuilding: null, specialties: ['电气'],
+    }, 'review');
+    expect(scoped.latestBulk?.count).toBe(sheet.lines.length - 1);
+    expect(scoped.latestBulk?.failures).toBeUndefined();
+    expect(scoped.lines.some(l => l.inventory.recordId === failedId)).toBe(false);
+  });
   it('rejects incomplete scope, stale stock, inactive people and sample bulk operations without partial writes', async () => {
     const { service, start, sheet, source, store, items, people } =
       await setupReview();

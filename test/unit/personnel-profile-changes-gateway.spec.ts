@@ -79,4 +79,43 @@ describe('profile change field boundary', () => {
       gateway.fields(source, ['phone'], { fields: { 手机号: '13800000000' } }),
     ).resolves.toEqual({ phone: '手机号' });
   });
+  it('normalizes an omitted unchecked employment checkbox only after complete matching metadata',async()=>{
+    get.mockResolvedValueOnce({data:{code:0,data:{record:{record_id:source.recordId,fields:{姓名:'合成人员'}}}}})
+      .mockResolvedValueOnce({data:{code:0,data:{items:[],has_more:true,page_token:'page2'}}})
+      .mockResolvedValueOnce({data:{code:0,data:{items:[{field_name:'离职/异动情况',type:7}],has_more:false}}});
+    await expect(gateway.read(source)).resolves.toMatchObject({fields:{'离职/异动情况':false}});
+    expect(get).toHaveBeenCalledTimes(3);
+  });
+  it.each([true,null,'','未确认'])('does not normalize explicit employment value %s',async value=>{
+    get.mockResolvedValue({data:{code:0,data:{record:{record_id:source.recordId,fields:{'离职/异动情况':value}}}}});
+    await expect(gateway.read(source)).rejects.toThrow('人员在职状态已变化');expect(get).toHaveBeenCalledTimes(1);
+  });
+  it.each([{items:[]},{items:[{field_name:'离职/异动情况',type:1}]}])('rejects missing or non-checkbox schema',async ({items})=>{
+    get.mockResolvedValueOnce({data:{code:0,data:{record:{record_id:source.recordId,fields:{}}}}})
+      .mockResolvedValueOnce({data:{code:0,data:{items,has_more:false}}});
+    await expect(gateway.read(source)).rejects.toThrow('人员在职状态已变化');
+  });
+  it.each([
+    {items:[{field_name:'离职/异动情况',type:7}],has_more:true},
+    {items:[{field_name:'离职/异动情况',type:7}]},
+    {items:[{field_name:'离职/异动情况',type:7},{field_name:'离职/异动情况',type:1}],has_more:false},
+  ])('rejects incomplete or ambiguous metadata without assuming active',async data=>{
+    get.mockResolvedValueOnce({data:{code:0,data:{record:{record_id:source.recordId,fields:{}}}}}).mockResolvedValueOnce({data:{code:0,data}});
+    await expect(gateway.read(source)).rejects.toThrow('人员字段');
+  });
+  it('keeps explicit active records fast and rejects malformed fields',async()=>{
+    get.mockResolvedValueOnce({data:{code:0,data:{record:{record_id:source.recordId,fields:{'离职/异动情况':false}}}}});
+    await expect(gateway.read(source)).resolves.toMatchObject({fields:{'离职/异动情况':false}});expect(get).toHaveBeenCalledTimes(1);
+    get.mockResolvedValueOnce({data:{code:0,data:{record:{record_id:source.recordId,fields:[]}}}});
+    await expect(gateway.read(source)).rejects.toThrow('核对失败');
+  });
+  it('does not reuse unchecked-checkbox inference after schema or source changes',async()=>{
+    const record=()=>({data:{code:0,data:{record:{record_id:source.recordId,fields:{}}}}});
+    get.mockResolvedValueOnce(record()).mockResolvedValueOnce({data:{code:0,data:{items:[{field_name:'离职/异动情况',type:7}],has_more:false}}});
+    await gateway.read(source);
+    get.mockResolvedValueOnce(record()).mockResolvedValueOnce({data:{code:0,data:{items:[{field_name:'离职/异动情况',type:1}],has_more:false}}});
+    await expect(gateway.read(source)).rejects.toThrow('人员在职状态已变化');
+    jest.mocked(gateway.verifySource).mockRejectedValueOnce(new Error('source changed'));get.mockClear();
+    await expect(gateway.read(source)).rejects.toThrow('source changed');expect(get).not.toHaveBeenCalled();
+  });
 });

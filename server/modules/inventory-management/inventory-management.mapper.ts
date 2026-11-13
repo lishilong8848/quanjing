@@ -23,7 +23,8 @@ import type {
   WarehouseBuilding,
 } from '../../../shared/inventory-management.interface';
 import { WAREHOUSE_BUILDINGS } from '../../../shared/inventory-management.interface';
-import { getWarehouseInventoryLocationReadFieldNames } from '../../common/config/warehouse-inventory-location.config';
+import { getWarehouseInventoryLocationFieldName, getWarehouseInventoryLocationReadFieldNames } from '../../common/config/warehouse-inventory-location.config';
+import { describeInventoryLedgerImages, INVENTORY_PHOTO_FIELD } from './inventory-inbound-photo.service';
 import {
   extractDisplayText,
   extractDisplayValues,
@@ -36,11 +37,6 @@ import {
 type RecordFields = Record<string, unknown>;
 type CatalogIndex = Map<string, RecordFields>;
 type InventoryLocationIndex = Map<string, string>;
-type InventoryNonOutboundMovementType = Exclude<
-  InventoryMovementType,
-  'outbound'
->;
-
 interface NormalizedOutboundState {
   programRecord: boolean;
   status: InventoryOutboundStatus;
@@ -95,19 +91,109 @@ export interface InventoryManagementSnapshot {
   movements: InventoryMovementCollection;
 }
 
+const catalogIndexes = new WeakMap<BitableRecordItem[], CatalogIndex>();
+// Bitable replaces record arrays when a new snapshot arrives. Keep projections
+// attached to those arrays, and apply each caller's current scope afterwards.
+const inventoryLocations = new WeakMap<BitableRecordItem[], { field: string; value: InventoryLocationIndex }>();
+const mappedInventory = new WeakMap<BitableRecordItem[], WeakMap<CatalogIndex, { field: string; value: InventoryManagementItem[] }>>();
+
+function catalogIndex(records: BitableRecordItem[]): CatalogIndex {
+  const cached = catalogIndexes.get(records);
+  if (cached) return cached;
+  const index = buildCatalogIndex(records);
+  catalogIndexes.set(records, index);
+  return index;
+}
+
+function locationIndex(records: BitableRecordItem[]): InventoryLocationIndex {
+  const field = getWarehouseInventoryLocationFieldName();
+  const cached = inventoryLocations.get(records);
+  if (cached?.field === field) return cached.value;
+  const index = buildInventoryLocationIndex(records);
+  inventoryLocations.set(records, { field, value: index });
+  return index;
+}
+
+export function scopedInventoryItem(
+  record: BitableRecordItem,
+  catalog: BitableRecordItem[],
+  principal: AccessPrincipal,
+): InventoryManagementItem | undefined {
+  const item = mapInventoryItem(record, 0, catalogIndex(catalog));
+  if (!isProfessionalBusinessPrincipal(principal) && accessBuildings(principal) && !canAccessBuilding(principal, item.building)) return;
+  return filterProfessionalRecords(principal, [item], (candidate) => candidate.specialty)[0];
+}
+
+export function projectInventoryItems(
+  records: BitableRecordItem[],
+  catalogRecords: BitableRecordItem[],
+  principal?: AccessPrincipal,
+): InventoryManagementItem[] {
+  const catalog = catalogIndex(catalogRecords);
+  let byCatalog = mappedInventory.get(records);
+  if (!byCatalog) {
+    byCatalog = new WeakMap();
+    mappedInventory.set(records, byCatalog);
+  }
+  const field = getWarehouseInventoryLocationFieldName();
+  let cached = byCatalog.get(catalog);
+  if (cached?.field !== field) {
+    const locationFields = getWarehouseInventoryLocationReadFieldNames();
+    cached = { field, value: records.map((record, index) => mapInventoryItem(record, index, catalog, locationFields)) };
+    byCatalog.set(catalog, cached);
+  }
+  const scoped = filterProfessionalRecords(principal, cached.value, (item) => item.specialty);
+  return principal && !isProfessionalBusinessPrincipal(principal) && accessBuildings(principal)
+    ? scoped.filter((item) => canAccessBuilding(principal, item.building))
+    : scoped;
+}
+
+export function projectInventoryMovementRows(
+  records: BitableRecordItem[],
+  type: 'outbound',
+  inventory: BitableRecordItem[],
+  catalog: BitableRecordItem[],
+  principal?: AccessPrincipal,
+  now?: Date,
+): InventoryOutboundMovementItem[];
+export function projectInventoryMovementRows(
+  records: BitableRecordItem[],
+  type: InventoryMovementType,
+  inventory: BitableRecordItem[],
+  catalog: BitableRecordItem[],
+  principal?: AccessPrincipal,
+  now?: Date,
+): InventoryMovementItem[];
+export function projectInventoryMovementRows(
+  records: BitableRecordItem[],
+  type: InventoryMovementType,
+  inventory: BitableRecordItem[],
+  catalog: BitableRecordItem[],
+  principal?: AccessPrincipal,
+  now = new Date(),
+): InventoryMovementItem[] {
+  if (!records.length) return [];
+  const index = catalogIndex(catalog);
+  const locations = locationIndex(inventory);
+  const rows = buildMovements(records, type, now, index, locations);
+  const scoped = filterProfessionalRecords(principal, rows, (item) => item.specialty, (item) =>
+    item.destinationBuilding && item.destinationBuilding !== '未配置'
+      ? [item.building, item.destinationBuilding]
+      : item.building,
+  );
+  return principal && !isProfessionalBusinessPrincipal(principal) && accessBuildings(principal)
+    ? scoped.filter((item) => canAccessBuilding(principal, item.building) &&
+      (!item.destinationBuilding || item.destinationBuilding === '未配置' || canAccessBuilding(principal, item.destinationBuilding)))
+    : scoped;
+}
+
 export function buildInventoryManagementSnapshot(
   input: BuildInventorySnapshotInput,
 ): InventoryManagementSnapshot {
   const now = input.now ?? new Date();
-  const catalog = buildCatalogIndex(input.catalog);
-  const locations = buildInventoryLocationIndex(input.inventory);
-  let items = filterProfessionalRecords(input.principal, input.inventory.map((record, index) =>
-    mapInventoryItem(record, index, catalog),
-  ), item => item.specialty);
+  const items = projectInventoryItems(input.inventory, input.catalog, input.principal);
   const scopedPrincipal = isProfessionalBusinessPrincipal(input.principal);
   const scope = input.principal && !scopedPrincipal ? accessBuildings(input.principal) : null;
-  const scopedItems = scope ? items.filter(item => canAccessBuilding(input.principal!, item.building)) : items;
-  items = scopedItems;
   const managers = buildManagerIndex(input.managers);
   const visibleBuildings = scopedPrincipal ? WAREHOUSE_BUILDINGS.filter(building => PROFESSIONAL_SPECIALTIES.some(specialty => canManageProfessionalRecord(input.principal!, specialty, building))) : scope;
   const buildings = buildBuildingSummaries(items, managers).filter(item => !visibleBuildings || visibleBuildings.includes(item.building));
@@ -118,25 +204,10 @@ export function buildInventoryManagementSnapshot(
     now,
   );
   const movements = {
-    inbound: buildMovements(input.inbound, 'inbound', now, catalog, locations),
-    outbound: buildMovements(
-      input.outbound,
-      'outbound',
-      now,
-      catalog,
-      locations,
-    ),
-    borrow: buildMovements(input.borrow, 'borrow', now, catalog, locations),
+    inbound: projectInventoryMovementRows(input.inbound, 'inbound', input.inventory, input.catalog, input.principal, now),
+    outbound: projectInventoryMovementRows(input.outbound, 'outbound', input.inventory, input.catalog, input.principal, now),
+    borrow: projectInventoryMovementRows(input.borrow, 'borrow', input.inventory, input.catalog, input.principal, now),
   } satisfies InventoryMovementCollection;
-  movements.inbound = filterProfessionalRecords(input.principal, movements.inbound, item => item.specialty, item => item.destinationBuilding && item.destinationBuilding !== '未配置' ? [item.building, item.destinationBuilding] : item.building);
-  movements.outbound = filterProfessionalRecords(input.principal, movements.outbound, item => item.specialty, item => item.destinationBuilding && item.destinationBuilding !== '未配置' ? [item.building, item.destinationBuilding] : item.building);
-  movements.borrow = filterProfessionalRecords(input.principal, movements.borrow, item => item.specialty, item => item.destinationBuilding && item.destinationBuilding !== '未配置' ? [item.building, item.destinationBuilding] : item.building);
-  if (scope) {
-    const filterMovements = <T extends InventoryMovementItem>(rows: T[]): T[] => rows.filter(item => canAccessBuilding(input.principal!, item.building) && (!item.destinationBuilding || item.destinationBuilding === '未配置' || canAccessBuilding(input.principal!, item.destinationBuilding)));
-    movements.inbound = filterMovements(movements.inbound);
-    movements.outbound = filterMovements(movements.outbound);
-    movements.borrow = filterMovements(movements.borrow);
-  }
   const alerts = items
     .filter((item) => item.lowStock || item.negativeStock)
     .sort(compareInventoryRisk)
@@ -249,7 +320,7 @@ export function queryInventoryItems(
 }
 
 export function queryInventoryMovements(
-  movements: InventoryMovementCollection,
+  movements: Partial<InventoryMovementCollection>,
   query: InventoryMovementsQuery,
 ): InventoryMovementsResponse {
   const search = String(query.search || '')
@@ -317,6 +388,7 @@ function mapInventoryItem(
   record: BitableRecordItem,
   index: number,
   catalog: CatalogIndex,
+  locationFields = getWarehouseInventoryLocationReadFieldNames(),
 ): InventoryManagementItem {
   const fields = fieldsOf(record);
   const recordId = getRecordId(record) || `inventory:${index}`;
@@ -335,9 +407,11 @@ function mapInventoryItem(
   const annualUsage = number(fields, ['年度使用频次']) ?? 0;
   const reportedValue = number(fields, ['现存物品价格']);
   const unitPrice = number(catalogFields, ['物品单价']);
+  const images = describeInventoryLedgerImages(getRecordId(record), fields[INVENTORY_PHOTO_FIELD]);
 
   return {
     recordId,
+    ...(images.length ? { images } : {}),
     ...(specialty ? { specialty } : {}),
     sku,
     name: resolvedText(fields, ['名称'], catalogFields) || '未命名物品',
@@ -351,7 +425,7 @@ function mapInventoryItem(
       resolvedText(fields, ['一级分类'], catalogFields) || '未分类',
     secondaryCategory: resolvedText(fields, ['二级分类'], catalogFields),
     building: inventoryBuilding,
-    location: text(fields, getWarehouseInventoryLocationReadFieldNames()),
+    location: text(fields, locationFields),
     storageType: text(fields, ['库内外']),
     quantity,
     minimumQuantity,
@@ -487,13 +561,14 @@ function buildInventoryLocationIndex(
   records: BitableRecordItem[],
 ): InventoryLocationIndex {
   const result: InventoryLocationIndex = new Map();
+  const locationFields = getWarehouseInventoryLocationReadFieldNames();
   for (const record of records) {
     const fields = fieldsOf(record);
     const sku = text(fields, ['物品类别号']);
     const itemBuilding = building(fields, ['楼栋']);
     const location = text(
       fields,
-      getWarehouseInventoryLocationReadFieldNames(),
+      locationFields,
     );
     if (
       !sku ||
@@ -520,7 +595,7 @@ function buildMovements(
 ): InventoryOutboundMovementItem[];
 function buildMovements(
   records: BitableRecordItem[],
-  type: InventoryNonOutboundMovementType,
+  type: InventoryMovementType,
   now: Date,
   catalog: CatalogIndex,
   locations: InventoryLocationIndex,

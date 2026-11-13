@@ -29,6 +29,11 @@ export interface ProfileNotificationDelivery {
   firstAttemptAt?: number;
   messageId?: string;
   syncedVersion?: number;
+  syncedCardRevision?: number;
+  approveAvailable?: boolean;
+  presentationAttempts?: number;
+  presentationRetryAt?: number;
+  pendingCardRevision?: number;
   errorCode?: string;
   pendingCard?: Record<string, unknown>;
   pendingVersion?: number;
@@ -41,9 +46,12 @@ export interface ProfileNotificationJob {
   recipientsResolved: boolean;
   deliveries: ProfileNotificationDelivery[];
   nextResolveAt?: number;
+  photoAttempts?: Partial<Record<'before'|'after',number>>;
+  photoRetryAt?: Partial<Record<'before'|'after',number>>;
 }
 interface NotificationState {
   version: 1;
+  resultNotificationsStartedAt?: number;
   jobs: Record<string, ProfileNotificationJob>;
 }
 const uuid = /^[a-f0-9-]{36}$/u;
@@ -62,7 +70,11 @@ function valid(state: NotificationState): boolean {
     !!state.jobs &&
     typeof state.jobs === 'object' &&
     !Array.isArray(state.jobs) &&
-    Object.keys(state).sort().join(',') === 'jobs,version' &&
+    (state.resultNotificationsStartedAt === undefined
+      ? Object.keys(state).sort().join(',') === 'jobs,version'
+      : Object.keys(state).sort().join(',') === 'jobs,resultNotificationsStartedAt,version' &&
+        Number.isSafeInteger(state.resultNotificationsStartedAt) &&
+        state.resultNotificationsStartedAt > 0) &&
     Object.keys(state.jobs).length <= 10000 &&
     Object.entries(state.jobs).every(
       ([id, job]) =>
@@ -82,6 +94,7 @@ function valid(state: NotificationState): boolean {
         (job.nextResolveAt === undefined ||
           (Number.isSafeInteger(job.nextResolveAt) &&
             job.nextResolveAt >= 0)) &&
+        [job.photoAttempts,job.photoRetryAt].every(value=>value === undefined || (value && typeof value === 'object' && !Array.isArray(value) && Object.entries(value).every(([key,count])=>['before','after'].includes(key) && Number.isSafeInteger(count) && count >= 0))) &&
         Array.isArray(job.deliveries) &&
         job.deliveries.length <= 100 &&
         new Set(job.deliveries.map((row) => row.openId)).size ===
@@ -109,6 +122,9 @@ function valid(state: NotificationState): boolean {
             (row.syncedVersion === undefined ||
               (Number.isSafeInteger(row.syncedVersion) &&
                 row.syncedVersion > 0)) &&
+            [row.presentationAttempts,row.presentationRetryAt].every(value=>value === undefined || (Number.isSafeInteger(value) && value >= 0)) &&
+            (row.approveAvailable === undefined || typeof row.approveAvailable === 'boolean') &&
+            [row.syncedCardRevision,row.pendingCardRevision].every(value=>value === undefined || (Number.isSafeInteger(value) && value > 0)) &&
             (row.status !== 'sent' ||
               (!!row.messageId && !!row.syncedVersion)) &&
             (row.status !== 'sending' || row.firstAttemptAt !== undefined) &&

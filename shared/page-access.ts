@@ -94,11 +94,6 @@ export const PAGE_ACCESS_CATALOG = [
     "group": "equipment"
   },
   {
-    "path": "/exhaust-valve-map",
-    "label": "设备定位",
-    "group": "equipment"
-  },
-  {
     "path": "/purchase-inventory-management",
     "label": "采购管理",
     "group": "supply"
@@ -144,7 +139,10 @@ export const PAGE_ACCESS_CATALOG = [
     "group": "people"
   }
 ] as const;
-const knownPages = new Set<string>(PAGE_ACCESS_CATALOG.map(page => page.path));
+export const RETIRED_EXHAUST_VALVE_PAGE = '/exhaust-valve-map';
+const activePages = PAGE_ACCESS_CATALOG.map(page => page.path);
+// Persisted role, account, and handover records can still carry this route.
+const knownPages = new Set<string>([...activePages, RETIRED_EXHAUST_VALVE_PAGE]);
 export function validPagePaths(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= knownPages.size && value.every(path => typeof path === 'string' && knownPages.has(path)) && new Set(value).size === value.length;
 }
@@ -172,9 +170,10 @@ const INVENTORY_MANAGEMENT_PAGE = '/inventory-management';
 const OPERATIONS_TOOLS_PAGE = '/operations-tools-management';
 const CAMPUS_OPERATIONS_DASHBOARD_PAGE = '/campus-operations-dashboard';
 export function defaultCanAccessPage(role: AccessRole, pathname: string): boolean {
+  const normalizedPathname = normalizePagePath(pathname);
+  if (normalizedPathname === RETIRED_EXHAUST_VALVE_PAGE || normalizedPathname.startsWith(RETIRED_EXHAUST_VALVE_PAGE + '/')) return false;
   if (role === 'site_member') return ['/monthly-schedule', '/today-operations-panorama'].some(page => normalizePagePath(pathname) === page || normalizePagePath(pathname).startsWith(`${page}/`)) || defaultCanAccessPage('guest', pathname);
   if (role === 'admin') return true;
-  const normalizedPathname = normalizePagePath(pathname);
   if (role === 'guest' && normalizedPathname.startsWith('/monthly-schedule/')) return false;
   if (role === 'guest' && ['/today-operations-panorama', '/monthly-operations', '/operations-kb', '/meeting-management', '/system-monthly-report', '/ali-monthly-report'].some(path => normalizedPathname === path || normalizedPathname.startsWith(`${path}/`))) return false;
   if (normalizedPathname === '/system-configuration' || normalizedPathname.startsWith('/system-configuration/')) return false;
@@ -238,7 +237,7 @@ export function defaultCanAccessPage(role: AccessRole, pathname: string): boolea
 
 export function effectivePagePaths(role: AccessRole, rules?: RolePageRules): string[] {
   if (role === 'site_member' && rules?.site_member === undefined) return [...new Set([...effectivePagePaths('guest', rules), '/monthly-schedule', '/today-operations-panorama'])];
-  return role === 'admin' ? [...knownPages] : [...(rules?.[role] ?? PAGE_ACCESS_CATALOG.filter(page => defaultCanAccessPage(role, page.path)).map(page => page.path))];
+  return role === 'admin' ? [...activePages] : (rules?.[role] ?? activePages.filter(path => defaultCanAccessPage(role, path))).filter(path => path !== RETIRED_EXHAUST_VALVE_PAGE);
 }
 export function validPersonalPagePaths(role: AccessRole, paths: unknown): paths is string[] {
   return validPagePaths(paths) && (role === 'admin' || !paths.some(path=>path === '/system-configuration' || path.startsWith('/system-configuration/')));
@@ -247,11 +246,12 @@ export function effectiveAccountPagePaths(role: AccessRole, rules?: RolePageRule
   const defaults=effectivePagePaths(role,rules);
   if (paths === undefined || role === 'admin') return defaults;
   if (!validPersonalPagePaths(role,paths)) throw new Error('个人页面读取权限无效');
-  return [...new Set([...defaults,...paths])];
+  return [...new Set([...defaults,...paths])].filter(path => path !== RETIRED_EXHAUST_VALVE_PAGE);
 }
 export function canReadPage(role: AccessRole, path: string, paths?: readonly string[]): boolean {
-  if (role === 'admin') return true;
   let normalized = normalizePagePath(path);
+  if (normalized === RETIRED_EXHAUST_VALVE_PAGE || normalized.startsWith(RETIRED_EXHAUST_VALVE_PAGE + '/')) return false;
+  if (role === 'admin') return true;
   if (normalized === '/campus-certificate-dashboard' || normalized === '/campus-training-dashboard') {
     normalized = '/training-certification-management';
   }

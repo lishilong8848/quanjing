@@ -13,6 +13,7 @@ jest.mock('../../server/common/feishu/bitable-direct-read', () => ({
 
 import {
   fetchBitableRecords,
+  invalidateBitableRecordCache,
   resolveBitableAppToken,
 } from '../../server/common/feishu/bitable-direct-read';
 import { PurchaseInventoryService } from '../../server/modules/purchase-inventory/purchase-inventory.service';
@@ -122,6 +123,67 @@ describe('PurchaseInventoryService', () => {
     expect(fetchBitableRecords).toHaveBeenCalledTimes(12);
   });
 
+  it('serves an expired snapshot to ordinary display requests while one strict refresh runs', async () => {
+    let now = 1_800_000_000_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+      const first = await service.getDisplayDashboard(false);
+      const gate = deferred<[]>();
+      jest.mocked(fetchBitableRecords).mockReturnValue(gate.promise);
+      now += 4 * 60 * 60 * 1000 + 1;
+
+      const displays = await Promise.all([
+        service.getDisplayDashboard(false),
+        service.getDisplayDashboard('active'),
+      ]);
+      expect(displays).toEqual([
+        expect.objectContaining({ generatedAt: first.generatedAt, refreshState: 'stale' }),
+        expect.objectContaining({ generatedAt: first.generatedAt, refreshState: 'stale' }),
+      ]);
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(12);
+
+      const strict = service.getDashboard(true);
+      gate.resolve([]);
+      expect((await strict).refreshState).toBe('fresh');
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(18);
+      expect((await service.getDisplayDashboard(false)).refreshState).toBe('fresh');
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(18);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('waits for current records instead of displaying an expired snapshot after a known purchase write', async () => {
+    let now = 1_800_000_000_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+      const old = executionRecord('execution-old', '未开始（待审批）');
+      const updated = executionRecord('execution-updated', '未开始（待审批）');
+      jest.mocked(fetchBitableRecords).mockImplementation(async (_http, options) =>
+        options.tableId === 'tblKmajonrdwW7Z0' ? [old] : [],
+      );
+      const first = await service.getDisplayDashboard(false);
+      expect(first.requests.map((item) => item.recordId)).toEqual(['execution-old']);
+
+      invalidateBitableRecordCache({ appToken: 'app-token', tableId: 'tblKmajonrdwW7Z0' });
+      now += 4 * 60 * 60 * 1000 + 1;
+      const gate = deferred<void>();
+      jest.mocked(fetchBitableRecords).mockImplementation(async (_http, options) => {
+        await gate.promise;
+        return options.tableId === 'tblKmajonrdwW7Z0' ? [updated] : [];
+      });
+      const displayed = service.getDisplayDashboard(false);
+      gate.resolve();
+      const current = await displayed;
+      expect(current.refreshState).toBe('fresh');
+      expect(current.requests.map((item) => item.recordId)).toEqual(['execution-updated']);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('invalidates the dashboard and prevents an older in-flight read from restoring stale cache', async () => {
     const staleGate = deferred<void>();
     let calls = 0;
@@ -167,9 +229,12 @@ describe('PurchaseInventoryService', () => {
       },
     );
     const service = new PurchaseInventoryService({ axiosRef: {} } as never);
-    await service.getDashboard(false);
+    const original = await service.getDashboard(false);
 
     const refreshed = await service.getDashboard('active' as never);
+
+    expect(refreshed.inventory).toBe(original.inventory);
+    expect(refreshed.movements).toBe(original.movements);
 
     expect(fetchBitableRecords).toHaveBeenCalledTimes(7);
     expect(fetchBitableRecords).toHaveBeenLastCalledWith(

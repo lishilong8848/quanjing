@@ -14,6 +14,7 @@ import { InventoryStocktakeBulkService } from './inventory-stocktake-bulk.servic
 import { InventoryManagementService } from './inventory-management.service';
 import { InventoryInboundTaskLedgerStore } from './inventory-inbound-task-ledger.store';
 import { InventoryInboundTaskService } from './inventory-inbound-task.service';
+import { InventoryInboundPhotoService } from './inventory-inbound-photo.service';
 import { InventoryMovementCommandService } from './inventory-movement-command.service';
 import { InventoryMovementDeletionService } from './inventory-movement-deletion.service';
 import { InventoryMovementDeletionTaskLedgerStore } from './inventory-movement-deletion-task-ledger.store';
@@ -55,6 +56,7 @@ import { PERSONNEL_PREVIEW_READERS } from '../../common/access/personnel-preview
     InventoryFullPersonnelHandoverAdapter,
     { provide: PERSONNEL_PREVIEW_READERS.inventory, useExisting: InventoryFullPersonnelHandoverAdapter },
     InventoryInboundTaskService,
+    InventoryInboundPhotoService,
     InventoryMovementCommandService,
     InventoryMovementDeletionTaskLedgerStore,
     InventoryMovementOperationCoordinator,

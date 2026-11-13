@@ -1351,6 +1351,26 @@ describe('InventoryWorkflowGateway', () => {
     ]);
   });
 
+  it('resolves the attachment field ID and rejects a text field with the same name', async () => {
+    for (const type of [17, 1]) {
+      get.mockResolvedValueOnce({
+        data: {
+          code: 0,
+          data: {
+            items: [{ field_name: '物品图片', field_id: 'fldImage', type }],
+            has_more: false,
+          },
+        },
+      });
+      const field = gateway.getAttachmentFieldId('app-token', 'tbl-ledger', '物品图片', '库存台账');
+      if (type === 17) {
+        await expect(field).resolves.toBe('fldImage');
+      } else {
+        await expect(field).rejects.toThrow('库存台账缺少有效的「物品图片」附件字段');
+      }
+    }
+  });
+
   it('retries a timed-out field list GET and preserves the next page token', async () => {
     jest.useFakeTimers();
     const timeout = Object.assign(new Error('timeout of 10000ms exceeded'), {

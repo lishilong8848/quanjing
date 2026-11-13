@@ -1,7 +1,7 @@
 import { BUILDING_ADMIN_BUILDINGS, type AccessPrincipal, type BuildingAdminBuilding } from './access-control.interface';
 import { normalizeProfessionalScope, PROFESSIONAL_SPECIALTIES, type ProfessionalSpecialty } from './professional-access';
 import { roleBuildingOptions, validBuildingScope } from './building-access';
-import { effectivePagePaths, PAGE_ACCESS_ROLES, validPagePaths } from './page-access';
+import { effectivePagePaths, PAGE_ACCESS_ROLES, RETIRED_EXHAUST_VALVE_PAGE, validPagePaths } from './page-access';
 import type { AuthorizationBasePolicy, AuthorizationOverrides, EffectiveAuthorization } from './authorization-profile';
 import { PERMISSION_ROUTE_CLASSIFICATIONS } from './permission-route-classification';
 
@@ -333,9 +333,10 @@ export function personalPermissionPagePaths(principal: AccessPrincipal, inherite
     }
     for(const page of profile.overrides.denyPages)result.delete(page);
     result.delete('/system-configuration');
+    result.delete(RETIRED_EXHAUST_VALVE_PAGE);
     return [...result];
   }
-  if (!principal.personalRules?.length) return [...inherited];
+  if (!principal.personalRules?.length) return inherited.filter(page => page !== RETIRED_EXHAUST_VALVE_PAGE);
   const result = new Set(inherited);
   for (const page of new Set(BUSINESS_PERMISSION_CATALOG.map(item => item.page))) {
     const definitions = BUSINESS_PERMISSION_CATALOG.filter(item => item.page === page);
@@ -343,6 +344,7 @@ export function personalPermissionPagePaths(principal: AccessPrincipal, inherite
     if (definitions.some(item => hasPermissionSomewhere(decide, { module: item.id, action: 'read' }))) result.add(page);
     else result.delete(page);
   }
+  result.delete(RETIRED_EXHAUST_VALVE_PAGE);
   return [...result];
 }
 function businessAuthorizationIdentityParts(principal: AccessPrincipal): unknown[] {

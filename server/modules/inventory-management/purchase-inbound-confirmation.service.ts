@@ -55,6 +55,7 @@ import {
 } from './inventory-workflow.gateway';
 import {
   buildPendingPurchaseInbounds,
+  readPurchaseExecutionBuilding,
   buildPurchaseInboundCompletionFields,
   validatePurchaseInboundCategoryPreparation,
   validatePurchaseInboundConfirmation,
@@ -62,6 +63,7 @@ import {
 import { InventoryStorageLocationService } from './inventory-storage-location.service';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
+const PENDING_PROJECTION_TTL_MS = 10_000;
 
 interface PurchaseInboundConfig {
   purchaseAppToken: string;
@@ -75,6 +77,14 @@ interface PurchaseInboundSnapshot {
   submissions: BitableRecordItem[];
   executions: BitableRecordItem[];
   catalog: BitableRecordItem[];
+}
+
+interface PendingInboundProjection {
+  key: string;
+  generations: number[];
+  generatedAt: string;
+  expiresAt: number;
+  items: PurchasePendingInboundItem[];
 }
 
 interface RunningPurchaseInbound {
@@ -98,6 +108,7 @@ export class PurchaseInboundConfirmationService {
 
   private readonly running = new Map<string, RunningPurchaseInbound>();
   private readonly pendingReads = new Map<string, { ordinary?: Promise<PurchasePendingInboundResponse>; fresh?: Promise<PurchasePendingInboundResponse> }>();
+  private pendingProjection?: PendingInboundProjection;
 
   constructor(
     private readonly httpService: HttpService,
@@ -126,7 +137,7 @@ export class PurchaseInboundConfirmationService {
       // A forced read must start after the ordinary read, including a failed
       // ordinary read, rather than join the direct reader's in-flight cache.
       if (forceRefresh && preceding) await preceding.catch(() => undefined);
-      return this.readPendingSnapshot(config, forceRefresh);
+      return this.readPendingSnapshot(config, key, forceRefresh);
     })().finally(() => {
       if (entry[slot] === request) delete entry[slot];
       if (!entry.ordinary && !entry.fresh && this.pendingReads.get(key) === entry) this.pendingReads.delete(key);
@@ -135,9 +146,9 @@ export class PurchaseInboundConfirmationService {
     return structuredClone(await request);
   }
 
-  private async readPendingSnapshot(config: PurchaseInboundConfig, forceRefresh: boolean): Promise<PurchasePendingInboundResponse> {
+  private async readPendingSnapshot(config: PurchaseInboundConfig, key: string, forceRefresh: boolean): Promise<PurchasePendingInboundResponse> {
     for (let attempt = 0; ; attempt++) {
-      try { return await this.readPendingSnapshotOnce(config, forceRefresh || attempt > 0); }
+      try { return await this.readPendingSnapshotOnce(config, key, forceRefresh || attempt > 0); }
       catch (error) {
         if (!isPendingReadConflict(error)) throw error;
         if (attempt >= 2) throw new ServiceUnavailableException('待采购入库数据正在更新，本次核对未完成，请稍后重试');
@@ -145,9 +156,39 @@ export class PurchaseInboundConfirmationService {
     }
   }
 
-  private async readPendingSnapshotOnce(config: PurchaseInboundConfig, forceRefresh: boolean): Promise<PurchasePendingInboundResponse> {
+  private async readPendingSnapshotOnce(config: PurchaseInboundConfig, key: string, forceRefresh: boolean): Promise<PurchasePendingInboundResponse> {
     const sources = [[config.purchaseAppToken, config.submissionTableId], [config.purchaseAppToken, config.executionTableId], [config.warehouseAppToken, config.catalogTableId]];
-    const generations = sources.map(([app, table]) => getBitableRecordCacheGeneration(app, table));
+    const currentGenerations = () => sources.map(([app, table]) => getBitableRecordCacheGeneration(app, table));
+    const generations = currentGenerations();
+    let projection = this.pendingProjection;
+    const isCurrent = (values: number[]) => values.every((generation, index) => generation === generations[index]);
+    if (forceRefresh || !projection || projection.key !== key || projection.expiresAt <= Date.now() || !isCurrent(projection.generations)) {
+      if (this.pendingProjection?.key === key) this.pendingProjection = undefined;
+      const snapshot = await this.readPendingSourceTables(config, forceRefresh);
+      const now = Date.now();
+      projection = {
+        key,
+        generations,
+        generatedAt: new Date(now).toISOString(),
+        expiresAt: now + PENDING_PROJECTION_TTL_MS,
+        items: buildPendingPurchaseInbounds(snapshot),
+      };
+    }
+    // Handover can change independently of the Feishu tables. Keep the ledger
+    // lookup live even when the purchase and catalog projection is reusable.
+    const responsibilities = this.inboundTaskLedger ? await this.inboundTaskLedger.purchaseResponsibilities() : {};
+    if (!isCurrent(currentGenerations())) throw new Error(PENDING_READ_CONFLICT);
+    this.pendingProjection = projection;
+    return {
+      generatedAt: projection.generatedAt,
+      items: projection.items.map(item => {
+        const plan = responsibilities[item.executionRecordId];
+        return plan ? { ...item, responsibilityGeneration: plan.generation } : item;
+      }),
+    };
+  }
+
+  private async readPendingSourceTables(config: PurchaseInboundConfig, forceRefresh: boolean): Promise<PurchaseInboundSnapshot> {
     const settled = await Promise.allSettled([
       fetchBitableRecords(this.httpService, {
         appToken: config.purchaseAppToken,
@@ -180,15 +221,7 @@ export class PurchaseInboundConfirmationService {
     const failed = settled.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (failed.length) throw (failed.find(result => !isPendingReadConflict(result.reason)) || failed[0]).reason;
     const [submissions, executions, catalog] = settled.map(result => (result as PromiseFulfilledResult<BitableRecordItem[]>).value);
-    const responsibilities = this.inboundTaskLedger ? await this.inboundTaskLedger.purchaseResponsibilities() : {};
-    if (sources.some(([app, table], index) => getBitableRecordCacheGeneration(app, table) !== generations[index])) throw new Error(PENDING_READ_CONFLICT);
-    return {
-      generatedAt: new Date().toISOString(),
-      items: buildPendingPurchaseInbounds({ submissions, executions, catalog }).map(item => {
-        const plan = responsibilities[item.executionRecordId];
-        return plan ? { ...item, responsibilityGeneration: plan.generation } : item;
-      }),
-    };
+    return { submissions, executions, catalog };
   }
 
   async confirm(
@@ -488,7 +521,7 @@ export class PurchaseInboundConfirmationService {
     }
     assertProfessionalBitableRecord(principal, execution);
     const trustedExecutionBuilding = parseBuilding(
-      executionBuilding(execution),
+      readPurchaseExecutionBuilding(execution.fields),
     );
     assertPurchaseInboundExecutionScope(principal, trustedExecutionBuilding);
     assertPurchaseInboundScope(principal, request, []);
@@ -644,6 +677,7 @@ function buildTrustedInboundRequest(
     building,
     quantity: request.quantity,
     occurredAt: clean(request.occurredAt),
+    ...(request.photoIds !== undefined ? { photoIds: request.photoIds } : {}),
   };
   if (request.mode === 'new') {
     if (!strict) {
@@ -738,6 +772,9 @@ function buildPurchaseBusinessFingerprint(
     occurredAt: clean(request.occurredAt),
     catalogRecordId: clean(request.catalogRecordId),
     sku: clean(request.sku).toUpperCase(),
+    ...(request.photoIds?.length
+      ? { photoIds: request.photoIds, photoMutationId: transportMutationId(request) }
+      : {}),
     preparedCatalogRecordId: strictNewRequest
       ? clean(strictNewRequest.preparedCatalogRecordId)
       : '',
@@ -786,16 +823,6 @@ function isStrictPurchaseNewRequest(
   request: PurchaseInboundConfirmRequest,
 ): request is PurchaseNewInboundConfirmRequest {
   return request.mode === 'new' && hasStrictPurchaseSignal(request);
-}
-
-function executionBuilding(record: BitableRecordItem): string {
-  return (
-    fieldText(record.fields, [
-      '申请楼栋',
-      '申请楼栋（多楼请选E楼，备注里填写详情）',
-      '申请楼栋（多楼请选H楼，备注里填写详情）',
-    ]).split('、')[0] || ''
-  );
 }
 
 function hasCompletedExecutionSignal(record: BitableRecordItem): boolean {

@@ -1,6 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import * as fs from 'node:fs';
+import fs = require('node:fs');
 import {
   existsSync,
   mkdtempSync,

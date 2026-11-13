@@ -1,7 +1,8 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import type { BitableRecordItem } from '../../common/feishu/bitable-direct-read';
+import { createBitableBackgroundRefresh, type BitableRecordItem } from '../../common/feishu/bitable-direct-read';
+import { cancelHotfixInitialization, runHotfixInitialization } from '../../common/hotfix-runtime-activation';
 import {
   fetchEquipmentRepairRecords,
   persistRepairSnapshot,
@@ -9,7 +10,8 @@ import {
 } from './equipment-repair-source.reader';
 export { EQUIPMENT_REPAIR_FIELDS } from './equipment-repair-source.reader';
 
-const TTL = 4 * 60 * 60 * 1000;
+const TTL = 5 * 60 * 1000;
+const FAILURE_BACKOFF = 30000;
 export interface RepairSourceSnapshot {
   records: BitableRecordItem[];
   version: string;
@@ -23,13 +25,37 @@ export interface RepairSourceState {
 }
 
 @Injectable()
-export class EquipmentRepairSourceService {
+export class EquipmentRepairSourceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EquipmentRepairSourceService.name);
   private snapshot: RepairSourceSnapshot | null = null;
   private inFlight: Promise<void> | null = null;
   private warm: Promise<void> | null = null;
   private lastFailureAt = 0;
+  private destroyed = false;
+  private readonly background = createBitableBackgroundRefresh({
+    name: EquipmentRepairSourceService.name,
+    intervalMs: TTL,
+    warm: () => this.syncInBackground(false),
+    refresh: () => this.syncInBackground(true),
+  });
   constructor(private readonly http: HttpService) {}
+
+  onModuleInit(): Promise<void> {
+    return runHotfixInitialization(this, () => {
+      if (!this.destroyed) this.background.start();
+    });
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    this.destroyed = true;
+    this.background.stop();
+    await cancelHotfixInitialization(this);
+  }
+
+  private async syncInBackground(refresh: boolean): Promise<void> {
+    await this.getState(refresh);
+    await this.inFlight;
+  }
 
   async getState(refresh = false): Promise<RepairSourceState> {
     if (!this.snapshot) {
@@ -37,13 +63,15 @@ export class EquipmentRepairSourceService {
       await this.warm;
     }
     if (
+      !this.destroyed &&
       !this.inFlight &&
       (refresh ||
         !this.snapshot ||
+        this.lastFailureAt > 0 ||
         Date.now() - this.snapshot.fetchedAt >= TTL) &&
-      (refresh || Date.now() - this.lastFailureAt >= 30000)
+      (refresh || Date.now() - this.lastFailureAt >= FAILURE_BACKOFF)
     ) {
-      this.inFlight = this.read(refresh).finally(() => {
+      this.inFlight = this.read().finally(() => {
         this.inFlight = null;
       });
     }
@@ -74,9 +102,10 @@ export class EquipmentRepairSourceService {
       this.logger.warn('维修记录缓存不可用');
     }
   }
-  private async read(refresh: boolean): Promise<void> {
+  private async read(): Promise<void> {
     try {
       const records = await fetchEquipmentRepairRecords(this.http);
+      if (this.destroyed) return;
       this.set(records, Date.now());
       this.lastFailureAt = 0;
       try {

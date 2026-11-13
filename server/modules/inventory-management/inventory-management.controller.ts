@@ -12,9 +12,14 @@ import {
   Post,
   Query,
   Req,
+  Res,
   ServiceUnavailableException,
+  StreamableFile,
+  UploadedFiles,
+  UseInterceptors,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import type { Request, Response } from 'express';
 import type { AccessPrincipal } from '../../../shared/access-control.interface';
 import { AdminOnly, ProfessionalScoped } from '../../common/access/unified-access.decorators';
 import type {
@@ -28,7 +33,9 @@ import type {
   WarehouseBuilding,
   WarehouseStorageLocationCreateRequest,
 } from '../../../shared/inventory-management.interface';
+import { INVENTORY_INBOUND_PHOTO_MAX_BYTES, INVENTORY_INBOUND_PHOTO_MAX_COUNT } from '../../../shared/inventory-management.interface';
 import { InventoryManagementService } from './inventory-management.service';
+import { InventoryInboundPhotoService } from './inventory-inbound-photo.service';
 import { InventoryInboundTaskService } from './inventory-inbound-task.service';
 import type { ManualInventoryInboundTaskRequest } from './inventory-inbound-task-ledger.store';
 import { InventoryMovementCommandService } from './inventory-movement-command.service';
@@ -98,6 +105,8 @@ export class InventoryManagementController {
     private readonly purchaseInboundCategoryTaskService?: PurchaseInboundCategoryTaskService,
     @Optional()
     private readonly inventoryInboundTaskService?: InventoryInboundTaskService,
+    @Optional()
+    private readonly inventoryInboundPhotoService?: InventoryInboundPhotoService,
   ) {}
 
   @ProfessionalScoped()
@@ -143,6 +152,49 @@ export class InventoryManagementController {
       parsed.forceRefresh,
       principal,
     );
+  }
+
+  @ProfessionalScoped()
+  @Get('items/:recordId/images/:imageIndex')
+  async getItemImage(
+    @Req() request: AccessRequest,
+    @Param('recordId') recordId: string,
+    @Param('imageIndex') imageIndex: string,
+    @Res({ passthrough: true }) response: Response,
+    @Query('variant') variant?: string,
+  ) {
+    const file = await this.service.readItemImage(requirePrincipal(request), recordId, imageIndex, variant === 'thumbnail');
+    return streamInventoryPhoto(response, file);
+  }
+
+  @ProfessionalScoped()
+  @Post('inbound-photos')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(FilesInterceptor('photos', INVENTORY_INBOUND_PHOTO_MAX_COUNT, {
+    limits: { fileSize: INVENTORY_INBOUND_PHOTO_MAX_BYTES, fields: 2, fieldSize: 512, parts: INVENTORY_INBOUND_PHOTO_MAX_COUNT + 2 },
+  }))
+  stageInboundPhotos(
+    @Req() request: AccessRequest,
+    @Body('building') building: unknown,
+    @Body('clientMutationId') clientMutationId: unknown,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    if (!this.inventoryInboundPhotoService) throw new ServiceUnavailableException('入库照片服务尚未就绪');
+    return this.inventoryInboundPhotoService.stage(requirePrincipal(request), building, clientMutationId, files);
+  }
+
+  @ProfessionalScoped()
+  @Get('inbound-photos/:building/:clientMutationId/:photoId')
+  async getStagedInboundPhoto(
+    @Req() request: AccessRequest,
+    @Param('building') building: string,
+    @Param('clientMutationId') clientMutationId: string,
+    @Param('photoId') photoId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    if (!this.inventoryInboundPhotoService) throw new ServiceUnavailableException('入库照片服务尚未就绪');
+    const file = await this.inventoryInboundPhotoService.readStaged(requirePrincipal(request), building, clientMutationId, photoId);
+    return streamInventoryPhoto(response, file);
   }
 
   @ProfessionalScoped()
@@ -556,6 +608,12 @@ export class InventoryManagementController {
     assertGlobalBusinessOperation(requirePrincipal(request), { module: 'inventory', action: 'notify' });
     return this.workflowService.run(code, { trigger: 'manual' });
   }
+}
+
+function streamInventoryPhoto(response: Response, file: { buffer: Buffer; type: string }): StreamableFile {
+  response.setHeader('Cache-Control', 'private, no-store');
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  return new StreamableFile(file.buffer, { type: file.type });
 }
 
 function requirePrincipal(request: AccessRequest): AccessPrincipal {

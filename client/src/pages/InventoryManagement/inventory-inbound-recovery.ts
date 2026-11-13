@@ -10,6 +10,11 @@ import type { AccessPrincipal } from '@shared/access-control.interface';
 
 import type { InventoryInboundDraft } from './InventoryMovementCreateDialog';
 import type { PurchaseInboundDraft } from './PurchaseInboundConfirmationDialog';
+import {
+  isInventoryInboundPhotoForRequest,
+  isInventoryInboundPhotoIds,
+  isInventoryInboundStagedPhotos,
+} from './inventory-inbound-photos';
 
 export const INVENTORY_INBOUND_RECOVERY_STORAGE_KEY =
   'inventory-management:inbound-recovery';
@@ -71,6 +76,7 @@ const MANUAL_EXISTING_REQUEST_KEYS = new Set([
   'building',
   'quantity',
   'occurredAt',
+  'photoIds',
 ]);
 const MANUAL_NEW_REQUEST_KEYS = new Set([
   'type',
@@ -80,6 +86,7 @@ const MANUAL_NEW_REQUEST_KEYS = new Set([
   'quantity',
   'occurredAt',
   'newItem',
+  'photoIds',
 ]);
 const PURCHASE_EXISTING_REQUEST_KEYS = new Set([
   'executionRecordId',
@@ -90,6 +97,8 @@ const PURCHASE_EXISTING_REQUEST_KEYS = new Set([
   'sku',
   'quantity',
   'occurredAt',
+  'photoIds',
+  'responsibilityGeneration',
 ]);
 const PURCHASE_NEW_REQUEST_KEYS = new Set([
   'executionRecordId',
@@ -101,7 +110,11 @@ const PURCHASE_NEW_REQUEST_KEYS = new Set([
   'quantity',
   'occurredAt',
   'newItem',
+  'photoIds',
+  'responsibilityGeneration',
 ]);
+const MANUAL_OPTIONAL_REQUEST_KEYS = new Set(['photoIds']);
+const PURCHASE_OPTIONAL_REQUEST_KEYS = new Set(['photoIds', 'responsibilityGeneration']);
 const MANUAL_REQUEST_NEW_ITEM_KEYS = new Set([
   'specialty',
   'primaryCategory',
@@ -127,6 +140,7 @@ const MANUAL_DRAFT_KEYS = new Set([
   'itemQuery',
   'selectedItem',
   'newItem',
+  'photos',
 ]);
 const PURCHASE_FORM_KEYS = new Set([
   ...MANUAL_DRAFT_KEYS,
@@ -135,12 +149,15 @@ const PURCHASE_FORM_KEYS = new Set([
   'preparedCatalogRecordId',
   'generatedSku',
   'preparedAt',
+  'responsibilityGeneration',
 ]);
 const PURCHASE_OPTIONAL_FORM_KEYS = new Set([
   'clientMutationId',
+  'photos',
   'preparedCatalogRecordId',
   'generatedSku',
   'preparedAt',
+  'responsibilityGeneration',
 ]);
 const MANUAL_NEW_ITEM_KEYS = new Set([
   'specialty',
@@ -201,6 +218,7 @@ const INVENTORY_OPTION_TEXT_KEYS = [
 const PURCHASE_RECOVERY_DRAFT_KEYS = new Set(['form', 'purchaseSnapshot']);
 const PURCHASE_SNAPSHOT_KEYS = new Set([
   'specialty',
+  'responsibilityGeneration',
   'executionRecordId',
   'submissionRecordId',
   'requestCode',
@@ -325,6 +343,7 @@ function isStrictInboundRequestBase(
 ): boolean {
   return (
     value.clientMutationId === clientMutationId &&
+    (value.photoIds === undefined || isInventoryInboundPhotoIds(value.photoIds)) &&
     WAREHOUSE_BUILDINGS.includes(
       value.building as (typeof WAREHOUSE_BUILDINGS)[number],
     ) &&
@@ -382,7 +401,7 @@ function isAcceptedRecoveryRequest(
     if (value.mode === 'existing') {
       return (
         hasOnlyKeys(value, MANUAL_EXISTING_REQUEST_KEYS) &&
-        hasRequiredKeys(value, MANUAL_EXISTING_REQUEST_KEYS) &&
+        hasRequiredKeys(value, MANUAL_EXISTING_REQUEST_KEYS, MANUAL_OPTIONAL_REQUEST_KEYS) &&
         isIdentifier(value.catalogRecordId) &&
         isIdentifier(value.sku)
       );
@@ -390,21 +409,22 @@ function isAcceptedRecoveryRequest(
     return (
       value.mode === 'new' &&
       hasOnlyKeys(value, MANUAL_NEW_REQUEST_KEYS) &&
-      hasRequiredKeys(value, MANUAL_NEW_REQUEST_KEYS) &&
+      hasRequiredKeys(value, MANUAL_NEW_REQUEST_KEYS, MANUAL_OPTIONAL_REQUEST_KEYS) &&
       isStrictInboundNewItem(value.newItem, MANUAL_REQUEST_NEW_ITEM_KEYS)
     );
   }
 
   if (
     !purchaseExecutionRecordId ||
-    value.executionRecordId !== purchaseExecutionRecordId
+    value.executionRecordId !== purchaseExecutionRecordId ||
+    !isOptionalResponsibilityGeneration(value.responsibilityGeneration)
   ) {
     return false;
   }
   if (value.mode === 'existing') {
     return (
       hasOnlyKeys(value, PURCHASE_EXISTING_REQUEST_KEYS) &&
-      hasRequiredKeys(value, PURCHASE_EXISTING_REQUEST_KEYS) &&
+      hasRequiredKeys(value, PURCHASE_EXISTING_REQUEST_KEYS, PURCHASE_OPTIONAL_REQUEST_KEYS) &&
       isIdentifier(value.catalogRecordId) &&
       isIdentifier(value.sku)
     );
@@ -412,7 +432,7 @@ function isAcceptedRecoveryRequest(
   return (
     value.mode === 'new' &&
     hasOnlyKeys(value, PURCHASE_NEW_REQUEST_KEYS) &&
-    hasRequiredKeys(value, PURCHASE_NEW_REQUEST_KEYS) &&
+    hasRequiredKeys(value, PURCHASE_NEW_REQUEST_KEYS, PURCHASE_OPTIONAL_REQUEST_KEYS) &&
     isIdentifier(value.preparedCatalogRecordId) &&
     isIdentifier(value.generatedSku) &&
     isStrictInboundNewItem(value.newItem, PURCHASE_REQUEST_NEW_ITEM_KEYS)
@@ -454,7 +474,7 @@ function hasDraftBaseShape(
     optionalNewItemKeys?: ReadonlySet<string>;
   } = {},
 ): boolean {
-  const optionalKeys = options.optionalKeys ?? new Set(['clientMutationId']);
+  const optionalKeys = options.optionalKeys ?? new Set(['clientMutationId', 'photos']);
   if (
     !hasOnlyKeys(value, allowedKeys) ||
     !hasRequiredKeys(value, allowedKeys, optionalKeys) ||
@@ -468,6 +488,7 @@ function hasDraftBaseShape(
     typeof value.occurredAt !== 'string' ||
     typeof value.itemQuery !== 'string' ||
     !isOptionalMutationId(value.clientMutationId) ||
+    (value.photos !== undefined && !isInventoryInboundStagedPhotos(value.photos)) ||
     (value.selectedItem !== null && !isInventoryOption(value.selectedItem)) ||
     !isRecord(value.newItem) ||
     !hasOnlyKeys(value.newItem, newItemKeys) ||
@@ -500,6 +521,7 @@ export function isPurchaseInboundDraft(
     isRecord(value) &&
     value.kind === 'purchase' &&
     isIdentifier(value.executionRecordId) &&
+    isOptionalResponsibilityGeneration(value.responsibilityGeneration) &&
     hasDraftBaseShape(value, PURCHASE_FORM_KEYS, PURCHASE_NEW_ITEM_KEYS, {
       allowUnselectedMode: true,
       optionalKeys: PURCHASE_OPTIONAL_FORM_KEYS,
@@ -508,6 +530,12 @@ export function isPurchaseInboundDraft(
     [value.preparedCatalogRecordId, value.generatedSku, value.preparedAt].every(
       (field) => field === undefined || typeof field === 'string',
     )
+  );
+}
+
+function isOptionalResponsibilityGeneration(value: unknown): boolean {
+  return value === undefined || (
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
   );
 }
 
@@ -562,9 +590,15 @@ function isRetryDraftMutationValid(
   if (recovery.retryMode === 'editable') {
     return recovery.status === 'failed' && draft.clientMutationId === undefined;
   }
+  const photoIds = recovery.request?.photoIds;
   return (
-    draft.clientMutationId === undefined ||
-    draft.clientMutationId === recovery.clientMutationId
+    (draft.clientMutationId === undefined || draft.clientMutationId === recovery.clientMutationId) &&
+    (!draft.photos || draft.photos.every((photo) =>
+      isInventoryInboundPhotoForRequest(photo, draft.building, recovery.clientMutationId),
+    )) &&
+    (recovery.status !== 'accepted' ||
+      ((photoIds?.length ?? 0) === (draft.photos?.length ?? 0) &&
+        (photoIds?.every((id, index) => draft.photos?.[index]?.id === id) ?? true)))
   );
 }
 
@@ -679,6 +713,7 @@ export function isPurchaseInboundRecoveryDraft(
   if (
     Object.keys(snapshot).some((key) => !PURCHASE_SNAPSHOT_KEYS.has(key)) ||
     !isOptionalSpecialty(snapshot.specialty) ||
+    !isOptionalResponsibilityGeneration(snapshot.responsibilityGeneration) ||
     form.kind !== 'purchase' ||
     !isIdentifier(form.executionRecordId) ||
     form.executionRecordId !== snapshot.executionRecordId ||

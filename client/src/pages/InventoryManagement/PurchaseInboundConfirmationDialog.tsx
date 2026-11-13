@@ -25,7 +25,9 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select';
 import { WarehouseStorageLocationField } from './WarehouseStorageLocationField';
+import { InventoryInboundPhotos, useInventoryInboundPhotos } from './InventoryInboundPhotos';
 import type {
+  InventoryInboundStagedPhoto,
   InventoryMovementItem,
   InventoryMovementOptionItem,
   PurchaseExistingInboundConfirmRequest,
@@ -67,6 +69,7 @@ export interface PurchaseInboundDraft {
   kind: 'purchase';
   executionRecordId: string;
   clientMutationId?: string;
+  photos?: InventoryInboundStagedPhoto[];
   mode: PurchaseInboundItemMode | '';
   building: WarehouseBuilding;
   quantity: string;
@@ -102,7 +105,7 @@ interface PurchaseInboundConfirmationDialogProps {
   ) => void;
   onOpenChange: (open: boolean) => void;
   onSubmit: (submission: PurchaseInboundSubmission) => boolean | void;
-  batchPosition?: { current: number; total: number };
+  batchPosition?: { current: number; total: number; clientMutationId: string };
 }
 
 export function createPurchaseInboundDraft(
@@ -390,6 +393,7 @@ export function buildPurchaseInboundSubmission({
     throw new Error(`确认入库数量不能超过实际签收数量（${item.quantity}）`);
   }
   const occurredAt = new Date(draft.occurredAt).toISOString();
+  const photoIds = draft.photos?.map((photo) => photo.id);
   const draftSnapshot: PurchaseInboundDraft = {
     ...draft,
     clientMutationId: mutationId,
@@ -416,6 +420,7 @@ export function buildPurchaseInboundSubmission({
       sku: selectedItem.sku.trim(),
       quantity,
       occurredAt,
+      ...(photoIds?.length ? { photoIds } : {}),
     };
     optimisticFields = {
       sku: selectedItem.sku.trim(),
@@ -436,6 +441,7 @@ export function buildPurchaseInboundSubmission({
       generatedSku: draft.generatedSku?.trim() || '',
       quantity,
       occurredAt,
+      ...(photoIds?.length ? { photoIds } : {}),
       newItem,
     };
     optimisticFields = {
@@ -497,6 +503,8 @@ export function PurchaseInboundConfirmationDialog({
   const [categoryTaskMessage, setCategoryTaskMessage] = useState('');
   const [creatingStorageLocation, setCreatingStorageLocation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const inboundPhotos = useInventoryInboundPhotos();
+  const resetInboundPhotos = inboundPhotos.reset;
   const searchSequence = useRef(0);
   const categoryTaskCoordinatorRef =
     useRef<PurchaseInboundCategoryTaskCoordinator | null>(null);
@@ -519,6 +527,7 @@ export function PurchaseInboundConfirmationDialog({
       initialDraft?.executionRecordId === item.executionRecordId
         ? cloneDraft(initialDraft)
         : createPurchaseInboundDraft(item);
+    resetInboundPhotos(restoredDraft.photos);
     setDraft(restoredDraft);
     setOptions([]);
     setLoadingOptions(false);
@@ -528,7 +537,7 @@ export function PurchaseInboundConfirmationDialog({
     setCategoryTaskMessage('');
     setCreatingStorageLocation(false);
     setSubmitting(false);
-  }, [initialDraft, item, open]);
+  }, [initialDraft, item, open, resetInboundPhotos]);
 
   useEffect(() => {
     if (!open || !item) return;
@@ -716,6 +725,7 @@ export function PurchaseInboundConfirmationDialog({
     categoryTaskActive ||
     creatingStorageLocation ||
     submitting ||
+    inboundPhotos.uploading ||
     Object.keys(validatePurchaseInboundDraft(draft)).length > 0;
 
   function clearRetryMutationId(
@@ -955,7 +965,7 @@ export function PurchaseInboundConfirmationDialog({
     }
   }
 
-  function submit() {
+  async function submit() {
     if (!canConfirm) { setErrors(current => ({ ...current, submit: '当前权限不能确认该采购入库' })); return; }
     if (inboundSubmitGuard.current) return;
 
@@ -967,10 +977,16 @@ export function PurchaseInboundConfirmationDialog({
     setSubmitting(true);
     try {
       const mutationId =
-        draft!.clientMutationId?.trim() || createClientMutationId();
+        batchPosition?.clientMutationId || draft!.clientMutationId?.trim() || createClientMutationId();
+      if (!batchPosition) {
+        setDraft((current) => current ? { ...current, clientMutationId: mutationId } : current);
+      }
+      const photos = inboundPhotos.files.length || inboundPhotos.staged.length
+        ? await inboundPhotos.prepare(draft!.building, mutationId)
+        : [];
       const submission = buildPurchaseInboundSubmission({
         item: item!,
-        draft: draft!,
+        draft: { ...draft!, photos: photos.length ? photos : undefined },
         clientMutationId: mutationId,
         startedAt: Date.now(),
       });
@@ -992,7 +1008,9 @@ export function PurchaseInboundConfirmationDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => {
+      if (!inboundPhotos.uploading) onOpenChange(next);
+    }}>
       <DialogContent className="max-h-[92vh] overflow-y-auto border-blue-100 bg-slate-50 sm:max-w-2xl">
         <DialogHeader>
           <div className="flex items-start gap-3">
@@ -1009,7 +1027,7 @@ export function PurchaseInboundConfirmationDialog({
         </DialogHeader>
 
         <fieldset
-          disabled={retryLocked || categoryTaskActive || preparedNew}
+          disabled={retryLocked || categoryTaskActive || preparedNew || inboundPhotos.uploading}
           className="min-w-0 space-y-5 border-0 p-0 py-2"
         >
           {retryLocked && (
@@ -1319,8 +1337,11 @@ export function PurchaseInboundConfirmationDialog({
             </section>
           )}
 
-          <ErrorText message={errors.submit} />
         </fieldset>
+        {draft.mode && (
+          <InventoryInboundPhotos photos={inboundPhotos} disabled={retryLocked || categoryTaskActive || !canConfirm} />
+        )}
+        <ErrorText message={errors.submit} />
 
         <DialogFooter>
           {categoryTaskPhase === 'uncertain' && (
@@ -1333,12 +1354,13 @@ export function PurchaseInboundConfirmationDialog({
               type="button"
               variant="outline"
               onClick={onAbandonRetry}
+              disabled={inboundPhotos.uploading}
               className="border-amber-300 text-amber-800 hover:bg-amber-50"
             >
               放弃原编号并编辑
             </Button>
           )}
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" disabled={inboundPhotos.uploading} onClick={() => onOpenChange(false)}>
             取消
           </Button>
           <Button

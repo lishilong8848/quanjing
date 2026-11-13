@@ -18,6 +18,7 @@ import {
   resolveBitableAppToken,
 } from '../../server/common/feishu/bitable-direct-read';
 import { InventoryManagementService } from '../../server/modules/inventory-management/inventory-management.service';
+import { describeInventoryLedgerImages } from '../../server/modules/inventory-management/inventory-inbound-photo.service';
 
 const TABLES = {
   inventory: 'tblpVtCm9X0YYcdN',
@@ -123,6 +124,13 @@ describe('InventoryManagementService', () => {
     release([]);await oldCheck;await expect(current).resolves.toBeDefined();
   });
 
+  it('retries a transient consistency conflict once for a display read', async () => {
+    const service = new InventoryManagementService({ axiosRef: {} } as never);
+    (fetchBitableRecords as jest.Mock).mockRejectedValueOnce(new Error('数据在读取期间已变更，请重新读取'));
+    await expect(service.getItems({})).resolves.toMatchObject({ items: [], total: 0 });
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(4);
+  });
+
   it('reads the eight warehouse tables with the configured cache policy', async () => {
     const service = new InventoryManagementService({ axiosRef: {} } as never);
     const dashboard = await service.getDashboard(true);
@@ -201,6 +209,101 @@ describe('InventoryManagementService', () => {
 
     expect(second).not.toBe(first);
     expect(fetchBitableRecords).toHaveBeenCalledTimes(16);
+  });
+
+  it('reuses a scoped dashboard and isolates other buildings and authorization versions', async () => {
+    const service = new InventoryManagementService({ axiosRef: {} } as never);
+    const principal = { role: 'inventory_admin', purchaseBuilding: 'A楼', accountId: 'scope-test', authorizationVersion: 1 } as const;
+    const records = [
+      { record_id: 'recA', fields: { 楼栋: 'A楼', 名称: 'A楼库存', 剩余库存: 2 } },
+      { record_id: 'recB', fields: { 楼栋: 'B楼', 名称: 'B楼库存', 剩余库存: 5 } },
+    ];
+    (fetchBitableRecords as jest.Mock).mockImplementation(async (_http, options) =>
+      options.tableId === TABLES.inventory ? records : [],
+    );
+
+    const [first, repeated] = await Promise.all([
+      service.getDashboard(false, principal),
+      service.getDashboard(false, { ...principal }),
+    ]);
+    expect(repeated).toBe(first);
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(8);
+    expect(first.summary.totalQuantity).toBe(2);
+
+    const otherBuilding = await service.getDashboard(false, { ...principal, purchaseBuilding: 'B楼' });
+    expect(otherBuilding.summary.totalQuantity).toBe(5);
+    const newVersion = await service.getDashboard(false, { ...principal, authorizationVersion: 2 });
+    expect(newVersion).not.toBe(first);
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(24);
+  });
+
+  it('reuses item projections for the same source arrays and remaps when the source changes', async () => {
+    const service = new InventoryManagementService({ axiosRef: {} } as never);
+    let records = [
+      { record_id: 'recA', fields: { 楼栋: 'A楼', 名称: 'A楼库存', 剩余库存: 2 } },
+      { record_id: 'recB', fields: { 楼栋: 'B楼', 名称: 'B楼库存', 剩余库存: 5 } },
+    ];
+    const catalog: unknown[] = [];
+    (fetchBitableRecords as jest.Mock).mockImplementation(async (_http, options) =>
+      options.tableId === TABLES.inventory ? records : catalog,
+    );
+    const first = await service.getItems({ building: 'A楼' });
+    const repeated = await service.getItems({ search: 'A楼库存' });
+    expect(repeated.items[0]).toBe(first.items[0]);
+    records = [{ ...records[0], fields: { ...records[0].fields, 剩余库存: 8 } }];
+    (getBitableRecordCacheGeneration as jest.Mock).mockReturnValue(1);
+    const updated = await service.getItems({ building: 'A楼' });
+    expect(updated.items[0]).not.toBe(first.items[0]);
+    expect(updated.items[0].quantity).toBe(8);
+  });
+
+  it('merges the current sparse photo fields onto already-filtered ledger rows', async () => {
+    const photos = [{ file_token: 'private-photo-a', type: 'image/png', name: '测试.png' }];
+    const inventory = [
+      { record_id: 'recA', fields: { 楼栋: 'A楼', 名称: 'A楼库存' } },
+      { record_id: 'recB', fields: { 楼栋: 'B楼', 名称: 'B楼库存', 物品图片: photos } },
+    ];
+    const gateway = { searchRecords: jest.fn().mockResolvedValue([
+      { record_id: 'recA', fields: { 物品图片: photos } },
+    ]) };
+    (fetchBitableRecords as jest.Mock).mockImplementation(async (_http, options) =>
+      options.tableId === TABLES.inventory ? inventory : [],
+    );
+    const service = new InventoryManagementService({ axiosRef: {} } as never, undefined, gateway as never);
+    const result = await service.getItems({ building: 'A楼' });
+    expect(result.items.map((item) => item.recordId)).toEqual(['recA']);
+    expect(result.items[0].images).toEqual(describeInventoryLedgerImages('recA', photos));
+    expect(JSON.stringify(result)).not.toContain('private-photo-a');
+    expect(gateway.searchRecords).toHaveBeenCalledWith(expect.objectContaining({ fieldNames: ['物品图片'] }));
+    const next = await service.getItems({ building: 'B楼' });
+    expect(next.items[0].images).toBeUndefined();
+    expect(gateway.searchRecords).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the exact live record for image preview and rejects other buildings', async () => {
+    const photos = [{ file_token: 'private-photo-a', type: 'image/png', name: '测试.png' }];
+    const gateway = {
+      tryGetRecord: jest.fn().mockResolvedValue({ record_id: 'recA', fields: { 楼栋: 'A楼', 物品图片: photos } }),
+      getAttachmentFieldId: jest.fn().mockResolvedValue('fldImages'),
+    };
+    const photoService = {
+      download: jest.fn().mockResolvedValue({ type: 'image/png' }),
+      downloadThumbnail: jest.fn().mockResolvedValue({ type: 'image/jpeg' }),
+    };
+    const service = new InventoryManagementService({ axiosRef: {} } as never, photoService as never, gateway as never);
+    const selector = describeInventoryLedgerImages('recA', photos)[0].url.split('/').at(-1)!;
+    await expect(service.readItemImage({ role: 'inventory_admin', purchaseBuilding: 'B楼' }, 'recA', selector))
+      .rejects.toThrow('物品图片不存在');
+    await expect(service.readItemImage({ role: 'inventory_admin', purchaseBuilding: 'B楼' }, 'recA', selector, true))
+      .rejects.toThrow('物品图片不存在');
+    await expect(service.readItemImage({ role: 'admin', purchaseBuilding: null }, 'recA', selector))
+      .resolves.toMatchObject({ type: 'image/png' });
+    expect(photoService.download).toHaveBeenCalledTimes(1);
+    await expect(service.readItemImage({ role: 'admin', purchaseBuilding: null }, 'recA', selector, true))
+      .resolves.toMatchObject({ type: 'image/jpeg' });
+    expect(photoService.downloadThumbnail).toHaveBeenCalledTimes(1);
+    expect(gateway.tryGetRecord).toHaveBeenCalledWith('app-token', TABLES.inventory, 'recA', '库存台账');
+    expect((fetchBitableRecords as jest.Mock).mock.calls.every(([, options]) => options.tableId === TABLES.catalog)).toBe(true);
   });
 
   it('starts a fresh read after invalidation without letting the older read refill the cache', async () => {

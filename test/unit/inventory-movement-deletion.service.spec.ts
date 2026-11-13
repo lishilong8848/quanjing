@@ -311,6 +311,83 @@ describe('InventoryMovementDeletionService', () => {
     expect(recoveryAtFirstWrite).toMatchObject({ phase: 'prepared' });
   });
 
+  it('deletes a linked inbound when populated legacy execution fields follow empty preferred fields', async () => {
+    const movement = inboundRecord('A楼', '采购:exec-001');
+    const original = purchaseExecutionCompleted();
+    let execution = {
+      ...original,
+      fields: {
+        ...original.fields,
+        申请楼栋: null,
+        '申请楼栋（多楼请选E楼，备注里填写详情）': [],
+        '申请楼栋（多楼请选H楼，备注里填写详情）': { select: [{ label: 'A栋' }] },
+        物品类别码: [],
+        '物品类别码（库房）': { value: [{ text: ' d1001 ' }] },
+        实际采购数量: null,
+        采购申请数量: { value: [2] },
+        采购编码: [{ text: 'CG260813-001' }],
+      } as Record<string, unknown>,
+    };
+    gateway.tryGetRecord.mockImplementation(async (_appToken: string, tableId: string) =>
+      tableId === 'tbl-inbound' ? movement : execution);
+    gateway.getFieldSchemas.mockResolvedValue(purchaseExecutionSchemas());
+    gateway.updateRecord.mockImplementation(async (_app, _table, _id, fields) => {
+      execution = { ...execution, fields: { ...execution.fields, ...fields } };
+    });
+    const { service, ledger } = createService();
+    const { taskId } = await service.accept(REQUEST, ADMIN, PRINCIPAL_FINGERPRINT);
+
+    await waitFor(async () => (await ledger.findByTaskId(taskId))?.task.status === 'completed');
+    expect(gateway.updateRecord).toHaveBeenCalledTimes(1);
+    expect(gateway.deleteRecordAndConfirmAbsent).toHaveBeenCalledTimes(1);
+    expect(execution.fields).toMatchObject({ 是否已入库: false, 采购流程: '到货已签收（待入库）' });
+  });
+
+  it.each([
+    [{ 申请楼栋: null }, '申请楼栋为空或无效'],
+    [{ 采购编码: [] }, '采购编码为空或无效'],
+    [{ 物品类别码: 'D9999', '物品类别码（库房）': 'D1001' }, '物品类别号不一致'],
+    [{ 实际采购数量: 0, 采购申请数量: 2 }, '采购数量为空或无效'],
+    [{ 实际采购数量: true, 采购申请数量: 2 }, '采购数量为空或无效'],
+    [{ 实际采购数量: '待核对', 采购申请数量: 2 }, '采购数量为空或无效'],
+    [{ 实际采购数量: 3, 采购申请数量: 2 }, '数量不一致'],
+  ])('keeps records intact when authoritative linkage is invalid or conflicting (%j)', async (patch, message) => {
+    const original = purchaseExecutionCompleted();
+    gateway.tryGetRecord.mockImplementation(async (_appToken: string, tableId: string) =>
+      tableId === 'tbl-inbound'
+        ? inboundRecord('A楼', '采购:exec-001')
+        : { ...original, fields: { ...original.fields, ...patch } });
+    const { service, ledger } = createService();
+    const { taskId } = await service.accept(REQUEST, ADMIN, PRINCIPAL_FINGERPRINT);
+
+    await waitFor(async () => (await ledger.findByTaskId(taskId))?.task.status === 'failed');
+    expect((await ledger.findByTaskId(taskId))?.task).toMatchObject({
+      definitelyNotDeleted: true,
+      message: expect.stringContaining(message),
+    });
+    expect(gateway.updateRecord).not.toHaveBeenCalled();
+    expect(gateway.deleteRecordAndConfirmAbsent).not.toHaveBeenCalled();
+  });
+
+  it('rejects a multi-valued movement quantity instead of reading it as thousands', async () => {
+    const movement = inboundRecord('A楼', '采购:exec-001');
+    const execution = purchaseExecutionCompleted();
+    gateway.tryGetRecord.mockImplementation(async (_appToken: string, tableId: string) =>
+      tableId === 'tbl-inbound'
+        ? { ...movement, fields: { ...movement.fields, 入库数量: [1, 234] } }
+        : { ...execution, fields: { ...execution.fields, 实际采购数量: 1234 } });
+    const { service, ledger } = createService();
+    const { taskId } = await service.accept(REQUEST, ADMIN, PRINCIPAL_FINGERPRINT);
+
+    await waitFor(async () => (await ledger.findByTaskId(taskId))?.task.status === 'failed');
+    expect((await ledger.findByTaskId(taskId))?.task).toMatchObject({
+      definitelyNotDeleted: true,
+      message: expect.stringContaining('数量不一致'),
+    });
+    expect(gateway.updateRecord).not.toHaveBeenCalled();
+    expect(gateway.deleteRecordAndConfirmAbsent).not.toHaveBeenCalled();
+  });
+
   it('does not delete when rollback fields match but purchase derivation still says completed', async () => {
     const original = purchaseExecutionCompleted();
     let execution = original;

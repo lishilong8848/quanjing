@@ -68,4 +68,23 @@ describe('repair read state and recovery', () => {
     expect(state.error).toBeTruthy();
     expect(state.refreshing).toBe(false);
   });
+  it('refreshes after five minutes without another page request and stops on shutdown', async () => {
+    jest.useFakeTimers();
+    const source = new EquipmentRepairSourceService({} as never);
+    try {
+      fetchRows.mockResolvedValueOnce([{ record_id: 'first' }]).mockResolvedValueOnce([{ record_id: 'next' }]);
+      await source.onModuleInit();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(fetchRows).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(5 * 60000);
+      expect(fetchRows).toHaveBeenCalledTimes(2);
+      expect((await source.getState()).snapshot?.records[0].record_id).toBe('next');
+      await source.onModuleDestroy();
+      await jest.advanceTimersByTimeAsync(5 * 60000);
+      expect(fetchRows).toHaveBeenCalledTimes(2);
+    } finally {
+      await source.onModuleDestroy();
+      jest.useRealTimers();
+    }
+  });
 });

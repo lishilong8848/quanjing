@@ -265,7 +265,7 @@ describe('inventory loading performance UI', () => {
       /updatedAt=\{\s*needsDashboard\s*\?\s*dashboard\s*\?\s*formatUpdatedAt\(dashboard\.generatedAt\)\s*:\s*['"]同步中['"]\s*:\s*['"]按需加载['"]\s*\}/,
     );
     expect(header).toMatch(
-      /onRefresh=\{\s*showHeaderRefresh\s*\?\s*\(\)\s*=>\s*void\s+refreshAll\(\)\s*:\s*undefined\s*\}/,
+      /onRefresh=\{\s*showHeaderRefresh\s*&&\s*canForceRefresh\s*\?\s*\(\)\s*=>\s*void\s+refreshAll\(\)\s*:\s*undefined\s*\}/,
     );
     expect(ledgerCall).toContain('searchValue={searchQuery}');
     expect(ledgerCall).toMatch(
@@ -303,7 +303,7 @@ describe('inventory loading performance UI', () => {
     const refreshAll = extractAssignedCall(page, 'refreshAll', 'useCallback');
 
     expect(page).toMatch(
-      /const needsDashboard\s*=\s*\(?\s*activeSection\s*===\s*['"]overview['"]\s*\|\|\s*activeSection\s*===\s*['"]stocktake['"]\s*\)?\s*;/,
+      /const needsDashboard\s*=\s*canReadInventory\s*&&\s*\(\s*activeSection\s*===\s*['"]overview['"]\s*\|\|\s*\(\s*activeSection\s*===\s*['"]stocktake['"]\s*&&\s*!executingStocktake\s*\)\s*\)\s*;/,
     );
 
     expect(initialDashboardEffects).toHaveLength(1);
@@ -318,12 +318,12 @@ describe('inventory loading performance UI', () => {
     expect(dashboardTimerEffects).toHaveLength(1);
     expect(countInvocations(dashboardTimerEffect, 'loadDashboard')).toBe(1);
     expect(dashboardTimerEffect).toMatch(
-      /setInterval\s*\(\s*\(\s*\)\s*=>\s*\{[\s\S]*?if\s*\(\s*needsDashboard\s*\)\s*(?:\{\s*)?void\s+loadDashboard\(\s*\)/,
+      /setInterval\s*\(\s*\(\s*\)\s*=>\s*\{[\s\S]*?if\s*\(\s*needsDashboard\s*\)\s*\{[\s\S]*?void\s+loadDashboard\(\s*\)/,
     );
 
     expect(countInvocations(refreshAll, 'loadDashboard')).toBe(1);
     expect(refreshAll).toMatch(
-      /if\s*\(\s*needsDashboard\s*\)\s*(?:\{\s*)?await\s+loadDashboard\(\s*true\s*\)/,
+      /if\s*\(\s*needsDashboard\s*\)\s*\{[\s\S]*?await\s+loadDashboard\(\s*true\s*\)/,
     );
   });
 

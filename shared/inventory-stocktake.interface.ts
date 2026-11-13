@@ -15,6 +15,11 @@ export interface StocktakeSyncState {
   error: string;
   syncedAt: string | null;
 }
+export interface StocktakeBulkFailure {
+  recordId: string;
+  name: string;
+  reason: string;
+}
 export interface StocktakeBulkSummary {
   id: string;
   /** Returned only when every batch record is visible to the caller. */
@@ -24,6 +29,8 @@ export interface StocktakeBulkSummary {
   confirmedAt: string;
   status: 'confirmed' | 'undone';
   undoneAt: string | null;
+  /** Lines skipped by a partial bulk confirm; each stays draft and recoverable. */
+  failures?: StocktakeBulkFailure[];
 }
 export interface StocktakeSyncSummary {
   pending: number;
@@ -145,6 +152,10 @@ export interface StocktakeBulkTask {
   createdAt: string;
   updatedAt: string;
   error: string;
+  /** Confirmed line count when a partial bulk succeeded (<= count). */
+  confirmedCount?: number;
+  /** Per-line failures skipped by a partial bulk confirm. */
+  failures?: StocktakeBulkFailure[];
 }
 export interface StocktakeLineRequest
   extends StocktakeWriteRequest, StocktakeDraft {

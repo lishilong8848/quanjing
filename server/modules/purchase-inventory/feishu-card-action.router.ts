@@ -1,3 +1,4 @@
+import { PersonnelProfileCardActionService } from '../../common/access/personnel-profile-card-action.service';
 import { AccessConfigurationService, useConfiguredCardAuthorizationSnapshots } from '../../common/access/access-configuration.service';
 import { isReadonlyCopyCallback, observeCardCallbackResult } from '../../common/feishu-card-copy/transport';
 import { currentHotfixActivation } from '../../common/hotfix-runtime-activation';
@@ -50,6 +51,7 @@ const ERROR_RESPONSE: FeishuCardActionResponse = {
 };
 
 type CardActionKind =
+  | 'profile_change'
   | 'leave'
   | 'overtime'
   | 'purchase'
@@ -82,10 +84,12 @@ export class FeishuCardActionRouter {
     @Optional() private readonly followUpCards?: TodayOperationsFollowUpCardService,
     @Optional() private readonly callbackFeedback?: FeishuCardCallbackFeedbackService,
     @Optional() private readonly lifecycleReceiptImages?: PurchaseLifecycleReceiptImageRuntime,
+    @Optional() private readonly profileReviews?: PersonnelProfileCardActionService,
   ) {}
 
   isAnyEnabled(): boolean {
     return (
+      Boolean(this.profileReviews?.isEnabled()) ||
       this.overtimeWorkflowService.isEnabled() ||
       this.leaveWorkflowService.isEnabled() ||
       this.purchaseWorkflowService.isEnabled() ||
@@ -134,6 +138,7 @@ export class FeishuCardActionRouter {
   }
 
   private async dispatch(payload: unknown, kind: CardActionKind): Promise<FeishuCardActionResponse> {
+      if(kind==='profile_change'){if(!this.profileReviews?.isEnabled())throw new ServiceUnavailableException('资料审批服务未启用');return this.profileReviews.handle(payload);}
       if (kind === 'today_operations_followup') {
         if (!this.followUpCards?.isEnabled()) throw new ServiceUnavailableException('异常跟进卡片服务未启用');
         const result = await this.followUpCards.handle(payload);
@@ -596,6 +601,7 @@ function classifyCardAction(payload: unknown): CardActionKind {
     throw new Error('飞书卡片回调事件类型无效');
   }
   const action = requireObject(event.action);
+  if(action.value&&typeof action.value==='object'&&!Array.isArray(action.value)&&(action.value as Record<string,unknown>).workflowType==='profile_change')return 'profile_change';
   if (typeof action.name === 'string' && action.name.startsWith('today_followup_submit:')) return 'today_operations_followup';
   if (
     typeof action.name === 'string' &&
@@ -633,6 +639,7 @@ function classifyCardAction(payload: unknown): CardActionKind {
     return 'purchase';
   }
   const actionValue = requireObject(action.value);
+  if(actionValue.workflowType==='profile_change')return 'profile_change';
   if (actionValue.workflowType === 'today_operations_followup') return 'today_operations_followup';
   if (actionValue.workflowType === 'threshold_adjustment') {
     return 'threshold_adjustment';

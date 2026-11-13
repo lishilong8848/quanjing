@@ -7,6 +7,7 @@ import { canonicalRequestedPermissions, validRequestedPermissions, type Requeste
 import type { ConfigurationState, StoredAccount } from './access-configuration.store';
 import { accountAuthorizationChange } from './authorization-profile.configuration';
 import { authorizationPages } from './authorization-profile.policy';
+import { RETIRED_EXHAUST_VALVE_PAGE } from '../../../shared/page-access';
 
 export interface PermissionGrantRequest {
   id: string; version: number; accountId: string; applicantIdentity: string; permissions: RequestedPermission[];
@@ -46,7 +47,7 @@ export function readPermissionGrantReceipt(state: ConfigurationState, request: P
     if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).sort().join(',') !== FIELDS ||
       row.version !== 1 || row.kind !== 'personnel-permission-grant' || row.decision !== 'approve' ||
       row.requestId !== request.id || row.requestVersion !== request.version || row.accountId !== request.accountId ||
-      row.applicantIdentity !== request.applicantIdentity || !validRequestedPermissions(request.permissions) ||
+      row.applicantIdentity !== request.applicantIdentity || !validRequestedPermissions(request.permissions, true) ||
       row.permissionsHash !== permissionGrantPermissionsHash(request.permissions) ||
       !text(row.reviewerAccountId, 160) || !/^[A-Za-z0-9_-]+$/u.test(row.reviewerAccountId) ||
       !text(row.reviewerName, 100) || /[\u0000-\u001f\u007f]/u.test(row.reviewerName) || !text(row.comment, 500, true) || row.comment.trim() !== row.comment ||
@@ -64,7 +65,9 @@ export function requestedPermissionsSatisfied(principal: AccessPrincipal, permis
   const pages = personalPermissionPagePaths(principal, principal.effectiveAuthorization ? authorizationPages(principal.effectiveAuthorization) : []);
   return permissions.every(permission => {
     if (permission.kind === 'page') return pages.includes(permission.path);
-    if (!businessModuleDefinition(permission.module).scoped) return evaluate({ module: permission.module, action: permission.action }).allowed;
+    const definition = businessModuleDefinition(permission.module);
+    if (definition.page === RETIRED_EXHAUST_VALVE_PAGE) return false;
+    if (!definition.scoped) return evaluate({ module: permission.module, action: permission.action }).allowed;
     return (permission.buildings ?? BUILDING_ADMIN_BUILDINGS).every(building =>
       (permission.specialties ?? PROFESSIONAL_SPECIALTIES).every(specialty => evaluate({ module: permission.module, action: permission.action, building, specialty }).allowed));
   });

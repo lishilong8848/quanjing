@@ -2,7 +2,7 @@ import { BUSINESS_PERMISSION_CATALOG, configurableBusinessActions } from './busi
 import { PERMISSION_ROUTE_CLASSIFICATIONS } from './permission-route-classification';
 import { PAGE_ACCESS_CATALOG } from './page-access';
 
-const staticPages=new Set(['/nantong-base','/operations-architecture','/exhaust-valve-map']);
+const staticPages=new Set(['/nantong-base','/operations-architecture']);
 export function createPermissionCatalog(){
   return {
     version:2,

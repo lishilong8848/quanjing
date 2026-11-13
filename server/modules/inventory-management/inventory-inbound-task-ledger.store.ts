@@ -157,6 +157,19 @@ export class InventoryInboundTaskLedgerStore extends PurchaseInboundCategoryTask
     );
   }
 
+  protected override reserveInLedger(
+    ...[ledger, candidate]: Parameters<PurchaseInboundCategoryTaskLedgerStore['reserveInLedger']>
+  ): ReturnType<PurchaseInboundCategoryTaskLedgerStore['reserveInLedger']> {
+    const request = candidate.request as unknown as InventoryInboundTaskRequest;
+    const previous = ledger.entries.find(entry => entry.request.clientMutationId === request.clientMutationId);
+    const priorRequest = previous?.request as unknown as InventoryInboundTaskRequest | undefined;
+    if (previous && (request.photoIds?.length || priorRequest?.photoIds?.length) &&
+        previous.principalFingerprint !== candidate.principalFingerprint) {
+      throw new ForbiddenException('无权继续该入库照片申请');
+    }
+    return super.reserveInLedger(ledger, candidate);
+  }
+
   protected override sameBusinessRequest(
     existing: PurchaseInboundCategoryTaskLedgerEntry,
     candidate: PurchaseInboundCategoryTaskLedgerEntry,
@@ -177,6 +190,13 @@ export class InventoryInboundTaskLedgerStore extends PurchaseInboundCategoryTask
     return super.findByTaskId(
       taskId,
     ) as unknown as Promise<InventoryInboundTaskLedgerEntry | null>;
+  }
+
+  findInboundByMutationId(clientMutationId: string): Promise<InventoryInboundTaskLedgerEntry | undefined> {
+    return this.transactLedger(ledger => ({
+      result: ledger.entries.find(entry => entry.request.clientMutationId === clientMutationId) as unknown as InventoryInboundTaskLedgerEntry | undefined,
+      changed: false,
+    }));
   }
 
   listRecoverableInbounds(): Promise<InventoryInboundTaskLedgerEntry[]> {
@@ -241,6 +261,7 @@ function sameInventoryInboundTaskBusinessRequest(
     clean(left.clientMutationId) !== clean(right.clientMutationId) ||
     clean(left.mode) !== clean(right.mode) ||
     clean(left.building) !== clean(right.building) ||
+    JSON.stringify(left.photoIds ?? []) !== JSON.stringify(right.photoIds ?? []) ||
     Number(left.quantity) !== Number(right.quantity) ||
     normalizeTimestamp(left.occurredAt) !== normalizeTimestamp(right.occurredAt)
   ) {

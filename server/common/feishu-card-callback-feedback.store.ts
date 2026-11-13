@@ -4,7 +4,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createProcessLockOwner, normalizeProcessLockOwner, processLockOwnerMayBeAlive } from './process-lock-owner';
 
-export const CALLBACK_FEEDBACK_KINDS = ['leave', 'overtime', 'purchase', 'inventory_outbound', 'threshold_adjustment', 'today_operations_followup', 'today_operations_anomaly'] as const;
+export const CALLBACK_FEEDBACK_KINDS = ['profile_change', 'leave', 'overtime', 'purchase', 'inventory_outbound', 'threshold_adjustment', 'today_operations_followup', 'today_operations_anomaly'] as const;
 export type CallbackFeedbackKind = typeof CALLBACK_FEEDBACK_KINDS[number];
 export interface CallbackFeedbackJob {
   id: string; appId: string; openId: string; kind: CallbackFeedbackKind; uuid: string; sourceHash: string; actionHash: string;

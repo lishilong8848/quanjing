@@ -809,6 +809,28 @@ describe('PurchaseInboundConfirmationService', () => {
     expect(movementCommand.createTrustedInbound).toHaveBeenCalledTimes(1);
   });
 
+  it('binds purchase photos to their original confirmation request', async () => {
+    const service = createService();
+    const request = { ...newItemRequest(), photoIds: ['staged-photo-1'] };
+    const first = service.confirm(request, ADMIN);
+
+    await expect(service.confirm({
+      ...request,
+      clientMutationId: 'another-mutation',
+    }, ADMIN)).rejects.toBeInstanceOf(ConflictException);
+    await expect(first).resolves.toMatchObject({ success: true });
+    expect(movementCommand.createTrustedInbound).toHaveBeenCalledWith(
+      '采购:exec-1',
+      expect.objectContaining({
+        photoIds: request.photoIds,
+        clientMutationId: request.clientMutationId,
+      }),
+      ADMIN,
+      expect.any(Object),
+    );
+    expect(movementCommand.createTrustedInbound).toHaveBeenCalledTimes(1);
+  });
+
   it('treats a different selected location record as a different in-flight business payload', async () => {
     const service = createService();
     const first = service.confirm(newItemRequest(), ADMIN);
@@ -1273,6 +1295,43 @@ describe('PurchaseInboundConfirmationService', () => {
   );
 
   async function flushReads() { for (let i=0;i<15;i++) await Promise.resolve(); }
+  it('reuses a recent pending projection while reading handover generations on each request', async () => {
+    let responsibilityGeneration = 1;
+    const ledger = {
+      purchaseResponsibilities: jest.fn(async () => ({
+        'exec-1': { generation: responsibilityGeneration },
+      })),
+    };
+    const service = createService(undefined, ledger);
+
+    await expect(service.listPending()).resolves.toMatchObject({
+      items: [expect.objectContaining({ responsibilityGeneration: 1 })],
+    });
+    responsibilityGeneration = 2;
+    await expect(service.listPending()).resolves.toMatchObject({
+      items: [expect.objectContaining({ responsibilityGeneration: 2 })],
+    });
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(3);
+    expect(ledger.purchaseResponsibilities).toHaveBeenCalledTimes(2);
+  });
+
+  it('bypasses the pending projection after invalidation or explicit refresh', async () => {
+    let generation = 0;
+    jest.mocked(getBitableRecordCacheGeneration).mockImplementation(() => generation);
+    try {
+      const service = createService();
+      await service.listPending();
+      generation += 1;
+      await service.listPending();
+      await service.listPending(true);
+      expect(fetchBitableRecords).toHaveBeenCalledTimes(9);
+      expect(jest.mocked(fetchBitableRecords).mock.calls.slice(6).every(
+        ([, options]) => options.forceRefresh && options.strict && options.allowStale === false,
+      )).toBe(true);
+    } finally {
+      jest.mocked(getBitableRecordCacheGeneration).mockReturnValue(0);
+    }
+  });
   it('coalesces ordinary pending reads and queues exactly one fresh pass after the ordinary pass',async()=>{
     let release!:(value:any[])=>void;const wait=new Promise<any[]>(resolve=>{release=resolve;});
     (fetchBitableRecords as jest.Mock).mockImplementation((_http,options)=>options.forceRefresh?Promise.resolve([]):wait);

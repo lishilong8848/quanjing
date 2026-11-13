@@ -419,4 +419,6 @@ describe('approved basic profile updates', () => {
       照片: [{ file_token: 'confirmed-photo-token' }],
     });
   });
+  it('exposes only an exact committed review receipt for card recovery',async()=>{const row=await service.create(person,submit()),body=decide(row);expect(service.hasCardReviewReceipt(admin.accountId,body)).toBe(false);await service.review(admin,body);await finish(row.id);expect(service.hasCardReviewReceipt(admin.accountId,body)).toBe(true);expect(service.hasCardReviewReceipt('other-admin',body)).toBe(false);expect(service.hasCardReviewReceipt(admin.accountId,{...body,decision:'reject'})).toBe(false);expect(service.hasCardReviewReceipt(admin.accountId,{...body,expectedVersion:body.expectedVersion+1})).toBe(false);});
+
 });

@@ -241,6 +241,11 @@ describe('859条核盘慢读取与持久化受理', () => {
     } = require('../../server/modules/inventory-management/inventory-stocktake-bulk.service');
     const worker = new InventoryStocktakeBulkService(store, service);
     const task = worker.request(request, principal, 'test-session');
+    const failedId = request.lines[0].recordId;
+    const items = (await source.snapshot.mock.results[0].value).items;
+    source.currentMany.mockResolvedValueOnce(items.map((item: any) =>
+      item.recordId === failedId ? { ...item, quantity: 13 } : item,
+    ));
     await service.confirmReview(request, principal as any, 'test-session');
     store.update((state) => {
       const job = state.bulkJobs![0];
@@ -258,9 +263,11 @@ describe('859条核盘慢读取与持久化受理', () => {
     source.currentMany.mockClear();
     people.resolveApplicantForBuilding.mockClear();
     await worker.drain();
-    expect(
-      worker.status(task.month, task.building, task.id, principal).status,
-    ).toBe('success');
+    expect(worker.status(task.month, task.building, task.id, principal)).toMatchObject({
+      status: 'success',
+      confirmedCount: request.lines.length - 1,
+      failures: [expect.objectContaining({ recordId: failedId, reason: expect.stringContaining('库存已变化') })],
+    });
     expect(source.currentMany).not.toHaveBeenCalled();
     expect(people.resolveApplicantForBuilding).not.toHaveBeenCalled();
     expect(store.read().bulkBatches).toHaveLength(1);

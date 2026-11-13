@@ -206,7 +206,7 @@ describe('inventory movement entry UI', () => {
 
     expect(dialog).toContain('retryLocked?: boolean;');
     expect(dialog).toContain('<fieldset');
-    expect(dialog).toContain("disabled={type !== 'borrow' && retryLocked}");
+    expect(dialog).toContain("disabled={(type !== 'borrow' && retryLocked) || (type === 'inbound' && inboundPhotos.uploading)}");
     expect(dialog).toContain('恢复草稿已锁定');
     expect(movementPage).toContain(
       'retryLocked={Boolean(manualRetryDraft?.clientMutationId)}',
@@ -993,7 +993,7 @@ describe('inventory movement entry UI', () => {
     expect(dialog).not.toContain('placeholder="请输入存放位置"');
   });
 
-  it('keeps inbound submission synchronous and isolated from the legacy API path', () => {
+  it('stages selected photos before handing off inbound submission to the existing task path', () => {
     const dialog = readDialog();
     const inboundStart = dialog.indexOf('function submitInbound');
     const outboundStart = dialog.indexOf(
@@ -1007,7 +1007,9 @@ describe('inventory movement entry UI', () => {
     expect(inboundSubmit).toContain('onSubmit');
     expect(inboundSubmit).toContain('onOpenChange(false)');
     expect(inboundSubmit).toContain('inboundSubmitGuard.current');
-    expect(inboundSubmit).not.toContain('await ');
+    expect(inboundSubmit).toContain('? await inboundPhotos.prepare(draft.building, clientMutationId)');
+    expect(inboundSubmit.indexOf('await inboundPhotos.prepare')).toBeLessThan(inboundSubmit.indexOf('const accepted = onSubmit'));
+    expect(inboundSubmit).not.toContain('await onSubmit');
     expect(inboundSubmit).not.toContain('createInventoryMovement');
     expect(inboundSubmit).not.toContain('onCreated');
     expect(inboundSubmit).not.toContain('setSubmitting');

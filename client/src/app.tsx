@@ -44,7 +44,6 @@ const DutyStaffRepairPage = React.lazy(() => import('./pages/DutyStaffRepair'));
 const EquipmentPatrolDashboardPage = React.lazy(
   () => import('./pages/EquipmentPatrolDashboard'),
 );
-const ExhaustValveMapPage = React.lazy(() => import('./pages/ExhaustValveMap'));
 const MonthlySchedule = React.lazy(() => import('./pages/MonthlySchedule'));
 const MbtiAssessmentFlow = React.lazy(() => import('./pages/MbtiAssessment/MbtiAssessmentFlow'));
 const OvertimeConfirmationPage = React.lazy(
@@ -464,10 +463,6 @@ const RoutesComponent = () => {
                 <Route
                   path="/monthly-alarm-overview"
                   element={<MonthlyAlarmOverviewPage />}
-                />
-                <Route
-                  path="/exhaust-valve-map"
-                  element={<ExhaustValveMapPage />}
                 />
                 <Route
                   path="/schedule-calendar"

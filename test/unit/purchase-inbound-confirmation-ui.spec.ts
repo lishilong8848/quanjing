@@ -681,7 +681,7 @@ describe('purchase inbound confirmation ui', () => {
     expect(dialog).toContain('retryLocked?: boolean');
     expect(dialog).toContain('<fieldset');
     expect(dialog).toContain(
-      'disabled={retryLocked || categoryTaskActive || preparedNew}',
+      'disabled={retryLocked || categoryTaskActive || preparedNew || inboundPhotos.uploading}',
     );
     expect(dialog).toContain('恢复草稿已锁定');
     expect(page).toContain('createPurchaseInboundRecoveryDraft');

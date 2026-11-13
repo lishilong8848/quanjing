@@ -10,7 +10,6 @@ import {
   Gauge,
   HardHat,
   History,
-  MapPinned,
   Network,
   PanelsTopLeft,
   Route,
@@ -235,14 +234,6 @@ export const PAGE_REGISTRY: readonly SwitcherPage[] = [
     icon: Route,
     domainKey: 'equipment',
     description: '查看设备巡检路线与执行情况',
-  },
-  {
-    key: 'exhaust-valve-map',
-    label: '设备定位',
-    path: '/exhaust-valve-map',
-    icon: MapPinned,
-    domainKey: 'equipment',
-    description: '快速定位设备与关键设施',
   },
   {
     key: 'purchase',

@@ -21,6 +21,8 @@ import type {
   StocktakeWriteRequest,
   StocktakeScope,
   StocktakeBulkRequest,
+  StocktakeBulkFailure,
+  StocktakeBulkSummary,
   StocktakeProgress,
   StocktakeUndoRequest,
 } from '../../../shared/inventory-stocktake.interface';
@@ -313,11 +315,17 @@ export class InventoryStocktakeService {
     if (!bulkPerson)
       throw new BadRequestException('批量确认人已失效，请重新选择在职员工');
     people.set(`${bulkPerson.recordId}:${bulkPerson.openId}`, bulkPerson);
+    const failures: StocktakeBulkFailure[] = [];
+    const draftOk: typeof values = [];
     for (const line of pending) {
       const override = overrides.get(line.inventory.recordId)!;
       const person = override.confirmer || line.confirmer || request.confirmer;
-      if (!person?.recordId || !person.openId)
-        throw new BadRequestException('请从在职员工中选择确认人');
+      const recordId = line.inventory.recordId;
+      const name = line.inventory.name;
+      if (!person?.recordId || !person.openId) {
+        failures.push({ recordId, name, reason: '请从在职员工中选择确认人' });
+        continue;
+      }
       const key = `${person.recordId}:${person.openId}`;
       if (!people.has(key))
         people.set(
@@ -325,8 +333,10 @@ export class InventoryStocktakeService {
           await this.reviewDependency('人员', () => this.people.resolveApplicantForBuilding(person, true)),
         );
       const canonical = people.get(key);
-      if (!canonical)
-        throw new BadRequestException('确认人已失效，请重新选择在职员工');
+      if (!canonical) {
+        failures.push({ recordId, name, reason: '确认人已失效，请重新选择在职员工' });
+        continue;
+      }
       const value = {
         actualQuantity:
           override.actualQuantity ??
@@ -341,23 +351,40 @@ export class InventoryStocktakeService {
           bookQuantity: line.inventory.quantity,
         });
       } catch (error) {
-        throw new BadRequestException(
-          `${line.inventory.name}：${(error as Error).message}`,
-        );
+        failures.push({ recordId, name, reason: (error as Error).message });
+        continue;
       }
-      values.push({ line, value });
+      draftOk.push({ line, value });
     }
-    const stocks = await this.reviewDependency('库存', () => this.source.currentMany(
-      pending.map((l) => l.inventory),
-      ...(isProfessionalBusinessPrincipal(principal) ? [principal] : []),
-    ));
-    const current = new Map(stocks.map((i) => [i.recordId, i]));
-    for (const line of pending) {
-      const stock = current.get(line.inventory.recordId);
-      if (!stock || stocktakeFingerprint(stock) !== line.stockFingerprint)
-        throw new ConflictException(
-          `${line.inventory.name}库存已变化，请更新台账数量并重新核查`,
-        );
+    // Per-line isolation: one stale/conflicting line no longer aborts the whole
+    // batch. Stock version is re-checked only for lines that passed person/draft
+    // validation; every per-line check is preserved (never weakened).
+    if (draftOk.length) {
+      const stocks = await this.reviewDependency('库存', () => this.source.currentMany(
+        draftOk.map((entry) => entry.line.inventory),
+        ...(isProfessionalBusinessPrincipal(principal) ? [principal] : []),
+      ));
+      const current = new Map(stocks.map((i) => [i.recordId, i]));
+      for (const entry of draftOk) {
+        const stock = current.get(entry.line.inventory.recordId);
+        if (!stock || stocktakeFingerprint(stock) !== entry.line.stockFingerprint) {
+          failures.push({
+            recordId: entry.line.inventory.recordId,
+            name: entry.line.inventory.name,
+            reason: '库存已变化，请更新台账数量并重新核查',
+          });
+          continue;
+        }
+        values.push(entry);
+      }
+    }
+    if (!values.length) {
+      const reasons = failures.slice(0, 3)
+        .map(({ name, reason }) => `${name}（${reason}）`)
+        .join('；');
+      throw new ConflictException(
+        `本次 ${failures.length} 项均未确认：${reasons}${failures.length > 3 ? '；请刷新清单逐项核查' : ''}`,
+      );
     }
     return this.store.mutate(request.clientMutationId, fp, (state) => {
       const sheet = this.findSheet(state, request);
@@ -378,6 +405,7 @@ export class InventoryStocktakeService {
         undoneAt: null,
         actor,
         undoneBy: null,
+        ...(failures.length ? { failures } : {}),
         before: values.map(({ line }) => {
           const override = overrides.get(line.inventory.recordId)!;
           return {
@@ -416,7 +444,7 @@ export class InventoryStocktakeService {
         (s) => s.month === request.month && s.building === request.building,
       )!;
       const { review, ...sample } = base;
-      return this.scopedView({ ...sample, ...review!, scope: 'review' as const }, principal)!;
+      return this.scopedView({ ...sample, ...review!, scope: 'review' as const }, principal, batch)!;
     });
   }
   reviewFingerprint(request: StocktakeBulkRequest, actor: string) {
@@ -555,8 +583,8 @@ export class InventoryStocktakeService {
   private bulkSummary(
     batch: NonNullable<StocktakeLedger['bulkBatches']>[number],
   ) {
-    const { id, count, confirmer, confirmedAt, status, undoneAt } = batch;
-    return { id, count, confirmer, confirmedAt, status, undoneAt };
+    const { id, count, confirmer, confirmedAt, status, undoneAt, failures } = batch;
+    return { id, count, confirmer, confirmedAt, status, undoneAt, ...(failures?.length ? { failures } : {}) };
   }
   retrySync(
     request: StocktakeWriteRequest,
@@ -725,14 +753,34 @@ export class InventoryStocktakeService {
   private ownedLines(lines: StocktakeLine[], principal: AccessPrincipal) {
     return filterProfessionalRecords(principal, lines, line => line.inventory.specialty);
   }
-  private scopedView<T extends { lines: StocktakeLine[]; status: 'open' | 'completed' }>(sheet: T | undefined, principal: AccessPrincipal): T | undefined {
+  private scopedView<T extends { lines: StocktakeLine[]; status: 'open' | 'completed'; latestBulk?: StocktakeBulkSummary }>(
+    sheet: T | undefined,
+    principal: AccessPrincipal,
+    committedBatch?: NonNullable<StocktakeLedger['bulkBatches']>[number],
+  ): T | undefined {
     if (!sheet || !isProfessionalBusinessPrincipal(principal)) return sheet;
     const lines = this.ownedLines(sheet.lines, principal);
-    const result = { ...sheet, lines, shortfall: 0, status: lines.length > 0 && lines.every(line => line.status === 'confirmed') ? 'completed' as const : 'open' as const };
-    const latestBulk=(result as {latestBulk?:{id:string}}).latestBulk;
-    const batch=latestBulk && this.store.read().bulkBatches?.find(entry=>entry.id===latestBulk.id);
-    if (!batch || batch.before.some(before=>!lines.some(line=>line.inventory.recordId===before.recordId))) delete (result as { latestBulk?: unknown }).latestBulk;
-    else (result as T & {latestBulk?:import('../../../shared/inventory-stocktake.interface').StocktakeBulkSummary}).latestBulk={...(sheet as T & {latestBulk:import('../../../shared/inventory-stocktake.interface').StocktakeBulkSummary}).latestBulk,recordIds:batch.before.map(before=>before.recordId)};
+    const result = {
+      ...sheet,
+      lines,
+      shortfall: 0,
+      status: lines.length > 0 && lines.every(line => line.status === 'confirmed') ? 'completed' as const : 'open' as const,
+    };
+    if (!sheet.latestBulk) return result;
+    const batch = committedBatch?.id === sheet.latestBulk.id
+      ? committedBatch
+      : this.store.read().bulkBatches?.find(entry => entry.id === sheet.latestBulk?.id);
+    const visibleIds = new Set(lines.map(line => line.inventory.recordId));
+    if (!batch || batch.before.some(before => !visibleIds.has(before.recordId))) {
+      delete result.latestBulk;
+    } else {
+      const failures = sheet.latestBulk.failures?.filter(failure => visibleIds.has(failure.recordId));
+      result.latestBulk = {
+        ...sheet.latestBulk,
+        recordIds: batch.before.map(before => before.recordId),
+        failures: failures?.length ? failures : undefined,
+      };
+    }
     return result;
   }
   private findSheet(state: StocktakeLedger, request: StocktakeWriteRequest) {

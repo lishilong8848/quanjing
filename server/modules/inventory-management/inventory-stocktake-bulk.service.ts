@@ -16,6 +16,7 @@ import type { WarehouseBuilding } from '../../../shared/inventory-management.int
 import type {
   StocktakeBulkRequest,
   StocktakeBulkTask,
+  StocktakeSheet,
 } from '../../../shared/inventory-stocktake.interface';
 import {
   createProcessLockOwner,
@@ -50,6 +51,10 @@ function summary(job: StocktakeBulkJob): StocktakeBulkTask {
     updatedAt,
     error,
     confirmer: job.request?.confirmer,
+    ...(job.confirmedCount !== undefined
+      ? { confirmedCount: job.confirmedCount }
+      : {}),
+    ...(job.failures?.length ? { failures: job.failures } : {}),
   };
 }
 @Injectable()
@@ -147,6 +152,11 @@ export class InventoryStocktakeBulkService
         request: receipt ? null : structuredClone(request),
         owner: null,
       };
+      const latestBulk = (receipt?.result as StocktakeSheet | undefined)?.latestBulk;
+      if (latestBulk) {
+        created.confirmedCount = latestBulk.count;
+        created.failures = latestBulk.failures;
+      }
       jobs.push(created);
       return created;
     });
@@ -209,9 +219,11 @@ export class InventoryStocktakeBulkService
     while (!this.stopped && (job = this.claim())) {
       const current = job;
       let error = '';
+      let result: StocktakeSheet | undefined;
       try {
-        if (this.store.replay(current.id, current.fingerprint) === undefined)
-          await this.sheets.confirmReview(
+        result = this.store.replay<StocktakeSheet>(current.id, current.fingerprint);
+        if (result === undefined)
+          result = await this.sheets.confirmReview(
             current.request!,
             current.principal,
             current.actor,
@@ -222,11 +234,10 @@ export class InventoryStocktakeBulkService
             ? caught.message
             : '人员或库存核查未完成，请保留草稿并重试';
       }
-      if (
-        error &&
-        this.store.replay(current.id, current.fingerprint) !== undefined
-      )
-        error = '';
+      if (error) {
+        result = this.store.replay<StocktakeSheet>(current.id, current.fingerprint);
+        if (result !== undefined) error = '';
+      }
       this.store.update((state) => {
         const stored = state.bulkJobs?.find((j) => j.id === current.id);
         if (!stored || stored.owner?.token !== current.owner?.token)
@@ -235,7 +246,18 @@ export class InventoryStocktakeBulkService
         stored.error = error;
         stored.owner = null;
         stored.updatedAt = new Date().toISOString();
-        if (!error) stored.request = null;
+        if (!error) {
+          stored.request = null;
+          // Surface a partial bulk: confirmed count plus per-line failures, so
+          // the operator sees which lines stayed draft instead of a bare success.
+          const latestBulk = result?.latestBulk;
+          if (latestBulk) {
+            stored.confirmedCount = latestBulk.count;
+            stored.failures = latestBulk.failures?.length
+              ? latestBulk.failures
+              : undefined;
+          }
+        }
         return true;
       });
     }
