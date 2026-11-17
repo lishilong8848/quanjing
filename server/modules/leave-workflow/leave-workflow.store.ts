@@ -76,6 +76,7 @@ export type LeaveWorkflowTaskKind =
   | 'deliver_substitute_update_notifications'
   | 'deliver_stage_substitute_change_notifications'
   | 'sync_approved_leave_schedule'
+  | 'sync_substitute_overtime'
   | 'apply_substitute_update'
   | 'sync_personnel_handover'
   | 'verify_future_manager_handover';

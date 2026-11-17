@@ -20,6 +20,6 @@ import { PERSONNEL_PREVIEW_READERS } from '../../common/access/personnel-preview
     OvertimePersonnelHandoverAdapter,
     { provide: PERSONNEL_PREVIEW_READERS.overtime, useExisting: OvertimePersonnelHandoverAdapter },
   ],
-  exports: [OvertimeWorkflowService, OvertimeWorkflowStore, OvertimePersonnelHandoverAdapter],
+  exports: [OvertimeWorkflowService, OvertimeWorkflowStore, OvertimeWorkflowGateway, OvertimePersonnelHandoverAdapter],
 })
 export class OvertimeWorkflowModule {}

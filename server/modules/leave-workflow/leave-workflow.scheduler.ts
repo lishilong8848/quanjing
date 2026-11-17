@@ -18,6 +18,8 @@ export class LeaveWorkflowScheduler implements OnModuleInit, OnModuleDestroy {
   private taskRunRequested = false;
   private wakeHandle: NodeJS.Immediate | null = null;
   private stopped = false;
+  private nextSubstituteOvertimeCheckAt = 0;
+  private substituteOvertimeCheck: Promise<void> | null = null;
 
   constructor(private readonly service: LeaveWorkflowService) {}
 
@@ -41,6 +43,7 @@ export class LeaveWorkflowScheduler implements OnModuleInit, OnModuleDestroy {
     await cancelHotfixInitialization(this);
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    await this.substituteOvertimeCheck;
   }
 
   async runNow(): Promise<{ processed: number; failed: number }> {
@@ -94,6 +97,13 @@ export class LeaveWorkflowScheduler implements OnModuleInit, OnModuleDestroy {
         }
       }
       if (!this.stopped) await this.runTaskBatch();
+      if (!this.stopped && !this.substituteOvertimeCheck && Date.now() >= this.nextSubstituteOvertimeCheckAt) {
+        this.nextSubstituteOvertimeCheckAt = Date.now() + 5 * 60_000;
+        this.substituteOvertimeCheck = Promise.resolve()
+          .then(() => this.service.reconcileSubstituteOvertimeSources?.())
+          .catch(error => this.logger.warn(`替班加班来源核对失败：${safeError(error)}`))
+          .finally(() => { this.substituteOvertimeCheck = null; });
+      }
     } catch (error) {
       this.logger.error(`请休假程序审批后台任务轮询失败：${safeError(error)}`);
     } finally {

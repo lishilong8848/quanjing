@@ -116,6 +116,7 @@ export function buildOvertimeConfirmationResolvedCard(
 
 export function buildOvertimeSourceDeletedCard(
   snapshot: OvertimeApplicationSnapshot,
+  substituteChanged = false,
 ): Record<string, unknown> {
   assertRecordId(snapshot.recordId);
   return buildCard('grey', '加班申请已撤销', [
@@ -125,7 +126,8 @@ export function buildOvertimeSourceDeletedCard(
       text: {
         tag: 'lark_md',
         content:
-          "**底表记录已删除**\n<font color='grey'>审批和确认已终止，不再提醒</font>",
+          (substituteChanged ? '**原请假替班已取消或调整**' : '**底表记录已删除**') +
+          "\n<font color='grey'>审批和确认已终止，不再提醒</font>",
       },
     },
   ]);

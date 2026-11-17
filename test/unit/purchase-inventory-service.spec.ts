@@ -198,11 +198,11 @@ describe('PurchaseInventoryService', () => {
     expect(first.requests.map((item) => item.recordId)).toEqual(['before-write']);
 
     invalidateBitableRecordCache({ appToken: 'app-token', tableId: 'tblKmajonrdwW7Z0' });
-    read.mockResolvedValueOnce([executionRecord('after-write', '未开始（待审批）')]);
+    read.mockResolvedValueOnce([executionRecord('before-write', '下单完成（待签收）')]);
     const current = await service.getDisplayDashboard('active');
 
     expect(read).toHaveBeenCalledTimes(2);
-    expect(current.requests.map((item) => item.recordId)).toEqual(['after-write']);
+    expect(current.requests).toMatchObject([{ recordId: 'before-write', stage: 'receiving' }]);
   });
 
   it('bounds a slow active display read while the shared verified read keeps running', async () => {
@@ -263,7 +263,7 @@ describe('PurchaseInventoryService', () => {
   it('refreshes only active execution rows while retaining the completed snapshot', async () => {
     const activeBefore = executionRecord('active-before', '未开始（待审批）');
     const completed = executionRecord('completed-1', '采购完成（已入库）');
-    const activeAfter = executionRecord('active-after', '未开始（待审批）');
+    const activeAfter = executionRecord('active-before', '审批通过（待下单）');
     (fetchBitableRecords as jest.Mock).mockImplementation(
       async (_httpService, options: { tableId: string; filter?: unknown }) => {
         if (options.tableId !== 'tblKmajonrdwW7Z0') return [];
@@ -297,13 +297,54 @@ describe('PurchaseInventoryService', () => {
       }),
     );
     expect(refreshed.requests.map((item) => item.recordId).sort()).toEqual([
-      'active-after',
+      'active-before',
       'completed-1',
     ]);
     expect(refreshed.summary.stageCounts).toMatchObject({
-      approval: 1,
+      executing: 1,
       stocked: 1,
     });
+  });
+
+  it('reconciles a completed row missing from the active query and does not retain a deleted row', async () => {
+    const read = jest.mocked(fetchBitableRecords);
+    const tableId = process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID;
+    const history = executionRecord('history', '采购完成（已入库）');
+    const previous = [
+      history,
+      executionRecord('just-stocked', '到货已签收（待入库）'),
+      executionRecord('removed', '下单完成（待签收）'),
+    ];
+    const current = [
+      history,
+      executionRecord('just-stocked', '采购完成（已入库）'),
+    ];
+    read.mockImplementation(async (_http, options) => options.tableId !== tableId ? []
+      : options.filter ? [] : options.forceRefresh ? current : previous);
+    const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+    await service.getDashboard(false);
+    read.mockClear();
+    const dashboard = await service.getDashboard('active');
+    expect(dashboard.refreshState).toBe('fresh');
+    expect(dashboard.summary.stageCounts).toMatchObject({ executing: 0, receiving: 0, inbound: 0, stocked: 2 });
+    expect(dashboard.requests.map(item => item.recordId).sort()).toEqual(['history', 'just-stocked']);
+    expect(read.mock.calls.map(([, options]) => [options.tableId, Boolean(options.forceRefresh)]))
+      .toEqual([[tableId, false], [tableId, true]]);
+  });
+
+  it('recovers execution history after an initial partial read before reporting it as fresh', async () => {
+    const read = jest.mocked(fetchBitableRecords);
+    const tableId = process.env.FEISHU_PURCHASE_EXECUTION_TABLE_ID;
+    read.mockImplementation(async (_http, options) => {
+      if (options.tableId !== tableId) return [];
+      if (!options.forceRefresh) throw new Error('temporary execution read failure');
+      return [executionRecord('history', '采购完成（已入库）')];
+    });
+    const service = new PurchaseInventoryService({ axiosRef: {} } as never);
+    expect((await service.getDashboard(false)).refreshState).toBe('partial');
+    const dashboard = await service.getDashboard('active');
+    expect(dashboard).toMatchObject({ refreshState: 'fresh', summary: { stageCounts: { inbound: 0, stocked: 1 } } });
+    expect(read).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ tableId, forceRefresh: true }));
   });
 
   it('keeps the active source cache shorter than the 15-second browser polling interval', async () => {
@@ -329,7 +370,7 @@ describe('PurchaseInventoryService', () => {
           if (activeCacheExpiresAt > now) return activeCacheRecords;
           externalActiveReads += 1;
           now += 250;
-          activeCacheRecords = [
+          activeCacheRecords = [...activeCacheRecords,
             executionRecord(
               `active-poll-${externalActiveReads}`,
               '未开始（待审批）',

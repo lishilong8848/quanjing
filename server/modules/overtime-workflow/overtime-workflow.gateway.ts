@@ -267,6 +267,43 @@ export class OvertimeWorkflowGateway {
     });
   }
 
+  async readSubstitutionOvertimeRecords(): Promise<OvertimeBitableRecord[]> {
+    const config = this.overtimeConfig();
+    const rows = await fetchBitableRecords(this.httpService, {
+      ...config,
+      tableName: '替班加班核对',
+      forceRefresh: true,
+      strict: true,
+      allowStale: false,
+      fieldNames: ['请求唯一ID', '请求指纹', '加班人员', '加班人员姓名', '加班开始时间',
+        '加班结束时间', '加班时长', '加班工作流状态', '加班流程进展', '实际加班时长',
+        '加班工作流错误'],
+    });
+    return rows.map(row => ({ recordId: requireRecordId(row.record_id), fields: row.fields ?? {} }));
+  }
+
+  async createSubstitutionOvertimeRecord(fields: Record<string, unknown>, mutationId: string): Promise<string> {
+    const config = this.overtimeConfig();
+    if (config.tableId !== DEFAULT_OVERTIME_TABLE_ID || fields['请求唯一ID'] !== mutationId) {
+      throw new BadRequestException('替班加班目标表或请求标识无效');
+    }
+    const token = await this.getTenantAccessToken();
+    const digest = createHash('sha256').update(mutationId).digest();
+    digest[6] = (digest[6] & 0x0f) | 0x40;
+    digest[8] = (digest[8] & 0x3f) | 0x80;
+    const hex = digest.subarray(0, 16).toString('hex');
+    const clientToken = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    const response = await this.httpService.axiosRef.post(
+      recordsUrl(config.appToken, config.tableId),
+      { fields: cloneJsonObject(fields) },
+      { ...requestConfig(token), params: { client_token: clientToken, user_id_type: 'open_id' }, maxRedirects: 0 },
+    );
+    assertFeishuSuccess(response.data, '建立替班加班记录失败');
+    const id = requireRecordId(response.data?.data?.record?.record_id);
+    invalidateBitableRecordCache({ ...config, deletePersisted: true });
+    return id;
+  }
+
   issueConfirmationTicket(input: {
     recordId: string;
     approverOpenId: string;

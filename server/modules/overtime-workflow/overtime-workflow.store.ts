@@ -642,6 +642,7 @@ export class OvertimeWorkflowStore {
   async markSourceDeleted(
     recordId: string,
     now: Date | number = new Date(),
+    substituteMutationId?: string,
   ): Promise<OvertimeWorkflowApplicationEntry> {
     const normalizedRecordId = requireRecordId(recordId);
     return this.enqueue(async () => {
@@ -650,12 +651,19 @@ export class OvertimeWorkflowStore {
         (entry) => entry.recordId === normalizedRecordId,
       );
       if (!application) throw new NotFoundException('加班工作流申请不存在');
+      if (substituteMutationId && (application.clientMutationId !== substituteMutationId ||
+          (application.phase !== 'source_deleted' &&
+            (!['pending_approval', 'approval_pending'].includes(application.phase) ||
+             ledger.approvalActions.some(action => action.recordId === normalizedRecordId) ||
+             ledger.tasks.some(task => task.recordId === normalizedRecordId && task.status === 'processing'))))) {
+        throw new ConflictException('替班加班已进入审批或确认，请人工核对调整');
+      }
       const timestamp = resolveNow(now).toISOString();
       let changed = false;
       if (application.phase !== 'source_deleted') {
         application.phase = 'source_deleted';
         application.sourceDeletedAt = timestamp;
-        application.lastError = '底表记录已删除，工作流已终止';
+        application.lastError = substituteMutationId ? '替班加班撤回待同步' : '底表记录已删除，工作流已终止';
         application.revision += 1;
         application.updatedAt = timestamp;
         changed = true;

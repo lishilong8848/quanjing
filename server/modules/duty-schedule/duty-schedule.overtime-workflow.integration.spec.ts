@@ -88,6 +88,11 @@ const overtimeResult = {
   message: '加班申请已提交',
 };
 
+const access = {
+  accessPrincipal: { role: 'admin' as const, purchaseBuilding: null },
+  accessPrincipalFingerprint: 'integration-authenticated',
+};
+
 describe('DutyScheduleController overtime workflow integration', () => {
   it('imports the overtime workflow module for production injection', () => {
     const source = readFileSync(
@@ -110,7 +115,7 @@ describe('DutyScheduleController overtime workflow integration', () => {
     const controller = createController(createOvertimeRequest, acceptApplication);
 
     await expect(
-      controller.createOvertimeRequest(JSON.stringify(overtimeRequest), []),
+      controller.createOvertimeRequest(JSON.stringify(overtimeRequest), [], access),
     ).resolves.toBe(overtimeResult);
     expect(createOvertimeRequest).toHaveBeenCalledWith(overtimeRequest, undefined);
     expect(acceptApplication).toHaveBeenCalledWith({
@@ -130,7 +135,7 @@ describe('DutyScheduleController overtime workflow integration', () => {
     const controller = createController(createOvertimeRequest, acceptApplication);
 
     await expect(
-      controller.createOvertimeRequest(JSON.stringify(overtimeRequest), []),
+      controller.createOvertimeRequest(JSON.stringify(overtimeRequest), [], access),
     ).rejects.toThrow('workflow ledger unavailable');
   });
 
@@ -144,7 +149,7 @@ describe('DutyScheduleController overtime workflow integration', () => {
     );
 
     await expect(
-      controller.createOvertimeRequest(JSON.stringify(overtimeRequest), []),
+      controller.createOvertimeRequest(JSON.stringify(overtimeRequest), [], access),
     ).resolves.toBe(overtimeResult);
     expect(acceptApplication).not.toHaveBeenCalled();
   });
@@ -154,8 +159,20 @@ describe('DutyScheduleController overtime workflow integration', () => {
     const controller = createController(createOvertimeRequest);
 
     await expect(
-      controller.createOvertimeRequest(JSON.stringify(overtimeRequest), []),
+      controller.createOvertimeRequest(JSON.stringify(overtimeRequest), [], access),
     ).rejects.toThrow('加班审批工作流暂不可用');
+  });
+
+  it('checks automatic overtime overlap before writing a manual application', async () => {
+    const create = jest.fn();
+    const accept = jest.fn();
+    const check = jest.fn().mockRejectedValue(new Error('已有替班加班申请'));
+    const controller = createController(create, accept, true, check);
+
+    await expect(controller.createOvertimeRequest(JSON.stringify(overtimeRequest), [], access)).rejects.toThrow('已有替班加班申请');
+    expect(check).toHaveBeenCalledWith(overtimeRequest);
+    expect(create).not.toHaveBeenCalled();
+    expect(accept).not.toHaveBeenCalled();
   });
 });
 
@@ -163,6 +180,7 @@ function createController(
   createOvertimeRequest: jest.Mock,
   acceptApplication?: jest.Mock,
   enabled = true,
+  assertNoSubstitutionOvertimeOverlap = jest.fn().mockResolvedValue(undefined),
 ): DutyScheduleController {
   const Controller = DutyScheduleController as unknown as new (
     ...dependencies: unknown[]
@@ -174,7 +192,7 @@ function createController(
     { start: jest.fn() },
     undefined,
     acceptApplication
-      ? { acceptApplication, isEnabled: () => enabled }
+      ? { acceptApplication, isEnabled: () => enabled, assertNoSubstitutionOvertimeOverlap }
       : undefined,
   );
 }

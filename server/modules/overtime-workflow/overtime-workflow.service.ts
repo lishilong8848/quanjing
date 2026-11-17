@@ -235,6 +235,66 @@ export class OvertimeWorkflowService {
     return { created: accepted.created };
   }
 
+  async acceptSubstitutionApplication(clientMutationId: string, snapshot: OvertimeApplicationSnapshot): Promise<void> {
+    this.assertEnabled();
+    if (!clientMutationId.startsWith('overtime-request-leave-') || !snapshot.applicantOpenId) {
+      throw new BadRequestException('替班加班申请身份或来源无效');
+    }
+    const existing = await this.store.getApplication(snapshot.recordId);
+    if (existing?.clientMutationId === clientMutationId && existing.snapshot.applicantOpenId === snapshot.applicantOpenId &&
+        existing.snapshot.plannedStartAt === snapshot.plannedStartAt && existing.snapshot.plannedEndAt === snapshot.plannedEndAt &&
+        existing.snapshot.plannedHours === snapshot.plannedHours) return;
+    await this.store.acceptApplication({ clientMutationId, snapshot });
+  }
+
+  async assertNoSubstitutionOvertimeOverlap(request: OvertimeRequestCreateRequest): Promise<void> {
+    const start = Date.parse(request.startAt);
+    const end = Date.parse(request.endAt);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+    const candidates = (await this.store.listApplications()).filter(row =>
+      row.clientMutationId.startsWith('overtime-request-leave-') &&
+      !['rejected', 'source_deleted'].includes(row.phase) &&
+      normalizeName(row.snapshot.applicantName) === normalizeName(request.staffName) &&
+      start < Date.parse(row.snapshot.plannedEndAt) && Date.parse(row.snapshot.plannedStartAt) < end,
+    );
+    for (const row of candidates) {
+      if (row.phase === 'confirmed' && (await this.store.getConfirmation(row.recordId))?.draft.actualHours === 0) continue;
+      throw new BadRequestException('该时段已有系统生成的替班加班申请，请核对后选择未申请的时段');
+    }
+  }
+
+  async retireSubstitutionApplication(recordId: string, clientMutationId: string): Promise<void> {
+    this.assertEnabled();
+    if (!clientMutationId.startsWith('overtime-request-leave-')) {
+      throw new BadRequestException('仅允许撤回系统生成的替班加班');
+    }
+    const source = await this.gateway.readOvertimeRecordIfExists(recordId);
+    if (source && extractSimpleText(source.fields.请求唯一ID) !== clientMutationId) {
+      throw new BadRequestException('替班加班记录来源已变化');
+    }
+    if (source && (['已审批', '待确认', '已确认'].includes(extractSimpleText(source.fields.加班工作流状态)) ||
+        ['已审批', '已确认'].includes(extractSimpleText(source.fields.加班流程进展)))) {
+      throw new ServiceUnavailableException('替班加班已进入审批或确认，请人工核对调整');
+    }
+    const application = await this.store.getApplication(recordId);
+    const retired = application && await this.store.markSourceDeleted(recordId, new Date(), clientMutationId);
+    const reason = '原请假替班已取消或调整，本笔自动加班申请已撤回';
+    if (source && (extractSimpleText(source.fields.加班工作流状态) !== '已驳回' ||
+        extractSimpleText(source.fields.加班工作流错误) !== reason)) {
+      await this.gateway.updateOvertimeRecord(recordId, {
+        加班工作流状态: '已驳回', 加班流程进展: '申请中', 加班工作流错误: reason,
+      });
+      const current = await this.gateway.readOvertimeRecord(recordId);
+      if (extractSimpleText(current.fields.请求唯一ID) !== clientMutationId ||
+          extractSimpleText(current.fields.加班工作流状态) !== '已驳回') {
+        throw new ServiceUnavailableException('替班加班撤回回执待核对');
+      }
+    }
+    const result = retired && await this.refreshSourceDeletedCards(retired);
+    if (result?.failed) throw new ServiceUnavailableException('替班加班旧审批卡终态尚未同步');
+    if (retired) await this.store.patchApplication(recordId, { lastError: '' });
+  }
+
   async acceptApprovalAction(
     input: OvertimeApprovalActionAcceptanceInput,
   ): Promise<{ claimed: boolean; card: Record<string, unknown> }> {
@@ -931,7 +991,7 @@ export class OvertimeWorkflowService {
         .filter((messageId) => !patched.has(messageId)),
     );
     if (messageIds.length === 0) return { refreshed: 0, failed: 0 };
-    const card = buildOvertimeSourceDeletedCard(application.snapshot);
+    const card = buildOvertimeSourceDeletedCard(application.snapshot, application.clientMutationId.startsWith('overtime-request-leave-'));
     let refreshed = 0;
     let failed = 0;
     for (const messageId of messageIds) {

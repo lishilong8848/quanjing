@@ -39,6 +39,7 @@ import {
 import { LeaveWorkflowGateway } from './leave-workflow.gateway';
 import { LeaveWorkflowDetailGateway } from './leave-workflow.detail-gateway';
 import { originalPostSignature, requiredOriginalPostGroups } from './leave-two-level-substitution';
+import { LeaveSubstituteOvertimeService } from './leave-substitute-overtime.service';
 import {
   buildLeaveShiftCandidateSets,
   buildLeaveApprovalPlan,
@@ -175,6 +176,8 @@ export class LeaveWorkflowService {
     private readonly detailGateway?: LeaveWorkflowDetailGateway,
     @Inject(AccessConfigurationService)
     private readonly accessConfiguration?: AccessConfigurationService,
+    @Optional()
+    private readonly substituteOvertime?: LeaveSubstituteOvertimeService,
   ) {}
 
   isEnabled(): boolean {
@@ -183,6 +186,14 @@ export class LeaveWorkflowService {
 
   setTaskWakeHandler(handler: (() => void) | null): void {
     this.taskWakeHandler = handler;
+  }
+
+  async reconcileSubstituteOvertimeSources(): Promise<void> {
+    if (this.substituteOvertime) {
+      await this.substituteOvertime.reconcileChangedSources(
+        await this.store.listApplications(), id => this.store.getApplication(id),
+      );
+    }
   }
 
   async recoverConfiguredApplications(): Promise<LeaveWorkflowRecoveryResult> {
@@ -700,12 +711,14 @@ export class LeaveWorkflowService {
         return;
       case 'sync_leave_shift_details':
       case 'sync_approved_leave_schedule':
+      case 'sync_substitute_overtime':
       case 'apply_substitute_update': {
         // 主表、明细和排班可能来自不同 worker，同一请假记录必须按序写入。
         const previous = this.substituteSyncRuns.get(task.recordId) || Promise.resolve();
         const pending = previous.catch(() => undefined).then(() => {
           if (task.kind === 'sync_leave_shift_details') return this.syncLeaveShiftDetails(task);
           if (task.kind === 'sync_approved_leave_schedule') return this.syncApprovedLeaveSchedule(task);
+          if (task.kind === 'sync_substitute_overtime') return this.syncSubstituteOvertime(task);
           return this.applySubstituteUpdate(task, now);
         });
         this.substituteSyncRuns.set(task.recordId, pending);
@@ -1591,6 +1604,22 @@ export class LeaveWorkflowService {
           : {}),
       },
     );
+    if (this.substituteOvertime && (assignments.length || revision > 0)) {
+      await this.store.enqueueTask({
+        businessKey: `leave:${task.recordId}:substitute-overtime:${revision}`,
+        recordId: task.recordId,
+        kind: 'sync_substitute_overtime',
+        payload: { revision },
+      });
+    }
+  }
+
+  private async syncSubstituteOvertime(task: LeaveWorkflowTaskEntry): Promise<void> {
+    if (!this.substituteOvertime) throw new ServiceUnavailableException('替班加班服务未就绪');
+    const application = await this.requireApplication(task.recordId);
+    const revision = application.snapshot.assignmentRevision ?? application.snapshot.substituteRevision ?? 0;
+    if (revision !== task.payload.revision || application.status !== 'approved') return;
+    await this.substituteOvertime.sync(application, revision);
   }
 
   private async enqueueSubstituteAdjustmentCards(

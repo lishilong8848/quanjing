@@ -200,16 +200,27 @@ export class LeaveWorkflowGateway {
   }
 
   async readLeaveRecord(recordId: string): Promise<LeaveBitableRecord> {
+    const record = await this.readLeaveRecordIfExists(recordId);
+    if (!record) throw new BadGatewayException('请休假源记录已删除');
+    return record;
+  }
+
+  async readLeaveRecordIfExists(recordId: string): Promise<LeaveBitableRecord | null> {
     const normalizedRecordId = requireRecordId(recordId);
     const config = this.leaveConfig();
     const response = await this.httpService.axiosRef.get(
       `${recordsUrl(config.appToken, config.tableId)}/${encodeURIComponent(normalizedRecordId)}`,
       requestConfig(await this.getTenantAccessToken()),
-    );
+    ).catch((error: unknown) => {
+      const failure = error as { response?: { data?: { code?: unknown } } };
+      if (Number(failure?.response?.data?.code) === 1254043) return null;
+      throw error;
+    });
+    if (!response || Number(response.data?.code) === 1254043) return null;
     assertFeishuSuccess(response.data, '读取请休假多维记录失败');
     const record = response.data?.data?.record as BitableRecordItem | undefined;
     const responseRecordId = clean(record?.record_id || normalizedRecordId);
-    if (!record || !RECORD_ID_PATTERN.test(responseRecordId)) {
+    if (!record || responseRecordId !== normalizedRecordId) {
       throw new BadGatewayException('读取请休假多维记录失败：响应缺少记录');
     }
     return {

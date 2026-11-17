@@ -785,7 +785,8 @@ describe('monthly schedule overtime request', () => {
     expect(source).toContain(
       'ensureSchedulesForDateRange={ensureSchedulesForLeaveDateRange}',
     );
-    expect(source).toContain('canUseSelfServiceTools={canUseSelfServiceTools}');
+    const overtimeHost = source.match(/<OvertimeRequestDialogHost\b[^]*?\/>/)?.[0];
+    expect(overtimeHost).toContain('canUseSelfServiceTools={canCreateOvertimeRequest}');
     expect(source.slice(leaveIndex, overtimeIndex + 100)).toMatch(
       />\s*加班申请\s*</,
     );

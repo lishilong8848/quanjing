@@ -125,6 +125,7 @@ export function derivePurchaseStage(input: StageInput): {
     case '物品签收（待入库）':
       return { stage: 'inbound', statusLabel: '到货已签收（待入库）' };
     case '采购完成（已入库）':
+    case '物品签收已入库':
       return { stage: 'stocked', statusLabel: '采购完成（已入库）' };
     case '驳回申请':
       return { stage: 'rejected', statusLabel: input.workflowStatus };
@@ -134,6 +135,19 @@ export function derivePurchaseStage(input: StageInput): {
 
   if (input.rejected) return { stage: 'rejected', statusLabel: '已驳回' };
   return { stage: 'executing', statusLabel: '采购流程待同步' };
+}
+
+export function purchaseDashboardWorkflowStatus(fields: Record<string, unknown>): string {
+  const workflow = text(fields, ['采购流程']);
+  const program = text(fields, ['程序采购状态']);
+  // Inbound writes maintain both fields, but historical rows may only carry
+  // the program's terminal status. A legacy checkbox alone is not authoritative.
+  if (workflow === '驳回申请') return workflow;
+  return isCompletedPurchaseWorkflowStatus(program) ? program : workflow || program;
+}
+
+export function isCompletedPurchaseWorkflowStatus(status: string): boolean {
+  return status === '采购完成（已入库）' || status === '物品签收已入库';
 }
 
 export function buildPurchaseInventoryView(
@@ -214,12 +228,12 @@ function buildRequests(
         const warehouseConfirmed = checked(
           pickField(executionFields, ['是否已入库']),
         );
-        const workflowStatus = text(executionFields, ['采购流程']);
+        const workflowStatus = purchaseDashboardWorkflowStatus(executionFields);
         const purchaseMethod =
           text(executionFields, ['1️⃣物品采购方式', '采购方式']) ||
           text(submissionFields, ['采购方式', '1️⃣物品采购方式']);
         const warehouseCompleted =
-          warehouseConfirmed || workflowStatus === '采购完成（已入库）';
+          warehouseConfirmed || isCompletedPurchaseWorkflowStatus(workflowStatus);
         const stage = derivePurchaseStage({
           hasExecution: Boolean(execution),
           submitted: submission

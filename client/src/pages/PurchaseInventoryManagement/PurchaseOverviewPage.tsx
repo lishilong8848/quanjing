@@ -974,7 +974,11 @@ export default function PurchaseOverviewPage() {
           <div className="flex items-center justify-between gap-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             <span className="flex min-w-0 items-center gap-2">
               <AlertCircle className="h-4 w-4 shrink-0" />
-              <span className="truncate">{renderedLoadError}</span>
+              <span>
+                {renderedLoadError}
+                {dashboard && (dashboard.sectionStatus.executions.message || dashboard.refreshState === 'stale') &&
+                  '。当前采购阶段统计尚未核对，请以上次结果为参考。'}
+              </span>
             </span>
             <button
               type="button"

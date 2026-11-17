@@ -7,6 +7,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ActivePersonnelDirectory } from '../bitable-sync/active-personnel-directory';
+import { LeaveSubstituteOvertimeService } from '../leave-workflow/leave-substitute-overtime.service';
+import type { LeaveWorkflowApplicationEntry } from '../leave-workflow/leave-workflow.store';
 import { OvertimeWorkflowService as ActualOvertimeWorkflowService } from './overtime-workflow.service';
 import { withSyntheticBusinessIdentity } from '../../../test/unit/synthetic-business-identity.fixture';
 const OvertimeWorkflowService = withSyntheticBusinessIdentity(ActualOvertimeWorkflowService, 3);
@@ -128,7 +130,9 @@ describe('OvertimeWorkflowService', () => {
   let service: OvertimeWorkflowService;
 
   beforeEach(async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-12T00:00:00Z'));
+    // The ledger queue needs real microtasks and event-loop turns while the business date is frozen.
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'setImmediate'] });
+    jest.setSystemTime(new Date('2026-08-12T00:00:00Z'));
     directory = await mkdtemp(join(tmpdir(), 'overtime-service-'));
     store = new OvertimeWorkflowStore(join(directory, 'ledger.json'));
     gateway = {
@@ -231,6 +235,104 @@ describe('OvertimeWorkflowService', () => {
       expect.any(Object),
       'overtime:rec_overtime_1:approval:ou_supervisor',
     );
+  });
+
+  it('routes substitute overtime into the real local ledger and keeps manual approval working through replacement and withdrawal', async () => {
+    const shanghai = (day: number, hour: number) => new Date(Date.UTC(2026, 7, day, hour - 8)).toISOString();
+    const oldPerson = activeDirectory.personnel[0];
+    const newPerson = { ...oldPerson, recordId: 'p5', name: '李四', openId: 'ou_replacement', employeeNo: '005' };
+    personnel.getCachedActivePersonnelDirectory.mockResolvedValue({
+      ...activeDirectory, personnel: [...activeDirectory.personnel, newPerson],
+    });
+    const manual = {
+      clientMutationId: 'overtime-request-manual', staffName: oldPerson.name,
+      startAt: shanghai(12, 18), endAt: shanghai(12, 19), reason: '手工申请', expectedImpact: IMPACT,
+    };
+    const rows = new Map<string, Record<string, unknown>>([[SNAPSHOT.recordId, {
+      加班人员: [{ id: oldPerson.openId }], 加班人员姓名: oldPerson.name,
+      加班开始时间: Date.parse(manual.startAt), 加班结束时间: Date.parse(manual.endAt),
+    }]]);
+    gateway.readOvertimeRecord.mockImplementation(async recordId => ({ recordId, fields: rows.get(recordId) }));
+    gateway.readOvertimeRecordIfExists.mockImplementation(async recordId =>
+      rows.has(recordId) ? { recordId, fields: rows.get(recordId) } : null);
+    gateway.updateOvertimeRecord.mockImplementation(async (recordId, fields) => Object.assign(rows.get(recordId)!, fields));
+    gateway.sendInteractiveCard.mockImplementation(async (_recipient, _card, key) => `om_${stableOvertimeMessageUuid(key)}`);
+
+    const create = jest.fn(async (fields: Record<string, unknown>) => {
+      const recordId = `rec_auto_overtime_${rows.size}`;
+      rows.set(recordId, fields);
+      return recordId;
+    });
+    const leaveFields: Record<string, unknown> = {
+      请假工作流状态: '已审批', 休假开始时间: Date.parse(shanghai(12, 9)),
+      休假结束时间: Date.parse(shanghai(12, 21)), '替班人员（填姓名）': oldPerson.name,
+    };
+    const snapshot = (revision: number, person: typeof oldPerson, end: number) => ({
+      recordId: 'rec_leave_integration', status: 'approved',
+      snapshot: {
+        startAt: shanghai(12, 9), endAt: shanghai(12, end), assignmentRevision: revision,
+        shiftAssignments: [{ substituteName: person.name, substituteOpenId: person.openId,
+          startAt: shanghai(12, 9), endAt: shanghai(12, end) }],
+      },
+    }) as LeaveWorkflowApplicationEntry;
+    const auto = new LeaveSubstituteOvertimeService({
+      readSubstituteOvertimePersonnel: async () => [oldPerson, newPerson].map(person => ({ ...person, shift: '长白' })),
+      getCachedLeaveRequestImpactSchedules: async () => ['2026-08-11', '2026-08-12'].map(scheduleDate =>
+        ({ recordId: `rec_schedule_${scheduleDate}`, scheduleDate, dutyStaffActual: [] })),
+    } as never, {
+      readLeaveRecordIfExists: async () => ({ recordId: 'rec_leave_integration', fields: leaveFields }),
+    } as never, {
+      ...gateway, createSubstitutionOvertimeRecord: create,
+      readSubstitutionOvertimeRecords: async () => Array.from(rows, ([recordId, fields]) => ({ recordId, fields: structuredClone(fields) })),
+    } as never, service, store);
+
+    await service.acceptApplication({ request: manual, result: {
+      success: true, created: 1, recordId: SNAPSHOT.recordId, clientMutationId: manual.clientMutationId,
+      requestFingerprint: 'manual-fingerprint', impact: { ...IMPACT, rawHours: 1, payableHours: 1 }, message: 'ok',
+    } });
+    await auto.sync(snapshot(1, oldPerson, 21), 1);
+    await auto.sync(snapshot(1, oldPerson, 21), 1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect((await store.getApplication('rec_auto_overtime_1'))?.snapshot).toMatchObject({
+      applicantOpenId: oldPerson.openId, plannedStartAt: shanghai(12, 19), plannedEndAt: shanghai(12, 21),
+    });
+    await service.runPendingTasks(new Date());
+    await service.runPendingTasks(new Date());
+    expect((await store.getApplication('rec_auto_overtime_1'))?.phase).toBe('approval_pending');
+
+    leaveFields['替班人员（填姓名）'] = newPerson.name;
+    await auto.sync(snapshot(2, newPerson, 21), 2);
+    expect((await store.getApplication('rec_auto_overtime_1'))?.phase).toBe('source_deleted');
+    expect((await store.getApplication('rec_auto_overtime_2'))?.snapshot.applicantOpenId).toBe(newPerson.openId);
+    leaveFields.休假结束时间 = Date.parse(shanghai(12, 20));
+    const revised = snapshot(3, newPerson, 20);
+    await auto.sync(revised, 3);
+    expect((await store.getApplication('rec_auto_overtime_2'))?.phase).toBe('source_deleted');
+    expect((await store.getApplication('rec_auto_overtime_3'))?.snapshot.plannedEndAt).toBe(shanghai(12, 20));
+    await service.runPendingTasks(new Date());
+    await service.runPendingTasks(new Date());
+    const currentAuto = await store.getApplication('rec_auto_overtime_3');
+    expect(currentAuto?.phase).toBe('approval_pending');
+
+    leaveFields.请假工作流状态 = '已撤销';
+    await auto.reconcileChangedSources([revised], async () => revised);
+    expect((await store.getApplication('rec_auto_overtime_3'))?.phase).toBe('source_deleted');
+    expect(create).toHaveBeenCalledTimes(3);
+    const revokedCardId = currentAuto!.approvalCards[0].messageId;
+    const cancellation = gateway.patchInteractiveCard.mock.calls.find(([messageId]) => messageId === revokedCardId);
+    expect(JSON.stringify(cancellation)).toContain('原请假替班已取消或调整');
+    await expect(service.acceptApprovalAction({
+      eventId: 'evt_revoked_auto_approval', recordId: 'rec_auto_overtime_3', action: 'approve',
+      actorOpenId: 'ou_supervisor', messageId: revokedCardId,
+    })).rejects.toThrow();
+    const manualEntry = await store.getApplication(SNAPSHOT.recordId);
+    expect(manualEntry?.phase).toBe('approval_pending');
+    await expect(service.acceptApprovalAction({
+      eventId: 'evt_manual_after_leave_withdrawal', recordId: SNAPSHOT.recordId, action: 'approve',
+      actorOpenId: 'ou_supervisor', messageId: manualEntry!.approvalCards[0].messageId,
+    })).resolves.toMatchObject({ claimed: true });
+    await service.runPendingTasks(new Date());
+    expect(rows.get(SNAPSHOT.recordId)?.加班工作流状态).toBe('已审批');
   });
 
   it('keeps routing pending when no machine-room manager can be resolved', async () => {
@@ -826,7 +928,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('sends one initial confirmation at planned end and daily reminders from the next Shanghai day', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
     await seedApprovalPending(store);
     await service.acceptApprovalAction({
       eventId: 'evt_initial_confirmation',
@@ -1035,7 +1137,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('persists an explicitly selected end through the durable queue without canonicalizing the lunch boundary', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     const input = {
       recordId: SNAPSHOT.recordId,
@@ -1089,7 +1191,7 @@ describe('OvertimeWorkflowService', () => {
   ])(
     'rejects inconsistent end %s / hours %s before queueing',
     async (actualEndAt, actualHours) => {
-      jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+      jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
       await seedAwaitingConfirmation(store);
       const input = {
         recordId: SNAPSHOT.recordId,
@@ -1106,7 +1208,7 @@ describe('OvertimeWorkflowService', () => {
   );
 
   it('validates the ticket, returns prefilled confirmation and queues exact integer-hour draft', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     await expect(
       service.getConfirmationDetail(SNAPSHOT.recordId, 'signed-ticket'),
@@ -1161,7 +1263,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('recovers an approved confirmation from the exact Base record when the local ledger is missing', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     gateway.readOvertimeRecord.mockResolvedValue({
       recordId: SNAPSHOT.recordId,
       fields: approvedOvertimeBaseFields(),
@@ -1195,7 +1297,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('does not recover a missing ledger from a terminal or differently approved Base record', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     gateway.readOvertimeRecord.mockResolvedValueOnce({
       recordId: SNAPSHOT.recordId,
       fields: approvedOvertimeBaseFields({
@@ -1221,7 +1323,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('accepts only the exact submit replay after confirmation while detail stays closed', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     const submission = {
       recordId: SNAPSHOT.recordId,
@@ -1263,7 +1365,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('accepts zero actual hours, keeps end equal to start and clears the Base disposition', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
 
     const accepted = await service.submitConfirmation({
@@ -1309,7 +1411,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('requires a disposition for positive hours and forbids one for zero hours', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
 
     await expect(
@@ -1335,7 +1437,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('does not coerce a null hour value into a zero-hour cancellation', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
 
     await expect(
@@ -1351,7 +1453,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('updates confirmation card holders and sends one result to every uncovered deduplicated recipient', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     await store.patchApplication(SNAPSHOT.recordId, {
       professionalRecipients: [
@@ -1441,7 +1543,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('retries partial result delivery without rewriting Base or resending successful recipients', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     await store.patchApplication(SNAPSHOT.recordId, {
       confirmationCards: [
@@ -1518,7 +1620,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('persists a result intent before send and retries a lost delivered write with the same business key and UUID', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     const originalPatchApplication = store.patchApplication.bind(store);
     let failFirstDeliveredWrite = true;
@@ -1581,7 +1683,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('does not blindly resend an unresolved result intent after the one-hour Feishu dedupe window', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     const originalPatchApplication = store.patchApplication.bind(store);
     let failFirstDeliveredWrite = true;
@@ -1624,7 +1726,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('rechecks the wall clock before send and refuses when work crosses into the Feishu retry safety margin', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     const originalPatchApplication = store.patchApplication.bind(store);
     let failFirstDeliveredWrite = true;
@@ -1671,7 +1773,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('does not keep daily reminders alive when a historical confirmation card cannot be patched', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     await store.patchApplication(SNAPSHOT.recordId, {
       confirmationCards: [
@@ -1726,7 +1828,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('rejects non-hour start values and non-integer hours before touching the store', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-14T00:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     await expect(
       service.submitConfirmation({
@@ -1753,7 +1855,7 @@ describe('OvertimeWorkflowService', () => {
   });
 
   it('does not allow confirmation before the planned overtime end', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-08-13T08:00:00.000Z'));
+    jest.setSystemTime(new Date('2026-08-13T08:00:00.000Z'));
     await seedAwaitingConfirmation(store);
     await expect(
       service.getConfirmationDetail(SNAPSHOT.recordId, 'signed-ticket'),

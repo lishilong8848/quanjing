@@ -80,6 +80,7 @@ describe('purchase inventory mapper', () => {
     ['到货已签收（待入库）', 'inbound', '到货已签收（待入库）'],
     ['物品签收（待入库）', 'inbound', '到货已签收（待入库）'],
     ['采购完成（已入库）', 'stocked', '采购完成（已入库）'],
+    ['物品签收已入库', 'stocked', '采购完成（已入库）'],
     ['驳回申请', 'rejected', '驳回申请'],
   ] as const)(
     'uses the manually added purchase process %s as the source of truth',
@@ -98,6 +99,18 @@ describe('purchase inventory mapper', () => {
       ).toEqual({ stage, statusLabel });
     },
   );
+
+  it('recognizes the program completion status when the legacy purchase process is missing or behind', () => {
+    for (const workflow of ['', '下单完成（待签收）', '到货已签收（待入库）']) {
+      expect(mapProcurementRequest({ executionFields: {
+        采购流程: workflow,
+        程序采购状态: '物品签收已入库',
+      } })).toMatchObject({ stage: 'stocked', warehouseConfirmed: true });
+    }
+    expect(mapProcurementRequest({ executionFields: {
+      程序采购状态: '物品签收（待入库）',
+    } })).toMatchObject({ stage: 'inbound', warehouseConfirmed: false });
+  });
 
   it('keeps records with an unsynchronised Base process out of pending approval', () => {
     expect(

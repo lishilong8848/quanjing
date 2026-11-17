@@ -8,14 +8,17 @@ import { LeaveWorkflowService } from './leave-workflow.service';
 import { LeaveWorkflowStore } from './leave-workflow.store';
 import { LeavePersonnelHandoverAdapter } from './leave-personnel-handover.adapter';
 import { PERSONNEL_PREVIEW_READERS } from '../../common/access/personnel-preview.ports';
+import { OvertimeWorkflowModule } from '../overtime-workflow/overtime-workflow.module';
+import { LeaveSubstituteOvertimeService } from './leave-substitute-overtime.service';
 
 @Module({
-  imports: [HttpModule, BitableSyncModule],
+  imports: [HttpModule, BitableSyncModule, OvertimeWorkflowModule],
   providers: [
     LeaveWorkflowStore,
     LeaveWorkflowGateway,
     LeaveWorkflowDetailGateway,
     LeaveWorkflowService,
+    LeaveSubstituteOvertimeService,
     LeaveWorkflowScheduler,
     LeavePersonnelHandoverAdapter,
     { provide: PERSONNEL_PREVIEW_READERS.leave, useExisting: LeavePersonnelHandoverAdapter },

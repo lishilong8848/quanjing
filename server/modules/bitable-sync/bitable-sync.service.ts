@@ -3870,7 +3870,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   async getCachedLeaveRequestImpactSchedules(
     startDate: string,
     endDate: string,
-    options: { waitForApprovalRecovery?: boolean } = {},
+    options: { waitForApprovalRecovery?: boolean; originalOnly?: boolean } = {},
   ): Promise<LeaveRequestImpactSchedule[]> {
     if (
       !/^\d{4}-\d{2}-\d{2}$/u.test(startDate) ||
@@ -3882,10 +3882,10 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     const readSources = () => Promise.all([
       this.readRollingScheduleRecords('non-duty', startDate, endDate),
       this.readRollingScheduleRecords('schedule', startDate, endDate),
-      readCachedLeaveApprovalSnapshotState(),
+      options.originalOnly ? null : readCachedLeaveApprovalSnapshotState(),
     ]);
     let [nonDutyRows, scheduleRows, approvalState] = await readSources();
-    if (!approvalState.snapshot.verified) {
+    if (approvalState && !approvalState.snapshot.verified) {
       if (!options.waitForApprovalRecovery) {
         void this.refreshLeaveApprovalCache();
         throw new ServiceUnavailableException('请休假审批缓存正在后台核验，请稍后重试原操作');
@@ -3899,26 +3899,27 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         throw new ServiceUnavailableException(error instanceof Error ? error.message : '请休假审批缓存暂未核验');
       }
       [nonDutyRows, scheduleRows, approvalState] = await readSources();
-      if (!approvalState.snapshot.verified) {
-        throw new ServiceUnavailableException(new LeaveApprovalCacheError(approvalState.failure || 'invalid').message);
+      if (!approvalState?.snapshot.verified) {
+        throw new ServiceUnavailableException(new LeaveApprovalCacheError(approvalState?.failure || 'invalid').message);
       }
     }
     const inRange = (date: string | null): date is string =>
       Boolean(date && date >= startDate && date <= endDate);
     // The caller includes adjacent rest days; unrelated historical rows need no approval projection.
-    const nonDutyRecords = enrichScheduleRecordsWithLeaveApproval(
-      nonDutyRows.filter(record => inRange(extractFeishuDateValue(
-        pickField(record.fields || {}, ['排班日期', '日期', 'schedule_date']),
-      ))),
-      approvalState.snapshot,
-    );
-    const scheduleRecords = enrichScheduleRecordsWithLeaveApproval(
-      scheduleRows.filter(record => inRange(extractFeishuDateValue(
-        pickField(record.fields || {}, ['fldZSaDbGf', '排班日期', '日期']),
-      ))),
-      approvalState.snapshot,
-    );
+    const inRangeRecords = (rows: BitableRecordItem[], dateAliases: string[]) => {
+      const filtered = rows.filter(record => inRange(extractFeishuDateValue(pickField(record.fields || {}, dateAliases))));
+      return approvalState ? enrichScheduleRecordsWithLeaveApproval(filtered, approvalState.snapshot) : filtered;
+    };
+    const nonDutyRecords = inRangeRecords(nonDutyRows, ['排班日期', '日期', 'schedule_date']);
+    const scheduleRecords = inRangeRecords(scheduleRows, ['fldZSaDbGf', '排班日期', '日期']);
     const result: LeaveRequestImpactSchedule[] = [];
+    const readOriginalStaff = (fields: Record<string, unknown>, aliases: string[]): string[] => {
+      const planned = pickField(fields, aliases);
+      if (planned === undefined && !aliases.some(alias => Object.hasOwn(fields, alias))) {
+        throw new ServiceUnavailableException('原始排班人员字段无法核验');
+      }
+      return extractDisplayValues(planned).flatMap(name => this.splitStaffNames(name));
+    };
 
     for (const record of nonDutyRecords) {
       const schedule = this.mapFeishuNonDutyRecord(record);
@@ -3932,7 +3933,9 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         teamText: schedule.team || '长白',
         shift: 'long_white',
         shiftText: '长白',
-        dutyStaffActual: this.splitStaffNames(schedule.dutyStaffActual),
+        dutyStaffActual: options.originalOnly
+          ? readOriginalStaff(record.fields || {}, ['人员（文本）', '人员文本', '人员', '长白班'])
+          : this.splitStaffNames(schedule.dutyStaffActual),
       });
     }
 
@@ -3961,7 +3964,9 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         teamText,
         shift: shiftText,
         shiftText,
-        dutyStaffActual: approvedLeave.dutyStaff,
+        dutyStaffActual: options.originalOnly
+          ? readOriginalStaff(fields, ['fldJi5bxBG', '人员（文本）', '人员文本', '人员'])
+          : approvedLeave.dutyStaff,
       });
     }
 
@@ -4001,9 +4006,23 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * 仅从服务器本地快照解析飞书身份，避免点击姓名时实时请求多维表。
-   */
+  async readSubstituteOvertimePersonnel() {
+    const [directory, profiles] = await Promise.all([
+      this.getCachedActivePersonnelDirectory(),
+      this.readCachedPersonProfileRecords('leave', true),
+    ]);
+    const shifts = new Map<string, string | null>();
+    for (const record of profiles) {
+      const fields = record.fields || {};
+      const id = extractFeishuOpenId(pickField(fields, ['员工姓名', '员工', '人员']));
+      if (!id) continue;
+      const shift = this.normalizeShiftLabel(extractDisplayText(pickField(fields, ['班组', '班次', '班别', '值班班次'])));
+      shifts.set(id, shifts.has(id) ? null : shift);
+    }
+    return directory.personnel.map(person => ({ ...person, shift: shifts.get(person.openId) ?? null }));
+  }
+
+  /** 仅从服务器本地快照解析飞书身份，避免点击姓名时实时请求多维表。 */
   async getPersonChatAppLink(
     recordId: string,
     scope: PersonProfileScope = 'leave',

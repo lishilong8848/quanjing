@@ -61,6 +61,7 @@ import { DutyScheduleAutomationService } from '@server/modules/duty-schedule/dut
 import { DutyScreenshotService } from '@server/modules/duty-schedule/duty-screenshot.service';
 import { TyphoonWarningMonitorService } from '@server/modules/duty-schedule/typhoon-warning-monitor.service';
 import { OvertimeWorkflowService } from '@server/modules/overtime-workflow/overtime-workflow.service';
+import { withOvertimeSubmissionLock } from '@server/modules/overtime-workflow/overtime-submission-lock';
 import { LeaveWorkflowService } from '@server/modules/leave-workflow/leave-workflow.service';
 import type {
   AdditionalMatterCreateRequest,
@@ -838,17 +839,25 @@ export class DutyScheduleController {
       );
     }
     request.staffName = bindWorkforceRequestApplicant(request.staffName || '', accessRequest?.accessPrincipal, Boolean(accessRequest?.accessPrincipalFingerprint), '提交加班申请');
-    const result = await this.dutyScheduleService.createOvertimeRequest(
-      request,
-      files[0],
-      ...(isPersonalAccessAccount(accessRequest?.accessPrincipal) ? [accessRequest!.accessPrincipal] : []),
-    );
-    if (!this.overtimeWorkflowService) {
-      throw new ServiceUnavailableException('加班审批工作流暂不可用');
+    if (request.clientMutationId?.startsWith('overtime-request-leave-')) {
+      throw new BadRequestException('系统替班加班标识不可用于手工申请');
     }
-    if (!this.overtimeWorkflowService.isEnabled()) return result;
-    await this.overtimeWorkflowService.acceptApplication({ request, result });
-    return result;
+    return withOvertimeSubmissionLock([request.staffName], async () => {
+      if (this.overtimeWorkflowService?.isEnabled()) {
+        await this.overtimeWorkflowService.assertNoSubstitutionOvertimeOverlap(request);
+      }
+      const result = await this.dutyScheduleService.createOvertimeRequest(
+        request,
+        files[0],
+        ...(isPersonalAccessAccount(accessRequest?.accessPrincipal) ? [accessRequest!.accessPrincipal] : []),
+      );
+      if (!this.overtimeWorkflowService) {
+        throw new ServiceUnavailableException('加班审批工作流暂不可用');
+      }
+      if (!this.overtimeWorkflowService.isEnabled()) return result;
+      await this.overtimeWorkflowService.acceptApplication({ request, result });
+      return result;
+    });
   }
 
   @GuestSubmittable()

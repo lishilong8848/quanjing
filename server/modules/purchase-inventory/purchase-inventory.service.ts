@@ -17,7 +17,6 @@ import {
 import {
   createBitableBackgroundRefresh,
   fetchBitableRecords,
-  extractDisplayText,
   getBitableRecordCacheGeneration,
   getRecordId,
   resolveBitableAppToken,
@@ -26,6 +25,8 @@ import {
 import {
   buildPurchaseInventoryStableView,
   buildPurchaseInventoryView,
+  isCompletedPurchaseWorkflowStatus,
+  purchaseDashboardWorkflowStatus,
 } from './purchase-inventory.mapper';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
@@ -503,31 +504,55 @@ export class PurchaseInventoryService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const activeRecords = await this.readDashboardRecords({
+    const options = {
       appToken: sourceSnapshot.appToken,
       tableId,
       tableName: TABLES.executions.name,
-      cacheTtlMs: ACTIVE_SOURCE_CACHE_TTL_MS,
-      forceRefresh: false,
       allowStale: false,
       strict: true,
-      filter: ACTIVE_EXECUTION_FILTER,
+    };
+    const previous = sourceSnapshot.sourceSections.executions;
+    const generation = getBitableRecordCacheGeneration(options.appToken, tableId);
+    const readCompleteExecution = () => this.readDashboardRecords({
+      ...options,
+      cacheTtlMs: CACHE_TTL_MS,
+      forceRefresh: true,
     });
-    const completedRecords =
-      sourceSnapshot.sourceSections.executions.records.filter(
-        isCompletedExecutionRecord,
-      );
-    const executionRecords = mergeBitableRecords(
-      activeRecords,
-      completedRecords,
-    );
+    let executionRecords: BitableRecordItem[];
+    let executionRead = previous.executionRead;
+    if (!executionRead || executionRead.tableId !== tableId ||
+        executionRead.appToken !== options.appToken || previous.status.message) {
+      executionRecords = await readCompleteExecution();
+      executionRead = { appToken: options.appToken, tableId, generation };
+    } else {
+      const activeRecords = await this.readDashboardRecords({
+        ...options,
+        cacheTtlMs: ACTIVE_SOURCE_CACHE_TTL_MS,
+        filter: ACTIVE_EXECUTION_FILTER,
+      });
+      const activeIds = new Set(activeRecords.map(getRecordId));
+      // A row that just completed is excluded by the active query. Verify
+      // whether it completed or was removed before publishing new totals.
+      if (previous.records.some(record => !isCompletedExecutionRecord(record) &&
+          !activeIds.has(getRecordId(record)))) {
+        executionRecords = await readCompleteExecution();
+        executionRead = { appToken: options.appToken, tableId, generation };
+      } else {
+        executionRecords = mergeBitableRecords(
+          activeRecords,
+          previous.records.filter(isCompletedExecutionRecord),
+        );
+      }
+    }
+    if (generation !== getBitableRecordCacheGeneration(options.appToken, tableId)) {
+      throw new Error(BITABLE_READ_CONFLICT);
+    }
     const nextSnapshot: PurchaseInventorySourceSnapshot = {
       ...sourceSnapshot,
       sourceSections: {
         ...sourceSnapshot.sourceSections,
         executions: {
-          // A filtered read retains completed rows from the prior full read.
-          executionRead: sourceSnapshot.sourceSections.executions.executionRead,
+          executionRead,
           records: executionRecords,
           status: { configured: true, count: executionRecords.length },
         },
@@ -654,10 +679,7 @@ function markDashboardSyncing(dashboard: PurchaseInventoryResponse): PurchaseInv
 }
 
 function isCompletedExecutionRecord(record: BitableRecordItem): boolean {
-  return (
-    extractDisplayText(record.fields?.['采购流程']).trim() ===
-    COMPLETED_WORKFLOW_STATUS
-  );
+  return isCompletedPurchaseWorkflowStatus(purchaseDashboardWorkflowStatus(record.fields ?? {}));
 }
 
 function mergeBitableRecords(
