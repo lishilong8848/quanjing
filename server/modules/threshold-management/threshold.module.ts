@@ -3,6 +3,7 @@ import { HttpModule } from '@nestjs/axios';
 import type { ThresholdRecord } from '../../../shared/threshold-management.interface';
 import seed from '../../../shared/electrical-thresholds.seed.json';
 import hvac from '../../../shared/hvac-thresholds.seed.json';
+import weakCurrent from '../../../shared/weak-current-thresholds.seed.json';
 import { ThresholdController } from './threshold.controller';
 import { ThresholdStore } from './threshold.store';
 import { ThresholdBitableGateway } from './threshold-bitable.gateway';
@@ -30,6 +31,10 @@ import { ThresholdAdjustmentService } from './threshold-adjustment.service';
             {
               key: 'hvac-initial-v1',
               records: hvac.records as ThresholdRecord[],
+            },
+            {
+              key: 'weak-current-initial-v1',
+              records: weakCurrent.records as ThresholdRecord[],
             },
           ],
           true,

@@ -3,6 +3,35 @@ const identityPath = 'dist/server/hotfix-runtime-identity.json';
 const canonical = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
 function check(condition, reason) { if (!condition) throw Error(reason); }
 function stat(file) { try { return fs.lstatSync(file); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; } }
+function copyCapabilityAssets(root) {
+  const source = path.join(root, 'server/capabilities');
+  if (!stat(source)) return;
+  const destination = path.join(root, 'dist/server/capabilities');
+  const directory = (file) => {
+    const info = stat(file);
+    check(info?.isDirectory() && !info.isSymbolicLink() && canonical(fs.realpathSync(file)) === canonical(file), 'HOTFIX_CAPABILITY_UNSAFE_PATH');
+  };
+  function copyTree(from, to) {
+    directory(from);
+    if (!stat(to)) fs.mkdirSync(to);
+    directory(to);
+    for (const name of fs.readdirSync(from)) {
+      const input = path.join(from, name), output = path.join(to, name);
+      const info = fs.lstatSync(input);
+      if (info.isDirectory()) { copyTree(input, output); continue; }
+      if (!name.endsWith('.json')) continue;
+      check(info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && canonical(fs.realpathSync(input)) === canonical(input), 'HOTFIX_CAPABILITY_UNSAFE_PATH');
+      const expected = fs.readFileSync(input);
+      const existing = stat(output);
+      if (!existing) fs.writeFileSync(output, expected, { flag: 'wx' });
+      else check(existing.isFile() && !existing.isSymbolicLink() && existing.nlink === 1 && canonical(fs.realpathSync(output)) === canonical(output), 'HOTFIX_CAPABILITY_UNSAFE_PATH');
+      check(fs.readFileSync(output).equals(expected), 'HOTFIX_CAPABILITY_COPY_MISMATCH');
+    }
+  }
+  // Nest's watch-mode copy can close before its first filesystem event.
+  // Make the declared assets complete before the release fingerprints them.
+  copyTree(source, destination);
+}
 function writeRuntimeIdentity(buildRoot, deploymentId) {
   check(typeof deploymentId === 'string' && /^nantong-safe-full-runtime-hotfix-\d{8}-\d{6,9}$/.test(deploymentId) && !/[\r\n]/.test(deploymentId), 'HOTFIX_IDENTITY_INVALID_DEPLOYMENT');
   check(typeof buildRoot === 'string' && path.isAbsolute(buildRoot) && !buildRoot.startsWith('\\\\'), 'HOTFIX_IDENTITY_INVALID_ROOT');
@@ -20,6 +49,7 @@ function writeRuntimeIdentity(buildRoot, deploymentId) {
   check(mainStat.isFile() && !mainStat.isSymbolicLink() && mainStat.nlink === 1 && canonical(fs.realpathSync(main)) === canonical(main), 'HOTFIX_IDENTITY_UNSAFE_PATH');
   const target = path.join(root, identityPath);
   check(!stat(target), 'HOTFIX_IDENTITY_ALREADY_EXISTS');
+  copyCapabilityAssets(root);
   const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, activationProtocol: 'maintenance-commit-v1', deploymentId }) + '\n');
   fs.writeFileSync(target, bytes, { flag: 'wx', mode: 0o600 });
   check(fs.readFileSync(target).equals(bytes), 'HOTFIX_IDENTITY_WRITE_MISMATCH');

@@ -16,15 +16,10 @@ export const TOOL_FLOW_KINDS = [
   'inspection',
 ] as const;
 export type ToolFlowKind = (typeof TOOL_FLOW_KINDS)[number];
-export type ToolSourceKey = 'ledger' | ToolFlowKind;
+export type ToolSourceKey = 'ledger' | 'maintenance';
 export const TOOL_SOURCE_LABELS: Record<ToolSourceKey, string> = {
   ledger: '工具台账',
-  quality: '不合格工具',
-  maintenance: '维护管理',
-  repair: '检修管理',
-  scrap: '报废管理',
-  borrow: '借用管理',
-  inspection: '送检管理',
+  maintenance: '工具送检维护记录',
 };
 export interface OperationsTool {
   specialty?: string;
@@ -53,6 +48,7 @@ export interface OperationsTool {
 export interface OperationsToolFlow {
   id: string;
   kind: ToolFlowKind;
+  recordType?: string;
   code: string;
   toolIds: string[];
   name: string;

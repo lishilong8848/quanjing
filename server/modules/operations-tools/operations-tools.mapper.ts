@@ -250,6 +250,23 @@ export function mapFlow(
     attachments,
   };
 }
+export function mapToolServiceRecord(record: BitableRecordItem): OperationsToolFlow | null {
+  const fields = record.fields ?? {};
+  const recordType = extractDisplayText(fields['办理类型']).trim();
+  // Both kinds share the maintenance date fields and the same ledger relation.
+  const flow = mapFlow('maintenance', record);
+  if (!flow) return null;
+  const attachments = [fields['维护记录单'], fields['送检报告']].flatMap((files) =>
+    Array.isArray(files) ? files.map((file) => extractDisplayText(file?.name)).filter(Boolean) : [],
+  );
+  return {
+    ...flow,
+    kind: recordType === '工具送检' ? 'inspection' : 'maintenance',
+    recordType,
+    attachments: [...new Set(attachments)],
+    reason: extractDisplayText(fields['检测结论']).trim() || flow.reason,
+  };
+}
 export function assertToolsPrincipal(
   principal: AccessPrincipal | undefined,
   pageRead = false,

@@ -29,9 +29,32 @@ describe('tools snapshot read-through and background refresh', () => {
       .mockRejectedValue(new Error('private token must not escape'));
     await Promise.all([service.refresh(), service.refresh()]);
     const snapshot = await service.getSnapshot();
-    expect(fetchBitableRecords).toHaveBeenCalledTimes(7);
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(2);
     expect(snapshot.sources.ledger.state).toBe('error');
     expect(JSON.stringify(snapshot)).not.toContain('private token');
+  });
+  it('reads complete tables and links only to the two requested Feishu views', async () => {
+    const service = new OperationsToolsService({} as never);
+    await service.refresh();
+    const snapshot = await service.getSnapshot();
+    expect(Object.keys(snapshot.sources).sort()).toEqual([
+      'ledger',
+      'maintenance',
+    ]);
+    expect(snapshot.sources.ledger.sourceUrl).toContain(
+      'table=tbl8pYoYy88r2OSx&view=vew3FZgTUf',
+    );
+    expect(snapshot.sources.maintenance.sourceUrl).toContain(
+      'table=tblutFXoTA0mPkt1&view=vewFCnUXz8',
+    );
+    expect(
+      jest
+        .mocked(fetchBitableRecords)
+        .mock.calls.map(([, options]) => [options.tableId, options.viewId]),
+    ).toEqual([
+      ['tbl8pYoYy88r2OSx', undefined],
+      ['tblutFXoTA0mPkt1', undefined],
+    ]);
   });
   it('retains last successful section when an external refresh fails', async () => {
     const service = new OperationsToolsService({} as never);

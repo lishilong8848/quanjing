@@ -153,6 +153,24 @@ describe('OvertimeWorkflowGateway', () => {
     ).rejects.toThrow('读取加班多维记录失败');
   });
 
+  it('reconciles an uncertain automatic-overtime delete using a missing-record readback', async () => {
+    const post = jest.fn().mockResolvedValue({
+      data: { code: 0, tenant_access_token: 'tenant-token', expire: 7200 },
+    });
+    const deletion = jest.fn().mockRejectedValue(new Error('delete response lost'));
+    const get = jest.fn()
+      .mockResolvedValueOnce({ data: { code: 0, data: { record: { record_id: 'rec_pending', fields: {} } } } })
+      .mockResolvedValueOnce({ data: { code: 1254043, msg: 'RecordIdNotFound' } });
+    const gateway = new OvertimeWorkflowGateway(
+      { axiosRef: { post, get, delete: deletion } } as unknown as HttpService, jest.fn(),
+    );
+    await expect(gateway.deleteSubstitutionOvertimeRecord('rec_pending')).rejects.toThrow('delete response lost');
+    expect(invalidateBitableRecordCache).not.toHaveBeenCalled();
+    await expect(gateway.deleteSubstitutionOvertimeRecord('rec_pending')).resolves.toBeUndefined();
+    expect(deletion).toHaveBeenCalledWith(expect.stringMatching(/tables\/tblpCzmTT3EapaUY\/records\/rec_pending$/), expect.objectContaining({ maxRedirects: 0 }));
+    expect(invalidateBitableRecordCache).toHaveBeenCalledTimes(1);
+  });
+
   it('sets a finite timeout on every Feishu card and Base request', async () => {
     const post = jest
       .fn()

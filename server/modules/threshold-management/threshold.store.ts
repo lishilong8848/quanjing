@@ -25,6 +25,7 @@ import {
 } from '../../../shared/threshold-bitable';
 import {
   THRESHOLD_KINDS,
+  WEAK_CURRENT_PROFESSION,
   type ThresholdCommand,
   type ThresholdInput,
   type ThresholdMutationResult,
@@ -160,6 +161,8 @@ export class ThresholdStore {
           )
           .map((m) => m.result.id),
       );
+      for (const record of ledger.records)
+        if (record.profession === WEAK_CURRENT_PROFESSION) protectedIds.add(record.id);
       const next = [
         ...records.filter((r) => !protectedIds.has(r.id)),
         ...ledger.records.filter((r) => protectedIds.has(r.id)),
@@ -304,7 +307,8 @@ export class ThresholdStore {
     if (
       this.syncEnabled &&
       record &&
-      !(record.profession in THRESHOLD_BITABLE_SCHEMA.tables)
+      record.profession !== WEAK_CURRENT_PROFESSION &&
+      !Object.hasOwn(THRESHOLD_BITABLE_SCHEMA.tables, record.profession)
     )
       throw new BadRequestException('该专业尚未接入多维表');
     if (
@@ -366,6 +370,10 @@ export class ThresholdStore {
       }
       let next: ThresholdRecord | null = null;
       const before = index >= 0 ? structuredClone(ledger.records[index]) : null;
+      if (command.operation === 'update' && before?.profession !== record!.profession &&
+          (before?.profession === WEAK_CURRENT_PROFESSION || record!.profession === WEAK_CURRENT_PROFESSION))
+        throw new BadRequestException('弱电阈值不能跨专业移动');
+      const syncRequired = this.syncEnabled && (record ?? before)?.profession !== WEAK_CURRENT_PROFESSION;
       const id =
         command.operation === 'create'
           ? `threshold-${randomUUID()}`
@@ -403,14 +411,15 @@ export class ThresholdStore {
         record: next,
         revision: ledger.revision,
         updatedAt: now,
-        ...(this.syncEnabled
+        ...(syncRequired
           ? { sync: { state: 'pending' as const, attempts: 0 } }
           : {}),
       };
       ledger.mutations[command.clientMutationId] = {
         fingerprint,
         result,
-        ...(this.syncEnabled ? { actor, before } : {}),
+        actor,
+        before,
       };
       this.write(ledger);
       return result;

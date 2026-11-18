@@ -10,10 +10,11 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from '@/components/ui/native-select';
-import type { ThresholdRecord } from '@shared/threshold-management.interface';
+import { WEAK_CURRENT_PROFESSION, type ThresholdRecord } from '@shared/threshold-management.interface';
 import {
   buildThresholdMatrix,
   matrixSectionLabel,
+  weakCurrentAlarmLevel,
   type MatrixRow,
   type MatrixColumn,
 } from './matrix-model';
@@ -50,8 +51,9 @@ function MatrixCell({
       </td>
     );
   const syncing = pending.has(record.id);
+  const alarmLevel = record.profession === WEAK_CURRENT_PROFESSION ? weakCurrentAlarmLevel(record) : undefined;
   const empty = record.value === '' || record.value === '/';
-  const label = `${column.building}${column.location ? ' · ' + column.location : ''} · ${row.parameter}`;
+  const label = [column.building, column.location, alarmLevel && row.section, alarmLevel, row.parameter].filter(Boolean).join(' · ');
   const longValue = record.value.length > 14 || record.value.includes('\n');
   const valueButton = (
     <button
@@ -62,6 +64,7 @@ function MatrixCell({
       onClick={() => onDetail(record)}
     >
       <span>{record.value}</span>
+      {alarmLevel && <span className="threshold-alarm-level" data-level={alarmLevel}>{alarmLevel}</span>}
       {record.value !== '' &&
         record.value !== '/' &&
         record.unit &&
@@ -110,6 +113,8 @@ export const ThresholdMatrix = memo(function ThresholdMatrix({
   pending: Set<string>;
   onDetail: (record: ThresholdRecord) => void;
 }) {
+  const weakCurrent = records[0]?.profession === WEAK_CURRENT_PROFESSION;
+  const parameterHeading = weakCurrent ? '告警类型 / 收敛名称' : '参数';
   const model = useMemo(
     () =>
       buildThresholdMatrix(records, building ? [building] : CAMPUS_BUILDINGS),
@@ -127,6 +132,7 @@ export const ThresholdMatrix = memo(function ThresholdMatrix({
                 record.device,
                 record.parameter,
                 record.section,
+                row.section,
                 record.location,
                 record.model,
                 record.brand,
@@ -216,7 +222,7 @@ export const ThresholdMatrix = memo(function ThresholdMatrix({
                   rowSpan={showColumnLabels ? 2 : 1}
                   scope="col"
                 >
-                  参数
+                  {parameterHeading}
                 </th>
                 {groups.map((g) => (
                   <th
@@ -253,7 +259,7 @@ export const ThresholdMatrix = memo(function ThresholdMatrix({
             <thead className="matrix-mobile-head">
               <tr>
                 <th className="threshold-matrix-parameter" scope="col">
-                  参数
+                  {parameterHeading}
                 </th>
                 <th scope="col">
                   {selectedMobile}
@@ -274,6 +280,10 @@ export const ThresholdMatrix = memo(function ThresholdMatrix({
                     matrixSectionLabel(row) !==
                       matrixSectionLabel(visible[index - 1])
                   }
+                  showParameter={
+                    !weakCurrent || index === 0 || row.section !== visible[index - 1].section ||
+                    row.parameter !== visible[index - 1].parameter
+                  }
                   selectedMobileColumn={selectedColumn?.key || ''}
                   pending={pending}
                   onDetail={onDetail}
@@ -290,7 +300,7 @@ export const ThresholdMatrix = memo(function ThresholdMatrix({
       )}
       <div className="threshold-pagination">
         <span>
-          {rows.length} 项参数 · {recordCount} 个设定值
+          {rows.length} {weakCurrent ? '档告警规则' : '项参数'} · {recordCount} 个设定值
         </span>
         <Button
           variant="outline"
@@ -319,12 +329,14 @@ function MatrixRowView({
   row,
   columns,
   showSection,
+  showParameter,
   selectedMobileColumn,
   ...props
 }: {
   row: MatrixRow;
   columns: MatrixColumn[];
   showSection: boolean;
+  showParameter: boolean;
   selectedMobileColumn: string;
   pending: Set<string>;
   onDetail: (r: ThresholdRecord) => void;
@@ -353,7 +365,7 @@ function MatrixRowView({
       )}
       <tr className="threshold-matrix-row">
         <th scope="row" className="threshold-matrix-parameter">
-          <strong>{row.parameter}</strong>
+          <strong className={showParameter ? undefined : 'sr-only'}>{row.parameter}</strong>
           {row.different && (
             <span className="threshold-difference-tag">差异</span>
           )}

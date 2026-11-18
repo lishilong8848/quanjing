@@ -268,30 +268,28 @@ export class OvertimeWorkflowService {
     if (!clientMutationId.startsWith('overtime-request-leave-')) {
       throw new BadRequestException('仅允许撤回系统生成的替班加班');
     }
-    const source = await this.gateway.readOvertimeRecordIfExists(recordId);
-    if (source && extractSimpleText(source.fields.请求唯一ID) !== clientMutationId) {
-      throw new BadRequestException('替班加班记录来源已变化');
-    }
-    if (source && (['已审批', '待确认', '已确认'].includes(extractSimpleText(source.fields.加班工作流状态)) ||
-        ['已审批', '已确认'].includes(extractSimpleText(source.fields.加班流程进展)))) {
-      throw new ServiceUnavailableException('替班加班已进入审批或确认，请人工核对调整');
-    }
+    const checkSource = async () => {
+      const source = await this.gateway.readOvertimeRecordIfExists(recordId);
+      if (!source) return null;
+      if (source.recordId !== recordId || extractSimpleText(source.fields.请求唯一ID) !== clientMutationId) {
+        throw new BadRequestException('替班加班记录来源已变化');
+      }
+      const status = extractSimpleText(source.fields.加班工作流状态);
+      const progress = extractSimpleText(source.fields.加班流程进展);
+      const pending = ['', '待路由', '待审批'].includes(status) && ['', '申请中', '待审批'].includes(progress);
+      const previouslyRetired = status === '已驳回' && progress === '申请中' &&
+        extractSimpleText(source.fields.加班工作流错误) === '原请假替班已取消或调整，本笔自动加班申请已撤回';
+      if (!pending && !previouslyRetired) {
+        throw new ServiceUnavailableException('替班加班状态已变化，请人工核对调整');
+      }
+      return source;
+    };
+    const source = await checkSource();
     const application = await this.store.getApplication(recordId);
     const retired = application && await this.store.markSourceDeleted(recordId, new Date(), clientMutationId);
-    const reason = '原请假替班已取消或调整，本笔自动加班申请已撤回';
-    if (source && (extractSimpleText(source.fields.加班工作流状态) !== '已驳回' ||
-        extractSimpleText(source.fields.加班工作流错误) !== reason)) {
-      await this.gateway.updateOvertimeRecord(recordId, {
-        加班工作流状态: '已驳回', 加班流程进展: '申请中', 加班工作流错误: reason,
-      });
-      const current = await this.gateway.readOvertimeRecord(recordId);
-      if (extractSimpleText(current.fields.请求唯一ID) !== clientMutationId ||
-          extractSimpleText(current.fields.加班工作流状态) !== '已驳回') {
-        throw new ServiceUnavailableException('替班加班撤回回执待核对');
-      }
-    }
     const result = retired && await this.refreshSourceDeletedCards(retired);
     if (result?.failed) throw new ServiceUnavailableException('替班加班旧审批卡终态尚未同步');
+    if (source && await checkSource()) await this.gateway.deleteSubstitutionOvertimeRecord(recordId);
     if (retired) await this.store.patchApplication(recordId, { lastError: '' });
   }
 

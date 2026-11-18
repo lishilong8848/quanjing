@@ -1,4 +1,4 @@
-import type { ThresholdRecord } from '@shared/threshold-management.interface';
+import { WEAK_CURRENT_PROFESSION, type ThresholdRecord } from '@shared/threshold-management.interface';
 import { normalizeThresholdEquipment } from '@shared/threshold-equipment';
 
 export interface ThresholdComparisonGroup {
@@ -30,7 +30,9 @@ export function buildThresholdComparisonGroups(records: ThresholdRecord[]) {
     const type = ['水泵', '加药装置', '空调软件版本'].includes(first.device)
       ? first.location.split(' · ')[0]
       : '';
-    const structure = entity
+    // A missing or edited rule in one building must not split the other
+    // buildings out of the weak-current comparison.
+    const structure = first.profession === WEAK_CURRENT_PROFESSION ? [] : entity
       .map((r) => JSON.stringify([r.section, r.parameter, r.unit]))
       .sort();
     const key = JSON.stringify([

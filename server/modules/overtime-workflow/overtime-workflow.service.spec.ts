@@ -122,6 +122,7 @@ describe('OvertimeWorkflowService', () => {
     readOvertimeRecord: jest.Mock;
     readOvertimeRecordIfExists: jest.Mock;
     updateOvertimeRecord: jest.Mock;
+    deleteSubstitutionOvertimeRecord: jest.Mock;
     issueConfirmationTicket: jest.Mock;
     verifyConfirmationTicket: jest.Mock;
     buildConfirmationUrl: jest.Mock;
@@ -150,6 +151,7 @@ describe('OvertimeWorkflowService', () => {
         fields: {},
       }),
       updateOvertimeRecord: jest.fn().mockResolvedValue(undefined),
+      deleteSubstitutionOvertimeRecord: jest.fn().mockResolvedValue(undefined),
       issueConfirmationTicket: jest.fn().mockReturnValue('signed-ticket'),
       verifyConfirmationTicket: jest.fn().mockReturnValue({
         recordId: SNAPSHOT.recordId,
@@ -256,10 +258,12 @@ describe('OvertimeWorkflowService', () => {
     gateway.readOvertimeRecordIfExists.mockImplementation(async recordId =>
       rows.has(recordId) ? { recordId, fields: rows.get(recordId) } : null);
     gateway.updateOvertimeRecord.mockImplementation(async (recordId, fields) => Object.assign(rows.get(recordId)!, fields));
+    gateway.deleteSubstitutionOvertimeRecord.mockImplementation(async recordId => { rows.delete(recordId); });
     gateway.sendInteractiveCard.mockImplementation(async (_recipient, _card, key) => `om_${stableOvertimeMessageUuid(key)}`);
 
+    let nextRecord = 0;
     const create = jest.fn(async (fields: Record<string, unknown>) => {
-      const recordId = `rec_auto_overtime_${rows.size}`;
+      const recordId = `rec_auto_overtime_${++nextRecord}`;
       rows.set(recordId, fields);
       return recordId;
     });
@@ -303,11 +307,13 @@ describe('OvertimeWorkflowService', () => {
     leaveFields['替班人员（填姓名）'] = newPerson.name;
     await auto.sync(snapshot(2, newPerson, 21), 2);
     expect((await store.getApplication('rec_auto_overtime_1'))?.phase).toBe('source_deleted');
+    expect(rows.has('rec_auto_overtime_1')).toBe(false);
     expect((await store.getApplication('rec_auto_overtime_2'))?.snapshot.applicantOpenId).toBe(newPerson.openId);
     leaveFields.休假结束时间 = Date.parse(shanghai(12, 20));
     const revised = snapshot(3, newPerson, 20);
     await auto.sync(revised, 3);
     expect((await store.getApplication('rec_auto_overtime_2'))?.phase).toBe('source_deleted');
+    expect(rows.has('rec_auto_overtime_2')).toBe(false);
     expect((await store.getApplication('rec_auto_overtime_3'))?.snapshot.plannedEndAt).toBe(shanghai(12, 20));
     await service.runPendingTasks(new Date());
     await service.runPendingTasks(new Date());
@@ -317,6 +323,8 @@ describe('OvertimeWorkflowService', () => {
     leaveFields.请假工作流状态 = '已撤销';
     await auto.reconcileChangedSources([revised], async () => revised);
     expect((await store.getApplication('rec_auto_overtime_3'))?.phase).toBe('source_deleted');
+    expect(rows.has('rec_auto_overtime_3')).toBe(false);
+    expect(rows.has(SNAPSHOT.recordId)).toBe(true);
     expect(create).toHaveBeenCalledTimes(3);
     const revokedCardId = currentAuto!.approvalCards[0].messageId;
     const cancellation = gateway.patchInteractiveCard.mock.calls.find(([messageId]) => messageId === revokedCardId);

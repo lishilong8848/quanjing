@@ -1,5 +1,7 @@
 import {
   deriveTools,
+  deriveToolsMonth,
+  chinaToday,
   daysRemaining,
 } from '../../client/src/pages/OperationsToolsManagement/model';
 
@@ -19,6 +21,61 @@ const tool = (id: string, building: string, extra = {}) => ({
   ...extra,
 });
 describe('tools unified chart and drilldown model', () => {
+  it('uses Shanghai month boundaries, preferring actual dates while leaving the ledger unfiltered by month', () => {
+    const today = chinaToday(Date.parse('2026-10-31T16:00:00Z'));
+    expect(today).toBe('2026-11-01');
+    const snapshot: any = {
+      tools: [
+        tool('recA', 'A楼'),
+        tool('recB', 'A楼', { inspectionDue: '2026-11-30' }),
+        tool('recC', 'B楼'),
+      ],
+      flows: [
+        {
+          id: 'actual',
+          kind: 'inspection',
+          toolIds: ['recA'],
+          date: '2026-10-31',
+          actualDate: '2026-11-01',
+        },
+        {
+          id: 'planned',
+          kind: 'maintenance',
+          toolIds: ['recA'],
+          date: '2026-11-03',
+          actualDate: null,
+        },
+        {
+          id: 'old',
+          kind: 'maintenance',
+          toolIds: ['recC'],
+          date: '2026-10-31',
+          actualDate: null,
+        },
+        {
+          id: 'disabled',
+          kind: 'borrow',
+          toolIds: ['recC'],
+          date: '2026-11-03',
+          actualDate: null,
+        },
+      ],
+    };
+    const month = deriveToolsMonth(
+      snapshot,
+      'A楼',
+      '',
+      today,
+      today.slice(0, 7),
+    );
+    expect(month.flows.map((flow) => flow.id)).toEqual(['planned', 'actual']);
+    expect(month.groups.total.map((item) => item.id).sort()).toEqual([
+      'recA',
+      'recB',
+    ]);
+    expect(month.groups.inspection.map((item) => item.id)).toEqual(['recB']);
+    expect(deriveTools(snapshot, '', '', today).tools).toHaveLength(3);
+  });
   it('does not count unapproved borrowing and uses stable ids instead of names', () => {
     const snapshot: any = {
       tools: [tool('recA', 'A楼'), tool('recB', 'B楼')],

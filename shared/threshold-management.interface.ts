@@ -1,4 +1,5 @@
 export const THRESHOLD_KINDS = ['告警', '设定', '额定参数', '待核对'] as const;
+export const WEAK_CURRENT_PROFESSION = '弱电';
 export type ThresholdKind = (typeof THRESHOLD_KINDS)[number];
 export interface ThresholdInput {
   profession: string;

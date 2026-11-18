@@ -1,10 +1,41 @@
 import {
   mapTool,
   mapFlow,
+  mapToolServiceRecord,
   scopeToolsSnapshot,
 } from '../../server/modules/operations-tools/operations-tools.mapper';
 
 describe('operations tools typed mapping and access', () => {
+  it('maps both service types with the verified shared dates and ledger relation', () => {
+    const fields = {
+      维护工具: { link_record_ids: ['recA', 'recB'] },
+      计划维护日期: '2026-10-30',
+      实际维护日期: '2026-11-02',
+      维护记录单: [{ name: '维护记录' }],
+      送检报告: [{ name: '送检报告' }],
+      检测结论: '合格',
+    };
+    expect(
+      mapToolServiceRecord({
+        record_id: 'recS',
+        fields: { ...fields, 办理类型: '工具送检' },
+      }),
+    ).toMatchObject({
+      kind: 'inspection',
+      recordType: '工具送检',
+      toolIds: ['recA', 'recB'],
+      date: '2026-10-30',
+      actualDate: '2026-11-02',
+      reason: '合格',
+      attachments: ['维护记录', '送检报告'],
+    });
+    expect(
+      mapToolServiceRecord({
+        record_id: 'recM',
+        fields: { ...fields, 办理类型: '自检维护' },
+      })?.kind,
+    ).toBe('maintenance');
+  });
   it('preserves missing quantities and computes monthly maintenance without the erroneous formula', () => {
     const tool = mapTool({
       record_id: 'recA',

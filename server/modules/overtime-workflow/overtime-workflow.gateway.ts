@@ -304,6 +304,29 @@ export class OvertimeWorkflowGateway {
     return id;
   }
 
+  async deleteSubstitutionOvertimeRecord(recordId: string): Promise<void> {
+    const id = requireRecordId(recordId);
+    const config = this.overtimeConfig();
+    if (config.tableId !== DEFAULT_OVERTIME_TABLE_ID) {
+      throw new BadRequestException('替班加班目标表无效');
+    }
+    const token = await this.getTenantAccessToken();
+    let failure: unknown;
+    try {
+      const response = await this.httpService.axiosRef.delete(
+        `${recordsUrl(config.appToken, config.tableId)}/${encodeURIComponent(id)}`,
+        { ...requestConfig(token), maxRedirects: 0 },
+      );
+      assertFeishuSuccess(response.data, '删除旧替班加班记录失败');
+    } catch (error) {
+      failure = error;
+    }
+    if (await this.readOvertimeRecordIfExists(id)) {
+      throw failure ?? new BadGatewayException('旧替班加班删除结果待核对');
+    }
+    invalidateBitableRecordCache({ ...config, deletePersisted: true });
+  }
+
   issueConfirmationTicket(input: {
     recordId: string;
     approverOpenId: string;

@@ -7,7 +7,6 @@ import {
 import {
   TOOL_SOURCE_LABELS,
   type OperationsToolsSnapshot,
-  type ToolFlowKind,
   type ToolSourceKey,
   type ToolSourceStatus,
 } from '../../../shared/operations-tools.interface';
@@ -23,7 +22,7 @@ import {
   TOOL_SOURCES,
   TOOLS_SYNC_INTERVAL_MS,
 } from './operations-tools.config';
-import { mapFlow, mapTool } from './operations-tools.mapper';
+import { mapToolServiceRecord, mapTool } from './operations-tools.mapper';
 
 type Section = { records: BitableRecordItem[]; status: ToolSourceStatus };
 const keys = Object.keys(TOOL_SOURCES) as ToolSourceKey[];
@@ -39,7 +38,7 @@ export class OperationsToolsService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly http: HttpService) {
     for (const key of keys) {
       const source = TOOL_SOURCES[key],
-        sourceUrl = `${TOOLS_BASE_URL}?table=${source.tableId}`;
+        sourceUrl = `${TOOLS_BASE_URL}?table=${source.tableId}&view=${source.viewId}`;
       this.sections.set(key, {
         records: [],
         status: {
@@ -47,7 +46,7 @@ export class OperationsToolsService implements OnModuleInit, OnModuleDestroy {
           updatedAt: null,
           message: null,
           sourceUrl,
-          formUrl: source.formId ? `${sourceUrl}&view=${source.formId}` : null,
+          formUrl: null,
         },
       });
     }
@@ -75,7 +74,7 @@ export class OperationsToolsService implements OnModuleInit, OnModuleDestroy {
             const cached = await readLatestPersistedBitableRecordSnapshot({
               appToken: TOOLS_BASE,
               tableId: source.tableId,
-              tableName: TOOL_SOURCE_LABELS[key],
+              tableName: source.cacheName ?? TOOL_SOURCE_LABELS[key],
             });
             if (!cached) return;
             section.records = cached.records;
@@ -115,17 +114,15 @@ export class OperationsToolsService implements OnModuleInit, OnModuleDestroy {
           .map((t) => [t.id, t]),
       ).values(),
     ];
-    const flows = keys
-      .filter((key): key is ToolFlowKind => key !== 'ledger')
-      .flatMap((kind) => [
-        ...new Map(
-          this.sections
-            .get(kind)!
-            .records.map((r) => mapFlow(kind, r))
-            .filter((f) => f !== null)
-            .map((f) => [f.id, f]),
-        ).values(),
-      ]);
+    const flows = [
+      ...new Map(
+        this.sections
+          .get('maintenance')!
+          .records.map(mapToolServiceRecord)
+          .filter((f) => f !== null)
+          .map((f) => [f.id, f]),
+      ).values(),
+    ];
     return {
       tools,
       flows,
@@ -148,11 +145,12 @@ export class OperationsToolsService implements OnModuleInit, OnModuleDestroy {
         const worker = async (): Promise<void> => {
           for (let key = queue.shift(); key; key = queue.shift()) {
             const section = this.sections.get(key)!;
+            const source = TOOL_SOURCES[key];
             try {
               const records = await fetchBitableRecords(this.http, {
                 appToken: TOOLS_BASE,
-                tableId: TOOL_SOURCES[key].tableId,
-                tableName: TOOL_SOURCE_LABELS[key],
+                tableId: source.tableId,
+                tableName: source.cacheName ?? TOOL_SOURCE_LABELS[key],
                 cacheTtlMs: TOOLS_SYNC_INTERVAL_MS,
                 forceRefresh: true,
                 allowStale: false,

@@ -32,8 +32,8 @@ export function FlowList({
             <span>
               <strong>{flowToolName(f, tools)}</strong>
               <small>
-                {f.code || f.id} · {f.building || '关联楼栋'} ·{' '}
-                {f.date || '日期未维护'}
+                {f.recordType || '办理类型未填写'} · {f.building || '关联楼栋'} ·{' '}
+                {f.actualDate || f.date || '日期未维护'}
               </small>
             </span>
             <Badge

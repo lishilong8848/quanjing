@@ -12,6 +12,7 @@ export const ThresholdList = memo(function ThresholdList({
   canDelete,
   onDetail,
   onEdit,
+  editLabel = '申请调整',
   onDelete,
 }: {
   records: ThresholdRecord[];
@@ -19,6 +20,7 @@ export const ThresholdList = memo(function ThresholdList({
   canDelete: boolean;
   onDetail: (record: ThresholdRecord) => void;
   onEdit?: (record: ThresholdRecord) => void;
+  editLabel?: string;
   onDelete?: (record: ThresholdRecord) => void;
 }) {
   return (
@@ -113,7 +115,7 @@ export const ThresholdList = memo(function ThresholdList({
                   <Button
                     size="icon"
                     variant="ghost"
-                    aria-label={`申请调整${record.parameter}`}
+                    aria-label={`${editLabel}${record.parameter}`}
                     disabled={pending.has(record.id)}
                     onClick={() => onEdit(record)}
                   >

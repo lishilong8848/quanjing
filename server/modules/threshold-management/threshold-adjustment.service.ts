@@ -638,14 +638,15 @@ export class ThresholdAdjustmentService
           },
           `threshold-approval:${id}`,
         );
-        this.sync.kick();
-        const sync = this.records.syncResults([result.clientMutationId])[0]
-          ?.sync;
-        if (sync?.state === 'error')
-          throw new Error(sync.error || '设备参数多维表同步失败');
-        if (sync?.state === 'cancelled')
-          throw new ConflictException('设备参数同步已取消');
-        if (sync?.state !== 'success') return;
+        if (result.sync) {
+          this.sync.kick();
+          const sync = this.records.syncResults([result.clientMutationId])[0]?.sync;
+          if (sync?.state === 'error')
+            throw new Error(sync.error || '设备参数多维表同步失败');
+          if (sync?.state === 'cancelled')
+            throw new ConflictException('设备参数同步已取消');
+          if (sync?.state !== 'success') return;
+        }
         this.ledger.change(id, (e) => {
           e.adjustment.appliedRecord = result.record!;
           e.adjustment.state = 'completed';

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ThresholdStore } from '../../server/modules/threshold-management/threshold.store';
 import { ThresholdController } from '../../server/modules/threshold-management/threshold.controller';
+import { thresholdContentFingerprint } from '../../shared/threshold-bitable';
 import {
   applyThresholdOverlay,
   type ThresholdRecord,
@@ -29,7 +30,7 @@ describe('阈值持久化与幂等', () => {
     store = new ThresholdStore(join(dir, 'records.json'), []);
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
-  test('游客不能读写，管理员和编辑人员均不能绕过审批变更阈值', () => {
+  test('只有管理员可以直接保存已有阈值，重复提交不重复修改', () => {
     const controller = new ThresholdController(store);
     const request = (role: string) =>
       ({ accessPrincipal: { role, accountId: 'qa' } }) as never;
@@ -51,20 +52,74 @@ describe('阈值持久化与幂等', () => {
         request('editor'),
       ),
     ).toThrow('审批');
-    expect(() =>
-      controller.mutate(
-        {
-          operation: 'update',
-          clientMutationId: 'qa-admin-direct',
-          id: 'missing',
-          expectedVersion: 1,
-          record: input,
-        },
-        request('admin'),
-      ),
-    ).toThrow('审批');
-    expect(controller.list(request('editor')).records).toHaveLength(0);
+    const existing = store.mutate({ operation: 'create', clientMutationId: 'qa-base-1', record: input }, 'fixture').record!;
+    const command = {
+      operation: 'update' as const,
+      clientMutationId: 'threshold-direct-qa-save-1',
+      id: existing.id,
+      expectedVersion: existing.version,
+      expectedContent: thresholdContentFingerprint(existing),
+      record: { ...existing, value: '225' },
+    };
+    for (const role of ['editor', 'professional_admin', 'professional_engineer'])
+      expect(() => controller.mutate(command, request(role))).toThrow('审批');
+    expect(() => controller.mutate({ ...command, operation: 'create' }, request('admin'))).toThrow('提交标识');
+    expect(() => controller.mutate({ ...command, expectedContent: undefined }, request('admin'))).toThrow('提交标识');
+    expect(() => controller.mutate({ ...command, clientMutationId: 'approved-qa-save-1' }, request('admin'))).toThrow('提交标识');
+    const saved = controller.mutate(command, request('admin'));
+    expect(saved.record).toMatchObject({ value: '225', version: existing.version + 1 });
+    expect(controller.mutate(command, request('admin'))).toEqual(saved);
+    expect(() => controller.mutate({ ...command, clientMutationId: 'threshold-direct-qa-save-2' }, request('admin'))).toThrow('已被修改');
+    expect(controller.list(request('editor')).records).toHaveLength(1);
+    const deletion = { operation: 'delete' as const, id: existing.id,
+      clientMutationId: 'threshold-direct-qa-delete-1', expectedVersion: saved.record!.version,
+      expectedContent: thresholdContentFingerprint(saved.record!) };
+    for (const role of ['guest', 'editor', 'professional_admin', 'professional_engineer'])
+      expect(() => controller.mutate(deletion, request(role))).toThrow(/权限|审批/);
+    expect(() => controller.mutate({ ...deletion, expectedContent: 'stale' }, request('admin'))).toThrow('阈值已变化');
+    const deleted = controller.mutate(deletion, request('admin'));
+    expect(deleted.record).toBeNull();
+    expect(controller.mutate(deletion, request('admin'))).toEqual(deleted);
     expect(controller.list(request('admin')).records).toHaveLength(0);
+  });
+
+  test('弱电一次导入，直存后重启和电气暖通云端刷新均保留修改', () => {
+    const path = join(dir, 'records.json');
+    const cloud = { ...input, id: 'electric-1', version: 1, updatedAt: '', source: null } as ThresholdRecord;
+    const weak = { ...cloud, profession: '弱电', id: 'weak-current-1', value: '告警 > 20\n恢复 < 19' };
+    new ThresholdStore(path, [cloud]).mutate({ operation: 'update', clientMutationId: 'prepare-1', id: cloud.id,
+      expectedVersion: 1, record: cloud }, 'fixture');
+    const make = () => new ThresholdStore(path, [cloud], [{ key: 'weak-current-initial-v1', records: [weak] }], true);
+    const imported = make();
+    expect(imported.list().records).toHaveLength(2);
+    const direct = (record: ThresholdRecord, value: string, suffix: string) => ({
+      operation: 'update' as const, clientMutationId: `threshold-direct-${suffix}`, id: record.id,
+      expectedVersion: record.version, expectedContent: thresholdContentFingerprint(record), record: { ...record, value },
+    });
+    const request = { accessPrincipal: { role: 'admin', accountId: 'qa' } } as never;
+    const kick = jest.fn();
+    const controller = new ThresholdController(imported, { kick } as never);
+    const saved = controller.mutate(direct(weak, '告警 > 21\n恢复 < 19', 'local-save-1'), request);
+    expect(saved.sync).toBeUndefined();
+    expect(kick).not.toHaveBeenCalled();
+    const move = direct(saved.record!, 'x', 'move-save-1');
+    expect(() => controller.mutate({ ...move, record: { ...move.record, profession: '电气' } }, request)).toThrow('不能跨专业移动');
+    const active = make();
+    expect(active.adoptCloud([cloud], active.list().revision)).toBe(true);
+    expect(active.list().records.filter((r) => r.profession === '弱电')).toEqual([saved.record]);
+    const cloudSaved = new ThresholdController(active, { kick } as never).mutate(direct(cloud, '240', 'cloud-save-1'), request);
+    expect(cloudSaved.sync?.state).toBe('pending');
+    expect(kick).toHaveBeenCalledTimes(1);
+    expect(active.pendingSync().map((job) => job.result.id)).toEqual([cloud.id]);
+    const removed = new ThresholdController(active, { kick } as never).mutate({
+      operation: 'delete', id: weak.id, expectedVersion: saved.record!.version,
+      expectedContent: thresholdContentFingerprint(saved.record!), clientMutationId: 'threshold-direct-local-delete-1',
+    }, request);
+    expect(removed).toMatchObject({ record: null, operation: 'delete' });
+    expect(removed.sync).toBeUndefined();
+    const reloaded = make();
+    expect(reloaded.adoptCloud([cloud], reloaded.list().revision)).toBe(true);
+    expect(reloaded.list().records.some((record) => record.id === weak.id)).toBe(false);
   });
   test('新增、修改、删除在重启后保留；同一 mutation 重放不重复写入', () => {
     const command = {

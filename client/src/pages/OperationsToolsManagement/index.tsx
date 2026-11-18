@@ -10,7 +10,6 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftRight,
-  CheckCircle2,
   ClipboardCheck,
   ClipboardList,
   ExternalLink,
@@ -27,7 +26,6 @@ import { canUsePageAction } from '../business-action-access';
 import { businessBuildingsForAction } from '@shared/business-permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
@@ -43,10 +41,7 @@ import {
 } from '@/components/ui/native-select';
 import {
   TOOL_BUILDINGS,
-  TOOL_FLOW_KINDS,
   TOOL_SOURCE_LABELS,
-  type ToolFlowKind,
-  type ToolSourceKey,
   type OperationsToolsSnapshot,
 } from '@shared/operations-tools.interface';
 import { ManagementHeader } from '../PurchaseInventoryManagement/ManagementHeader';
@@ -55,69 +50,49 @@ import {
   chinaToday,
   deriveTools,
   flowToolName,
-  type ToolMetric,
+  deriveToolsMonth,
 } from './model';
 import { ToolList } from './ToolList';
 import { FlowList } from './FlowList';
 import './styles.css';
 
-type Section = 'overview' | ToolSourceKey;
+type Section = 'overview' | 'ledger';
+type Metric = 'total' | 'maintenance' | 'inspection';
 type Selection =
-  | { type: 'metric'; key: ToolMetric }
-  | { type: 'building'; building: string; quality: boolean }
-  | { type: 'problem'; check: string }
-  | { type: 'tool'; id: string }
-  | { type: 'flow'; id: string }
-  | { type: 'repair' }
-  | { type: 'apply' }
-  | { type: 'guide' };
+  | { type: 'metric'; key: Metric }
+  | { type: 'tool' | 'flow'; id: string };
+
 const SECTIONS = [
   ['overview', '总览', '工具态势', LayoutGrid],
   ['ledger', '工具台账', '台账明细', ClipboardList],
-  ['quality', '不合格工具', '待处理', ShieldAlert],
-  ['maintenance', '维护管理', '维护记录', Wrench],
-  ['repair', '检修管理', '检修记录', Wrench],
-  ['scrap', '报废管理', '报废记录', Trash2],
-  ['borrow', '借用管理', '借用归还', ArrowLeftRight],
-  ['inspection', '送检管理', '送检记录', ClipboardCheck],
+  ['quality', '不合格工具', '暂不可用', ShieldAlert],
+  ['maintenance', '维护管理', '暂不可用', Wrench],
+  ['repair', '检修管理', '暂不可用', Wrench],
+  ['scrap', '报废管理', '暂不可用', Trash2],
+  ['borrow', '借用管理', '暂不可用', ArrowLeftRight],
+  ['inspection', '送检管理', '暂不可用', ClipboardCheck],
 ] as const;
-const METRICS: {
-  key: ToolMetric;
-  label: string;
-  note: string;
-  dependencies: ToolSourceKey[];
-}[] = [
+
+const METRICS = [
   {
     key: 'total',
-    label: '工具台账',
-    note: '台账条目 · 非实物件数',
-    dependencies: ['ledger'],
-  },
-  {
-    key: 'quality',
-    label: '不合格工具',
-    note: '当前未完成处置',
-    dependencies: ['ledger', 'quality'],
-  },
-  {
-    key: 'borrow',
-    label: '借用未归还',
-    note: '已出库工具条目',
-    dependencies: ['ledger', 'borrow'],
-  },
-  {
-    key: 'inspection',
-    label: '送检临期 / 逾期',
-    note: '已配置日期 · 不足 30 天',
-    dependencies: ['ledger'],
+    label: '涉及工具',
+    note: '办理或到期的台账条目',
+    icon: ClipboardList,
   },
   {
     key: 'maintenance',
-    label: '维护临期 / 逾期',
-    note: '已配置日期 · 不足 30 天',
-    dependencies: ['ledger'],
+    label: '维护到期',
+    note: '按维护到期日统计',
+    icon: Wrench,
   },
-];
+  {
+    key: 'inspection',
+    label: '送检到期',
+    note: '按送检到期日统计',
+    icon: ClipboardCheck,
+  },
+] as const;
 const EMPTY: Pick<OperationsToolsSnapshot, 'tools' | 'flows'> = {
   tools: [],
   flows: [],
@@ -148,7 +123,11 @@ export default function OperationsToolsManagementPage() {
   const queryKey = useMemo(() => ['operations-tools', identity], [identity]);
   const enabled =
     !access.isLoading &&
-    canAccessPage(access.role, '/operations-tools-management', access.pagePaths);
+    canAccessPage(
+      access.role,
+      '/operations-tools-management',
+      access.pagePaths,
+    );
   const query = useQuery({
     queryKey,
     queryFn: ({ signal }) => getToolsSnapshot(false, signal),
@@ -170,22 +149,33 @@ export default function OperationsToolsManagementPage() {
   const externalOpened = useRef(false),
     lastRefresh = useRef(0),
     refreshInFlight = useRef(false);
-  const scope = access.effectiveAuthorization ? businessBuildingsForAction(access, { module: 'tools', action: 'read' }) : accessBuildings(access);
-  const locked = Boolean(scope && scope.length === 1);
-  const effectiveBuilding = locked ? (access.purchaseBuilding ?? '') : building;
-  const model = useMemo(
-    () => deriveTools(snapshot ?? EMPTY, effectiveBuilding, search, today),
-    [snapshot, effectiveBuilding, search, today],
-  );
-  const overviewTools = useMemo(() => model.concerns.slice(0, 5), [model]);
-  const repairFlows = useMemo(
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const month = selectedMonth || today.slice(0, 7);
+  const scope = access.effectiveAuthorization
+    ? businessBuildingsForAction(access, { module: 'tools', action: 'read' })
+    : accessBuildings(access);
+  const locked = scope?.length === 1;
+  const effectiveBuilding = locked ? scope[0] : building;
+  const ledgerTools = useMemo(
     () =>
-      model.flows.filter((f) => f.kind === 'repair' && f.status === '检修中'),
-    [model],
+      section === 'ledger'
+        ? deriveTools(snapshot ?? EMPTY, effectiveBuilding, search, today)
+            .concerns
+        : [],
+    [snapshot, effectiveBuilding, search, today, section],
   );
-  const sectionFlows = useMemo(
-    () => model.flows.filter((f) => f.kind === section),
-    [model, section],
+  const overview = useMemo(
+    () =>
+      section === 'overview'
+        ? deriveToolsMonth(
+            snapshot ?? EMPTY,
+            effectiveBuilding,
+            search,
+            today,
+            month,
+          )
+        : null,
+    [snapshot, effectiveBuilding, search, today, section, month],
   );
   const selectTool = useCallback(
     (id: string) => setSelection({ type: 'tool', id }),
@@ -206,7 +196,16 @@ export default function OperationsToolsManagementPage() {
       await queryClient.cancelQueries({ queryKey, exact: true });
       await queryClient.fetchQuery({
         queryKey,
-        queryFn: ({ signal }) => getToolsSnapshot(canUsePageAction(access, 'tools', 'refresh', access.capabilities.canForceRefresh), signal),
+        queryFn: ({ signal }) =>
+          getToolsSnapshot(
+            canUsePageAction(
+              access,
+              'tools',
+              'refresh',
+              access.capabilities.canForceRefresh,
+            ),
+            signal,
+          ),
         staleTime: 0,
       });
     } catch {
@@ -220,6 +219,7 @@ export default function OperationsToolsManagementPage() {
     setSelection(null);
     setBuilding('');
     setSearch('');
+    setSelectedMonth('');
     return () => {
       void queryClient.cancelQueries({ queryKey, exact: true });
       queryClient.removeQueries({ queryKey, exact: true });
@@ -260,570 +260,42 @@ export default function OperationsToolsManagementPage() {
     ),
     [],
   );
-  const available = useCallback(
-    (keys: ToolSourceKey[]) =>
-      keys.every((key) => readable(snapshot?.sources[key]?.state)),
-    [snapshot],
-  );
-  const updated = snapshot
-    ? Object.values(snapshot.sources)
-        .map((s) => s.updatedAt)
-        .filter((v): v is string => Boolean(v))
-        .sort()[0]
-    : null;
-  const sourceFailures = useMemo(
-    () =>
-      snapshot
-        ? Object.entries(snapshot.sources).filter(
-            ([, s]) => s.state === 'error' || s.state === 'stale',
-          )
-        : [],
-    [snapshot],
-  );
-  const source =
-    section !== 'overview' ? snapshot?.sources[section] : undefined;
+  const ledger = snapshot?.sources.ledger;
+  const records = snapshot?.sources.maintenance;
+  const updated = [ledger?.updatedAt, records?.updatedAt]
+    .filter((value): value is string => Boolean(value))
+    .sort()[0];
+  const sourceFailures = (['ledger', 'maintenance'] as const).flatMap((key) => {
+    const source = snapshot?.sources[key];
+    return source?.state === 'error' || source?.state === 'stale'
+      ? [{ key, source }]
+      : [];
+  });
   const selectedTool =
     selection?.type === 'tool'
-      ? model.tools.find((t) => t.id === selection.id)
+      ? snapshot?.tools.find((tool) => tool.id === selection.id)
       : undefined;
   const selectedFlow =
     selection?.type === 'flow'
-      ? model.flows.find((f) => f.id === selection.id)
+      ? overview?.flows.find((flow) => flow.id === selection.id)
       : undefined;
-  const drillTools =
+  const selectedMetric =
     selection?.type === 'metric'
-      ? model.groups[selection.key]
-      : selection?.type === 'building'
-        ? (model.buildings.find((b) => b.building === selection.building)?.[
-            selection.quality ? 'quality' : 'tools'
-          ] ?? [])
-        : selection?.type === 'problem'
-          ? (model.problems.find((p) => p.check === selection.check)?.tools ??
-            [])
-          : [];
+      ? METRICS.find((item) => item.key === selection.key)
+      : undefined;
   const dialogTitle =
-    selection?.type === 'tool'
-      ? (selectedTool?.name ?? '工具已不在当前筛选中')
-      : selection?.type === 'flow'
-        ? selectedFlow
-          ? flowToolName(selectedFlow, snapshot?.tools ?? [])
-          : '记录已不在当前筛选中'
-        : selection?.type === 'apply'
-          ? '新建申请'
-          : selection?.type === 'guide'
-            ? '流程说明'
-            : selection?.type === 'repair'
-              ? '检修中记录'
-              : selection?.type === 'metric'
-                ? METRICS.find((m) => m.key === selection.key)?.label
-                : selection?.type === 'building'
-                  ? `${selection.building} · ${selection.quality ? '不合格工具' : '工具台账'}`
-                  : selection?.type === 'problem'
-                    ? model.problems.find((p) => p.check === selection.check)
-                        ?.label
-                    : '';
+    selectedTool?.name ||
+    (selectedFlow
+      ? flowToolName(selectedFlow, snapshot?.tools ?? [])
+      : selectedMetric?.label) ||
+    '记录已不在当前筛选中';
   const DialogIcon =
-    selection?.type === 'metric'
-      ? {
-          total: ClipboardList,
-          quality: ShieldAlert,
-          borrow: ArrowLeftRight,
-          inspection: ClipboardCheck,
-          maintenance: Wrench,
-        }[selection.key]
-      : selection?.type === 'repair' || selection?.type === 'flow'
-        ? Wrench
-        : ClipboardList;
-  const dialogSummaries: {
-    label: string;
-    value: number | string;
-    risk?: boolean;
-    selection: Selection;
-  }[] =
-    selection?.type === 'building'
-      ? [
-          {
-            label: '台账条目',
-            value: available(['ledger'])
-              ? (model.buildings.find((b) => b.building === selection.building)
-                  ?.tools.length ?? 0)
-              : '—',
-            selection: { ...selection, quality: false },
-          },
-          {
-            label: '不合格工具',
-            value: available(['ledger', 'quality'])
-              ? (model.buildings.find((b) => b.building === selection.building)
-                  ?.quality.length ?? 0)
-              : '—',
-            risk: true,
-            selection: { ...selection, quality: true },
-          },
-        ]
-      : selection?.type === 'metric' && selection.key === 'total'
-        ? METRICS.slice(0, 4).map((metric) => ({
-            label: metric.label,
-            value: available(metric.dependencies)
-              ? model.groups[metric.key].length
-              : '—',
-            risk: metric.key === 'quality',
-            selection: { type: 'metric', key: metric.key },
-          }))
-        : [];
-
-  const pageContent = useMemo(
-    () => (
-      <main className="tools-content">
-        <nav className="tools-nav" aria-label="运维工具管理视图">
-          {SECTIONS.map(([key, label, description, Icon]) => (
-            <button
-              key={key}
-              type="button"
-              aria-current={section === key ? 'page' : undefined}
-              onClick={() => setSection(key)}
-            >
-              <Icon aria-hidden="true" />
-              <span>
-                <strong>{label}</strong>
-                <small>{description}</small>
-              </span>
-            </button>
-          ))}
-        </nav>
-        <div className="tools-filters">
-          <label>
-            楼栋
-            <NativeSelect
-              aria-label="筛选楼栋"
-              value={effectiveBuilding}
-              disabled={locked}
-              onChange={(e) => setBuilding(e.target.value)}
-            >
-              <NativeSelectOption value="">全部楼栋</NativeSelectOption>
-              {[
-                ...TOOL_BUILDINGS.filter(value => !scope || scope.includes(value)),
-                ...(locked &&
-                effectiveBuilding &&
-                !(TOOL_BUILDINGS as readonly string[]).includes(
-                  effectiveBuilding,
-                )
-                  ? [effectiveBuilding]
-                  : []),
-              ].map((b) => (
-                <NativeSelectOption key={b} value={b}>
-                  {b}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </label>
-          <label className="tools-search">
-            <Search aria-hidden="true" />
-            <Input
-              aria-label="搜索工具、型号、位置"
-              placeholder="搜索工具、型号、位置"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </label>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setSearch('');
-              if (!locked) setBuilding('');
-            }}
-          >
-            重置
-          </Button>
-          <span className="tools-scope">
-            {effectiveBuilding || '全园区'} · {today}
-          </span>
-        </div>
-        <div role="status" aria-live="polite" className="tools-sync-state">
-          {query.isPending && '正在加载工具数据…'}
-          {(manualRefresh || snapshot?.refreshing) &&
-            '正在后台同步，已有数据可继续查看'}
-          {(query.isError || refreshError) && (
-            <span className="tools-error">
-              {refreshError || '读取失败，请重试；已有数据已保留'}{' '}
-              <Button variant="ghost" size="sm" onClick={() => void refresh()}>
-                重试
-              </Button>
-            </span>
-          )}
-        </div>
-        {sourceFailures.length > 0 && (
-          <details className="tools-source-warning">
-            <summary>
-              {sourceFailures.length} 张表同步失败，正在显示最近一次成功数据
-            </summary>
-            <ul>
-              {sourceFailures.map(([key, s]) => (
-                <li key={key}>
-                  {TOOL_SOURCE_LABELS[key as ToolSourceKey]}：{s.message}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-        {snapshot && (
-          <>
-            {section === 'overview' && (
-              <>
-                <section className="tools-metrics" aria-label="工具统计">
-                  {METRICS.slice(0, 4).map((m) => {
-                    const Icon =
-                      m.key === 'total'
-                        ? ClipboardList
-                        : m.key === 'quality'
-                          ? ShieldAlert
-                          : m.key === 'borrow'
-                            ? ArrowLeftRight
-                            : ClipboardCheck;
-                    return (
-                      <button
-                        className={`tools-metric tools-metric-${m.key}`}
-                        key={m.key}
-                        type="button"
-                        disabled={!available(m.dependencies)}
-                        onClick={() =>
-                          setSelection({ type: 'metric', key: m.key })
-                        }
-                      >
-                        <span className="tools-metric-icon">
-                          <Icon aria-hidden="true" />
-                        </span>
-                        <span className="tools-metric-body">
-                          <span>{m.label}</span>
-                          <strong>
-                            {available(m.dependencies)
-                              ? model.groups[m.key].length
-                              : '—'}
-                            <small>条</small>
-                          </strong>
-                          <span className="tools-metric-note">{m.note}</span>
-                          <span className="tools-metric-link">查看详情</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </section>
-                <section
-                  className="tools-building-section"
-                  aria-label="各楼工具台账"
-                >
-                  <h2>
-                    <ClipboardList aria-hidden="true" />
-                    各楼工具台账
-                  </h2>
-                  <div className="tools-building-grid">
-                    {model.buildings.map((item) => (
-                      <button
-                        key={item.building}
-                        type="button"
-                        className="tools-building-card"
-                        disabled={!available(['ledger'])}
-                        onClick={() =>
-                          setSelection({
-                            type: 'building',
-                            building: item.building,
-                            quality: false,
-                          })
-                        }
-                      >
-                        <span className="tools-building-top">
-                          <strong>{item.building}</strong>
-                          {item.quality.length > 0 ? (
-                            <span className="tools-building-risk">
-                              {item.quality.length} 不合格
-                            </span>
-                          ) : (
-                            <CheckCircle2 aria-label="无不合格工具" />
-                          )}
-                        </span>
-                        <span className="tools-building-count">
-                          <span>
-                            台账条目
-                            <strong>
-                              {available(['ledger']) ? item.tools.length : '—'}
-                            </strong>
-                          </span>
-                          <span>
-                            待处理
-                            <strong>
-                              {available(['quality'])
-                                ? item.quality.length
-                                : '—'}
-                            </strong>
-                          </span>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-                <div className="tools-panels">
-                  <Card data-slot="card">
-                    <CardHeader data-slot="card-header">
-                      <CardTitle data-slot="card-title">各楼工具分布</CardTitle>
-                      <div className="tools-legend">
-                        <span>台账条目</span>
-                        <span>其中不合格</span>
-                      </div>
-                    </CardHeader>
-                    <CardContent
-                      data-slot="card-content"
-                      className="tools-chart"
-                    >
-                      {available(['ledger']) ? (
-                        model.buildings.map((b, i) => (
-                          <div className="tools-chart-row" key={b.building}>
-                            <strong>{b.building}</strong>
-                            <button
-                              className="tools-bar-button"
-                              aria-label={`${b.building}工具台账${b.tools.length}条`}
-                              onClick={() =>
-                                setSelection({
-                                  type: 'building',
-                                  building: b.building,
-                                  quality: false,
-                                })
-                              }
-                            >
-                              <span
-                                className={`tools-bar ${i === 0 ? 'tools-bar-peak' : ''}`}
-                                style={{
-                                  width: `${(b.tools.length / Math.max(1, model.buildings[0]?.tools.length ?? 0)) * 100}%`,
-                                }}
-                              >
-                                {available(['quality']) && (
-                                  <span
-                                    className="tools-bar-risk"
-                                    style={{
-                                      width: `${(b.quality.length / Math.max(1, b.tools.length)) * 100}%`,
-                                    }}
-                                  />
-                                )}
-                              </span>
-                            </button>
-                            <span className="tools-number">
-                              {b.tools.length}
-                              {i === 0 && b.tools.length > 0 && (
-                                <small>最高</small>
-                              )}
-                            </span>
-                            <button
-                              disabled={!available(['quality'])}
-                              className="tools-risk-link"
-                              onClick={() =>
-                                setSelection({
-                                  type: 'building',
-                                  building: b.building,
-                                  quality: true,
-                                })
-                              }
-                            >
-                              不合格{' '}
-                              {available(['quality']) ? b.quality.length : '—'}
-                            </button>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="tools-empty">台账暂不可用</p>
-                      )}
-                    </CardContent>
-                  </Card>
-                  <Card data-slot="card">
-                    <CardHeader data-slot="card-header">
-                      <CardTitle data-slot="card-title">当前待处理</CardTitle>
-                    </CardHeader>
-                    <CardContent
-                      data-slot="card-content"
-                      className="tools-tasks"
-                    >
-                      {METRICS.filter((m) => m.key !== 'total').map((m) => (
-                        <button
-                          key={m.key}
-                          disabled={!available(m.dependencies)}
-                          onClick={() =>
-                            setSelection({ type: 'metric', key: m.key })
-                          }
-                        >
-                          <span>
-                            {m.label}
-                            <small>
-                              {m.key === 'quality' ? '登记与检查结论' : m.note}
-                            </small>
-                          </span>
-                          <Badge variant="outline">
-                            {available(m.dependencies)
-                              ? model.groups[m.key].length
-                              : '—'}{' '}
-                            条
-                          </Badge>
-                          <span className="tools-link">查看</span>
-                        </button>
-                      ))}
-                      <div className="tools-data-note">
-                        {model.tools.filter((t) => t.issues.length > 0).length}{' '}
-                        条台账信息待完善
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-                <Card data-slot="card">
-                  <CardHeader data-slot="card-header">
-                    <CardTitle data-slot="card-title">需关注的工具</CardTitle>
-                    <Button
-                      variant="ghost"
-                      onClick={() => setSection('ledger')}
-                    >
-                      全部台账
-                    </Button>
-                  </CardHeader>
-                  <CardContent data-slot="card-content">
-                    <ToolList
-                      tools={overviewTools}
-                      today={today}
-                      onSelect={selectTool}
-                    />
-                  </CardContent>
-                </Card>
-              </>
-            )}
-            {section === 'quality' && (
-              <div className="tools-panels">
-                <Card data-slot="card">
-                  <CardHeader data-slot="card-header">
-                    <CardTitle data-slot="card-title">不合格问题分布</CardTitle>
-                    <span className="tools-muted">同一工具可能有多项问题</span>
-                  </CardHeader>
-                  <CardContent
-                    data-slot="card-content"
-                    className="tools-chart tools-problems"
-                  >
-                    {available(['ledger', 'quality']) ? (
-                      model.problems.map((p, i) => (
-                        <div className="tools-chart-row" key={p.check}>
-                          <strong>{p.label}</strong>
-                          <button
-                            className="tools-bar-button"
-                            aria-label={`${p.label}${p.tools.length}条`}
-                            onClick={() =>
-                              setSelection({ type: 'problem', check: p.check })
-                            }
-                          >
-                            <span
-                              className={`tools-bar ${i === 0 ? 'tools-bar-peak' : ''}`}
-                              style={{
-                                width: `${(p.tools.length / Math.max(1, model.problems[0]?.tools.length ?? 0)) * 100}%`,
-                              }}
-                            />
-                          </button>
-                          <span className="tools-number">
-                            {p.tools.length}
-                            {i === 0 && p.tools.length > 0 && (
-                              <small>最高</small>
-                            )}
-                          </span>
-                        </div>
-                      ))
-                    ) : (
-                      <p>不合格数据暂不可用</p>
-                    )}
-                  </CardContent>
-                </Card>
-                <Card data-slot="card">
-                  <CardHeader data-slot="card-header">
-                    <CardTitle data-slot="card-title">待处置工具</CardTitle>
-                  </CardHeader>
-                  <CardContent data-slot="card-content">
-                    <p className="tools-large-number">
-                      {available(['ledger', 'quality'])
-                        ? model.groups.quality.length
-                        : '—'}{' '}
-                      <small>条</small>
-                    </p>
-                    <p className="tools-muted">
-                      当前未闭环的关联工具及底表不合格记录
-                    </p>
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        setSelection({ type: 'metric', key: 'quality' })
-                      }
-                      disabled={!available(['ledger', 'quality'])}
-                    >
-                      查看工具
-                    </Button>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-            {section !== 'overview' && (
-              <Card data-slot="card">
-                <CardHeader data-slot="card-header">
-                  <CardTitle data-slot="card-title">
-                    {TOOL_SOURCE_LABELS[section]}
-                  </CardTitle>
-                  {source &&
-                    nativeLink(
-                      source.formUrl ?? source.sourceUrl,
-                      source.formUrl
-                        ? '填写申请'
-                        : section === 'ledger'
-                          ? '维护台账'
-                          : '查看原表',
-                    )}
-                </CardHeader>
-                <CardContent data-slot="card-content">
-                  {!readable(source?.state) ? (
-                    <p className="tools-empty">
-                      {source?.state === 'loading'
-                        ? '正在同步数据'
-                        : '该表数据暂不可用，请重试'}
-                    </p>
-                  ) : section === 'ledger' ? (
-                    <ToolList
-                      tools={model.concerns}
-                      today={today}
-                      onSelect={selectTool}
-                    />
-                  ) : (
-                    <FlowList
-                      flows={sectionFlows}
-                      tools={snapshot.tools}
-                      onSelect={selectFlow}
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            )}
-          </>
-        )}
-      </main>
-    ),
-    [
-      section,
-      model,
-      effectiveBuilding,
-      locked,
-      search,
-      today,
-      manualRefresh,
-      snapshot,
-      query.isPending,
-      query.isError,
-      refreshError,
-      refresh,
-      sourceFailures,
-      available,
-      repairFlows,
-      overviewTools,
-      selectTool,
-      selectFlow,
-      source,
-      nativeLink,
-      sectionFlows,
-    ],
+    selectedMetric?.icon ?? (selectedFlow ? Wrench : ClipboardList);
+  const filterKey = JSON.stringify([effectiveBuilding, search.trim()]);
+  const unavailable = (state?: string) => (
+    <p className="tools-empty">
+      {state === 'loading' ? '正在同步数据' : '该表数据暂不可用，请重试'}
+    </p>
   );
 
   return (
@@ -831,7 +303,7 @@ export default function OperationsToolsManagementPage() {
       <ManagementHeader
         activePage="operations-tools"
         subtitle="运维工具管理"
-        sourceLabel="工具台账与流转记录"
+        sourceLabel="工具底表与送检维护记录"
         updatedAt={
           updated
             ? new Date(updated).toLocaleString('zh-CN', {
@@ -845,24 +317,188 @@ export default function OperationsToolsManagementPage() {
         showSearch={false}
         actions={
           <>
-            <Button
-              variant="outline"
-              className="tools-header-button"
-              onClick={() => setSelection({ type: 'guide' })}
-            >
+            <Button variant="outline" className="tools-header-button" disabled>
               流程说明
             </Button>
-            <Button
-              className="tools-apply-button"
-              disabled={!snapshot}
-              onClick={() => setSelection({ type: 'apply' })}
-            >
+            <Button className="tools-apply-button" disabled>
               ＋ 新建申请
             </Button>
           </>
         }
       />
-      {pageContent}
+      <main className="tools-content">
+        <nav className="tools-nav" aria-label="运维工具管理视图">
+          {SECTIONS.map(([key, label, description, Icon]) => {
+            const active = key === 'overview' || key === 'ledger';
+            return (
+              <button
+                key={key}
+                type="button"
+                disabled={!active}
+                aria-current={section === key ? 'page' : undefined}
+                onClick={active ? () => setSection(key) : undefined}
+              >
+                <Icon aria-hidden="true" />
+                <span>
+                  <strong>{label}</strong>
+                  <small>{description}</small>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+        <div className="tools-filters">
+          {section === 'overview' && (
+            <label className="tools-month">
+              月份
+              <Input
+                type="month"
+                aria-label="总览月份"
+                value={month}
+                onChange={(event) => setSelectedMonth(event.target.value)}
+              />
+            </label>
+          )}
+          <label>
+            楼栋
+            <NativeSelect
+              aria-label="筛选楼栋"
+              value={effectiveBuilding}
+              disabled={locked}
+              onChange={(event) => setBuilding(event.target.value)}
+            >
+              <NativeSelectOption value="">全部楼栋</NativeSelectOption>
+              {(locked
+                ? scope
+                : TOOL_BUILDINGS.filter(
+                    (value) => !scope || scope.includes(value),
+                  )
+              ).map((value) => (
+                <NativeSelectOption key={value} value={value}>
+                  {value}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </label>
+          <label className="tools-search">
+            <Search aria-hidden="true" />
+            <Input
+              aria-label="搜索工具、型号、位置"
+              placeholder="搜索工具、型号、位置"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setSearch('');
+              if (!locked) setBuilding('');
+              if (section === 'overview') setSelectedMonth('');
+            }}
+          >
+            重置
+          </Button>
+        </div>
+        <div role="status" aria-live="polite" className="tools-sync-state">
+          {query.isPending && '正在加载工具数据…'}
+          {(manualRefresh || snapshot?.refreshing) &&
+            '正在后台同步，已有数据可继续查看'}
+          {(query.isError || refreshError) && (
+            <span className="tools-error">
+              {refreshError || '读取失败，请重试'}{' '}
+              <Button variant="ghost" size="sm" onClick={() => void refresh()}>
+                重试
+              </Button>
+            </span>
+          )}
+        </div>
+        {sourceFailures.length > 0 && (
+          <details className="tools-source-warning">
+            <summary>部分数据尚未更新</summary>
+            <ul>
+              {sourceFailures.map(({ key, source }) => (
+                <li key={key}>
+                  {TOOL_SOURCE_LABELS[key]}：{source.message}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {snapshot && overview && (
+          <>
+            <section className="tools-metrics" aria-label="当月工具统计">
+              {METRICS.map(({ key, label, note, icon: Icon }) => {
+                const ready =
+                  readable(ledger?.state) &&
+                  (key !== 'total' || readable(records?.state));
+                return (
+                  <button
+                    className="tools-metric"
+                    key={key}
+                    type="button"
+                    disabled={!ready}
+                    onClick={() => setSelection({ type: 'metric', key })}
+                  >
+                    <span className="tools-metric-icon">
+                      <Icon aria-hidden="true" />
+                    </span>
+                    <span className="tools-metric-body">
+                      <span>{label}</span>
+                      <strong>
+                        {ready ? overview.groups[key].length : '—'}
+                        <small>条</small>
+                      </strong>
+                      <span className="tools-metric-note">{note}</span>
+                      {ready && (
+                        <span className="tools-metric-link">查看详情</span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </section>
+            <Card data-slot="card">
+              <CardHeader data-slot="card-header">
+                <CardTitle data-slot="card-title">{TOOL_SOURCE_LABELS.maintenance}</CardTitle>
+                {records && nativeLink(records.sourceUrl, '查看记录表')}
+              </CardHeader>
+              <CardContent data-slot="card-content">
+                {readable(records?.state) ? (
+                  <FlowList
+                    key={month + filterKey}
+                    flows={overview.flows}
+                    tools={snapshot.tools}
+                    onSelect={selectFlow}
+                  />
+                ) : (
+                  unavailable(records?.state)
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+        {snapshot && section === 'ledger' && (
+          <Card data-slot="card">
+            <CardHeader data-slot="card-header">
+              <CardTitle data-slot="card-title">{TOOL_SOURCE_LABELS.ledger}</CardTitle>
+              {ledger && nativeLink(ledger.sourceUrl, '查看工具底表')}
+            </CardHeader>
+            <CardContent data-slot="card-content">
+              {readable(ledger?.state) ? (
+                <ToolList
+                  key={filterKey}
+                  tools={ledgerTools}
+                  today={today}
+                  onSelect={selectTool}
+                />
+              ) : (
+                unavailable(ledger?.state)
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </main>
       <Dialog
         open={selection !== null}
         onOpenChange={(open) => {
@@ -896,7 +532,7 @@ export default function OperationsToolsManagementPage() {
             <div>
               <DialogTitle>{dialogTitle}</DialogTitle>
               <DialogDescription className="sr-only">
-                运维工具管理明细与操作
+                运维工具管理明细
               </DialogDescription>
             </div>
             <DialogClose asChild>
@@ -911,69 +547,20 @@ export default function OperationsToolsManagementPage() {
             </DialogClose>
           </DialogHeader>
           <div className="tools-dialog-body">
-            {selection?.type !== 'guide' &&
-              selection?.type !== 'apply' &&
-              (query.isError || sourceFailures.length > 0) && (
-                <p role="status" className="tools-source-warning">
-                  部分数据尚未更新，当前显示最近一次成功数据。
-                </p>
-              )}
-            {(selection?.type === 'metric' ||
-              selection?.type === 'building' ||
-              selection?.type === 'problem') && (
-              <>
-                {dialogSummaries.length > 0 && (
-                  <div className="tools-dialog-summaries">
-                    {dialogSummaries.map((item) => (
-                      <button
-                        key={item.label}
-                        type="button"
-                        className="tools-dialog-summary"
-                        onClick={() => setSelection(item.selection)}
-                      >
-                        <span>{item.label}</span>
-                        <strong
-                          className={item.risk ? 'tools-error' : undefined}
-                        >
-                          {item.value}
-                        </strong>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <section className="tools-dialog-list" aria-label="工具明细">
-                  <header>
-                    <h3>
-                      <ClipboardList aria-hidden="true" />
-                      工具明细
-                    </h3>
-                    <Badge variant="outline">{drillTools.length} 条</Badge>
-                  </header>
-                  <ToolList
-                    tools={drillTools}
-                    pageSize={12}
-                    today={today}
-                    onSelect={selectTool}
-                  />
-                </section>
-              </>
+            {(query.isError || sourceFailures.length > 0) && (
+              <p role="status" className="tools-source-warning">
+                部分数据尚未更新。
+              </p>
             )}
-            {selection?.type === 'repair' && (
-              <section className="tools-dialog-list" aria-label="检修记录">
-                <header>
-                  <h3>
-                    <Wrench aria-hidden="true" />
-                    检修记录
-                  </h3>
-                  <Badge variant="outline">{repairFlows.length} 单</Badge>
-                </header>
-                <div className="tools-dialog-flow-list">
-                  <FlowList
-                    flows={repairFlows}
-                    tools={snapshot?.tools ?? []}
-                    onSelect={selectFlow}
-                  />
-                </div>
+            {selectedMetric && overview && (
+              <section className="tools-dialog-list" aria-label="工具明细">
+                <ToolList
+                  key={selectedMetric.key}
+                  tools={overview.groups[selectedMetric.key]}
+                  pageSize={12}
+                  today={today}
+                  onSelect={selectTool}
+                />
               </section>
             )}
             {selectedTool && (
@@ -1010,7 +597,7 @@ export default function OperationsToolsManagementPage() {
                   </p>
                 )}
                 {snapshot &&
-                  nativeLink(snapshot.sources.ledger.sourceUrl, '在飞书中维护')}
+                  nativeLink(snapshot.sources.ledger.sourceUrl, '查看工具底表')}
               </>
             )}
             {selectedFlow && (
@@ -1019,11 +606,11 @@ export default function OperationsToolsManagementPage() {
                   {[
                     ['编号', selectedFlow.code || selectedFlow.id],
                     ['楼栋', selectedFlow.building],
+                    ['办理类型', selectedFlow.recordType],
                     ['当前阶段', selectedFlow.status],
-                    ['计划 / 申请日期', selectedFlow.date],
+                    ['计划办理日期', selectedFlow.date],
                     ['实际日期', selectedFlow.actualDate],
-                    ['数量', selectedFlow.quantity?.toString()],
-                    ['原因 / 处理方式', selectedFlow.reason],
+                    ['检测结论', selectedFlow.reason],
                   ].map(([label, value]) => (
                     <div key={label}>
                       <dt>{label}</dt>
@@ -1036,37 +623,10 @@ export default function OperationsToolsManagementPage() {
                 )}
                 {snapshot &&
                   nativeLink(
-                    snapshot.sources[selectedFlow.kind].sourceUrl,
-                    '查看与处理原记录',
+                    snapshot.sources.maintenance.sourceUrl,
+                    '查看记录表',
                   )}
               </>
-            )}
-            {selection?.type === 'apply' && snapshot && (
-              <div className="tools-application-list">
-                {TOOL_FLOW_KINDS.filter((k) => snapshot.sources[k].formUrl).map(
-                  (k) => (
-                    <div key={k}>
-                      <strong>{TOOL_SOURCE_LABELS[k]}</strong>
-                      {nativeLink(snapshot.sources[k].formUrl!, '打开申请表')}
-                    </div>
-                  ),
-                )}
-                <p className="tools-muted">
-                  申请在飞书中填写及审批。返回后自动同步结果。检修由不合格登记转入。
-                </p>
-              </div>
-            )}
-            {selection?.type === 'guide' && (
-              <div className="tools-guide">
-                <p>借用：申请 → 主管审批 → 仓管出库 → 归还确认</p>
-                <p>维护：申请审批 → 维护检查 → 完成或登记不合格</p>
-                <p>送检：申请审批 → 报告填写 → 完成</p>
-                <p>不合格：登记 → 转检修 / 转报废 → 处置反馈</p>
-                <p>报废：主管审批 → 经理审批 → 通过或终止</p>
-                <p>
-                  缺失数量不会按零统计；不同单位不合并求和。送检条件未明确的工具需在原表核实。
-                </p>
-              </div>
             )}
           </div>
           <footer className="tools-dialog-footer">

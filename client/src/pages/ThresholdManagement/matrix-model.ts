@@ -1,4 +1,4 @@
-import type { ThresholdRecord } from '@shared/threshold-management.interface';
+import { WEAK_CURRENT_PROFESSION, type ThresholdRecord } from '@shared/threshold-management.interface';
 import { normalizeThresholdEquipment } from '@shared/threshold-equipment';
 import { buildThresholdComparisonGroups } from './comparison-groups';
 
@@ -28,6 +28,30 @@ const buildingOrder = [
   '110站',
   '待核对',
 ];
+export function weakCurrentAlertType(section: string) {
+  const type = section.trim();
+  if (type === '过高报警' || type === '过低报警') return type.replace('报警', '告警');
+  return type || '待核对';
+}
+
+export function weakCurrentAlarmLevel(record: ThresholdRecord) {
+  return /^告警等级[：:][ \t]*([^\r\n]+)/m.exec(record.note)?.[1].trim() || '等级待核对';
+}
+
+function groupWeakCurrentRows(rows: MatrixRow[]) {
+  const types = new Map<string, Map<string, MatrixRow[]>>();
+  for (const row of rows) {
+    const names = types.get(row.section) ?? new Map<string, MatrixRow[]>();
+    const rules = names.get(row.parameter) ?? [];
+    rules.push(row);
+    names.set(row.parameter, rules);
+    types.set(row.section, names);
+  }
+  const groups = [...types.entries()].sort(([left], [right]) =>
+    Number(left === '待核对') - Number(right === '待核对'),
+  );
+  return groups.flatMap(([, names]) => [...names.values()].flat());
+}
 function columnLocation(record: ThresholdRecord) {
   record = normalizeThresholdEquipment(record);
   let location = [
@@ -61,8 +85,15 @@ function comparableValue(value: string) {
   const sign = numeric[1] === '-' && (integer !== '0' || fraction) ? '-' : '';
   return `${sign}${integer}${fraction ? '.' + fraction : ''}${numeric[4]}`;
 }
+function comparableRule(record: ThresholdRecord) {
+  const value = comparableValue(record.value);
+  if (record.profession === WEAK_CURRENT_PROFESSION)
+    return JSON.stringify([value, weakCurrentAlarmLevel(record)]);
+  return value;
+}
 export function matrixSectionLabel(row: MatrixRow) {
   const records = Object.values(row.cells);
+  if (records[0]?.profession === WEAK_CURRENT_PROFESSION) return row.section;
   if (
     records.length &&
     records.every((record) => {
@@ -108,12 +139,18 @@ export function buildThresholdMatrix(
       equipment.brand || '',
     ]);
     columns.set(columnKey, { key: columnKey, building, location });
+    const weak = record.profession === WEAK_CURRENT_PROFESSION;
+    // The name can span merged Excel rows. Each rule still has its own value row.
+    const valueRow = weak && record.source
+      ? `${record.source.sheet}:${record.source.cell.match(/\d+$/)?.[0] || record.source.cell}` : '';
+    const section = weak ? weakCurrentAlertType(record.section) : record.section;
     const signature = JSON.stringify([
       comparisonKeys.get(record.id),
       record.device,
-      record.section,
+      section,
       record.parameter,
       record.unit,
+      valueRow,
     ]);
     const origin = record.source
       ? `${record.source.sheet}:${(record.source.parameterCell || record.source.cell).match(/\d+$/)?.[0] || record.source.cell}`
@@ -123,7 +160,7 @@ export function buildThresholdMatrix(
     if (!row) {
       row = {
         key: `${signature}:${origin}:${bucket.length}`,
-        section: record.section,
+        section,
         parameter: record.parameter,
         unit: record.unit,
         kind: record.kind,
@@ -146,7 +183,7 @@ export function buildThresholdMatrix(
     if (kinds.size > 1) row.kind = '多类型';
     const values = new Map<string, number>();
     for (const record of Object.values(row.cells)) {
-      const value = comparableValue(record.value);
+      const value = comparableRule(record);
       if (value && value !== '/')
         values.set(value, (values.get(value) || 0) + 1);
     }
@@ -156,7 +193,7 @@ export function buildThresholdMatrix(
     if (row.different && maximum > 1 && common.length === 1) {
       row.emphasizedIds = Object.values(row.cells)
         .filter((record) => {
-          const value = comparableValue(record.value);
+          const value = comparableRule(record);
           return value && value !== '/' && value !== common[0][0];
         })
         .map((record) => record.id);
@@ -180,6 +217,6 @@ export function buildThresholdMatrix(
         a.location.localeCompare(b.location, 'zh-CN', { numeric: true })
       );
     }),
-    rows,
+    rows: records[0]?.profession === WEAK_CURRENT_PROFESSION ? groupWeakCurrentRows(rows) : rows,
   };
 }

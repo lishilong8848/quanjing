@@ -61,6 +61,23 @@ function fixture() {
 }
 
 describe('leave substitution generates pending overtime applications', () => {
+  it('creates a separate pending application for each independently assigned substitute', async () => {
+    const { service, rows, workflow } = fixture();
+    const leave = application();
+    leave.snapshot.shiftAssignments = [
+      { ...shift('ou_sub'), endAt: new Date(at(19)).toISOString() },
+      { ...shift('ou_next'), startAt: new Date(at(19)).toISOString() },
+    ] as typeof leave.snapshot.shiftAssignments;
+    await service.sync(leave, 1);
+    await service.sync(leave, 1);
+    expect(rows.map(({ fields }) => [fields.加班人员, fields.加班开始时间, fields.加班结束时间, fields.加班时长])).toEqual([
+      [[{ id: 'ou_sub' }], at(18), at(19), 1],
+      [[{ id: 'ou_next' }], at(19), at(21), 2],
+    ]);
+    expect(workflow.acceptSubstitutionApplication.mock.calls.map(([, snapshot]) => snapshot.applicantOpenId))
+      .toEqual(['ou_sub', 'ou_next', 'ou_sub', 'ou_next']);
+  });
+
   it('subtracts the substitute’s normal hours and existing applications, and reuses the written record on retry', async () => {
     const { service, rows, overtime, workflow, bitable } = fixture();
     rows.push({ recordId: 'recManual', fields: {
@@ -153,7 +170,7 @@ describe('leave substitution generates pending overtime applications', () => {
     expect(workflow.acceptSubstitutionApplication.mock.calls[0][1]).toMatchObject({ recordId: 'recLostResponse' });
   });
 
-  it('retries a withdrawn approval card without rewriting the already withdrawn source', async () => {
+  it('only deletes a pending automatic row after the old approval card is retired', async () => {
     const id = 'overtime-request-leave-123-revision';
     const fields = { 请求唯一ID: id, 加班工作流状态: '待审批', 加班工作流错误: '' };
     const row = { recordId: 'recAuto', fields };
@@ -169,18 +186,32 @@ describe('leave substitution generates pending overtime applications', () => {
       markSourceDeletedCardPatched: jest.fn(), patchApplication: jest.fn(),
     };
     const gateway = {
-      readOvertimeRecordIfExists: jest.fn().mockResolvedValue(row), readOvertimeRecord: jest.fn().mockResolvedValue(row),
-      updateOvertimeRecord: jest.fn(async (_id, update) => { Object.assign(fields, update); }),
+      readOvertimeRecordIfExists: jest.fn().mockResolvedValue(row),
+      deleteSubstitutionOvertimeRecord: jest.fn(),
       patchInteractiveCard: jest.fn().mockRejectedValueOnce(new Error('temporary')).mockResolvedValueOnce(undefined),
     };
     const service = new OvertimeWorkflowService(store as never, gateway as never, {} as never);
     jest.spyOn(service, 'isEnabled').mockReturnValue(true);
     await expect(service.retireSubstitutionApplication(row.recordId, id)).rejects.toThrow('旧审批卡终态尚未同步');
-    expect(fields.加班工作流状态).toBe('已驳回');
+    expect(gateway.deleteSubstitutionOvertimeRecord).not.toHaveBeenCalled();
     await service.retireSubstitutionApplication(row.recordId, id);
-    expect(gateway.updateOvertimeRecord).toHaveBeenCalledTimes(1);
+    expect(gateway.deleteSubstitutionOvertimeRecord).toHaveBeenCalledWith(row.recordId);
     expect(gateway.patchInteractiveCard).toHaveBeenCalledTimes(2);
     expect(store.patchApplication).toHaveBeenCalledWith(row.recordId, { lastError: '' });
+  });
+
+  it('keeps the record if the Feishu state changes during retirement', async () => {
+    const id = 'overtime-request-leave-123-revision';
+    const pending = { recordId: 'recAuto', fields: { 请求唯一ID: id, 加班工作流状态: '待审批' } };
+    const gateway = {
+      readOvertimeRecordIfExists: jest.fn().mockResolvedValueOnce(pending)
+        .mockResolvedValueOnce({ ...pending, fields: { ...pending.fields, 加班工作流状态: '已审批' } }),
+      deleteSubstitutionOvertimeRecord: jest.fn(),
+    };
+    const service = new OvertimeWorkflowService({ getApplication: jest.fn() } as never, gateway as never, {} as never);
+    jest.spyOn(service, 'isEnabled').mockReturnValue(true);
+    await expect(service.retireSubstitutionApplication(pending.recordId, id)).rejects.toThrow('人工核对');
+    expect(gateway.deleteSubstitutionOvertimeRecord).not.toHaveBeenCalled();
   });
 
   it('only queues automatic overtime after a successful approved schedule write', async () => {

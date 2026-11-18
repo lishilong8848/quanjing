@@ -21,9 +21,11 @@ import {
 import { Input } from '@/components/ui/input';
 import {
   THRESHOLD_KINDS,
+  WEAK_CURRENT_PROFESSION,
   type ThresholdRecord,
 } from '@shared/threshold-management.interface';
 import { ThresholdHeader } from './ThresholdHeader';
+import { ThresholdDirectEdit } from './ThresholdForm';
 import { useThresholds } from './use-thresholds';
 import { needsThresholdReview, ThresholdList } from './ThresholdList';
 import {
@@ -31,6 +33,7 @@ import {
   thresholdDeviceIcon,
 } from './ThresholdDeviceRail';
 import { ThresholdMatrix } from './ThresholdMatrix';
+import { weakCurrentAlertType } from './matrix-model';
 import { buildThresholdComparisonGroups } from './comparison-groups';
 import './styles.css';
 
@@ -73,10 +76,12 @@ export function ThresholdPage({
   const { readOnlyPage } = access;
   const canCreate = canUsePageAction(access, 'thresholds', 'create', !readOnlyPage);
   const canUpdate = canUsePageAction(access, 'thresholds', 'update', !readOnlyPage);
+  const canDirectEdit = access.role === 'admin' && canUpdate && !readOnlyPage;
   const canRefresh = canUsePageAction(access, 'thresholds', 'refresh', !readOnlyPage);
   const data = useThresholds(identity);
   const adjustments = useThresholdAdjustments(identity, data.acceptAdjustment, canUsePageAction(access, 'thresholds', 'read', !readOnlyPage));
   const [adjusting, setAdjusting] = useState<ThresholdRecord | null>(null);
+  const [editing, setEditing] = useState<ThresholdRecord | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [profession, setProfession] = useState('电气');
   const [building, setBuilding] = useState('');
@@ -90,7 +95,7 @@ export function ThresholdPage({
   const [announcement, setAnnouncement] = useState('');
   const professions = useMemo(
     () => [
-      ...new Set(['电气', '暖通', ...data.records.map((r) => r.profession)]),
+      ...new Set(['电气', '暖通', WEAK_CURRENT_PROFESSION, ...data.records.map((r) => r.profession)]),
     ],
     [data.records],
   );
@@ -122,14 +127,21 @@ export function ThresholdPage({
   const activeComparison =
     comparisonGroups.find((group) => group.key === comparisonKey) ||
     comparisonGroups[0];
+  const weakCurrent = profession === WEAK_CURRENT_PROFESSION;
+  const filterOptions = useMemo(
+    () => weakCurrent
+      ? [...new Set(activeComparison?.records.map((r) => weakCurrentAlertType(r.section)))]
+      : THRESHOLD_KINDS,
+    [activeComparison, weakCurrent],
+  );
   const base = useMemo(
     () =>
       (activeComparison?.records || []).filter(
         (r) =>
           !kind ||
-          (kind === 'review' ? needsThresholdReview(r) : r.kind === kind),
+          (kind === 'review' ? needsThresholdReview(r) : weakCurrent ? `alert:${weakCurrentAlertType(r.section)}` === kind : r.kind === kind),
       ),
-    [activeComparison, kind],
+    [activeComparison, kind, weakCurrent],
   );
   const scoped = useMemo(
     () =>
@@ -150,6 +162,15 @@ export function ThresholdPage({
   );
   const openEdit = useCallback(
     (record: ThresholdRecord) => {
+      if (canDirectEdit) {
+        if (pending.has(record.id)) {
+          toast.message('这条阈值还有同步任务，请完成同步后再编辑');
+          return;
+        }
+        setDetail(null);
+        setEditing(record);
+        return;
+      }
       if (!canCreate || (access.effectiveAuthorization && !decideBusinessPermission(access, { module: 'thresholds', action: 'create', building: record.building, specialty: record.profession }).allowed)) return;
       setDetail(null);
       if (
@@ -164,7 +185,7 @@ export function ThresholdPage({
       }
       setAdjusting(record);
     },
-    [adjustments.records, canCreate, access],
+    [adjustments.records, canCreate, canDirectEdit, pending, access],
   );
   const selectBuilding = useCallback((value: string) => {
     setBuilding(value);
@@ -396,15 +417,15 @@ export function ThresholdPage({
                       ))}
                     </NativeSelect>
                     <NativeSelect
-                      aria-label="参数类型筛选"
+                      aria-label={weakCurrent ? '告警类型筛选' : '参数类型筛选'}
                       value={kind}
                       onChange={(event) => {
                         setKind(event.target.value);
                       }}
                     >
-                      <NativeSelectOption value="">全部类型</NativeSelectOption>
-                      {THRESHOLD_KINDS.map((value) => (
-                        <NativeSelectOption key={value}>
+                      <NativeSelectOption value="">{weakCurrent ? '全部告警类型' : '全部类型'}</NativeSelectOption>
+                      {filterOptions.map((value) => (
+                        <NativeSelectOption key={value} value={weakCurrent ? `alert:${value}` : value}>
                           {value}
                         </NativeSelectOption>
                       ))}
@@ -426,7 +447,7 @@ export function ThresholdPage({
                 </CardHeader>
                 <CardContent data-slot="card-content">
                   {scoped.length ? (
-                    activeComparison?.records.every(
+                    !weakCurrent && activeComparison?.records.every(
                       (record) => !record.building,
                     ) ? (
                       <div className="threshold-matrix-scroll">
@@ -442,7 +463,8 @@ export function ThresholdPage({
                           pending={pending}
                           canDelete={false}
                           onDetail={openDetail}
-                          onEdit={canCreate ? openEdit : undefined}
+                          onEdit={canDirectEdit || canCreate ? openEdit : undefined}
+                          editLabel={canDirectEdit ? '编辑阈值' : undefined}
                           onDelete={() => undefined}
                         />
                       </div>
@@ -454,7 +476,7 @@ export function ThresholdPage({
                         query={query}
                         onlyDifferences={onlyDifferences}
                         pending={pending}
-                        onDetail={openEdit}
+                        onDetail={canDirectEdit || canCreate ? openEdit : openDetail}
                       />
                     )
                   ) : (
@@ -484,11 +506,27 @@ export function ThresholdPage({
           <ThresholdDetail
             record={data.records.find((r) => r.id === detail)}
             onClose={() => setDetail(null)}
-            onEdit={openEdit}
+            onEdit={canDirectEdit || canCreate ? openEdit : undefined}
             syncing={pending.has(detail)}
+            editLabel={canDirectEdit ? '编辑阈值' : undefined}
           />
         )}
       </Suspense>
+      {editing && (
+        <ThresholdDirectEdit
+          key={editing.id}
+          record={editing}
+          submit={data.submit}
+          onClose={() => setEditing(null)}
+          onSaved={(result) => {
+            setEditing(null);
+            const text = result.operation === 'delete' ? '阈值已删除' : '阈值已保存';
+            const message = result.sync?.state === 'pending' ? `${text}，正在同步飞书` : text;
+            setAnnouncement(message);
+            toast.success(message);
+          }}
+        />
+      )}
       {adjusting && (
         <ThresholdAdjustmentForm
           record={adjusting}

@@ -5,7 +5,7 @@
 .tools-content {
   max-width: 120rem;
   margin-inline: auto;
-  padding: 1.25rem 2rem 2rem;
+  padding: 1.25rem 2rem 6rem;
 }
 .tools-header-button {
   height: 2.75rem;
@@ -45,6 +45,11 @@
   background: var(--tools-blue);
   color: hsl(220 60% 99%);
   box-shadow: 0 0.125rem 0.375rem hsl(217 75% 35% / 18%);
+}
+.tools-nav button:disabled {
+  background: hsl(218 23% 96%);
+  color: hsl(218 10% 55%);
+  cursor: not-allowed;
 }
 .tools-nav button svg {
   width: 1rem;
@@ -86,6 +91,11 @@
 }
 .tools-filters select {
   min-width: 8rem;
+  background: var(--tools-surface);
+}
+.tools-month input {
+  width: auto;
+  min-width: 8.5rem;
   background: var(--tools-surface);
 }
 .tools-search {
@@ -136,7 +146,7 @@
 }
 .tools-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
   margin-bottom: 1.25rem;
 }
@@ -497,6 +507,13 @@
 .tools-pagination > span:first-child {
   margin-right: auto;
 }
+.tools-content .tools-pagination {
+  justify-content: center;
+  scroll-margin-bottom: 5rem;
+}
+.tools-content .tools-pagination > span:first-child {
+  margin-right: 0;
+}
 .tools-empty {
   padding: 2rem 1rem;
   text-align: center;
@@ -774,7 +791,7 @@
     padding-inline: 0.875rem;
   }
   .tools-content {
-    padding: 1rem;
+    padding: 1rem 1rem 6rem;
   }
   .tools-nav button {
     min-width: 7.5rem;

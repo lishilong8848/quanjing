@@ -1,11 +1,61 @@
 import {
   buildThresholdMatrix,
   matrixSectionLabel,
+  weakCurrentAlarmLevel,
 } from '../../client/src/pages/ThresholdManagement/matrix-model';
 import type { ThresholdRecord } from '../../shared/threshold-management.interface';
 import seed from '../../shared/electrical-thresholds.seed.json';
 import hvac from '../../shared/hvac-thresholds.seed.json';
+import weakCurrent from '../../shared/weak-current-thresholds.seed.json';
 import { buildThresholdComparisonGroups } from '../../client/src/pages/ThresholdManagement/comparison-groups';
+
+test('弱电先按告警类型，再按收敛名称合并展示各档真实条件与等级', () => {
+  const all = weakCurrent.records as ThresholdRecord[];
+  const flattened = [...new Set(all.map((r) => r.device))].flatMap((device) => {
+    const groups = buildThresholdComparisonGroups(all.filter((r) => r.device === device));
+    expect(groups).toHaveLength(1);
+    return buildThresholdMatrix(groups[0].records).rows.flatMap((row) => Object.values(row.cells));
+  });
+  expect(flattened).toHaveLength(5415);
+  expect(new Set(flattened.map((r) => r.id))).toEqual(new Set(all.map((r) => r.id)));
+  expect(flattened.filter((r) => weakCurrentAlarmLevel(r) === '等级待核对')).toHaveLength(90);
+  const source = all.filter((r) => r.device === '房间温湿度');
+  const { rows } = buildThresholdMatrix(source);
+  const conditions = (type: string) => rows.filter((row) => row.section === type && row.parameter === '温湿度_温度')
+    .map((row) => Object.values(row.cells).find((r) => r.building === 'A楼')!)
+    .map((r) => [r.value, weakCurrentAlarmLevel(r)]);
+  expect(conditions('过高告警')).toEqual([['告警 > 28\n恢复 < 27', '严重'], ['告警 > 26\n恢复 < 25.5', '预警']]);
+  expect(conditions('过低告警')).toEqual([['告警 < 20\n恢复 > 21', '严重'], ['告警 < 20.8\n恢复 > 21', '预警']]);
+});
+
+test('弱电某楼删除一档后其它楼仍对齐原值行，各楼告警等级单独参与差异对照', () => {
+  const records = (weakCurrent.records as ThresholdRecord[]).filter((r) => r.device === '房间温湿度' && r.parameter === '温湿度_温度');
+  const kept = records.filter((r) => r.source?.cell !== 'B3').map((r) => r.source?.cell === 'I5' ? { ...r, note: '告警等级：重要' } : r);
+  const comparisons = buildThresholdComparisonGroups(kept);
+  expect(comparisons).toHaveLength(1);
+  const { rows } = buildThresholdMatrix(comparisons[0].records);
+  const high = rows.filter((row) => row.section === '过高告警');
+  expect(high).toHaveLength(2);
+  expect(Object.values(high[0].cells).map((r) => r.building)).not.toContain('A楼');
+  expect(Object.values(high[1].cells).find((r) => r.building === 'A楼')?.value).toContain('告警 > 26');
+  expect(high[1].different).toBe(true);
+  expect(high[1].emphasizedIds).toEqual([records.find((r) => r.source?.cell === 'I5')?.id]);
+});
+
+test('弱电按数据自动发现任意告警类型，缺少类型另列待核对', () => {
+  const original = (weakCurrent.records as ThresholdRecord[]).find((r) => r.id && r.section === '不正常值')!;
+  const { rows } = buildThresholdMatrix([
+    original,
+    { ...original, id: 'new-a', source: null, section: ' 通信异常 ', parameter: '控制器离线' },
+    { ...original, id: 'no-type', source: null, section: '', parameter: '电源状态' },
+    { ...original, id: 'new-b', source: null, section: '状态不一致', parameter: '开关状态' },
+    { ...original, id: 'new-c', source: null, section: '通信异常', parameter: '模块离线' },
+  ]);
+  expect(rows.map((r) => [matrixSectionLabel(r), r.parameter])).toEqual([
+    ['通信异常', '控制器离线'], ['通信异常', '模块离线'], ['状态不一致', '开关状态'],
+    ['不正常值', original.parameter], ['待核对', '电源状态'],
+  ]);
+});
 
 test('变频器清单显示共同设备类型，保留五栋楼和全部设定值', () => {
   const groups = buildThresholdComparisonGroups(

@@ -19,7 +19,7 @@ import { ThresholdAdjustmentService } from './threshold-adjustment.service';
 import type { ThresholdAdjustmentInput } from '../../../shared/threshold-adjustment.interface';
 import { filterProfessionalRecords } from '../../common/access/professional-record-scope';
 import { accessBuildings, canAccessBuilding } from '../../../shared/building-access';
-import { ProfessionalScoped } from '../../common/access/unified-access.decorators';
+import { AdminOnly, ProfessionalScoped } from '../../common/access/unified-access.decorators';
 
 @Controller('api/threshold-management')
 export class ThresholdController {
@@ -53,15 +53,22 @@ export class ThresholdController {
       ...(this.sync ? { sourceSync: this.sync.sourceStatus() } : {}),
     };
   }
+  @AdminOnly()
   @Post('mutations')
   mutate(
     @Body() body: ThresholdCommand,
     @Req() request: Request & { accessPrincipal?: AccessPrincipal },
   ) {
-    this.actor(request);
-    throw new ForbiddenException(
-      '阈值变更必须提交调整申请并通过楼长和专业主管审批',
-    );
+    const actor = this.actor(request);
+    if (request.accessPrincipal?.role !== 'admin')
+      throw new ForbiddenException('直接保存阈值仅限管理员，其他人员请提交审批');
+    if (!body || !['update', 'delete'].includes(body.operation) || !body.expectedContent ||
+        typeof body.clientMutationId !== 'string' ||
+        !/^threshold-direct-[a-zA-Z0-9_-]{8,140}$/.test(body.clientMutationId))
+      throw new BadRequestException('编辑或删除阈值需提供当前记录版本和提交标识，请刷新后重试');
+    const result = this.store.mutate(body, actor);
+    if (result.sync?.state === 'pending') this.sync?.kick();
+    return result;
   }
   @Get('adjustments/context')
   @ProfessionalScoped()

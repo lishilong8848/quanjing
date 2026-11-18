@@ -17,12 +17,14 @@ export function ThresholdDetail({
   onEdit,
   onDelete,
   syncing,
+  editLabel = '申请调整',
 }: {
   record: ThresholdRecord | undefined;
   onClose: () => void;
-  onEdit: (record: ThresholdRecord) => void;
+  onEdit?: (record: ThresholdRecord) => void;
   onDelete?: (record: ThresholdRecord) => void;
   syncing: boolean;
+  editLabel?: string;
 }) {
   return (
     <Dialog
@@ -92,9 +94,9 @@ export function ThresholdDetail({
                   同步中
                 </span>
               )}
-              <Button disabled={syncing} onClick={() => onEdit(record)}>
-                申请调整
-              </Button>
+              {onEdit && <Button disabled={syncing} onClick={() => onEdit(record)}>
+                {editLabel}
+              </Button>}
             </DialogFooter>
           </>
         ) : (

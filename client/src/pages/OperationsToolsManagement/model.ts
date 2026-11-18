@@ -127,6 +127,46 @@ export function deriveTools(
   return { tools, flows, groups, buildings, concerns, problems };
 }
 export type ToolMetric = keyof ReturnType<typeof deriveTools>['groups'];
+export function deriveToolsMonth(
+  snapshot: Pick<OperationsToolsSnapshot, 'tools' | 'flows'>,
+  building: string,
+  search: string,
+  today: string,
+  month: string,
+) {
+  const visible = deriveTools(snapshot, building, search, today);
+  const inMonth = (date: string | null) => date?.slice(0, 7) === month;
+  const flows = visible.flows
+    .filter(
+      (flow) =>
+        (flow.kind === 'maintenance' || flow.kind === 'inspection') &&
+        inMonth(flow.actualDate ?? flow.date),
+    )
+    .sort(
+      (a, b) =>
+        (b.actualDate ?? b.date ?? '').localeCompare(
+          a.actualDate ?? a.date ?? '',
+        ) || a.id.localeCompare(b.id),
+    );
+  const relatedIds = new Set(flows.flatMap((flow) => flow.toolIds));
+  const maintenance = visible.tools.filter(
+    (tool) => !tool.scrapStatus && inMonth(tool.maintenanceDue),
+  );
+  const inspection = visible.tools.filter(
+    (tool) => !tool.scrapStatus && inMonth(tool.inspectionDue),
+  );
+  const dueIds = new Set(
+    [...maintenance, ...inspection].map((tool) => tool.id),
+  );
+  const total = visible.concerns.filter(
+    (tool) =>
+      relatedIds.has(tool.id) ||
+      dueIds.has(tool.id) ||
+      inMonth(tool.maintenanceDate) ||
+      inMonth(tool.inspectionDate),
+  );
+  return { flows, groups: { total, maintenance, inspection } };
+}
 export function flowToolName(
   flow: OperationsToolFlow,
   tools: OperationsTool[],

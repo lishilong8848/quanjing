@@ -67,7 +67,7 @@ describe('explicit permission route coverage', () => {
     expect(classifyBusinessRequest('/api/access/configuration/accounts', 'POST').kind).toBe('admin');
     expect(classifyBusinessRequest('/api/access/login', 'POST').kind).toBe('protocol');
     expect(classifyBusinessRequest('/api/weather/warning', 'GET').kind).toBe('auxiliary');
-    expect(classifyBusinessRequest('/api/threshold-management/mutations', 'POST').kind).toBe('denied');
+    expect(classifyBusinessRequest('/api/threshold-management/mutations', 'POST').kind).toBe('admin');
     expect(businessRequestPermission('/api/contract-management/attachments/storage', 'GET')).toEqual({ module: 'contracts', action: 'read' });
   });
   it('keeps basic personnel dependencies separate from both private profile scopes and source refresh', () => {
