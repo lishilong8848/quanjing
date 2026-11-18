@@ -730,6 +730,17 @@ export async function getAliMonthlyQualityDataset(
   }
 }
 
+export async function getAliMonthlyQualitySupplemental(
+  recordId: string,
+): Promise<{ recordId: string; supplemental: string }> {
+  const response = await axiosForBackend({
+    url: `/api/risk-inspection/ali-monthly-quality/issues/${encodeURIComponent(recordId)}/supplemental`,
+    method: 'GET',
+    timeout: 20_000,
+  });
+  return response.data;
+}
+
 export async function updateAliMonthlyQualitySupplemental(
   recordId: string,
   input: {
@@ -754,6 +765,7 @@ export interface AliMonthlyQualityFollowUpTask {
   clientMutationId: string;
   syncStatus: 'pending' | 'running' | 'success' | 'error';
   message: string;
+  currentSupplemental?: string;
 }
 
 export async function getAliMonthlyQualitySupplementalTask(

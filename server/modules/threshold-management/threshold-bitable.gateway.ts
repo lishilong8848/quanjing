@@ -21,6 +21,11 @@ interface CloudRecord {
 @Injectable()
 export class ThresholdBitableGateway {
   private readonly ready = new Map<string, number>();
+  private readonly snapshots = new Map<string, {
+    rev: number;
+    count: number;
+    records: ThresholdRecord[];
+  }>();
   constructor(private readonly http: HttpService) {}
   private table(profession: string): string {
     const table = (schema.tables as Record<string, string>)[profession];
@@ -149,9 +154,9 @@ export class ThresholdBitableGateway {
     });
     if (!Array.isArray(before.tables) || before.total > before.tables.length)
       throw new Error('飞书数据表元数据不完整');
-    const records: ThresholdRecord[] = [];
-    const ids = new Set<string>();
-    for (const [profession, table] of Object.entries(schema.tables)) {
+    // Read the configured profession tables concurrently,
+    // while retaining sequential pagination and version checks within each one.
+    const reads = await Promise.allSettled(Object.entries(schema.tables).map(async ([profession, table]) => {
       const metadata = before.tables.find(
         (item: { id: string }) => item.id === table,
       );
@@ -161,12 +166,15 @@ export class ThresholdBitableGateway {
         !Number.isSafeInteger(metadata.rev)
       )
         throw new Error('飞书数据表版本或数量无效');
-      let count = 0;
+      const cached = this.snapshots.get(table);
+      if (cached?.rev === metadata.rev && cached.count === metadata.records_count)
+        return { table, rev: metadata.rev, count: cached.count, records: structuredClone(cached.records) };
+      const records: ThresholdRecord[] = [];
       await this.ensureFields(table);
       let pageToken: string | undefined;
       do {
-        if (Date.now() - startedAt > 60000)
-          throw new Error('云端读取超时，请刷新重试');
+        if (Date.now() - startedAt > 180000)
+          throw new Error('云端读取超时，已保留上次核验数据，后台将重试');
         const result = await this.request(
           'POST',
           `${this.url(table)}/records/search`,
@@ -186,15 +194,22 @@ export class ThresholdBitableGateway {
             item.fields || {},
             profession,
           );
-          if (ids.has(record.id)) throw new Error('多维表阈值记录标识重复');
-          ids.add(record.id);
           records.push(record);
-          count += 1;
         }
         pageToken = result.has_more ? result.page_token : undefined;
       } while (pageToken);
-      if (count !== metadata.records_count)
+      if (records.length !== metadata.records_count)
         throw new Error('多维表读取期间数量已变化，请刷新重试');
+      return { table, rev: metadata.rev, count: records.length, records };
+    }));
+    const failure = reads.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    const tables = reads.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+    const records = tables.flatMap((table) => table.records);
+    const ids = new Set<string>();
+    for (const record of records) {
+      if (ids.has(record.id)) throw new Error('多维表阈值记录标识重复');
+      ids.add(record.id);
     }
     const after = await this.request('GET', tablesUrl, undefined, {
       limit: 100,
@@ -213,6 +228,10 @@ export class ThresholdBitableGateway {
       )
         throw new Error('多维表读取期间内容已变化，请刷新重试');
     }
+    // Cache only complete snapshots that passed both count and version checks.
+    for (const table of tables) this.snapshots.set(table.table, {
+      rev: table.rev, count: table.count, records: structuredClone(table.records),
+    });
     return records;
   }
   async sync(

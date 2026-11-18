@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -255,6 +256,133 @@ describe('RiskInspectionService', () => {
     }, { role: 'building_admin', purchaseBuilding: '110站' })).rejects.toBeInstanceOf(ForbiddenException);
     expect(put).toHaveBeenCalledTimes(1);
   });
+
+  test.each([null, '', [], [{ type: 'text', text: ' \r\n ' }]])(
+    'writes an empty narrative field and preserves commas, repeated phrases and line breaks (%j)',
+    async (initial) => {
+      const original = monthlyQualityRecord('recQualityEmpty');
+      original.fields!['问题补充描述'] = initial;
+      const supplemental = '已核对，已核对；请继续\n复查、归档';
+      const confirmed = { ...original, fields: { ...original.fields, 问题补充描述: [
+        { type: 'text', text: '已核对，已核对；' }, { type: 'text', text: '请继续\n复查、归档' },
+      ] } };
+      const get = jest.fn()
+        .mockResolvedValueOnce({ data: { code: 0, data: { record: original } } })
+        .mockResolvedValueOnce({ data: { code: 0, data: { record: confirmed } } });
+      const put = jest.fn().mockResolvedValue({ data: { code: 0 } });
+      const service = new RiskInspectionService({ axiosRef: { get, put } } as unknown as HttpService);
+      await expect(service.updateAliMonthlyQualitySupplemental('recQualityEmpty', {
+        supplemental, expectedSupplemental: '', clientMutationId: 'quality-empty-punctuation',
+      }, { role: 'admin' })).resolves.toMatchObject({ supplemental, syncStatus: 'success' });
+      expect(put).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test('reads only the requested latest narrative and enforces its building scope', async () => {
+    const original = monthlyQualityRecord('recQualityLatest');
+    original.fields!['问题补充描述'] = '已有内容，等候复查';
+    const get = jest.fn().mockResolvedValue({ data: { code: 0, data: { record: original } } });
+    const put = jest.fn();
+    const service = new RiskInspectionService({ axiosRef: { get, put } } as unknown as HttpService);
+    await expect(service.getAliMonthlyQualitySupplemental('recQualityLatest', {
+      role: 'building_admin', purchaseBuilding: 'A楼',
+    })).resolves.toEqual({ recordId: 'recQualityLatest', supplemental: '已有内容，等候复查' });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(mockedFetch).not.toHaveBeenCalled();
+    await expect(service.getAliMonthlyQualitySupplemental('recQualityLatest', {
+      role: 'building_admin', purchaseBuilding: 'B楼',
+    })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  test('returns the current narrative on genuine conflicts and never overwrites it', async () => {
+    const original = monthlyQualityRecord('recQualityConflict');
+    original.fields!['问题补充描述'] = '其他人已填写，等待复核';
+    const get = jest.fn().mockResolvedValue({ data: { code: 0, data: { record: original } } });
+    const put = jest.fn();
+    const service = new RiskInspectionService({ axiosRef: { get, put } } as unknown as HttpService);
+    try {
+      await service.updateAliMonthlyQualitySupplemental('recQualityConflict', {
+        supplemental: '我的草稿', expectedSupplemental: '', clientMutationId: 'quality-real-conflict',
+      }, { role: 'admin' });
+      throw new Error('expected conflict');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        currentSupplemental: '其他人已填写，等待复核',
+      });
+    }
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  test('recovers a lost write response with punctuation without sending a second write', async () => {
+    const supplemental = '已改正，已归档；继续复核\n逐项确认';
+    const current = monthlyQualityRecord('recQualityRetry');
+    current.fields!['问题补充描述'] = supplemental;
+    const get = jest.fn().mockResolvedValue({ data: { code: 0, data: { record: current } } });
+    const put = jest.fn();
+    const service = new RiskInspectionService({ axiosRef: { get, put } } as unknown as HttpService);
+    await expect(service.updateAliMonthlyQualitySupplemental('recQualityRetry', {
+      supplemental, expectedSupplemental: '', clientMutationId: 'quality-lost-write-response',
+    }, { role: 'admin' })).resolves.toMatchObject({ syncStatus: 'success', supplemental });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  test.each(['write-receipt-lost', 'readback-failed'])(
+    'recognizes an already committed first submission as success on automatic retry (%s)',
+    async (failure) => {
+      const directory = mkdtempSync(join(tmpdir(), 'quality-first-submit-retry-'));
+      const record = monthlyQualityRecord('recQualityFirstSubmit');
+      record.fields!['问题补充描述'] = '';
+      const supplemental = '已完成核查，已修正；逐项确认\n已完成核查，已修正';
+      let readbackFailed = false;
+      const get = jest.fn(async () => {
+        if (failure === 'readback-failed' && record.fields!['问题补充描述'] === supplemental && !readbackFailed) {
+          readbackFailed = true;
+          throw new Error('simulated readback connection reset');
+        }
+        return { data: { code: 0, data: { record: structuredClone(record) } } };
+      });
+      const put = jest.fn(async (_url, body) => {
+        record.fields!['问题补充描述'] = body.fields['问题补充描述'];
+        if (failure === 'write-receipt-lost') throw new Error('simulated lost write receipt after commit');
+        return { data: { code: 0 } };
+      });
+      const store = new QualityFollowUpTaskStore(join(directory, 'ledger.json'));
+      const service = new RiskInspectionService({ axiosRef: { get, put } } as unknown as HttpService, store);
+      const principal = { role: 'building_admin' as const, purchaseBuilding: 'A楼' as const };
+      const input = { supplemental, expectedSupplemental: '', clientMutationId: `quality-first-${failure}` };
+      try {
+        const accepted = await service.acceptAliMonthlyQualitySupplemental(record.record_id!, input, principal);
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          const task = store.get(accepted.taskId);
+          if (task?.attempts === 1 && task.status === 'pending') break;
+          await new Promise<void>(resolve => setImmediate(resolve));
+        }
+        expect(record.fields!['问题补充描述']).toBe(supplemental);
+        expect(store.get(accepted.taskId)).toMatchObject({ status: 'pending', attempts: 1 });
+        store.update(accepted.taskId, task => ({ ...task, nextRetryAt: new Date(0).toISOString() }));
+        service.onModuleInit();
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          if (store.get(accepted.taskId)?.status === 'success' || store.get(accepted.taskId)?.status === 'error') break;
+          await new Promise<void>(resolve => setImmediate(resolve));
+        }
+        expect(service.getAliMonthlyQualitySupplementalTask(accepted.taskId, principal)).toMatchObject({
+          syncStatus: 'success', supplemental,
+        });
+        expect(store.get(accepted.taskId)).toMatchObject({ status: 'success', attempts: 2 });
+        expect(put).toHaveBeenCalledTimes(1);
+        expect(get).toHaveBeenCalledTimes(failure === 'write-receipt-lost' ? 2 : 3);
+        expect((await service.acceptAliMonthlyQualitySupplemental(record.record_id!, input, principal)).taskId)
+          .toBe(accepted.taskId);
+        expect(put).toHaveBeenCalledTimes(1);
+      } finally {
+        service.onModuleDestroy();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   test('accepts a durable follow-up task and reports the confirmed result', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'quality-follow-up-service-'));

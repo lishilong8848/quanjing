@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 
 import type { AliMonthlyQualityIssue } from '@shared/risk-inspection.interface';
-import { getAliMonthlyQualitySupplementalTask, updateAliMonthlyQualitySupplemental } from '@/api';
+import { getAliMonthlyQualitySupplemental, getAliMonthlyQualitySupplementalTask, updateAliMonthlyQualitySupplemental } from '@/api';
 import { useAccess } from '@/access/AccessProvider';
 
 import { Badge } from '@/components/ui/badge';
@@ -83,7 +83,11 @@ export function AliMonthlyQualityEvidencePanel({
     draft: string;
     error: string;
     clientMutationId?: string;
+    sourceLoading?: boolean;
+    sourceError?: boolean;
+    latestSupplemental?: string;
   } | null>(null);
+  const followUpReadGeneration = useRef(0);
   const [pendingById, setPendingById] = useState<Record<string, string>>({});
   const pendingIds = useRef(new Set<string>());
   const [followUpStatus, setFollowUpStatus] = useState('');
@@ -92,9 +96,35 @@ export function AliMonthlyQualityEvidencePanel({
       ? decideBusinessPermission(principal, { module: 'quality', action: 'update', building: issue.building, specialty: issue.specialty }).allowed
       : role === 'admin' || (role === 'professional_admin' || role === 'professional_engineer') || role === 'editor' ||
         (role === 'building_admin' && canAccessBuilding(principal, issue.building));
+  const openFollowUp = async (issue: AliMonthlyQualityIssue, draft = issue.supplemental) => {
+    const generation = ++followUpReadGeneration.current;
+    setFollowUp({ issue, draft, error: '', sourceLoading: true });
+    try {
+      const latest = await getAliMonthlyQualitySupplemental(issue.id);
+      if (generation !== followUpReadGeneration.current) return;
+      if (latest.recordId !== issue.id || typeof latest.supplemental !== 'string') {
+        throw new Error('问题记录读取结果不一致，请重试');
+      }
+      onSupplementalUpdated(issue.id, latest.supplemental);
+      setFollowUp(current => current?.issue.id === issue.id ? {
+        ...current,
+        issue: { ...current.issue, supplemental: latest.supplemental },
+        draft: current.draft === issue.supplemental ? latest.supplemental : current.draft,
+        latestSupplemental: latest.supplemental,
+        sourceLoading: false,
+      } : current);
+    } catch (error) {
+      if (generation !== followUpReadGeneration.current) return;
+      setFollowUp(current => current?.issue.id === issue.id ? {
+        ...current, sourceLoading: false, sourceError: true,
+        error: error instanceof Error ? error.message : '最新跟进内容读取失败，请重试',
+      } : current);
+    }
+  };
   const submitFollowUp = async () => {
-    if (!followUp) return;
+    if (!followUp || followUp.sourceLoading || followUp.sourceError) return;
     const { issue } = followUp;
+    let latestIssue = issue;
     if (!canFollowUp(issue)) { setFollowUp({ ...followUp, error: '当前权限不能跟进此问题，请核对楼栋及专业归属' }); return; }
     const supplemental = followUp.draft.trim();
     if (!supplemental || supplemental.length > 3000) {
@@ -135,6 +165,10 @@ export function AliMonthlyQualityEvidencePanel({
       }
       if (result.syncStatus === 'error') {
         terminal = true;
+        if (typeof result.currentSupplemental === 'string') {
+          latestIssue = { ...issue, supplemental: result.currentSupplemental };
+          onSupplementalUpdated(issue.id, result.currentSupplemental);
+        }
         throw new Error(result.message || '问题跟进同步失败');
       }
       if (result.syncStatus !== 'success') {
@@ -150,8 +184,9 @@ export function AliMonthlyQualityEvidencePanel({
         return;
       }
       setFollowUp({
-        issue,
+        issue: latestIssue,
         draft: supplemental,
+        latestSupplemental: latestIssue.supplemental,
         error: error instanceof Error ? error.message : '同步失败，请重试',
         ...(!terminal ? { clientMutationId } : {}),
       });
@@ -507,7 +542,7 @@ export function AliMonthlyQualityEvidencePanel({
                             disabled={Boolean(pendingById[issue.id])}
                             onClick={(event) => {
                               event.stopPropagation();
-                              setFollowUp({ issue, draft: issue.supplemental, error: '' });
+                              void openFollowUp(issue);
                             }}
                           >
                             问题跟进
@@ -564,7 +599,7 @@ export function AliMonthlyQualityEvidencePanel({
       />
       <span className="sr-only" role="status" aria-live="polite">{followUpStatus}</span>
       <Dialog open={Boolean(followUp)} onOpenChange={(open) => {
-        if (!open) setFollowUp(null);
+        if (!open) { followUpReadGeneration.current += 1; setFollowUp(null); }
       }}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
@@ -575,6 +610,13 @@ export function AliMonthlyQualityEvidencePanel({
             <p className="text-sm text-slate-700">
               {followUp?.issue.building} · {followUp?.issue.item} · {followUp?.issue.issue}
             </p>
+            {followUp?.sourceLoading ? <p className="text-sm text-slate-600" role="status">正在核对最新跟进内容…</p> : null}
+            {followUp?.latestSupplemental !== undefined && followUp.latestSupplemental !== followUp.draft ? (
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">当前已保存内容</p>
+                <p className="whitespace-pre-wrap break-words">{followUp.latestSupplemental || '未填写'}</p>
+              </div>
+            ) : null}
             <label className="block space-y-2 text-sm font-medium">
               <span>问题补充描述</span>
               <Textarea
@@ -589,8 +631,12 @@ export function AliMonthlyQualityEvidencePanel({
             {followUp?.error ? <p className="text-sm text-red-700" role="alert">{followUp.error}</p> : null}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setFollowUp(null)}>取消</Button>
-            <Button type="button" onClick={() => void submitFollowUp()}>提交</Button>
+            <Button type="button" variant="outline" onClick={() => { followUpReadGeneration.current += 1; setFollowUp(null); }}>取消</Button>
+            {followUp?.sourceError ? (
+              <Button type="button" onClick={() => void openFollowUp(followUp.issue, followUp.draft)}>重新读取</Button>
+            ) : (
+              <Button type="button" disabled={followUp?.sourceLoading} onClick={() => void submitFollowUp()}>提交</Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

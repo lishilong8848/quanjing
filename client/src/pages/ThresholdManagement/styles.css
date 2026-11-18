@@ -559,6 +559,23 @@
   font-size: 0.6875rem;
   line-height: 1.4;
 }
+.threshold-cell-value.has-alarm-level {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.5rem;
+}
+.threshold-cell-value.has-alarm-level > .threshold-alarm-level {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  margin-top: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.threshold-cell-value.has-alarm-level > span:not(.threshold-alarm-level),
+.threshold-cell-value.has-alarm-level > small {
+  grid-column: 2;
+}
 .threshold-alarm-level[data-level='等级待核对'],
 .threshold-alarm-level[data-level='预警'] {
   color: var(--tm-warning);

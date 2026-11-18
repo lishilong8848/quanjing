@@ -968,7 +968,8 @@ describe('PurchaseApplicationService catalog reads', () => {
         success: true,
         task: expect.objectContaining({
           status: 'failed',
-          message: expect.stringContaining('同步飞书多维表失败'),
+          message: expect.stringContaining('采购申请未写入'),
+          definitelyNotWritten: true,
           completedAt: expect.any(String),
         }),
       }),
@@ -978,12 +979,91 @@ describe('PurchaseApplicationService catalog reads', () => {
       httpService.axiosRef.post.mock.calls.filter(([url]) =>
         String(url).includes('/drive/v1/medias/upload_all'),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       httpService.axiosRef.post.mock.calls.filter(([url]) =>
         String(url).endsWith('/tables/tblKmajonrdwW7Z0/records'),
       ),
     ).toHaveLength(0);
+  });
+
+  it('unlocks a definite pre-write code failure without issuing any record write', async () => {
+    const allocate = jest.fn().mockRejectedValue(new Error('数据在读取期间已变更，请重新读取'));
+    const http = { axiosRef: { post: jest.fn() } };
+    const service = testPurchaseApplicationService(http as never, undefined, { allocate } as never);
+    const request = validRequest();
+    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(request, []);
+    const accepted = service.acceptApplications(request, [], '2026-07-10',
+      'purchase-prewrite-read-conflict', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT);
+    const result = await waitForSubmissionTerminal(service, accepted.taskId);
+    expect(result.task).toMatchObject({ status: 'failed', definitelyNotWritten: true,
+      message: expect.stringContaining('生成采购编号失败') });
+    expect(http.axiosRef.post).not.toHaveBeenCalled();
+    expect(service.acceptApplications(request, [], '2026-07-10',
+      'purchase-prewrite-read-conflict', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT).taskId)
+      .toBe(accepted.taskId);
+    expect(allocate).toHaveBeenCalledTimes(1);
+  });
+
+  it('uploads at most two comparison files concurrently, preserving attachment order before writing', async () => {
+    let active = 0;
+    let peak = 0;
+    let uploadIndex = 0;
+    const http = { axiosRef: { post: jest.fn(async (url: string, body) => {
+      if (url.includes('/auth/')) return { data: { code: 0, tenant_access_token: 'tenant-token', expire: 7200 } };
+      if (url.includes('/medias/upload_all')) {
+        const index = ++uploadIndex;
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise(resolve => setTimeout(resolve, index === 1 ? 30 : 10));
+        active -= 1;
+        return { data: { code: 0, data: { file_token: `file-${index}` } } };
+      }
+      expect(active).toBe(0);
+      expect(uploadIndex).toBe(3);
+      expect(body.fields['三方比价依据（邮件/报价单）']).toEqual([
+        { file_token: 'file-1' }, { file_token: 'file-2' }, { file_token: 'file-3' },
+      ]);
+      return { data: { code: 0, data: { record: { record_id: 'rec-upload-order' } } } };
+    }) } };
+    const service = testPurchaseApplicationService(http as never, undefined,
+      { allocate: jest.fn().mockResolvedValue('CG260710-601') } as never);
+    const request = comparisonRequest();
+    request.items = [request.items[0]];
+    await expect(service.submitApplications(request, comparisonImages(), '2026-07-10'))
+      .resolves.toMatchObject({ success: true, created: [{ recordId: 'rec-upload-order' }] });
+    expect(peak).toBe(2);
+  });
+
+  it('retains confirmed lines and registers only their approvals when a later write loses its receipt', async () => {
+    let records = 0;
+    const http = { axiosRef: { post: jest.fn(async (url: string) => {
+      if (url.includes('/auth/')) return { data: { code: 0, tenant_access_token: 'tenant-token', expire: 7200 } };
+      records += 1;
+      if (records > 1) throw Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' });
+      return { data: { code: 0, data: { record: { record_id: 'rec-confirmed-first' } } } };
+    }) } };
+    const manager = { enqueueApprovalBatch: jest.fn().mockResolvedValue(undefined) };
+    const service = testPurchaseApplicationService(http as never, manager as never,
+      { allocate: jest.fn().mockResolvedValue('CG260710-601') } as never);
+    const request = validRequest();
+    const fingerprint = buildPurchaseApplicationSubmissionFingerprint(request, []);
+    const accepted = service.acceptApplications(request, [], '2026-07-10',
+      'purchase-partial-receipt', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT);
+    const result = await waitForSubmissionTerminal(service, accepted.taskId);
+    expect(result.task).toMatchObject({ status: 'uncertain', result: {
+      success: false, created: [{ recordId: 'rec-confirmed-first', lineId: request.items[0].lineId }],
+    } });
+    expect(result.task).not.toHaveProperty('definitelyNotWritten');
+    expect(manager.enqueueApprovalBatch).toHaveBeenCalledWith(expect.objectContaining({
+      approvalBatchId: accepted.taskId, recordIds: ['rec-confirmed-first'],
+    }));
+    const ledger = (service as unknown as { submissionTaskLedger: PurchaseApplicationTaskLedgerStore }).submissionTaskLedger;
+    expect(ledger.listCompletedTasksWithCreatedRecords()).toHaveLength(1);
+    expect(ledger.findByTaskId(accepted.taskId)?.task.result?.created).toHaveLength(1);
+    service.acceptApplications(request, [], '2026-07-10',
+      'purchase-partial-receipt', fingerprint, request, TEST_PURCHASE_PRINCIPAL_FINGERPRINT);
+    expect(records).toBe(2);
   });
 
   it('keeps a confirmed record successful when post-write cache invalidation fails', async () => {

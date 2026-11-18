@@ -2,8 +2,8 @@ import { HttpService } from '@nestjs/axios';
 import { Injectable } from '@nestjs/common';
 import {
   extractDisplayText,
-  fetchBitableRecords,
 } from '../../common/feishu/bitable-direct-read';
+import { readPurchaseSource } from './purchase-source-read';
 import {
   buildPurchaseOrderCode,
   purchaseBuildingNumber,
@@ -27,7 +27,10 @@ export class PurchaseCodeService {
   async allocate(input: PurchaseCodeAllocationInput): Promise<string> {
     const buildingNumber = purchaseBuildingNumber(input.building);
     if (!buildingNumber) throw new Error(`采购楼栋不支持自动编码：${input.building}`);
-    const key = `${input.date}:${buildingNumber}`;
+    const key = JSON.stringify([
+      input.appToken, input.submissionTableId, input.executionTableId,
+      input.date, buildingNumber,
+    ]);
 
     return this.runExclusively(key, async () => {
       const currentMaximum = await this.readCurrentMaximum(input, buildingNumber);
@@ -43,19 +46,24 @@ export class PurchaseCodeService {
     input: PurchaseCodeAllocationInput,
     buildingNumber: string,
   ): Promise<number> {
+    const datePart = input.date.slice(2).replaceAll('-', '');
+    const codePrefix = `CG${datePart}-${buildingNumber}`;
     const records = await Promise.all(
       [input.submissionTableId, input.executionTableId].map((tableId) =>
-        fetchBitableRecords(this.httpService, {
+        readPurchaseSource(this.httpService, {
           appToken: input.appToken,
           tableId,
           tableName: '采购记录',
           fieldNames: ['采购编码'],
+          filter: {
+            conjunction: 'and',
+            conditions: [{ field_name: '采购编码', operator: 'contains', value: [codePrefix] }],
+          },
           forceRefresh: true,
           cacheTtlMs: 0,
         }),
       ),
     );
-    const datePart = input.date.slice(2).replaceAll('-', '');
     const pattern = new RegExp(`^CG${datePart}-${buildingNumber}(\\d{2})$`);
     let maximum = 0;
     for (const record of records.flat()) {

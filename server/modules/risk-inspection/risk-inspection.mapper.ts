@@ -1,3 +1,4 @@
+import { qualitySupplementalText } from '../../../shared/quality-supplemental';
 import type {
   AliMonthlyQualityDataset,
   AliMonthlyQualityEvidence,
@@ -246,7 +247,7 @@ function mapAliMonthlyQualityIssue(
   const recordId = getRecordId(record);
   const building = normalizeBuilding(extractDisplayText(fields['楼栋']));
   const issue = extractDisplayText(fields['问题']) || '未填写';
-  const supplemental = extractDisplayText(fields['问题补充描述']);
+  const supplemental = qualitySupplementalText(fields['问题补充描述']);
   const people = resolveQualityIssuePeople(
     `${issue} ${supplemental}`,
     building,

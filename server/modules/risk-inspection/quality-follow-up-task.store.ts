@@ -25,6 +25,7 @@ export interface QualityFollowUpTask {
   clientMutationId: string;
   supplemental: string;
   expectedSupplemental: string;
+  currentSupplemental?: string;
   principal: AccessPrincipal;
   status: QualityFollowUpTaskStatus;
   attempts: number;

@@ -57,14 +57,14 @@ function MatrixCell({
   const longValue = record.value.length > 14 || record.value.includes('\n');
   const valueButton = (
     <button
-      className={`threshold-cell-value ${/^-?[\d.,]+\s*%?$/.test(record.value.trim()) ? 'is-numeric' : ''}`}
+      className={`threshold-cell-value ${alarmLevel ? 'has-alarm-level' : ''} ${/^-?[\d.,]+\s*%?$/.test(record.value.trim()) ? 'is-numeric' : ''}`}
       aria-label={`查看${label}`}
       disabled={syncing}
       title={longValue ? undefined : record.value || '空白'}
       onClick={() => onDetail(record)}
     >
-      <span>{record.value}</span>
       {alarmLevel && <span className="threshold-alarm-level" data-level={alarmLevel}>{alarmLevel}</span>}
+      <span>{record.value}</span>
       {record.value !== '' &&
         record.value !== '/' &&
         record.unit &&

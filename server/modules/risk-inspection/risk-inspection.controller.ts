@@ -58,6 +58,15 @@ export class RiskInspectionController {
   }
 
   @ProfessionalScoped()
+  @Get('ali-monthly-quality/issues/:recordId/supplemental')
+  getAliMonthlyQualitySupplemental(
+    @Param('recordId') recordId: string,
+    @Req() request: Request & { accessPrincipal?: AccessPrincipal },
+  ) {
+    return this.service.getAliMonthlyQualitySupplemental(recordId, request.accessPrincipal);
+  }
+
+  @ProfessionalScoped()
   @Patch('ali-monthly-quality/issues/:recordId/supplemental')
   @HttpCode(HttpStatus.ACCEPTED)
   updateAliMonthlyQualitySupplemental(

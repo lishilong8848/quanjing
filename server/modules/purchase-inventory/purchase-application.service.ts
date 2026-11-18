@@ -35,7 +35,6 @@ import {
 import {
   extractDisplayText,
   extractDisplayValues,
-  fetchBitableRecords,
   getRecordId,
   invalidateBitableRecordCache,
   pickField,
@@ -54,6 +53,7 @@ import {
 import { PurchaseCodeService } from './purchase-code.service';
 import { PurchaseManagerApprovalService } from './purchase-manager-approval.service';
 import { comparisonAttachmentIssue } from '../../../shared/purchase-comparison-attachments';
+import { readPurchaseSource } from './purchase-source-read';
 
 const CATALOG_CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 /** Internal activation remains absent until lifecycle delivery and recovery are ready. */
@@ -178,7 +178,7 @@ export class PurchaseApplicationService {
   ): Promise<PurchaseApplicationCatalogItem[]> {
     const appToken = await this.resolveAppToken();
     const tableId = readEnv('FEISHU_ITEM_CATEGORY_TABLE_ID');
-    const records = await fetchBitableRecords(this.httpService, {
+    const records = await readPurchaseSource(this.httpService, {
       appToken,
       tableId,
       tableName: '物品类别',
@@ -289,7 +289,7 @@ export class PurchaseApplicationService {
         'FEISHU_ORGANIZATION_PROFILE_VIEW_ID',
         'FEISHU_ORGANIZATION_VIEW_ID',
       ]) || source.viewId;
-    const records = await fetchBitableRecords(this.httpService, {
+    const records = await readPurchaseSource(this.httpService, {
       appToken,
       tableId,
       viewId,
@@ -579,39 +579,8 @@ export class PurchaseApplicationService {
       normalizedFiles,
     );
 
-    const appToken = await this.resolveAppToken();
-    const submissionTableId = readEnv('FEISHU_PURCHASE_SUBMISSION_TABLE_ID');
-    if (!submissionTableId) {
-      throw new BadRequestException('采购提交表尚未配置，无法校验历史采购编码');
-    }
-    const executionTableId = readEnv('FEISHU_PURCHASE_EXECUTION_TABLE_ID');
-    if (!executionTableId) {
-      throw new BadRequestException('采购执行表尚未配置');
-    }
-    const requestCode = await this.purchaseCodeService.allocate({
-      appToken,
-      date: today,
-      building: validatedRequest.shared.building,
-      submissionTableId,
-      executionTableId,
-    });
-    const accessToken = await this.getTenantAccessToken();
-    await this.ensureOnlineLinkFields(
-      appToken,
-      executionTableId,
-      Math.max(
-        0,
-        ...validatedRequest.items.map((item) => item.onlineUrls?.length || 0),
-      ),
-      accessToken,
-    );
-
-    const attachmentTokens: string[] = [];
-    for (const file of comparisonFiles) {
-      attachmentTokens.push(
-        await this.uploadAttachment(appToken, file, accessToken),
-      );
-    }
+    const { appToken, executionTableId, requestCode, accessToken, attachmentTokens } =
+      await this.prepareSubmission(validatedRequest, comparisonFiles, today);
 
     const created: PurchaseApplicationSubmitResponse['created'] = [];
     const failed: PurchaseApplicationSubmitResponse['failed'] = [];
@@ -646,6 +615,13 @@ export class PurchaseApplicationService {
         failed.push({ lineId: item.lineId, message: safeErrorMessage(error) });
         continue;
       }
+      this.saveSubmissionProgress(approvalBatchId, {
+        success: false,
+        created,
+        failed,
+        warnings,
+        message: `已确认写入 ${created.length}/${validatedRequest.items.length} 项采购申请`,
+      });
       if (!approvalBatchId) {
         try {
           await this.purchaseManagerApprovalService?.enqueueApprovalRequest(
@@ -670,6 +646,69 @@ export class PurchaseApplicationService {
         ? `已提交 ${created.length} 项，${failed.length} 项失败`
         : `已成功提交 ${created.length} 项采购申请`,
     };
+  }
+
+  private saveSubmissionProgress(
+    taskId: string,
+    result: PurchaseApplicationSubmitResponse,
+  ): void {
+    const entry = this.submissionTasks.get(taskId);
+    if (!entry) return;
+    entry.task = cloneLedgerTask({ ...entry.task, result });
+    try {
+      entry.task = this.submissionTaskLedger.updateTask(taskId, entry.task).task;
+    } catch (error) {
+      // A confirmed external write must never be retried as a new submission.
+      throw new UncertainApplicationRecordMutationError(
+        '采购记录已写入，保存分项回执失败，请使用原申请编号核对',
+        { cause: error },
+      );
+    }
+  }
+
+  private async prepareSubmission(
+    request: PurchaseApplicationBatchRequest,
+    files: PurchaseApplicationUploadFile[],
+    today: string,
+  ) {
+    let stage = '读取采购配置';
+    try {
+      const appToken = await this.resolveAppToken();
+      const submissionTableId = readEnv('FEISHU_PURCHASE_SUBMISSION_TABLE_ID');
+      const executionTableId = readEnv('FEISHU_PURCHASE_EXECUTION_TABLE_ID');
+      if (!submissionTableId || !executionTableId) {
+        throw new BadRequestException('采购提交表或采购执行表尚未配置');
+      }
+      stage = '生成采购编号';
+      const requestCode = await this.purchaseCodeService.allocate({
+        appToken, date: today, building: request.shared.building,
+        submissionTableId, executionTableId,
+      });
+      stage = '验证飞书连接';
+      const accessToken = await this.getTenantAccessToken();
+      stage = '校验采购链接字段';
+      await this.ensureOnlineLinkFields(appToken, executionTableId,
+        Math.max(0, ...request.items.map(item => item.onlineUrls?.length || 0)), accessToken);
+      const attachmentTokens: string[] = [];
+      for (let index = 0; index < files.length; index += 2) {
+        const batch = files.slice(index, index + 2);
+        stage = `上传比价附件（${index + 1}—${index + batch.length}/${files.length}）`;
+        // Wait for both uploads before failing, so retries cannot overlap an old upload.
+        const results = await Promise.allSettled(
+          batch.map(file => this.uploadAttachment(appToken, file, accessToken)),
+        );
+        for (const result of results) {
+          if (result.status === 'rejected') throw result.reason;
+          attachmentTokens.push(result.value);
+        }
+      }
+      return { appToken, executionTableId, requestCode, accessToken, attachmentTokens };
+    } catch (error) {
+      throw new DefinitelyNotWrittenApplicationSubmissionError(
+        `${stage}失败，采购申请未写入，可保留草稿后重试：${safeErrorMessage(error)}`,
+        { cause: error },
+      );
+    }
   }
 
   private validateSubmission(
@@ -780,7 +819,7 @@ export class PurchaseApplicationService {
         terminalTask,
       ).task;
       if (
-        entry.task.status === 'completed' &&
+        (entry.task.status === 'completed' || entry.task.status === 'uncertain') &&
         entry.task.result?.created.length &&
         this.purchaseManagerApprovalService
       ) {

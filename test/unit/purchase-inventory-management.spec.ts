@@ -311,6 +311,36 @@ describe('purchase inventory management logic', () => {
     });
   });
 
+  it('shows terminal uncertainty without discarding the original identity or enabling actions', () => {
+    const pending = purchaseLogic.buildPendingPurchaseApplicationItems(applicationBatch(), 'original-id');
+    const unknown = purchaseLogic.markPurchaseApplicationItemsUncertain(pending, '写入回执未确认');
+    expect(unknown).toHaveLength(2);
+    expect(unknown[0]).toMatchObject({
+      recordId: pending[0].recordId, clientMutationId: 'original-id',
+      pendingSync: true, executionRecordId: null, requestCode: '待核对',
+      statusLabel: '结果待核对', submissionError: '写入回执未确认',
+    });
+    expect(pending[0].statusLabel).toBe('同步中');
+    const refreshed = purchaseLogic.replacePurchaseApplicationOverlay(dashboard([]), unknown);
+    expect(refreshed.requests[0].statusLabel).toBe('结果待核对');
+  });
+
+  it('keeps confirmed partial writes and clears uncertainty when the original task completes', () => {
+    const pending = purchaseLogic.buildPendingPurchaseApplicationItems(applicationBatch(), 'original-id');
+    const result: PurchaseApplicationSubmitResponse = {
+      success: false, message: '部分已保存', warnings: [], failed: [],
+      created: [{ lineId: 'line-1', recordId: 'saved-1', requestCode: 'CG261118-601' }],
+    };
+    const unknown = purchaseLogic.markPurchaseApplicationItemsUncertain(pending, '第二项结果未确认', result);
+    expect(unknown).toHaveLength(2);
+    expect(unknown[0]).toMatchObject({ recordId: 'saved-1', pendingSync: false, statusLabel: '待审批' });
+    expect(unknown[1]).toMatchObject({ clientLineId: 'line-2', pendingSync: true, statusLabel: '结果待核对' });
+    result.created.push({ lineId: 'line-2', recordId: 'saved-2', requestCode: 'CG261118-601' });
+    const settled = purchaseLogic.reconcilePendingPurchaseApplicationItems(unknown, result);
+    expect(settled.map((item) => item.recordId)).toEqual(['saved-1', 'saved-2']);
+    expect(settled.every((item) => !item.pendingSync && !item.submissionError)).toBe(true);
+  });
+
   it('groups every line item under its purchase order number without dropping items', () => {
     const grouped = groupPurchaseOrderItems([
       request({

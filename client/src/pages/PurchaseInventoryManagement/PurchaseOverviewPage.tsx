@@ -70,6 +70,7 @@ import { canCheckPurchaseWorkflowActions } from './purchase-workflow-action.logi
 import { createPurchaseDashboardReadCache, type DashboardRefreshMode } from './purchase-dashboard-read-cache';
 import {
   buildPendingPurchaseApplicationItems,
+  markPurchaseApplicationItemsUncertain,
   buildPurchaseAnomalies,
   createEmptyPurchaseInventoryDashboard,
   filterPurchaseApplicationItems,
@@ -788,6 +789,25 @@ export default function PurchaseOverviewPage() {
     }
   }
 
+  function handleApplicationSubmissionUncertain(
+    mutationId: string,
+    message: string,
+    result?: PurchaseApplicationSubmitResponse,
+  ) {
+    const items = pendingApplicationItemsRef.current.get(mutationId);
+    if (!items) return;
+    pendingApplicationItemsRef.current.set(
+      mutationId,
+      markPurchaseApplicationItemsUncertain(items, message, result),
+    );
+    updateDashboardState((current) =>
+      replacePurchaseApplicationOverlay(
+        current,
+        [...pendingApplicationItemsRef.current.values()].flat(),
+      ),
+    );
+  }
+
   async function handleApplicationSubmissionSettled(
     mutationId: string,
     result: PurchaseApplicationSubmitResponse | null,
@@ -1130,6 +1150,7 @@ export default function PurchaseOverviewPage() {
           onOpenChange={handleApplicationDialogOpenChange}
           onSubmissionStarted={handleApplicationSubmissionStarted}
           onSubmissionSettled={handleApplicationSubmissionSettled}
+          onSubmissionUncertain={handleApplicationSubmissionUncertain}
         />
       ) : null}
       <PurchaseOnlineApprovalDialog
@@ -2071,7 +2092,16 @@ function StageBadge({
       </button>
     );
   }
-  return <span className={badgeClassName}>{content}</span>;
+  return (
+    <span className="inline-flex max-w-56 flex-col gap-1">
+      <span className={badgeClassName}>{content}</span>
+      {item.submissionError && (
+        <span className="text-xs font-normal text-amber-700" title={item.submissionError}>
+          请打开新建采购申请，使用原编号核对
+        </span>
+      )}
+    </span>
+  );
 }
 
 function PurchaseLinks({ links }: { links: string[] }) {

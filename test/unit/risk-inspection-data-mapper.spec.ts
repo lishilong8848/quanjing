@@ -182,6 +182,7 @@ describe('risk inspection data mapper', () => {
       id: 'quality-a-july',
       month: '7月',
       building: 'A楼',
+      specialty: '',
       item: '值班纪律',
       issue: '夜班人员瞌睡',
       supplemental: '已完成提醒谈话',

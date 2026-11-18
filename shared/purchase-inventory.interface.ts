@@ -24,6 +24,7 @@ export interface PurchaseInventoryRequestItem {
   clientMutationId?: string;
   clientLineId?: string;
   pendingSync?: boolean;
+  submissionError?: string;
   submissionRecordId: string | null;
   executionRecordId: string | null;
   requestCode: string;

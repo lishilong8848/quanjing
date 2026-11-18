@@ -120,6 +120,11 @@ interface PurchaseApplicationDialogProps {
     mutationId: string,
     result: PurchaseApplicationSubmitResponse | null,
   ) => Promise<boolean> | boolean;
+  onSubmissionUncertain: (
+    mutationId: string,
+    message: string,
+    result?: PurchaseApplicationSubmitResponse,
+  ) => void;
 }
 
 export function PurchaseApplicationDialog({
@@ -127,6 +132,7 @@ export function PurchaseApplicationDialog({
   onOpenChange,
   onSubmissionStarted,
   onSubmissionSettled,
+  onSubmissionUncertain,
 }: PurchaseApplicationDialogProps) {
   const access = useAccess();
   const { role, principalFingerprint, accountId, displayName } = access;
@@ -169,6 +175,7 @@ export function PurchaseApplicationDialog({
   const acceptanceRecoveryMutationIdRef = useRef<string | null>(null);
   const onSubmissionStartedRef = useRef(onSubmissionStarted);
   const onSubmissionSettledRef = useRef(onSubmissionSettled);
+  const onSubmissionUncertainRef = useRef(onSubmissionUncertain);
   const [mobileItemIndex, setMobileItemIndex] = useState(0);
   const [catalogResults, setCatalogResults] = useState<
     Record<string, PurchaseApplicationCatalogItem[]>
@@ -198,6 +205,7 @@ export function PurchaseApplicationDialog({
   const applicantSearchSequence = useRef(0);
   onSubmissionStartedRef.current = onSubmissionStarted;
   onSubmissionSettledRef.current = onSubmissionSettled;
+  onSubmissionUncertainRef.current = onSubmissionUncertain;
   recoveryJournalRef.current = recoveryJournal;
   const [principalRequestGate] = useState(
     () => new PurchasePrincipalRequestGate(principalIdentityKey),
@@ -307,7 +315,7 @@ export function PurchaseApplicationDialog({
           if (!principalRequestGate.isCurrent(requestGeneration)) return;
           toast.warning(message);
         },
-        (message) => {
+        (message, result) => {
           if (!principalRequestGate.isCurrent(requestGeneration)) return;
           const uncertainJournal: PurchaseApplicationSubmissionJournal = {
             ...journal,
@@ -318,6 +326,7 @@ export function PurchaseApplicationDialog({
           retryMutationIdRef.current = uncertainJournal;
           recoveryJournalRef.current = uncertainJournal;
           setRecoveryJournal(uncertainJournal);
+          onSubmissionUncertainRef.current(journal.mutationId, message, result);
           setUncertainResolution(null);
           submissionInFlightRef.current = false;
           monitoredTaskIdRef.current = null;
@@ -405,6 +414,7 @@ export function PurchaseApplicationDialog({
           retryMutationIdRef.current = uncertainJournal;
           recoveryJournalRef.current = uncertainJournal;
           setRecoveryJournal(uncertainJournal);
+          onSubmissionUncertainRef.current(journal.mutationId, outcome.message);
           toast.warning('原申请受理结果仍未确认，已保留原编号', {
             description: `${outcome.message}；可使用原编号再次查询，系统不会生成新编号。`,
           });
@@ -429,6 +439,10 @@ export function PurchaseApplicationDialog({
         retryMutationIdRef.current = uncertainJournal;
         recoveryJournalRef.current = uncertainJournal;
         setRecoveryJournal(uncertainJournal);
+        onSubmissionUncertainRef.current(
+          journal.mutationId,
+          readErrorMessage(error, '原申请自动找回未完成，请使用原编号再次查询'),
+        );
         submissionInFlightRef.current = false;
         setBackgroundPending(false);
         setSubmitting(false);
@@ -2846,7 +2860,10 @@ async function monitorPurchaseApplicationTask(
   ) => Promise<void> | void,
   onFailed: (message: string) => Promise<void> | void,
   onUncertain: (message: string) => Promise<void> | void,
-  onTerminalUncertain: (message: string) => Promise<void> | void,
+  onTerminalUncertain: (
+    message: string,
+    result?: PurchaseApplicationSubmitResponse,
+  ) => Promise<void> | void,
   shouldContinue: () => boolean,
 ): Promise<void> {
   const slowPollingAt = Date.now() + SUBMISSION_TASK_POLL_TIMEOUT_MS;
@@ -2877,12 +2894,14 @@ async function monitorPurchaseApplicationTask(
         } else {
           await onTerminalUncertain(
             task.message || '采购申请任务失败，但写入结果未得到确认',
+            task.result,
           );
         }
         return;
       } else if (task.status === 'uncertain') {
         await onTerminalUncertain(
           task.message || '原任务结果未确认，请核对申请清单或联系管理员',
+          task.result,
         );
         return;
       }

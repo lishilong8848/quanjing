@@ -267,10 +267,33 @@ export function reconcilePendingPurchaseApplicationItems(
         executionRecordId: created.executionRecordId ?? created.recordId,
         requestCode: created.requestCode,
         pendingSync: false,
+        submissionError: undefined,
         statusLabel: '待审批',
       },
     ];
   });
+}
+
+export function markPurchaseApplicationItemsUncertain(
+  items: PurchaseInventoryRequestItem[],
+  message: string,
+  result?: PurchaseApplicationSubmitResponse,
+): PurchaseInventoryRequestItem[] {
+  const confirmed = result
+    ? reconcilePendingPurchaseApplicationItems(items, result)
+    : [];
+  const confirmedLines = new Set(confirmed.map((item) => item.clientLineId));
+  return [
+    ...confirmed,
+    ...items.filter((item) => !confirmedLines.has(item.clientLineId)).map((item) => ({
+      ...item,
+      // Keep actions locked until the original request has been reconciled.
+      pendingSync: true,
+      requestCode: '待核对',
+      statusLabel: '结果待核对',
+      submissionError: message,
+    })),
+  ];
 }
 
 export function replacePurchaseApplicationOverlay(

@@ -53,6 +53,7 @@ import {
 } from './risk-inspection.mapper';
 import { mapMonthlyAlarmOverview } from './monthly-alarm-overview.mapper';
 import { QualityFollowUpTaskStore, type QualityFollowUpTask } from './quality-follow-up-task.store';
+import { qualitySupplementalText } from '../../../shared/quality-supplemental';
 
 const ALI_TABLE_NAME = '现场风险检查-Ali';
 const CROSS_TABLE_NAME = '交叉互查互纠';
@@ -175,9 +176,9 @@ export class RiskInspectionService implements OnModuleInit, OnModuleDestroy {
     if (!/^[a-z0-9_-]{1,128}$/iu.test(recordId)) {
       throw new BadRequestException('质量问题记录 ID 无效');
     }
-    const supplemental = typeof input?.supplemental === 'string' ? input.supplemental.trim() : '';
+    const supplemental = typeof input?.supplemental === 'string' ? qualitySupplementalText(input.supplemental) : '';
     const expectedSupplemental = typeof input?.expectedSupplemental === 'string'
-      ? input.expectedSupplemental.trim() : null;
+      ? qualitySupplementalText(input.expectedSupplemental) : null;
     const clientMutationId = typeof input?.clientMutationId === 'string'
       ? input.clientMutationId.trim() : '';
     if (!supplemental || supplemental.length > 3000 || expectedSupplemental === null ||
@@ -216,6 +217,7 @@ export class RiskInspectionService implements OnModuleInit, OnModuleDestroy {
       supplemental: task.supplemental,
       syncStatus: task.status,
       message: task.message,
+      ...(typeof task.currentSupplemental === 'string' ? { currentSupplemental: task.currentSupplemental } : {}),
     };
   }
 
@@ -254,12 +256,16 @@ export class RiskInspectionService implements OnModuleInit, OnModuleDestroy {
         error instanceof ForbiddenException || error instanceof ConflictException;
       const retry = !permanent && task.attempts < 2;
       const message = error instanceof Error ? error.message : '问题跟进同步失败';
+      const conflict = error instanceof ConflictException ? error.getResponse() : null;
+      const currentSupplemental = conflict && typeof conflict === 'object' && 'currentSupplemental' in conflict &&
+        typeof conflict.currentSupplemental === 'string' ? conflict.currentSupplemental : undefined;
       try {
         this.qualityTaskStore.update(task.id, (current) => ({
           ...current,
           status: retry ? 'pending' : 'error',
           message: retry ? '飞书同步暂时失败，正在重试' : message,
           nextRetryAt: retry ? new Date(Date.now() + 1_000 * (current.attempts + 1)).toISOString() : null,
+          ...(currentSupplemental !== undefined ? { currentSupplemental } : {}),
         }));
       } catch (storeError) {
         this.logger.error(`问题跟进任务状态保存失败: ${String(storeError)}`);
@@ -474,35 +480,13 @@ export class RiskInspectionService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async updateAliMonthlyQualitySupplemental(
-    recordId: string,
-    input: {
-      supplemental?: unknown;
-      expectedSupplemental?: unknown;
-      clientMutationId?: unknown;
-    },
-    principal?: AccessPrincipal,
-  ): Promise<{ recordId: string; supplemental: string; clientMutationId: string; syncStatus: 'success' }> {
+  private async qualitySupplementalSource(recordId: string, principal?: AccessPrincipal) {
     if (!principal || (!['admin', 'editor', 'building_admin', 'professional_admin', 'professional_engineer'].includes(principal.role) && !isProfessionalBusinessPrincipal(principal))) {
       throw new ForbiddenException('无权跟进质量问题');
     }
     if (!/^[a-z0-9_-]{1,128}$/iu.test(recordId)) {
       throw new BadRequestException('质量问题记录 ID 无效');
     }
-    const supplemental = typeof input?.supplemental === 'string'
-      ? input.supplemental.trim()
-      : '';
-    const expected = typeof input?.expectedSupplemental === 'string'
-      ? input.expectedSupplemental.trim()
-      : null;
-    const clientMutationId = typeof input?.clientMutationId === 'string'
-      ? input.clientMutationId.trim()
-      : '';
-    if (!supplemental || supplemental.length > 3000 || expected === null ||
-      !/^[a-z0-9_-]{8,128}$/iu.test(clientMutationId)) {
-      throw new BadRequestException('问题跟进内容或提交标识无效');
-    }
-
     const source = parseFeishuBitableLink(
       readEnv('FEISHU_RISK_INSPECTION_ALI_MONTHLY_QUALITY_SOURCE_URL') ||
         ALI_MONTHLY_QUALITY_DEFAULT_SOURCE_URL,
@@ -525,17 +509,60 @@ export class RiskInspectionService implements OnModuleInit, OnModuleDestroy {
       }
       return response.data.data.record as BitableRecordItem;
     };
+    const current = await readRecord();
+    assertProfessionalBitableRecord(principal, current);
+    const building = extractDisplayText(current.fields?.['楼栋']).trim();
+    if (principal.role === 'building_admin' && !canAccessBuilding(principal, building)) {
+      throw new ForbiddenException('只能跟进本楼栋质量问题');
+    }
+    return { source, appToken, token, url, readRecord, current };
+  }
+
+  async getAliMonthlyQualitySupplemental(recordId: string, principal?: AccessPrincipal) {
+    const { current } = await this.qualitySupplementalSource(recordId, principal);
+    return { recordId, supplemental: qualitySupplementalText(current.fields?.['问题补充描述']) };
+  }
+
+  async updateAliMonthlyQualitySupplemental(
+    recordId: string,
+    input: {
+      supplemental?: unknown;
+      expectedSupplemental?: unknown;
+      clientMutationId?: unknown;
+    },
+    principal?: AccessPrincipal,
+  ): Promise<{ recordId: string; supplemental: string; clientMutationId: string; syncStatus: 'success' }> {
+    if (!principal || (!['admin', 'editor', 'building_admin', 'professional_admin', 'professional_engineer'].includes(principal.role) && !isProfessionalBusinessPrincipal(principal))) {
+      throw new ForbiddenException('无权跟进质量问题');
+    }
+    if (!/^[a-z0-9_-]{1,128}$/iu.test(recordId)) {
+      throw new BadRequestException('质量问题记录 ID 无效');
+    }
+    const supplemental = typeof input?.supplemental === 'string'
+      ? qualitySupplementalText(input.supplemental)
+      : '';
+    const expected = typeof input?.expectedSupplemental === 'string'
+      ? qualitySupplementalText(input.expectedSupplemental)
+      : null;
+    const clientMutationId = typeof input?.clientMutationId === 'string'
+      ? input.clientMutationId.trim()
+      : '';
+    if (!supplemental || supplemental.length > 3000 || expected === null ||
+      !/^[a-z0-9_-]{8,128}$/iu.test(clientMutationId)) {
+      throw new BadRequestException('问题跟进内容或提交标识无效');
+    }
+
+    const { source, appToken, token, url, readRecord, current } =
+      await this.qualitySupplementalSource(recordId, principal);
     try {
-      const current = await readRecord();
-      assertProfessionalBitableRecord(principal, current);
-      const building = extractDisplayText(current.fields?.['楼栋']).trim();
-      if (principal.role === 'building_admin' && !canAccessBuilding(principal, building)) {
-        throw new ForbiddenException('只能跟进本楼栋质量问题');
-      }
-      const currentText = extractDisplayText(current.fields?.['问题补充描述']).trim();
+      const currentText = qualitySupplementalText(current.fields?.['问题补充描述']);
+      let confirmedText = currentText;
       if (currentText !== supplemental) {
         if (currentText !== expected) {
-          throw new ConflictException('问题补充描述已被更新，请刷新后再提交');
+          throw new ConflictException({
+            message: '该记录已有新的跟进内容，请核对最新内容后提交；你的草稿已保留',
+            currentSupplemental: currentText,
+          });
         }
         const response = await this.httpService.axiosRef.put(url, {
           fields: { 问题补充描述: supplemental },
@@ -545,9 +572,9 @@ export class RiskInspectionService implements OnModuleInit, OnModuleDestroy {
         if (response.data?.code !== 0) {
           throw new ServiceUnavailableException('问题跟进写入飞书失败');
         }
+        const confirmed = await readRecord();
+        confirmedText = qualitySupplementalText(confirmed.fields?.['问题补充描述']);
       }
-      const confirmed = await readRecord();
-      const confirmedText = extractDisplayText(confirmed.fields?.['问题补充描述']).trim();
       if (confirmedText !== supplemental) {
         throw new ServiceUnavailableException('问题跟进回读未确认，请稍后重试');
       }

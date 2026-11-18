@@ -274,7 +274,7 @@ export class PurchaseApplicationTaskLedgerStore {
       const entries = [...this.entriesByTaskId.values()]
         .filter(
           (entry) =>
-            entry.task.status === 'completed' &&
+            (entry.task.status === 'completed' || entry.task.status === 'uncertain') &&
             Boolean(entry.task.result?.created.length),
         )
         .sort((left, right) => terminalTimestamp(right) - terminalTimestamp(left))
