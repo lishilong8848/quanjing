@@ -31,6 +31,9 @@ import {
   extractDisplayValues,
   extractNumberValue,
   fetchBitableRecords,
+  getRecordId,
+  getTenantAccessToken,
+  invalidateBitableRecordCache,
   normalizeBuildingForFrontend,
   normalizeBuildingLabel,
   normalizeShiftForFrontend,
@@ -49,7 +52,12 @@ import {
   preferMoreCompleteLongWhiteDutyRows,
   type LongWhiteDutyStaffSourceRow,
 } from '../duty-schedule/long-white-duty-staff';
+import { exceedsPueChangeThreshold, shiftDate } from '../duty-schedule/daily-operations-patrol.rules';
 import { resolveApprovalAwareDutyStaffFromFields } from '../duty-schedule/approved-leave-visibility';
+import {
+  applyPatrolFacilityCorrection, DAILY_ENERGY_CATEGORIES, energyCategoryKey, ENERGY_NUMERIC_FIELDS, ENERGY_VALUE, NON_IT_VALUE, PUE_FIELD,
+  readPatrolFacilityCorrections, savePatrolFacilityCorrection, WATER_DAILY_FIELDS,
+} from './patrol-facility-corrections';
 
 const SOURCE_CACHE_TTL_MS = 5 * 60 * 1000;
 const APPROVAL_VISIBILITY_CACHE_TTL_MS = 30 * 1000;
@@ -101,7 +109,7 @@ const SOURCE_DEFINITIONS = {
   pue: {
     envKey: 'TODAY_OPERATIONS_KPI_PUE_URL',
     tableName: '机楼每日用电汇总',
-    fieldNames: ['日期', '楼栋', '汇总分类', 'PUE'] as const,
+    fieldNames: ['日期', '楼栋', '类型', '汇总分类', 'PUE', PUE_FIELD] as const,
   },
   itLoad: {
     envKey: 'TODAY_OPERATIONS_KPI_IT_LOAD_URL',
@@ -240,13 +248,133 @@ export class TodayOperationsKpiService {
     ) {
       throw new TypeError(`无效巡视日期：${businessDate}`);
     }
-    return this.loadKpis(scanTime, true, 4);
+    return this.loadKpis(scanTime, true, 4, true);
+  }
+
+  async correctPatrolFacility(date: string, building: TodayOperationsKpiBuilding, rawValue: number): Promise<number> {
+    const start = Date.parse(`${date}T00:00:00+08:00`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(start) || formatShanghaiDate(start) !== date ||
+        !PUE_BUILDINGS.some((candidate) => candidate === building) || !Number.isFinite(rawValue)) {
+      throw new Error('PUE 修正条件无效');
+    }
+    const previousDate = shiftDate(date, -1);
+    const auth = resolveTodayOperationsKpiAuth();
+    const [source, powerSource, waterSource] = await Promise.all([
+      this.resolveSource('pue'), this.resolveSource('electricity'), this.resolveSource('water'),
+    ]);
+    const scopedRows = (config: SourceConfig, dateField: string, days: number, fields: readonly string[],
+                        extra: BitableRecordSearchFilter['conditions'] = []) =>
+      fetchBitableRecords(this.httpService, {
+        ...config, viewId: undefined, fieldNames: [dateField, '楼栋', ...fields],
+        auth, forceRefresh: true, allowStale: false, strict: true,
+        filter: { conjunction: 'and', conditions: [
+          { field_name: dateField, operator: 'isGreater', value: ['ExactDate', String(start - days * DAY_MS)] },
+          { field_name: dateField, operator: 'isLess', value: ['ExactDate', String(start + DAY_MS)] },
+          { field_name: '楼栋', operator: 'is', value: [building] },
+          ...extra,
+        ] },
+      });
+    const energyRows = () => scopedRows(source, '日期', 3, [
+      '类型', '汇总分类', 'PUE', '数值（3位小数点）', '非IT用电量（万）', ...ENERGY_NUMERIC_FIELDS,
+    ]);
+    const rowsFor = (rows: BitableRecordItem[], day: string, dateField = '日期') => rows.filter(({ fields }) =>
+      extractBusinessDate(fields?.[dateField]) === day && extractDisplayText(fields?.['楼栋']) === building);
+    const earlierDate = shiftDate(date, -2);
+    const [rows, corrections] = await Promise.all([energyRows(), readPatrolFacilityCorrections(earlierDate, date)]);
+    const currentRows = rowsFor(rows, date);
+    const previousRows = rowsFor(rows, previousDate);
+    const pueRow = (dayRows: BitableRecordItem[]) => requireSingleFacilityRow(dayRows.filter(({ fields }) =>
+      extractDisplayText(fields?.['汇总分类']) === 'PUE'));
+    const target = pueRow(currentRows), previous = pueRow(previousRows);
+    const earlier = pueRow(rowsFor(rows, earlierDate));
+    const previousCorrection = corrections.get(`${previousDate}:${building}`);
+    const recent = previousCorrection?.pue ?? positivePue(previous.fields?.[PUE_FIELD]) ?? positivePue(previous.fields?.PUE);
+    const older = corrections.get(`${earlierDate}:${building}`)?.pue ?? positivePue(earlier.fields?.[PUE_FIELD]) ?? positivePue(earlier.fields?.PUE);
+    if (extractNumberValue(target.fields?.PUE) !== rawValue || recent === null || older === null ||
+        !exceedsPueChangeThreshold(rawValue, (recent + older) / 2)) {
+      throw new Error('PUE 数据已变化或基准不足');
+    }
+    const [powerRows, waterRows] = await Promise.all([
+      scopedRows(powerSource, '日期', 2, ['项目', '用电量'], [{ field_name: '项目', operator: 'is', value: ['变压器总进线'] }]),
+      scopedRows(waterSource, '执行日期', 2, ['类型', '频次', ...WATER_DAILY_FIELDS], [
+        { field_name: '类型', operator: 'is', value: ['水耗'] }, { field_name: '频次', operator: 'is', value: ['日'] },
+      ]),
+    ]);
+    const power = powerRows.filter(({ fields }) => extractDisplayText(fields?.['项目']) === '变压器总进线');
+    const dailyWater = waterRows.filter(({ fields }) => extractDisplayText(fields?.['类型']) === '水耗' && extractDisplayText(fields?.['频次']) === '日');
+    const electricityRecordId = getRecordId(requireSingleFacilityRow(rowsFor(power, date)));
+    const waterRecordId = getRecordId(requireSingleFacilityRow(rowsFor(dailyWater, date, '执行日期')));
+    const electricity = previousCorrection?.electricity ?? extractNumberValue(requireSingleFacilityRow(rowsFor(power, previousDate)).fields?.['用电量']);
+    const previousWater = requireSingleFacilityRow(rowsFor(dailyWater, previousDate, '执行日期'));
+    const water = previousCorrection?.water ?? Object.fromEntries(WATER_DAILY_FIELDS.map((field) =>
+      [field, extractNumberValue(previousWater.fields?.[field])],
+    ));
+    if (electricity === null || electricity < 0 || water['当日耗水总量（实际）'] === null || water['当日耗水总量（实际）'] < 0 ||
+        water['当日耗水总量'] === null || water['当日耗水总量'] < 0) {
+      throw new Error('前一日用电或水耗数据不完整');
+    }
+
+    const yesterday = indexEnergyRows(previousRows);
+    const today = indexEnergyRows(currentRows);
+    const categories = new Set(currentRows.map(({ fields }) => extractDisplayText(fields?.['汇总分类'])));
+    if (DAILY_ENERGY_CATEGORIES.some((category) => !categories.has(category)) ||
+        yesterday.size !== today.size || [...today.keys()].some((key) => !yesterday.has(key))) {
+      throw new Error('两日的用电汇总分类不一致');
+    }
+    const energyRecordIds = Object.fromEntries([...today].map(([key, row]) => [key, getRecordId(row)]));
+    const saved = corrections.get(`${date}:${building}`);
+    if (saved) {
+      if (saved.rawPue !== rawValue || saved.electricityRecordId !== electricityRecordId || saved.waterRecordId !== waterRecordId ||
+          !matchesFacilityEnergy(today, saved.energyRecordIds, saved.energy)) {
+        throw new Error('已修正的整栋日报发生变化，请核对原记录');
+      }
+      return saved.pue;
+    }
+
+    const energy = Object.fromEntries([...yesterday].map(([key, row]) => {
+      if (previousCorrection) {
+        const stored = previousCorrection.energy[key];
+        const fields = stored && Object.fromEntries(ENERGY_NUMERIC_FIELDS.map((name) => [name, stored[name]]));
+        if (!fields) throw new Error('前一日修正记录缺少用电分类');
+        return [key, fields];
+      }
+      const fields = Object.fromEntries(ENERGY_NUMERIC_FIELDS.map((field) => [field, extractNumberValue(row.fields?.[field])]));
+      fields[ENERGY_VALUE] ??= extractNumberValue(row.fields?.['数值（3位小数点）']);
+      fields[NON_IT_VALUE] ??= extractNumberValue(row.fields?.['非IT用电量（万）']);
+      if (fields[ENERGY_VALUE] === null) throw new Error('前一日用电汇总存在空数据');
+      if (getRecordId(row) === getRecordId(previous)) fields[PUE_FIELD] ??= recent;
+      return [key, fields];
+    }));
+    const updates = [...today].flatMap(([key, row]) => {
+      const fields = Object.fromEntries(Object.entries(energy[key]).filter(([field, value]) =>
+        extractNumberValue(row.fields?.[field]) !== value,
+      ));
+      return Object.keys(fields).length ? [{ record_id: getRecordId(row), fields }] : [];
+    });
+    if (updates.length) {
+      const token = await getTenantAccessToken(this.httpService, auth);
+      const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${encodeURIComponent(source.appToken)}/tables/${encodeURIComponent(source.tableId)}/records/batch_update`;
+      try {
+        await this.httpService.axiosRef.post(url, { records: updates }, { headers: { Authorization: `Bearer ${token}` }, timeout: 8_000 });
+      } catch {
+        // A lost write response still requires verification of the full set of rows.
+      } finally {
+        invalidateBitableRecordCache({ appToken: source.appToken, tableId: source.tableId, deletePersisted: true });
+      }
+      const confirmed = indexEnergyRows(rowsFor(await energyRows(), date));
+      if (!matchesFacilityEnergy(confirmed, energyRecordIds, energy)) throw new Error('整栋用电汇总修正未全部核实');
+    }
+    await savePatrolFacilityCorrection({ date, building, previousDate, rawPue: rawValue, pue: recent,
+      electricity, electricityRecordId, water, waterRecordId, energy, energyRecordIds });
+    this.snapshot = undefined;
+    return recent;
   }
 
   private async loadKpis(
     now: Date,
     forceRefresh: boolean,
     historyLimit = 3,
+    rawPue = false,
   ): Promise<TodayOperationsKpiResponse> {
     const today = formatShanghaiDate(now.getTime());
     const state: SourceReadState = {
@@ -262,8 +390,8 @@ export class TodayOperationsKpiService {
       personnel,
       pue,
       itLoad,
-      electricity,
-      water,
+      rawElectricity,
+      rawWater,
       leaveApprovalSnapshot,
     ] = await Promise.all([
       this.readSourceRecords({ config: sources.safety, state }),
@@ -332,6 +460,9 @@ export class TodayOperationsKpiService {
       }),
       fetchLeaveApprovalSnapshot(this.httpService, { forceRefresh }),
     ]);
+    const corrections = await readPatrolFacilityCorrections(shiftDate(today, -31), today);
+    const electricity = applyPatrolFacilityCorrection(rawElectricity, 'electricity', corrections);
+    const water = applyPatrolFacilityCorrection(rawWater, 'water', corrections);
 
     let personnelRows = mapOnDutyPeopleRows(
       enrichScheduleRecordsWithLeaveApproval(personnel, leaveApprovalSnapshot),
@@ -378,6 +509,15 @@ export class TodayOperationsKpiService {
       nightShiftRows,
       today,
     );
+    const pueValues = pue.map((row) => {
+      const fields = row.fields ?? {};
+      const key = `${extractBusinessDate(fields['日期'])}:${extractDisplayText(fields['楼栋'])}`;
+      const saved = corrections.get(key);
+      const effective = saved && saved.energyRecordIds[energyCategoryKey(fields)] === getRecordId(row)
+        ? saved.pue : positivePue(fields[PUE_FIELD]);
+      if (effective === null) return row;
+      return { ...row, fields: { ...fields, [rawPue ? PUE_FIELD : 'PUE']: effective } };
+    });
     return {
       sourceStatus: state.stale ? 'stale' : 'fresh',
       syncedAt:
@@ -387,7 +527,7 @@ export class TodayOperationsKpiService {
       metrics: {
         safeOperationDays: mapSafetyMetric(safety, today),
         onDutyPeople: mapOnDutyPeopleMetric(onDutyPeopleDetails),
-        averagePue: mapAverageMetric(pue, '日期', 'PUE', 3, PUE_BUILDINGS),
+        averagePue: mapAverageMetric(pueValues, '日期', 'PUE', 3, PUE_BUILDINGS),
         itLoadRate: mapItLoadMetric(itLoad),
         electricityKwh: mapSumMetric(electricity, '日期', '用电量', 0),
         waterTons: mapSumMetric(water, '执行日期', '当日耗水总量（实际）', 1),
@@ -396,10 +536,10 @@ export class TodayOperationsKpiService {
         onDutyPeople: onDutyPeopleDetails,
         buildingMetrics: {
           averagePue: mapBuildingMetricDetails(
-            pue,
+            pueValues,
             '日期',
             'PUE',
-            3,
+            rawPue ? null : 3,
             PUE_BUILDINGS,
             PUE_BUILDINGS,
             historyLimit,
@@ -428,49 +568,27 @@ export class TodayOperationsKpiService {
   }
 
   private async resolveSources(): Promise<Record<SourceKey, SourceConfig>> {
+    const entries = await Promise.all((Object.keys(DEFAULT_SOURCE_URLS) as SourceKey[])
+      .map(async (key) => [key, await this.resolveSource(key)] as const));
+    return Object.fromEntries(entries) as Record<SourceKey, SourceConfig>;
+  }
+
+  private async resolveSource(key: SourceKey): Promise<SourceConfig> {
     const auth = resolveTodayOperationsKpiAuth();
-    const entries = await Promise.all(
-      (Object.keys(DEFAULT_SOURCE_URLS) as SourceKey[]).map(async (key) => {
-        const definition = SOURCE_DEFINITIONS[key];
-        const parsed = parseFeishuBitableLink(
-          key === 'personnel'
-            ? DEFAULT_SOURCE_URLS.personnel
-            : readEnv(definition.envKey) || DEFAULT_SOURCE_URLS[key],
-        );
-        const appToken = await resolveBitableAppToken(this.httpService, {
-          appToken: parsed.appToken,
-          wikiToken: parsed.wikiToken,
-          tableName: definition.tableName,
-          auth,
-        });
-        if (!appToken || !parsed.tableId) {
-          throw new Error(`${definition.tableName}数据源配置不完整`);
-        }
-        return [
-          key,
-          {
-            appToken,
-            tableId: parsed.tableId,
-            tableName: definition.tableName,
-            viewId: parsed.viewId || undefined,
-            fieldNames: definition.fieldNames,
-          },
-        ] as const;
-      }),
-    );
-    const resolved = new Map<SourceKey, SourceConfig>(entries);
-    const requireSource = (key: SourceKey): SourceConfig => {
-      const source = resolved.get(key);
-      if (!source) throw new Error(`${key}数据源解析失败`);
-      return source;
-    };
+    const definition = SOURCE_DEFINITIONS[key];
+    const parsed = parseFeishuBitableLink(key === 'personnel'
+      ? DEFAULT_SOURCE_URLS.personnel
+      : readEnv(definition.envKey) || DEFAULT_SOURCE_URLS[key]);
+    const appToken = await resolveBitableAppToken(this.httpService, {
+      appToken: parsed.appToken, wikiToken: parsed.wikiToken, tableName: definition.tableName, auth,
+    });
+    if (!appToken || !parsed.tableId) throw new Error(`${definition.tableName}数据源配置不完整`);
     return {
-      safety: requireSource('safety'),
-      personnel: requireSource('personnel'),
-      pue: requireSource('pue'),
-      itLoad: requireSource('itLoad'),
-      electricity: requireSource('electricity'),
-      water: requireSource('water'),
+      appToken,
+      tableId: parsed.tableId,
+      tableName: definition.tableName,
+      viewId: parsed.viewId || undefined,
+      fieldNames: definition.fieldNames,
     };
   }
 
@@ -1042,7 +1160,7 @@ function mapBuildingMetricDetails(
   records: BitableRecordItem[],
   dateField: string,
   valueField: string,
-  precision: number,
+  precision: number | null,
   completeBuildings: readonly RequiredBuilding[] = REQUIRED_BUILDINGS,
   includedBuildings: readonly RequiredBuilding[] = REQUIRED_BUILDINGS,
   historyLimit = 3,
@@ -1067,15 +1185,18 @@ function mapBuildingMetricDetails(
     })),
     history: periods.slice(0, historyLimit).map((period) => ({
       date: period.date,
-      rows: includedBuildings.map((building) => ({
-        building,
-        value: readRequiredPeriodBuildingValue(
+      rows: includedBuildings.map((building) => {
+        const value = readRequiredPeriodBuildingValue(
           period,
           building,
           valueField,
           precision,
-        ),
-      })),
+        );
+        const comparisonValue = precision === null
+          ? positivePue(period.records.get(building)?.fields?.[PUE_FIELD])
+          : null;
+        return comparisonValue === null ? { building, value } : { building, value, comparisonValue };
+      }),
     })),
   };
 }
@@ -1084,19 +1205,19 @@ function readPeriodBuildingValue(
   period: CompleteBuildingPeriod,
   building: RequiredBuilding,
   fieldName: string,
-  precision: number,
+  precision: number | null,
 ): number | null {
   const value = extractNumberValue(
     period.records.get(building)?.fields?.[fieldName],
   );
-  return value === null ? null : round(value, precision);
+  return value === null || precision === null ? value : round(value, precision);
 }
 
 function readRequiredPeriodBuildingValue(
   period: CompleteBuildingPeriod,
   building: RequiredBuilding,
   fieldName: string,
-  precision: number,
+  precision: number | null,
 ): number {
   const value = readPeriodBuildingValue(
     period,
@@ -1309,4 +1430,39 @@ function formatShanghaiDate(timestamp: number): string {
 function round(value: number, precision: number): number {
   const factor = 10 ** precision;
   return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function positivePue(field: unknown): number | null {
+  const value = extractNumberValue(field);
+  return value !== null && value > 0 ? value : null;
+}
+
+function requireSingleFacilityRow(rows: BitableRecordItem[]): BitableRecordItem {
+  if (rows.length !== 1 || !getRecordId(rows[0])) throw new Error('楼栋日汇总记录缺失或重复');
+  return rows[0];
+}
+
+function indexEnergyRows(rows: BitableRecordItem[]): Map<string, BitableRecordItem> {
+  const indexed = new Map<string, BitableRecordItem>();
+  for (const row of rows) {
+    const fields = row.fields ?? {};
+    const key = energyCategoryKey(fields);
+    if (!getRecordId(row) || !extractDisplayText(fields['类型']) || !extractDisplayText(fields['汇总分类']) || indexed.has(key)) {
+      throw new Error('楼栋用电汇总分类缺失或重复');
+    }
+    indexed.set(key, row);
+  }
+  return indexed;
+}
+
+function matchesFacilityEnergy(
+  rows: ReadonlyMap<string, BitableRecordItem>,
+  recordIds: Record<string, string>,
+  values: Record<string, Record<string, number | null>>,
+): boolean {
+  return rows.size === Object.keys(recordIds).length && [...rows].every(([key, row]) =>
+    recordIds[key] === getRecordId(row) && values[key] && ENERGY_NUMERIC_FIELDS.every((field) =>
+      extractNumberValue(row.fields?.[field]) === values[key][field],
+    ),
+  );
 }

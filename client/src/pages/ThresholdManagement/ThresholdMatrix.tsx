@@ -114,7 +114,7 @@ export const ThresholdMatrix = memo(function ThresholdMatrix({
   onDetail: (record: ThresholdRecord) => void;
 }) {
   const weakCurrent = records[0]?.profession === WEAK_CURRENT_PROFESSION;
-  const parameterHeading = weakCurrent ? '告警类型 / 收敛名称' : '参数';
+  const parameterHeading = weakCurrent ? '收敛名称 / 告警类型' : '参数';
   const model = useMemo(
     () =>
       buildThresholdMatrix(records, building ? [building] : CAMPUS_BUILDINGS),
@@ -365,7 +365,11 @@ function MatrixRowView({
       )}
       <tr className="threshold-matrix-row">
         <th scope="row" className="threshold-matrix-parameter">
-          <strong className={showParameter ? undefined : 'sr-only'}>{row.parameter}</strong>
+          <strong className={showParameter ? undefined : 'sr-only'}>
+            {Object.values(row.cells)[0]?.profession === WEAK_CURRENT_PROFESSION
+              ? row.section
+              : row.parameter}
+          </strong>
           {row.different && (
             <span className="threshold-difference-tag">差异</span>
           )}

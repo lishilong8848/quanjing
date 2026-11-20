@@ -19,6 +19,11 @@ import type {
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const STAFF_SEPARATOR = /[\s、,，;；/]+/u;
 
+export function exceedsPueChangeThreshold(value: number, average: number, percent = 50): boolean {
+  const fraction = percent / 100;
+  return value < average * (1 - fraction) || value > average * (1 + fraction);
+}
+
 export interface FacilityMetricInput {
   businessDate: string;
   metrics: DailyOperationsPatrolFacilityMetric[];
@@ -81,9 +86,11 @@ export function detectFacilityMetricIssues(
       );
     }
     for (const row of current.rows) {
-      const baselineValues = baselines.map((period) =>
-        period.rows.find((candidate) => candidate.building === row.building)?.value,
-      );
+      const isPue = metric.key === 'averagePue';
+      const baselineValues = baselines.map((period) => {
+        const candidate = period.rows.find((item) => item.building === row.building);
+        return isPue ? candidate?.comparisonValue ?? candidate?.value : candidate?.value;
+      });
       if (
         baselineValues.some(
           (value) => value === undefined || !Number.isFinite(value) || value <= 0,
@@ -106,18 +113,22 @@ export function detectFacilityMetricIssues(
         (baselineValues as number[]).reduce((sum, value) => sum + value, 0) /
         compareDays;
       const changePercent = ((row.value - baseline) / baseline) * 100;
-      if (Math.abs(changePercent) < thresholdPercent) continue;
+      const isAnomalous = isPue
+        ? exceedsPueChangeThreshold(row.value, baseline, thresholdPercent)
+        : Math.abs(changePercent) >= thresholdPercent;
+      if (!isAnomalous) continue;
       const direction = changePercent >= 0 ? '上升' : '下降';
-      issues.push(
-        issue(
-          'facility',
-          `${row.building} ${metric.label} ${direction} ${formatNumber(Math.abs(changePercent), 1)}%`,
-          `${current.date} 当前 ${formatNumber(row.value, 3)}${metric.unit}，前${compareDays}日均值 ${formatNumber(baseline, 3)}${metric.unit}`,
-          current.date,
-          'warning',
-          `${metric.key}:${row.building}:${current.date}`,
-        ),
+      const finding = issue(
+        'facility',
+        `${row.building} ${metric.label} ${direction} ${formatNumber(Math.abs(changePercent), 1)}%`,
+        `${isPue ? '原始读数' : `${current.date} 当前`} ${formatNumber(row.value, 3)}${metric.unit}，前${compareDays}日均值 ${formatNumber(baseline, 3)}${metric.unit}`,
+        current.date,
+        'warning',
+        `${metric.key}:${row.building}:${current.date}`,
       );
+      finding.facilityBuilding = row.building;
+      if (isPue) finding.pueCorrection = { building: row.building, rawValue: row.value };
+      issues.push(finding);
     }
   }
 

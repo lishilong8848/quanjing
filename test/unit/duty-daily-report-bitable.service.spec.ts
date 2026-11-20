@@ -44,6 +44,7 @@ function mockAxios(opts: {
     put: [] as Array<{ url: string; body: any }>,
   };
   let created = 0;
+  const records: MockRecord[] = JSON.parse(JSON.stringify(opts.records ?? []));
   const axiosRef = {
     post: jest.fn(async (url: string, body: any) => {
       calls.post.push({ url, body });
@@ -54,6 +55,7 @@ function mockAxios(opts: {
       if (url.endsWith('/records')) {
         created += 1;
         const building = body?.fields?.['楼栋'] ?? `idx${created}`;
+        records.push({ record_id: `created-${building}`, fields: { ...body.fields } });
         return {
           data: { code: 0, data: { record: { record_id: `created-${building}` } } },
         } as any;
@@ -68,12 +70,17 @@ function mockAxios(opts: {
         } as any;
       if (url.endsWith('/records'))
         return {
-          data: { code: 0, data: { items: opts.records ?? [], has_more: false } },
+            data: { code: 0, data: { items: records, has_more: false } },
         } as any;
+      const recordId = url.split('/records/')[1];
+      const record = records.find((row) => row.record_id === recordId);
+      if (record) return { data: { code: 0, data: { record } } } as any;
       throw new Error(`unexpected GET ${url}`);
     }),
     put: jest.fn(async (url: string, body: any) => {
       calls.put.push({ url, body });
+      const record = records.find((row) => row.record_id === url.split('/records/')[1]);
+      if (record) Object.assign(record.fields, body.fields);
       return { data: { code: 0 } } as any;
     }),
   };
@@ -208,10 +215,11 @@ describe('DutyDailyReportBitableService per-building records', () => {
     // No creation (all seven buildings exist); no field-type lookup needed.
     expect(createPosts(calls)).toHaveLength(0);
     expect(calls.get.some((g) => g.url.endsWith('/fields'))).toBe(false);
-    // Six records lack the screenshot -> one upload mirrored into those six; the
-    // record that already has it is left untouched (no duplicate).
-    expect(uploadPosts(calls)).toHaveLength(1);
+    // Six records lack the screenshot: recover the existing token and mirror it,
+    // without reuploading or touching the record that already has the file.
+    expect(uploadPosts(calls)).toHaveLength(0);
     expect(calls.put).toHaveLength(6);
+    expect(calls.put.every((p) => p.body.fields['日报截图'][0].file_token === 'existing-token')).toBe(true);
     expect(result).toMatchObject({ appended: true, created: false });
 
     // Second run: every record now has the file (simulate) -> nothing uploaded.

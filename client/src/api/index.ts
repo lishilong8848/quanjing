@@ -22,6 +22,7 @@ import type {
   AccessLoginRequest,
   AccessSessionResponse,
 } from '@shared/access-control.interface';
+import { ACCESS_SESSION_ACTIVITY_PATH } from '@shared/access-session-activity.interface';
 import type {
   PurchaseInventoryResponse,
   PurchaseOnlineApprovalAcceptedResponse,
@@ -401,6 +402,17 @@ export async function getAccessSession(): Promise<AccessSessionResponse & { sess
       ? { sessionCookieStatus: status }
       : {}),
   };
+}
+
+/** A cookie mutation: callers serialize it with login/logout, never auto-poll it. */
+export async function renewAccessSession(principalFingerprint: string): Promise<AccessSessionResponse> {
+  const response = await axiosForBackend({
+    url: ACCESS_SESSION_ACTIVITY_PATH,
+    method: 'POST',
+    data: { principalFingerprint },
+    timeout: ACCESS_REQUEST_TIMEOUT_MS,
+  });
+  return response.data as AccessSessionResponse;
 }
 
 export async function getTodayAttendanceSnapshot(

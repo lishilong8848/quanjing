@@ -45,6 +45,8 @@ export async function searchStocktakePeople(query: string): Promise<PurchaseAppl
 
 export const getStocktakeOverview = (month: string) =>
   read<StocktakeOverview>('overview', { month });
+export const getStocktakeExport = (month: string, building: WarehouseBuilding, scope: StocktakeScope) =>
+  read<StocktakeSheet | null>('export', { month, building, scope });
 export async function getStocktakeSheet(
   month: string,
   building: WarehouseBuilding,

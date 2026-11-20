@@ -110,6 +110,7 @@ const INVENTORY_ADMIN_EXACT_REQUESTS = new Set([
   'GET /api/inventory-management/stocktake/people',
   'GET /api/inventory-management/stocktake/overview',
   'GET /api/inventory-management/stocktake/sheet',
+  'GET /api/inventory-management/stocktake/export',
   'GET /api/inventory-management/stocktake/sync-status',
   'GET /api/inventory-management/stocktake/bulk-status',
   'POST /api/inventory-management/stocktake/start',
@@ -132,6 +133,7 @@ const INVENTORY_ADMIN_EXACT_REQUESTS = new Set([
   'POST /api/inventory-management/movements',
   'POST /api/inventory-management/inbound-photos',
   'POST /api/inventory-management/movements/deletions',
+  'POST /api/inventory-management/ledger-deletions',
   'POST /api/inventory-management/outbounds',
   'POST /api/inventory-management/outbounds/batch',
   'GET /api/inventory-management/purchase-inbounds/pending',
@@ -153,6 +155,7 @@ const INVENTORY_ADMIN_PURCHASE_INBOUND_CATEGORY_TASK_PATH =
   /^\/api\/inventory-management\/purchase-inbounds\/category-tasks\/[a-z0-9_-]{1,160}$/;
 const INVENTORY_ADMIN_MOVEMENT_DELETION_TASK_PATH =
   /^\/api\/inventory-management\/movements\/deletions\/tasks\/[a-z0-9_-]{1,180}$/;
+const INVENTORY_ADMIN_LEDGER_DELETION_PATH = /^\/api\/inventory-management\/ledger-deletions\/[a-z0-9_-]{8,128}$/;
 const PURCHASE_APPLICANT_EXACT_REQUESTS = new Set([
   'GET /api/purchase-inventory/dashboard',
   'GET /api/purchase-inventory/application-options',
@@ -858,7 +861,8 @@ function canInventoryAdministratorAccess(
         INVENTORY_ADMIN_ITEM_IMAGE_PATH.test(path) ||
         INVENTORY_ADMIN_STAGED_IMAGE_PATH.test(path) ||
         INVENTORY_ADMIN_PURCHASE_INBOUND_CATEGORY_TASK_PATH.test(path) ||
-        INVENTORY_ADMIN_MOVEMENT_DELETION_TASK_PATH.test(path)))
+        INVENTORY_ADMIN_MOVEMENT_DELETION_TASK_PATH.test(path) ||
+        INVENTORY_ADMIN_LEDGER_DELETION_PATH.test(path)))
   );
 }
 

@@ -757,7 +757,7 @@ describe('UnifiedAccessController', () => {
       if (expectedSecure) {
         expect(response.cookie).toHaveBeenCalledTimes(1);
         expect(response.cookie).toHaveBeenCalledWith('__Host-vnet_access_session', 'logged-out',
-          expect.objectContaining({ httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 1000 }));
+          expect.objectContaining({ httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: ACCESS_SESSION_TTL_MS }));
       } else {
         expect(response.cookie).not.toHaveBeenCalled();
       }
@@ -1119,7 +1119,7 @@ describe('UnifiedAccessController', () => {
       expect(service.issueTrustedSession).not.toHaveBeenCalled();
       expect(response.cookie).toHaveBeenCalledTimes(1);
       expect(response.cookie).toHaveBeenCalledWith('__Host-vnet_access_session', 'logged-out',
-        expect.objectContaining({ httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 1000 }));
+        expect.objectContaining({ httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: ACCESS_SESSION_TTL_MS }));
       expect(response.clearCookie).toHaveBeenCalledWith(COOKIE_NAME, {
         httpOnly: true,
         sameSite: 'none',

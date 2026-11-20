@@ -30,9 +30,11 @@ import {
   extractDateTimeIso,
   extractDateValue,
   extractDisplayText,
+  extractDisplayValues,
   extractNumberValue,
   fetchBitableRecords,
   getRecordId,
+  normalizeBuildingForFrontend,
   pickField,
   readLatestPersistedBitableRecordSnapshot,
   resolveBitableAppToken,
@@ -258,6 +260,43 @@ export class TodayOperationsOverviewService
     @Inject(HttpService)
     private readonly httpService: HttpService,
   ) {}
+
+  async getPatrolInspectionTitles(date: string): Promise<Map<string, string[]>> {
+    const start = Date.parse(`${date}T00:00:00+08:00`);
+    const end = start + DAY_MS;
+    const { wikiToken, tableId } = parseFeishuBitableLink(DEFAULT_SOURCE_URLS.inspection);
+    const tableName = SOURCE_DEFINITIONS.inspection.tableName;
+    // The linked view is A-only; query its table to match every affected building.
+    const appToken = await withinSourceDeadline(resolveBitableAppToken(this.httpService, { wikiToken, tableName }));
+    const startedBeforeDayEnd = { field_name: '实际开始时间', operator: 'isLess', value: ['ExactDate', String(end)] };
+    const endConditions = [
+      { field_name: '实际结束时间', operator: 'isGreater', value: ['ExactDate', String(start - DAY_MS)] },
+      { field_name: '实际结束时间', operator: 'isEmpty', value: [] },
+    ];
+    const groups = await withinSourceDeadline(Promise.all(endConditions.map((condition) =>
+      fetchBitableRecords(this.httpService, {
+        appToken, tableId, tableName, forceRefresh: true, allowStale: false, strict: true,
+        fieldNames: ['名称（标题）', '楼栋', '实际开始时间', '实际结束时间'],
+        filter: { conjunction: 'and', conditions: [startedBeforeDayEnd, condition] },
+      }),
+    )));
+    const titles = new Map<string, Set<string>>();
+    for (const { fields } of groups.flat()) {
+      const started = Date.parse(extractDateTimeIso(fields?.['实际开始时间']) ?? '');
+      const ended = fields?.['实际结束时间'];
+      const finished = ended == null ? Infinity : Date.parse(extractDateTimeIso(ended) ?? '');
+      if (!(started < end && finished > start && finished >= started)) continue;
+      const title = extractDisplayText(fields?.['名称（标题）']).trim();
+      if (!title) continue;
+      for (const name of extractDisplayValues(fields?.['楼栋'])) {
+        const building = normalizeBuildingForFrontend(name);
+        const existing = titles.get(building) ?? new Set<string>();
+        existing.add(title);
+        titles.set(building, existing);
+      }
+    }
+    return new Map([...titles].map(([building, names]) => [building, [...names].sort()]));
+  }
 
   onModuleInit(): void {
     if (

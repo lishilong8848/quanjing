@@ -33,7 +33,9 @@ describe('月览资源读取状态与投影', () => {
     );
     expect(options[0].filter).toBeUndefined();
     expect(options[1].fieldNames).toContain('PUE（数值）');
+    expect(options[1].fieldNames).toContain('类型');
     expect(options[1].fieldNames).not.toContain('PUE');
+    expect(options[3].fieldNames).toEqual(expect.arrayContaining(['类型', '频次']));
     options.forEach((x) => {
       expect(x).toMatchObject({
         strict: true,

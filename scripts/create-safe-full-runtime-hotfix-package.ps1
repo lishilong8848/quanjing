@@ -7727,16 +7727,26 @@ function Remove-VerifiedRecoveryStartScript {
 function Start-RecoveredRuntime {
   param(
     [string]$Root,
+    [string]$PackageRoot,
+    [object]$Manifest,
     [string]$Endpoint,
     [int]$TimeoutSeconds,
     [AllowNull()]
     [string]$StartScriptPath
   )
   Assert-PurchaseLedgerRuntimeCompatibility -Root $Root -RuntimeDist (Join-Path $Root 'dist')
+  # Recovery runs in a new installer process, so no in-memory proof from the
+  # interrupted install can be assumed. Validate the actual installed tree
+  # before either candidate restart or the rollback-specific launcher.
+  $dependencyProofReport = Invoke-InstalledDependencyProofGate `
+    -Root $Root `
+    -PackageRoot $PackageRoot `
+    -Manifest $Manifest
   $startedAfterUtc = (Get-Date).ToUniversalTime()
   $launcher = $null
   try {
-    $launcher = Start-App -Root $Root -StartScriptPath $StartScriptPath
+    $launcher = Start-App -Root $Root -StartScriptPath $StartScriptPath `
+      -DependencyProofFingerprint ([string]$dependencyProofReport.installedPhysicalTreeFingerprint)
     if (-not (Wait-AppHealth `
       -TimeoutSeconds $TimeoutSeconds `
       -Endpoint $Endpoint `
@@ -7976,6 +7986,8 @@ function Rollback-UncommittedHotfixTransaction {
     Invoke-HotfixFaultInjection -Phase 'after-rollback-dist-restored' -AppRoot $Root
     Start-RecoveredRuntime `
       -Root $Root `
+      -PackageRoot $PackageRoot `
+      -Manifest $Manifest `
       -Endpoint $Endpoint `
       -TimeoutSeconds $TimeoutSeconds `
       -StartScriptPath $recoveryStart.path
@@ -8261,7 +8273,8 @@ function Complete-CommittedHotfixTransaction {
       -Endpoint $Endpoint `
       -AllowNotRunning `
       -AllowStaleOwnedJsonPidRecord
-    Start-RecoveredRuntime -Root $Root -Endpoint $Endpoint -TimeoutSeconds $TimeoutSeconds
+    Start-RecoveredRuntime -Root $Root -PackageRoot $PackageRoot -Manifest $Manifest `
+      -Endpoint $Endpoint -TimeoutSeconds $TimeoutSeconds
   }
   if ($null -eq $DependencyProofReport) {
     $DependencyProofReport = Invoke-InstalledDependencyProofGate `

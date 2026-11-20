@@ -34,6 +34,7 @@ import {
   resourceRange,
   shanghaiDay,
 } from './monthly-operations-resources.model';
+import { applyPatrolFacilityCorrection, patrolFacilityCorrectionRevision, readPatrolFacilityCorrections } from './patrol-facility-corrections';
 
 const CACHE_MS = 5 * 60 * 1000;
 export const MONTHLY_RESOURCE_SOURCES = {
@@ -61,6 +62,7 @@ export const MONTHLY_RESOURCE_SOURCES = {
     fieldNames: [
       '日期',
       '楼栋',
+      '类型',
       '汇总分类',
       'PUE（数值）',
       '数值（3位小数点）',
@@ -88,6 +90,8 @@ export const MONTHLY_RESOURCE_SOURCES = {
     fieldNames: [
       '执行日期',
       '楼栋',
+      '类型',
+      '频次',
       '类型',
       '频次',
       '当日耗水总量',
@@ -195,7 +199,7 @@ export class MonthlyOperationsResourcesService
     refresh = false,
   ): Promise<MonthlyOperationsResourcesResponse> {
     const range = resourceRange(start, end);
-    const cacheKey = `${range.start}:${range.end}:${range.asOf}`;
+    const cacheKey = `${range.start}:${range.end}:${range.asOf}:${patrolFacilityCorrectionRevision()}`;
     if (!refresh) {
       const cached = this.responseCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) return cached.value;
@@ -278,13 +282,14 @@ export class MonthlyOperationsResourcesService
       ),
     ]);
     const mappedRacks = mapMonthlyRacks(racks.records, range.asOf);
-    const days = mapMonthlyEnergy(energy.records, readStart, range.asOf);
+    const corrections = await readPatrolFacilityCorrections(readStart, range.asOf);
+    const days = mapMonthlyEnergy(applyPatrolFacilityCorrection(energy.records, 'energy', corrections), readStart, range.asOf);
     const temperatures = mapMonthlyTemperature(
       weather.records,
       readStart,
       range.asOf,
     );
-    const waterDays = mapMonthlyWater(water.records, readStart, range.asOf);
+    const waterDays = mapMonthlyWater(applyPatrolFacilityCorrection(water.records, 'water', corrections), readStart, range.asOf);
     const mappedLoad = mapMonthlyLoad(load.records, range.asOf);
     return {
       range,

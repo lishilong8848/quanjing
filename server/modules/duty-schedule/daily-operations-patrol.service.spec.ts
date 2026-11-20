@@ -4,6 +4,8 @@ import type { DutyScheduleService } from './duty-schedule.service';
 import type { DailyOperationsPatrolGateway } from './daily-operations-patrol.gateway';
 import { DailyOperationsPatrolService } from './daily-operations-patrol.service';
 import type { DailyOperationsPatrolStore } from './daily-operations-patrol.store';
+import { buildAttendanceMorningBrief } from './attendance-morning-brief.card';
+import { buildDailyOperationsPatrolCard } from './daily-operations-patrol.card';
 
 describe('DailyOperationsPatrolService', () => {
   const previousEnv = { ...process.env };
@@ -11,6 +13,55 @@ describe('DailyOperationsPatrolService', () => {
   afterEach(() => {
     process.env = { ...previousEnv };
     jest.restoreAllMocks();
+  });
+
+  it.each([true, false])('updates the morning card only with confirmed PUE correction (confirmed=%s)', async (confirmed) => {
+    const fixture = createFixture();
+    const history = [
+      { date: '2026-11-19', rows: [{ building: 'A楼', value: 0.056 }] },
+      { date: '2026-11-18', rows: [{ building: 'A楼', value: 1.125 }] },
+      { date: '2026-11-17', rows: [{ building: 'A楼', value: 1.129 }] },
+    ];
+    const power = history.map((day, index) => ({ date: day.date, rows: [
+      { building: 'A楼', value: index === 0 ? 1000 : 100 },
+      { building: 'B楼', value: index === 0 ? 1000 : 100 },
+    ] }));
+    fixture.kpi.getKpisForAnomalyScan.mockResolvedValueOnce({
+      details: { buildingMetrics: { averagePue: { history }, electricityKwh: { history: power }, waterTons: {} } },
+    });
+    if (!confirmed) fixture.kpi.correctPatrolFacility.mockRejectedValueOnce(new Error('unconfirmed'));
+    fixture.overview.getPatrolInspectionTitles.mockResolvedValue(new Map([
+      ['building_a', ['A楼直流输出电压过低报警检修', 'A楼第二项检修']], ['building_b', ['B楼其它检修']],
+    ]));
+    const report = await createService(fixture).collectReport('2026-11-20');
+    const brief = buildAttendanceMorningBrief({ reportDate: '2026-11-20', fetchedAt: '2026-11-20 09:30',
+      sections: [], patrol: report, scheduleUrl: 'https://example.test/schedule', dashboardUrl: 'https://example.test/dashboard',
+    });
+    const content = JSON.stringify(brief);
+    for (const card of [brief, buildDailyOperationsPatrolCard(report)]) {
+      const markdown: string[] = [];
+      JSON.stringify(card, (_key, element) => {
+        if (element?.tag === 'markdown') markdown.push(element.content);
+        return element;
+      });
+      expect(markdown).toContainEqual(expect.stringMatching(/\n *原始读数 0\.056，前2日均值 1\.127\n *(?:当日)?整栋能耗数据/));
+      expect(markdown).toContainEqual(expect.stringMatching(/\n *当日以下检修可能导致数据异常：\n *A楼直流输出电压过低报警检修\n *A楼第二项检修/));
+    }
+    expect(fixture.kpi.correctPatrolFacility).toHaveBeenCalledWith('2026-11-19', 'A楼', 0.056);
+    expect(fixture.overview.getPatrolInspectionTitles).toHaveBeenCalledWith('2026-11-19');
+    expect(content).toContain('前2日均值 1.127');
+    expect(content).toContain('A楼直流输出电压过低报警检修');
+    expect(content).not.toContain('B楼其它检修');
+    expect(content).toContain('B楼 用电 上升 900%');
+    if (confirmed) {
+      expect(content).toContain('当日整栋能耗数据已修正，沿用 2026-11-18');
+      expect(content).toContain('PUE 1.125');
+      expect(content).not.toContain('A楼 用电 上升 900%');
+    } else {
+      expect(content).toContain('数据修正未确认');
+      expect(content).not.toContain('数据已修正');
+      expect(content).toContain('A楼 用电 上升 900%');
+    }
   });
 
   it('collects all four checks and sends exactly one normal card', async () => {
@@ -435,6 +486,7 @@ function createService(fixture: ReturnType<typeof createFixture>) {
     fixture.gateway as unknown as DailyOperationsPatrolGateway,
     fixture.followUp as never,
     fixture.followUpCards as never,
+    fixture.overview as never,
   );
 }
 
@@ -446,6 +498,7 @@ function createFixture() {
   ];
   return {
     kpi: {
+      correctPatrolFacility: jest.fn().mockResolvedValue(1.125),
       getKpisForAnomalyScan: jest.fn().mockResolvedValue({
         details: {
           buildingMetrics: {
@@ -456,6 +509,7 @@ function createFixture() {
         },
       }),
     },
+    overview: { getPatrolInspectionTitles: jest.fn().mockResolvedValue(new Map()) },
     schedule: {
       getSchedulesForRiskScan: jest.fn().mockResolvedValue([]),
       getYearlyChangeInfo: jest

@@ -1,5 +1,6 @@
 import type {
   DailyOperationsPatrolCheckResult,
+  DailyOperationsPatrolIssue,
   DailyOperationsPatrolReport,
 } from './daily-operations-patrol.types';
 import { buildFollowUpEntryButton } from '../bitable-sync/today-operations-follow-up-card';
@@ -18,7 +19,8 @@ export function buildDailyOperationsPatrolCard(
 ): Record<string, unknown> {
   const issueCount = report.checks.reduce((sum, check) => sum + check.count, 0);
   const hasAlerts = issueCount > 0;
-  const issues = report.checks.flatMap((check) => check.issues);
+  const issues = report.checks.flatMap((check) => check.issues)
+    .sort((left, right) => Number(Boolean(right.pueCorrection)) - Number(Boolean(left.pueCorrection)));
   const visibleIssues = issues.slice(0, MAX_EXPANDED_ISSUES);
   const remaining = Math.max(0, issues.length - visibleIssues.length);
   const actionElements = buildActions(options);
@@ -44,7 +46,8 @@ export function buildDailyOperationsPatrolCard(
         content: [
           ...visibleIssues.map(
             (item, index) =>
-              `${index + 1}. **${escapeMarkdown(item.title)}**${item.date ? ` · ${escapeMarkdown(item.date)}` : ''}\n   ${escapeMarkdown(item.detail)}`,
+              [`${index + 1}. **${escapeMarkdown(item.title)}**${item.date ? ` · ${escapeMarkdown(item.date)}` : ''}`,
+                escapeMarkdown(item.detail), ...patrolCorrectionLines(item.pueCorrection)].join('\n   '),
           ),
           ...(remaining > 0
             ? [`<font color="grey">另 ${remaining} 项请打开看板核对</font>`]
@@ -58,7 +61,7 @@ export function buildDailyOperationsPatrolCard(
     { tag: 'hr' },
     {
       tag: 'markdown',
-      content: `<font color="grey">用电 / PUE / 水耗仅核对巡视日前 3 个自然日。前一日较其前 2 日均值变化达 50% 时提示异常，所需数据缺失时标为数据异常。生成时间 ${formatShanghaiDateTime(report.generatedAt)}</font>`,
+      content: `<font color="grey">用电 / PUE / 水耗核对巡视日前一日及其前 2 日。PUE 较前 2 日均值变化超过 50% 时，该楼栋当天的能耗日报沿用前一天数据。生成时间 ${formatShanghaiDateTime(report.generatedAt)}</font>`,
     },
     ...actionElements,
   );
@@ -170,12 +173,19 @@ function normalizeHttpUrl(value: string | undefined): string {
   }
 }
 
-function escapeMarkdown(value: unknown): string {
+export function patrolCorrectionLines(correction: DailyOperationsPatrolIssue['pueCorrection']): string[] {
+  if (!correction) return [];
+  const inspections = correction.inspectionNote?.split('\n')
+    .map((line) => escapeMarkdown(line, 1_500)).join('\n').slice(0, 1_500);
+  return [escapeMarkdown(correction.resultNote), ...(inspections?.split('\n') ?? [])].filter(Boolean);
+}
+
+export function escapeMarkdown(value: unknown, limit = 500): string {
   return String(value ?? '')
     .replace(/[\r\n\t]+/gu, ' ')
     .replace(/([\\`*_[\]()<>])/gu, '\\$1')
     .trim()
-    .slice(0, 500);
+    .slice(0, limit);
 }
 
 function formatShanghaiDateTime(value: string): string {

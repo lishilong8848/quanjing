@@ -51,6 +51,14 @@ interface FeishuAttachmentValue {
   name?: string;
 }
 
+interface DutyDailyReportScreenshotOptions {
+  date?: string;
+  shift: DutyDailyReportShift;
+  image: Buffer;
+  fileName?: string;
+  replaceExisting?: boolean;
+}
+
 const DEFAULT_DAILY_REPORT_APP_TOKEN = 'MliKbC3fXa8PXrsndKscmxjdn1g';
 const DEFAULT_DAILY_REPORT_TABLE_ID = 'tblxfd0HA9kDZQ3w';
 // The bitable gained a single-select 楼栋 field; one daily-report record is kept
@@ -69,22 +77,36 @@ const CHINA_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 @Injectable()
 export class DutyDailyReportBitableService {
   private readonly logger = new Logger(DutyDailyReportBitableService.name);
+  private readonly screenshotTails = new Map<string, Promise<void>>();
 
   constructor(private readonly httpService: HttpService) {}
 
-  async appendScreenshot(options: {
-    date?: string;
-    shift: DutyDailyReportShift;
-    image: Buffer;
-    fileName?: string;
-    replaceExisting?: boolean;
-  }): Promise<DutyDailyReportScreenshotResult> {
+  async appendScreenshot(options: DutyDailyReportScreenshotOptions): Promise<DutyDailyReportScreenshotResult> {
     const date = this.normalizeDate(options.date) || this.formatDateKey(new Date());
+    const key = JSON.stringify([this.getAppToken(), this.getTableId(), date, options.shift]);
+    const previous = this.screenshotTails.get(key) || Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.catch(() => undefined).then(() => current);
+    this.screenshotTails.set(key, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await this.appendScreenshotInSequence({ ...options, date });
+    } finally {
+      release();
+      if (this.screenshotTails.get(key) === tail) this.screenshotTails.delete(key);
+    }
+  }
+
+  private async appendScreenshotInSequence(
+    options: DutyDailyReportScreenshotOptions & { date: string },
+  ): Promise<DutyDailyReportScreenshotResult> {
+    const date = options.date;
     const token = await this.getTenantAccessToken();
     const shiftLabel = this.getShiftLabel(options.shift);
     // One record per building for this date+shift; create any missing building idempotently.
-    // resolveBuildingRecords returns each record's current screenshot attachments (read from the
-    // same listing), so no extra per-record fetch is needed.
+    // The listing is used for lookup and safe recovery. Records about to be
+    // changed are read again below so their newer attachments are preserved.
     const buildingRecords = await this.resolveBuildingRecords(token, date, shiftLabel);
     const fileName = options.fileName || `nantong-duty-${date}-${shiftLabel}.png`;
     const screenshotField = this.getScreenshotFieldName();
@@ -116,23 +138,42 @@ export class DutyDailyReportBitableService {
       };
     }
 
-    // Upload the image once and mirror the same file_token into every building record.
-    const fileToken = await this.uploadBitableAttachment(token, {
+    // A prior attempt may already have attached this file to some buildings.
+    // Recover its token from the source instead of uploading the same file again.
+    // Explicit replacement always uploads new bytes; an old same-name file is
+    // not evidence that the replacement content has already been uploaded.
+    const reusableToken = options.replaceExisting ? undefined : states
+      .flatMap((state) => state.attachments)
+      .find((attachment) => attachment.name === fileName)?.file_token;
+    const fileToken = reusableToken || await this.uploadBitableAttachment(token, {
       image: options.image,
       fileName,
     });
     let attachmentCount = primary.attachments.length;
+    let primaryFileToken = primary.attachments.find((attachment) => attachment.name === fileName)?.file_token || fileToken;
     for (const s of needsWrite) {
-      const existing = s.attachments.find((a) => a.name === fileName);
+      const latestRecord = await this.getRecordById(token, s.recordId);
+      const latestAttachments = this.extractAttachmentValues(latestRecord.fields?.[screenshotField]);
+      const existing = latestAttachments.find((a) => a.name === fileName);
+      if (existing && !options.replaceExisting) {
+        if (s.recordId === primary.recordId) {
+          attachmentCount = latestAttachments.length;
+          primaryFileToken = existing.file_token;
+        }
+        continue;
+      }
       const nextAttachments = existing
-        ? s.attachments.map((a) =>
+        ? latestAttachments.map((a) =>
             a.file_token === existing.file_token ? { file_token: fileToken } : a,
           )
-        : this.appendAttachment(s.attachments, fileToken);
+        : this.appendAttachment(latestAttachments, fileToken);
       await this.updateRecord(token, s.recordId, {
         [screenshotField]: nextAttachments.map((a) => ({ file_token: a.file_token })),
       });
-      attachmentCount = nextAttachments.length;
+      if (s.recordId === primary.recordId) {
+        attachmentCount = nextAttachments.length;
+        primaryFileToken = fileToken;
+      }
     }
 
     this.logger.log(
@@ -144,7 +185,7 @@ export class DutyDailyReportBitableService {
       shiftLabel,
       recordId: primary.recordId,
       created: anyCreated,
-      fileToken,
+      fileToken: primaryFileToken,
       attachmentCount,
       appended: true,
     };

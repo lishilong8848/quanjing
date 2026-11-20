@@ -3,6 +3,7 @@ import type {
   AttendanceSummarySection,
 } from './attendance-automation.card';
 import type { DailyOperationsPatrolReport } from './daily-operations-patrol.types';
+import { patrolCorrectionLines } from './daily-operations-patrol.card';
 import type { TrainingParticipation } from '../../../shared/campus-training-dashboard.interface';
 import { buildFollowUpEntryButton } from '../bitable-sync/today-operations-follow-up-card';
 
@@ -129,11 +130,17 @@ export function buildAttendanceMorningBrief(
         tag: 'markdown',
         content: [
           `**${plain(check.label)}**　<font color="orange">${check.status === 'unavailable' ? '数据待核验' : `${check.count} 项关注`}</font>`,
-          ...check.issues
+          ...[...check.issues]
+            .sort((left, right) => Number(Boolean(right.pueCorrection)) - Number(Boolean(left.pueCorrection)))
             .slice(0, 4)
             .map(
-              (issue) =>
-                `${plain(issue.date)} · ${plain(issue.title)}：${plain(issue.detail).slice(0, 240)}`,
+              (issue) => {
+                const title = `${plain(issue.date)} · ${plain(issue.title)}`;
+                const detail = plain(issue.detail).slice(0, 240);
+                return issue.pueCorrection
+                  ? [title, detail, ...patrolCorrectionLines(issue.pueCorrection)].join('\n')
+                  : `${title}：${detail}`;
+              },
             ),
           ...(check.issues.length > 4
             ? [`另 ${check.issues.length - 4} 项，请查看全景看板`]

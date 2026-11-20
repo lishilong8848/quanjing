@@ -7,8 +7,10 @@ import type {
 } from '../../../shared/api.interface';
 import type { TodayOperationsKpiResponse } from '../../../shared/today-operations-kpi.interface';
 import { readPublicApplicationUrl } from '../../common/config/public-application-url';
+import { normalizeBuildingForFrontend } from '../../common/feishu/bitable-direct-read';
 import { BitableSyncService } from '../bitable-sync/bitable-sync.service';
 import { TodayOperationsKpiService } from '../bitable-sync/today-operations-kpi.service';
+import { TodayOperationsOverviewService } from '../bitable-sync/today-operations-overview.service';
 import { TodayOperationsAnomalyService } from '../bitable-sync/today-operations-anomaly.service';
 import { TodayOperationsFollowUpCardService } from '../bitable-sync/today-operations-follow-up-card.service';
 import type { AttendanceSummarySection } from './attendance-automation.card';
@@ -54,6 +56,7 @@ export class DailyOperationsPatrolService {
     @Optional()
     private readonly followUpService?: TodayOperationsAnomalyService,
     @Optional() private readonly followUpCards?: TodayOperationsFollowUpCardService,
+    @Optional() private readonly overviewService?: TodayOperationsOverviewService,
   ) {}
 
   isEnabled(): boolean {
@@ -224,6 +227,7 @@ export class DailyOperationsPatrolService {
             endDate,
           )
         : unavailablePatrolCheck('plan', '计划冲突', planSource.reason);
+    await this.correctFacilityPue(facility);
     const weather = this.buildWeatherCheck(weatherSource);
     const checks = [facility, schedule, plan, weather];
     const report = this.buildReport(
@@ -236,6 +240,38 @@ export class DailyOperationsPatrolService {
         : 0,
     );
     return report;
+  }
+
+  private async correctFacilityPue(check: DailyOperationsPatrolCheckResult): Promise<void> {
+    const findings = check.issues.filter((finding) => finding.pueCorrection);
+    if (!findings.length) return;
+    const inspections = this.overviewService
+      ?.getPatrolInspectionTitles(findings[0].date)
+      .catch(() => null);
+    for (const finding of findings) {
+      const correction = finding.pueCorrection!;
+      try {
+        const value = await this.kpiService.correctPatrolFacility(
+          finding.date, correction.building, correction.rawValue,
+        );
+        correction.resultNote = `当日整栋能耗数据已修正，沿用 ${shiftDate(finding.date, -1)} 的用电和水耗各项数据（PUE ${value}）`;
+        check.issues = check.issues.filter((item) => item.pueCorrection || item.date !== finding.date ||
+          item.facilityBuilding !== correction.building);
+        check.count = check.issues.length;
+        check.summary = `${check.count} 项需关注`;
+      } catch {
+        this.logger.warn(`${finding.date} ${correction.building} 整栋能耗数据修正未确认`);
+        correction.resultNote = '整栋能耗数据修正未确认，请核对日报';
+      }
+    }
+    const titles = await inspections;
+    for (const finding of findings) {
+      const correction = finding.pueCorrection!;
+      const names = titles?.get(normalizeBuildingForFrontend(correction.building));
+      correction.inspectionNote = names?.length
+        ? ['当日以下检修可能导致数据异常：', ...names].join('\n')
+        : titles ? '当日未查到该楼栋检修记录' : '当日检修记录暂不可用';
+    }
   }
 
   private buildFacilityCheck(

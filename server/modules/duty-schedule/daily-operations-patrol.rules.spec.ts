@@ -13,16 +13,16 @@ import {
 } from './daily-operations-patrol.rules';
 
 describe('daily operations patrol rules', () => {
-  it('treats an exact 50 percent facility change as an anomaly against two prior days', () => {
+  it('keeps the exact 50 percent alert for electricity, without correcting it', () => {
     const result = detectFacilityMetricIssues({
       businessDate: '2026-09-07',
       thresholdPercent: 50,
       compareDays: 2,
       metrics: [
         {
-          key: 'pue',
-          label: 'PUE',
-          unit: '',
+          key: 'electricityKwh',
+          label: '用电',
+          unit: 'kWh',
           history: [
             period('2026-09-06', { A楼: 1.5, B楼: 1 }),
             period('2026-09-05', { A楼: 1, B楼: 1 }),
@@ -37,12 +37,25 @@ describe('daily operations patrol rules', () => {
     expect(result.evaluatedDate).toBe('2026-09-06');
     expect(result.issues[0]).toMatchObject({
       check: 'facility',
-      title: 'A楼 PUE 上升 50%',
+      title: 'A楼 用电 上升 50%',
       date: '2026-09-06',
       severity: 'warning',
     });
     expect(result.issues[0].detail).toContain('前2日均值 1');
   });
+
+  it.each([[0.5, false], [1.5, false], [0.49, true], [1.51, true]])(
+    'corrects PUE %p only outside the exact 50%% boundaries', (value, expected) => {
+      const result = detectFacilityMetricIssues({ businessDate: '2026-11-20', metrics: [{
+        key: 'averagePue', label: 'PUE', unit: '', history: [
+          period('2026-11-19', { A楼: value }),
+          { date: '2026-11-18', rows: [{ building: 'A楼', value: 0.056, comparisonValue: 1 }] },
+          period('2026-11-17', { A楼: 1 }),
+        ],
+      }] });
+      expect(Boolean(result.issues[0]?.pueCorrection)).toBe(expected);
+    },
+  );
 
   it('reports unavailable facility data instead of silently treating it as normal', () => {
     const result = detectFacilityMetricIssues({
@@ -68,10 +81,10 @@ describe('daily operations patrol rules', () => {
     const result = detectFacilityMetricIssues({
       businessDate: '2026-09-17',
       metrics: [{
-        key: 'pue', label: 'PUE', unit: '',
+          key: 'averagePue', label: 'PUE', unit: '',
         history: [
           period('2026-09-17', { A楼: 9 }),
-          period('2026-09-16', { A楼: 1.5 }),
+          period('2026-09-16', { A楼: 1.6 }),
           period('2026-09-15', { A楼: 1 }),
           period('2026-09-14', { A楼: 1 }),
         ],
@@ -81,7 +94,7 @@ describe('daily operations patrol rules', () => {
     expect(result.status).toBe('alert');
     expect(result.count).toBe(1);
     expect(result.issues[0]).toMatchObject({ date: '2026-09-16', severity: 'warning' });
-    expect(result.issues[0].title).toContain('50%');
+    expect(result.issues[0].title).toContain('60%');
   });
 
   it('does not replace a missing calendar day with an older complete day', () => {

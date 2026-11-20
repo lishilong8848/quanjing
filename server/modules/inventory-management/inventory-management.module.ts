@@ -1,4 +1,7 @@
 import { HttpModule } from '@nestjs/axios';
+import { InventoryLedgerDeletionController } from './inventory-ledger-deletion.controller';
+import { InventoryLedgerDeletionService } from './inventory-ledger-deletion.service';
+import { InventoryLedgerDeletionStore } from './inventory-ledger-deletion.store';
 import { Module } from '@nestjs/common';
 import { PurchaseInventoryModule } from '../purchase-inventory/purchase-inventory.module';
 import { InventoryManagementController } from './inventory-management.controller';
@@ -40,7 +43,7 @@ import { PERSONNEL_PREVIEW_READERS } from '../../common/access/personnel-preview
     PurchaseInventoryModule,
     InventoryOutboundApprovalModule,
   ],
-  controllers: [InventoryManagementController, InventoryStocktakeController],
+  controllers: [InventoryManagementController, InventoryStocktakeController, InventoryLedgerDeletionController],
   providers: [
     InventoryStocktakeService,
     InventoryStocktakeSource,
@@ -51,6 +54,8 @@ import { PERSONNEL_PREVIEW_READERS } from '../../common/access/personnel-preview
     InventoryStocktakeResultsSync,
     InventoryStocktakeBulkService,
     InventoryManagementService,
+    InventoryLedgerDeletionService,
+    InventoryLedgerDeletionStore,
     InventoryInboundTaskLedgerStore,
     InventoryInboundHandoverAdapter,
     InventoryFullPersonnelHandoverAdapter,

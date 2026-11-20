@@ -39,18 +39,19 @@ export function weakCurrentAlarmLevel(record: ThresholdRecord) {
 }
 
 function groupWeakCurrentRows(rows: MatrixRow[]) {
-  const types = new Map<string, Map<string, MatrixRow[]>>();
+  const names = new Map<string, Map<string, MatrixRow[]>>();
   for (const row of rows) {
-    const names = types.get(row.section) ?? new Map<string, MatrixRow[]>();
-    const rules = names.get(row.parameter) ?? [];
+    const types = names.get(row.parameter) ?? new Map<string, MatrixRow[]>();
+    const rules = types.get(row.section) ?? [];
     rules.push(row);
-    names.set(row.parameter, rules);
-    types.set(row.section, names);
+    types.set(row.section, rules);
+    names.set(row.parameter, types);
   }
-  const groups = [...types.entries()].sort(([left], [right]) =>
-    Number(left === '待核对') - Number(right === '待核对'),
+  return [...names.values()].flatMap((types) =>
+    [...types.entries()]
+      .sort(([left], [right]) => Number(left === '待核对') - Number(right === '待核对'))
+      .flatMap(([, rules]) => rules),
   );
-  return groups.flatMap(([, names]) => [...names.values()].flat());
 }
 function columnLocation(record: ThresholdRecord) {
   record = normalizeThresholdEquipment(record);
@@ -93,7 +94,8 @@ function comparableRule(record: ThresholdRecord) {
 }
 export function matrixSectionLabel(row: MatrixRow) {
   const records = Object.values(row.cells);
-  if (records[0]?.profession === WEAK_CURRENT_PROFESSION) return row.section;
+  if (records[0]?.profession === WEAK_CURRENT_PROFESSION)
+    return row.parameter || '收敛名称待核对';
   if (
     records.length &&
     records.every((record) => {

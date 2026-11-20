@@ -12,17 +12,39 @@ import { isConfirmedLoginSession } from '../../client/src/access/session-commit-
 import type { ConfigurationDirectorySnapshot } from '../../server/common/access/access-configuration.directory';
 import { readPersonnelAuthorizationState } from '../../server/common/access/personnel-employment-state';
 import type { BitableRecordItem } from '../../server/common/feishu/bitable-direct-read';
+import { defaultAccessAccounts, roleName } from '../../server/common/access/access-configuration.defaults';
+import { authorizationTemplateId, createAuthorizationTemplates, projectAuthorization } from '../../server/common/access/authorization-profile.policy';
+import { validAccessPasswordHash } from '../../server/common/access/access-password';
+import { getAccessConfigurationStore } from '../../server/common/access/access-configuration.store';
 
 describe('外部员工姓名密码登录', () => {
   const saved = { ...process.env };
   let root: string, configuration: AccessConfigurationService, access: UnifiedAccessService;
-  beforeEach(() => {
+  beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'nt-external-access-'));
     process.env.ACCESS_CONFIGURATION_FILE = join(root, 'accounts.json');
     process.env.FEISHU_APP_ID = 'cli_a9d1c9fe9d381cee';
     process.env.FEISHU_APP_SECRET = 'synthetic-only';
     process.env.LOCAL_ACCESS_SESSION_SECRET = randomBytes(32).toString('base64');
     process.env.LOCAL_ADMIN_PASSWORD_HASH = hashAccessPassword('synthetic-admin-only');
+    // These are credential/session tests, not legacy-authorization migration tests.
+    // Seed explicit current role bindings so unrelated ambiguous legacy scopes
+    // cannot prevent the synthetic employee directory from being synchronized.
+    const templates = createAuthorizationTemplates(undefined, roleName);
+    const accounts = Object.fromEntries(Object.entries(defaultAccessAccounts()).map(([id, original]) => {
+      const account = { ...original };
+      if (account.passwordHash !== undefined && !validAccessPasswordHash(account.passwordHash)) delete account.passwordHash;
+      if (account.kind === 'local' && account.loginMethod === undefined) account.credentialSource = 'default';
+      return [id, projectAuthorization({ ...account,
+        authorizationBinding: { mode: 'follow', templateId: authorizationTemplateId(account.role) },
+        authorizationOverrides: { rules: [], allowPages: [], denyPages: [] },
+      }, templates)];
+    }));
+    await getAccessConfigurationStore().mutate(0, 'synthetic-authorization-profile-seed', 'synthetic-profile-only', state => {
+      state.schemaVersion = 2;
+      state.accounts = accounts;
+      state.authorizationTemplates = templates;
+    });
     configuration = new AccessConfigurationService(); access = new UnifiedAccessService(configuration);
   });
   afterEach(() => { process.env = { ...saved }; rmSync(root, { recursive: true, force: true }); });

@@ -22,6 +22,32 @@ const mockedPersistedSnapshot = jest.mocked(
 const mockedResolve = jest.mocked(resolveBitableAppToken);
 const httpService = {} as HttpService;
 
+it('reads the inspection table across buildings and matches the affected calendar day', async () => {
+  const timestamp = (date: string) => Date.parse(`${date}+08:00`);
+  const inspection = (id: string, title: string, buildings: string[], start: string, end?: string) => record(id, {
+    '名称（标题）': [{ text: title, type: 'text' }], 楼栋: buildings,
+    实际开始时间: timestamp(start), 实际结束时间: end ? timestamp(end) : undefined,
+  });
+  mockedResolve.mockResolvedValueOnce('inspection-base');
+  mockedFetch.mockResolvedValueOnce([
+    inspection('cross', '跨日检修', ['A栋', 'B楼'], '2026-11-18T20:00', '2026-11-19T03:00'),
+    inspection('old', '当天之前结束', ['A楼'], '2026-11-18T19:00', '2026-11-19T00:00'),
+    inspection('next', '次日检修', ['A楼'], '2026-11-20T00:00', '2026-11-20T04:00'),
+  ]).mockResolvedValueOnce([
+    inspection('open', '当日进行中', ['A楼'], '2026-11-19T09:00'),
+    inspection('same-title', '当日进行中', ['A楼'], '2026-11-19T12:00'),
+  ]);
+  const titles = await new TodayOperationsOverviewService(httpService).getPatrolInspectionTitles('2026-11-19');
+  expect(titles.get('building_a')).toEqual(['当日进行中', '跨日检修']);
+  expect(titles.get('building_b')).toEqual(['跨日检修']);
+  expect(mockedFetch).toHaveBeenLastCalledWith(httpService, expect.objectContaining({
+    tableId: 'tblpaHktT0mn0hwg', allowStale: false,
+    filter: { conjunction: 'and', conditions: expect.arrayContaining([
+      { field_name: '实际结束时间', operator: 'isEmpty', value: [] },
+    ]) },
+  }));
+});
+
 function record(
   recordId: string,
   fields: Record<string, unknown>,

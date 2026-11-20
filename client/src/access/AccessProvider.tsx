@@ -24,7 +24,7 @@ import { flushSync } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
-import { getAccessSession, loginAccess, logoutAccess } from '@/api';
+import { getAccessSession, loginAccess, logoutAccess, renewAccessSession } from '@/api';
 import { Button } from '@/components/ui/button';
 import { FeishuIcon } from '@/components/FeishuIcon';
 import {
@@ -69,6 +69,7 @@ import {
   isConfirmedLoginSession,
 } from './session-commit-coordinator';
 import { isTransientSessionReadError, readSessionWithTransientRetry } from './session-refresh';
+import { createSessionActivityController, isConfirmedActivityRenewal, mergeActivityRenewalSnapshot, SESSION_ACTIVITY_EVENTS, withSessionCookieLock } from './session-activity';
 
 export { getAccessRoleLabel };
 
@@ -167,6 +168,10 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   const callbackPending = feishuAuthStatus !== null && !feishuConfirmation.hasConsumedCallback(callbackLocation);
   const requiresFeishuIdentityRef = React.useRef(feishuAuthStatus === 'success');
   const sessionMutationQueue = React.useRef<Promise<void>>(Promise.resolve());
+  const sessionBroadcastRef = React.useRef<BroadcastChannel | null>(null);
+  const activityRenewalRef = React.useRef<Promise<void> | null>(null);
+  const activityBlockedRef = React.useRef(true);
+  activityBlockedRef.current = isLoading || isLoggingIn || isLoggingOut || isImpersonating || dialog.open;
   const reauthenticationPendingRef = React.useRef(false);
   const permissionChangeNoticeRef = React.useRef<string | null>(null);
   const lastReauthenticationLoginRef = React.useRef(
@@ -195,7 +200,12 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
     (
       operation: () => Promise<AccessSessionResponse>,
     ): Promise<AccessSessionResponse> => {
-      const queued = sessionMutationQueue.current.then(operation, operation);
+      const lockedOperation = () => withSessionCookieLock(async () => {
+        const result = await operation();
+        sessionBroadcastRef.current?.postMessage('changed');
+        return result;
+      });
+      const queued = sessionMutationQueue.current.then(lockedOperation, lockedOperation);
       sessionMutationQueue.current = queued.then(
         () => undefined,
         () => undefined,
@@ -208,6 +218,12 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
   const refreshSession = React.useCallback((silent = false): Promise<void> => {
     const lifecycle = refreshLifecycle.current!;
     if (lifecycle.signal.aborted || requiresFeishuIdentityRef.current || feishuConfirmation.isPending() || logoutPendingRef.current || impersonationPendingRef.current) return Promise.resolve();
+    if (activityRenewalRef.current) {
+      // The old cookie can expire while the renewal response is in transit.
+      // Read only after its Set-Cookie settles, otherwise a stale guest read
+      // could discard the still-valid identity being renewed.
+      return activityRenewalRef.current.then(() => refreshSession(silent), () => refreshSession(silent));
+    }
     if (refreshPromise.current) {
       // A remount waits for the old read to settle before starting its own.
       if (refreshRequestLifecycle.current?.signal.aborted) return refreshPromise.current.then(() => refreshSession(silent));
@@ -417,6 +433,102 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
     };
   }, [markReauthenticationPending, refreshSession, retrySession]);
 
+  const renewSessionFromActivity = React.useCallback((fingerprint: string): Promise<void> => {
+    if (activityRenewalRef.current) return activityRenewalRef.current;
+    const previous = sessionRef.current;
+    const sameCurrentIdentity = () => {
+      const current = sessionRef.current;
+      return !activityBlockedRef.current && !logoutPendingRef.current && !impersonationPendingRef.current &&
+        !reauthenticationPendingRef.current && !requiresFeishuIdentityRef.current && !feishuConfirmation.isPending() &&
+        !current.impersonation && hasAuthenticatedAccessIdentity(current) &&
+        current.principalFingerprint === fingerprint;
+    };
+    if (!sameCurrentIdentity() || typeof previous.expiresAt !== 'number' || previous.expiresAt <= Date.now()) return Promise.resolve();
+    const token = sessionCommitCoordinator.beginMutation();
+    // A request accepted before expiry may finish just after the old deadline.
+    const mayCommit = () => sessionCommitCoordinator.canCommit(token) && sameCurrentIdentity();
+    const changedIdentity = () => Object.assign(new Error('登录身份已变化，请重新确认。'), { code: 'ACTIVITY_IDENTITY_CHANGED' });
+    const sameIdentity = (value: AccessSessionResponse) => isConfirmedActivityRenewal(previous, value);
+    const pending = enqueueSessionMutation(async () => {
+      if (!mayCommit()) throw changedIdentity();
+      // The same-origin cookie might have changed in another browser tab while queued.
+      const current = normalizeAccessSession(await getAccessSession());
+      if (!mayCommit() || !sameIdentity(current)) throw changedIdentity();
+      if (current.expiresAt! > previous.expiresAt!) return current;
+      try { return await renewAccessSession(fingerprint); }
+      catch (error) {
+        // A response can be lost after Set-Cookie. Reconcile once, never blindly repeat POST.
+        if (!mayCommit()) throw error;
+        try {
+          const confirmed = normalizeAccessSession(await getAccessSession());
+          if (sameIdentity(confirmed) && confirmed.expiresAt! > previous.expiresAt!) return confirmed;
+        } catch { /* Preserve the original failure when readback also fails. */ }
+        throw error;
+      }
+    }).then(result => {
+      const confirmed = normalizeAccessSession(result);
+      if (!mayCommit()) return;
+      if (!sameIdentity(confirmed)) throw changedIdentity();
+      const committed = sessionCommitCoordinator.commitMutation(token);
+      if (committed === null) return;
+      sessionRef.current = mergeActivityRenewalSnapshot(sessionRef.current, confirmed);
+      setSession(current => {
+        if (!sessionCommitCoordinator.canCommit(committed)) return current;
+        const merged = mergeActivityRenewalSnapshot(current, confirmed);
+        sessionRef.current = merged;
+        return merged;
+      });
+      clearBackgroundSessionWarning();
+    }).catch(error => {
+      if (!sessionCommitCoordinator.canCommit(token)) return;
+      if (!isTransientSessionReadError(error)) {
+        void refreshSession(true);
+        return;
+      }
+      if (!backgroundSessionWarningRef.current) {
+        backgroundSessionWarningRef.current = true;
+        toast.warning('暂时无法延长登录状态，当前内容已保留。网络恢复后操作页面将再次尝试。', { id: BACKGROUND_SESSION_WARNING_ID });
+      }
+    }).finally(() => {
+      if (activityRenewalRef.current === pending) activityRenewalRef.current = null;
+    });
+    activityRenewalRef.current = pending;
+    return pending;
+  }, [clearBackgroundSessionWarning, enqueueSessionMutation, feishuConfirmation, refreshSession, sessionCommitCoordinator]);
+
+  React.useEffect(() => {
+    const activity = createSessionActivityController({
+      snapshot: () => {
+        const current = sessionRef.current;
+        return { fingerprint: current.principalFingerprint, expiresAt: current.expiresAt,
+          enabled: hasAuthenticatedAccessIdentity(current) && !current.impersonation &&
+            !activityBlockedRef.current && !logoutPendingRef.current && !impersonationPendingRef.current &&
+            !reauthenticationPendingRef.current && !requiresFeishuIdentityRef.current && !feishuConfirmation.isPending() };
+      },
+      visible: () => document.visibilityState === 'visible',
+      renew: renewSessionFromActivity,
+    });
+    const onActivity = (event: Event) => activity.record(event);
+    for (const event of SESSION_ACTIVITY_EVENTS) document.addEventListener(event, onActivity, { capture: true, passive: true });
+    return () => {
+      activity.dispose();
+      for (const event of SESSION_ACTIVITY_EVENTS) document.removeEventListener(event, onActivity, true);
+    };
+  }, [feishuConfirmation, renewSessionFromActivity]);
+
+  React.useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel('vnet-access-session-changed');
+    sessionBroadcastRef.current = channel;
+    channel.onmessage = event => {
+      if (event.data === 'changed') void refreshSession(true);
+    };
+    return () => {
+      if (sessionBroadcastRef.current === channel) sessionBroadcastRef.current = null;
+      channel.close();
+    };
+  }, [refreshSession]);
+
   const requestLogin = React.useCallback(
     (
       reason?: string,
@@ -479,7 +591,12 @@ export function AccessProvider({ children }: React.PropsWithChildren) {
     }
 
     const timeoutId = window.setTimeout(() => {
-      markSessionExpired();
+      const expireIfUnchanged = () => {
+        if (typeof sessionRef.current.expiresAt === 'number' && sessionRef.current.expiresAt <= Date.now()) markSessionExpired();
+      };
+      // Input just before the deadline may already be renewing the same session.
+      if (activityRenewalRef.current) void activityRenewalRef.current.finally(expireIfUnchanged);
+      else expireIfUnchanged();
     }, remainingMs);
     return () => window.clearTimeout(timeoutId);
   }, [dialog.open, markSessionExpired, session.expiresAt, session.role]);

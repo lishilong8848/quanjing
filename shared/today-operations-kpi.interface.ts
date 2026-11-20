@@ -24,6 +24,7 @@ export interface TodayOperationsKpiBuildingMetricHistoryPeriod {
   rows: Array<{
     building: TodayOperationsKpiBuilding;
     value: number;
+    comparisonValue?: number;
   }>;
 }
 

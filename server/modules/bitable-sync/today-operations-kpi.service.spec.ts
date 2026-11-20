@@ -1,6 +1,8 @@
 jest.mock('../../common/feishu/bitable-direct-read', () => ({
   ...jest.requireActual('../../common/feishu/bitable-direct-read'),
   fetchBitableRecords: jest.fn(),
+  getTenantAccessToken: jest.fn().mockResolvedValue('fixture-token'),
+  invalidateBitableRecordCache: jest.fn(),
   readLatestPersistedBitableRecordSnapshot: jest.fn(),
   resolveBitableAppToken: jest.fn(),
 }));
@@ -12,6 +14,9 @@ jest.mock('../../common/feishu/leave-approval-source', () => ({
 }));
 
 import type { HttpService } from '@nestjs/axios';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { BitableRecordItem } from '../../common/feishu/bitable-direct-read';
 import {
   fetchBitableRecords,
@@ -26,6 +31,8 @@ import {
   SYSTEM_LEAVE_APPROVAL_VERIFIED_FIELD,
 } from '../../common/feishu/leave-approval-source';
 import { TodayOperationsKpiService } from './today-operations-kpi.service';
+import { applyPatrolFacilityCorrection, DAILY_ENERGY_CATEGORIES, readPatrolFacilityCorrections } from './patrol-facility-corrections';
+import { mapMonthlyEnergy, mapMonthlyWater } from './monthly-operations-resources.model';
 
 const mockedFetch = jest.mocked(fetchBitableRecords);
 const mockedPersistedSnapshot = jest.mocked(
@@ -260,6 +267,89 @@ describe('TodayOperationsKpiService', () => {
     jest.useRealTimers();
   });
 
+  it.each(['already-corrected', 'lost-write-receipt', 'partial-retry', 'duplicate', 'missing-category'])('handles %s for the whole building day', async (caseName) => {
+    const directory = await mkdtemp(join(tmpdir(), 'nt-facility-test-'));
+    const original = process.env.DUTY_DAILY_REPORT_STATE_DIR;
+    process.env.DUTY_DAILY_REPORT_STATE_DIR = directory;
+    const date = '2026-11-19', prior = '2026-11-18';
+    const timestamp = (day: string) => Date.parse(`${day}T00:00:00+08:00`);
+    const pueField = 'PUE（数值）', numberField = '数值（3位小数点）-可编辑';
+    const summary = (id: string, day: string, category: string, raw: number, metric: number, pue: number) => record(id, {
+      日期: timestamp(day), 楼栋: 'A楼', 类型: '总览指标', 汇总分类: category, PUE: formulaNumber(raw),
+      [pueField]: pue, [numberField]: metric,
+      ...(category === '总用电量' ? { 总用电量数值: metric } : {}),
+    });
+    const same = caseName === 'already-corrected';
+    const table = [
+      summary('today-pue', date, 'PUE', 0.056, same ? 1.125 : 0.056, same ? 1.125 : 0.056),
+      summary('today-power', date, '总用电量', 0.056, same ? 250933.6 : 249300, same ? 1.125 : 0.056),
+      summary('prior-pue', prior, 'PUE', 0.073, 1.125, 1.125),
+      summary('prior-power', prior, '总用电量', 0.073, 250933.6, 1.125),
+      summary('earlier', '2026-11-17', 'PUE', 1.129, 1.129, 1.129),
+      ...(caseName === 'duplicate' ? [summary('duplicate', date, 'PUE', 0.056, 0.056, 0.056)] : []),
+      ...DAILY_ENERGY_CATEGORIES.slice(2).flatMap((category, index) => [
+        summary(`prior-extra-${index}`, prior, category, 0.073, 100, 1.125),
+        ...(caseName === 'missing-category' && index === 0 ? [] : [summary(`today-extra-${index}`, date, category, 0.056, 100, 1.125)]),
+      ]),
+    ];
+    const power = [record('power-current', { 日期: timestamp(date), 楼栋: 'A楼', 项目: '变压器总进线', 用电量: 248512 }),
+      record('power-prior', { 日期: timestamp(prior), 楼栋: 'A楼', 项目: '变压器总进线', 用电量: 250688 })];
+    const water = [record('water-current', { 执行日期: timestamp(date), 楼栋: 'A楼', 类型: '水耗', 频次: '日', 当日耗水总量: 310, '当日耗水总量（实际）': 310 }),
+      record('water-prior', { 执行日期: timestamp(prior), 楼栋: 'A楼', 类型: '水耗', 频次: '日', 当日耗水总量: 334, '当日耗水总量（实际）': 334, 东区耗水量: 100, 西区耗水量: 234, WUE: 1.25 })];
+    const outside = record('outside', { ...table[0].fields, 楼栋: 'B楼' });
+    mockedFetch.mockImplementation(async (_http, { tableId }) => tableId === 'tblf1YG2l2BDqcjV' ? power : tableId === 'tblz4TkZqrUJB90y' ? water : [...table, outside]);
+    const post = jest.fn(async (_url: string, { records }: { records: Array<{ record_id: string; fields: Record<string, unknown> }> }) => {
+      const writes = caseName === 'partial-retry' && post.mock.calls.length === 1 ? records.slice(0, 1) : records;
+      for (const update of writes) Object.assign(table.find((row) => row.record_id === update.record_id)!.fields!, update.fields);
+      throw new Error('lost response');
+    });
+    const service = new TodayOperationsKpiService({ axiosRef: { post } } as unknown as HttpService);
+    const correct = () => service.correctPatrolFacility(date, 'A楼', 0.056);
+    try {
+      if (caseName === 'duplicate' || caseName === 'missing-category') {
+        await expect(correct()).rejects.toThrow();
+        expect(post).not.toHaveBeenCalled();
+        expect((await readPatrolFacilityCorrections(date, date)).size).toBe(0);
+        return;
+      }
+      if (caseName === 'partial-retry') {
+        await expect(correct()).rejects.toThrow('未全部核实');
+        expect((await readPatrolFacilityCorrections(date, date)).size).toBe(0);
+      }
+      await expect(correct()).resolves.toBe(1.125);
+      await expect(correct()).resolves.toBe(1.125);
+      expect(post).toHaveBeenCalledTimes(same ? 0 : caseName === 'partial-retry' ? 2 : 1);
+      if (!same) {
+        const [url, data] = post.mock.calls[0];
+        expect(url).toMatch(/\/records\/batch_update$/);
+        expect(data.records.map((row) => row.record_id)).toEqual(['today-pue', 'today-power']);
+        expect(data.records[1].fields).toEqual({ [numberField]: 250933.6, [pueField]: 1.125, 总用电量数值: 250933.6 });
+      }
+      const saved = await readPatrolFacilityCorrections(date, date);
+      expect(saved.get(`${date}:A楼`)).toMatchObject({ pue: 1.125, electricity: 250688, water: { 当日耗水总量: 334, 东区耗水量: 100, 西区耗水量: 234, WUE: 1.25 } });
+      expect(Object.keys(saved.get(`${date}:A楼`)!.energy)).toHaveLength(8);
+      expect(applyPatrolFacilityCorrection(power, 'electricity', saved)[0].fields?.['用电量']).toBe(250688);
+      const correctedWater = applyPatrolFacilityCorrection(water, 'water', saved);
+      expect(correctedWater[0].fields?.['当日耗水总量（实际）']).toBe(334);
+      expect(mapMonthlyWater(correctedWater, date, date).find((row) => row.building === 'A楼'))
+        .toMatchObject({ water: 334, waterEast: 100, waterWest: 234, wue: 1.25 });
+      const correctedEnergy = applyPatrolFacilityCorrection(table, 'energy', saved);
+      expect(mapMonthlyEnergy(correctedEnergy, date, date).find((row) => row.building === 'A楼'))
+        .toMatchObject({ pue: 1.125, total: 250933.6, it: 100, cooling: 100, terminal: 100, auxiliary: 100 });
+      const laterRecord = record('later-record', { ...table[1].fields, '数值（3位小数点）': 42 });
+      expect(applyPatrolFacilityCorrection([laterRecord], 'energy', saved)[0]).toBe(laterRecord);
+      expect(table[0].fields?.['PUE']).toEqual(formulaNumber(0.056));
+      expect(outside.fields?.[pueField]).toBe(same ? 1.125 : 0.056);
+      table[1].fields![numberField] = 7;
+      await expect(correct()).rejects.toThrow('已修正的整栋日报发生变化');
+      expect(post).toHaveBeenCalledTimes(same ? 0 : caseName === 'partial-retry' ? 2 : 1);
+    } finally {
+      if (original === undefined) delete process.env.DUTY_DAILY_REPORT_STATE_DIR;
+      else process.env.DUTY_DAILY_REPORT_STATE_DIR = original;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('keeps four complete periods for anomaly scans when today already has data', async () => {
     const dateFields: Record<string, string> = {
       tblqSskJvBnx9UJj: '日期',
@@ -300,6 +390,19 @@ describe('TodayOperationsKpiService', () => {
     const result = await service.getKpisForAnomalyScan('2026-07-19');
 
     expect(result.metrics.safeOperationDays.date).toBe('2026-07-19');
+  });
+
+  it('displays the corrected PUE while retaining the measured value for the patrol scan', async () => {
+    mockedFetch.mockImplementation(async (_http, { tableId }) => sourceRecords[tableId].map((item) =>
+      tableId === 'tblqSskJvBnx9UJj' && item.fields?.['楼栋'] === 'A楼'
+        ? { ...item, fields: { ...item.fields, PUE: formulaNumber(0.056), 'PUE（数值）': 1.125 } }
+        : item,
+    ));
+    const service = new TodayOperationsKpiService(httpService);
+    const page = await service.getKpis();
+    const scan = await service.getKpisForAnomalyScan('2026-07-20');
+    expect(page.details.buildingMetrics.averagePue.history[0].rows[0]).toEqual({ building: 'A楼', value: 1.125 });
+    expect(scan.details.buildingMetrics.averagePue.history[0].rows[0]).toEqual({ building: 'A楼', value: 0.056, comparisonValue: 1.125 });
   });
 
   it('maps all six registered sources using the latest two complete business dates', async () => {

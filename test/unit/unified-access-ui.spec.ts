@@ -1,10 +1,34 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import * as ts from 'typescript';
 
 function readSource(path: string): string {
   const absolutePath = resolve(path);
   expect(existsSync(absolutePath)).toBe(true);
   return readFileSync(absolutePath, 'utf8');
+}
+
+/** Inspect nesting, so adding an independent signed-ticket route does not move the business guard. */
+function routeTopology(source: string) {
+  const file = ts.createSourceFile('app.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const routes: Array<{ path?: string; element?: string; ancestors: string[] }> = [];
+  const visit = (node: ts.Node, ancestors: string[]) => {
+    if ((ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) &&
+      (ts.isJsxElement(node) ? node.openingElement.tagName : node.tagName).getText(file) === 'Route') {
+      const opening = ts.isJsxElement(node) ? node.openingElement : node;
+      const attributes = opening.attributes.properties.filter(ts.isJsxAttribute);
+      const pathAttribute = attributes.find(item => item.name.getText(file) === 'path')?.initializer;
+      const elementAttribute = attributes.find(item => item.name.getText(file) === 'element')?.initializer;
+      const expression = elementAttribute && ts.isJsxExpression(elementAttribute) ? elementAttribute.expression : undefined;
+      const element = expression && ts.isJsxSelfClosingElement(expression) ? expression.tagName.getText(file) : undefined;
+      routes.push({ path: pathAttribute && ts.isStringLiteral(pathAttribute) ? pathAttribute.text : undefined, element, ancestors });
+      if (ts.isJsxElement(node)) node.children.forEach(child => visit(child, element ? [...ancestors, element] : ancestors));
+      return;
+    }
+    ts.forEachChild(node, child => visit(child, ancestors));
+  };
+  visit(file, []);
+  return routes;
 }
 
 describe('unified access frontend integration', () => {
@@ -67,12 +91,15 @@ describe('unified access frontend integration', () => {
 
     expect(appSource).toContain('<Route element={<RouteAccessGuard />}>');
     expect(appSource).toContain('<Route element={<GlobalAppShell />}>');
-    expect(
-      appSource.indexOf('<Route element={<RouteAccessGuard />}>'),
-    ).toBeLessThan(appSource.indexOf('<Route element={<GlobalAppShell />}>'));
-    expect(
-      appSource.indexOf('<Route element={<GlobalAppShell />}>'),
-    ).toBeLessThan(appSource.indexOf('<Route element={<Layout />}>'));
+    const routes = routeTopology(appSource);
+    for (const path of ['/monthly-schedule', '/system-configuration', '/personal-center', '/calendar-embed']) {
+      expect(routes.find(route => route.path === path)?.ancestors).toEqual(expect.arrayContaining(['RouteAccessGuard', 'GlobalAppShell']));
+    }
+    const publicTicketPaths = ['*', '/overtime-confirmation', '/purchase-lifecycle-attachment', '/purchase-lifecycle-payment-upload'];
+    expect(routes.filter(route => route.path && !route.ancestors.includes('RouteAccessGuard')).map(route => route.path).sort())
+      .toEqual(publicTicketPaths.sort());
+    expect(routes.find(route => route.path === '*')?.element).toBe('NotFound');
+    expect(routes.find(route => route.element === 'Layout')?.ancestors).toEqual(expect.arrayContaining(['RouteAccessGuard', 'GlobalAppShell']));
     expect(guardSource).toContain('canAccessPage(role, location.pathname, pagePaths)');
     expect(guardSource).toContain('requestLogin');
     expect(guardSource).toContain('window.setTimeout');
@@ -248,7 +275,12 @@ describe('unified access frontend integration', () => {
     expect(layoutSource).not.toContain('function DesktopUtilityNav');
     expect(layoutSource).not.toContain('function MobileBottomNav');
     expect(layoutSource).not.toContain("title: '人员修正'");
-    expect(appSource.match(/<GlobalAppShell \/>/g)).toHaveLength(1);
+    // Signed attachment pages and guarded business pages are distinct route branches;
+    // each branch gets one shell, so a rendered page still has a single navigation.
+    const shells = routeTopology(appSource).filter(route => route.element === 'GlobalAppShell');
+    expect(shells).toHaveLength(2);
+    expect(shells.filter(route => route.ancestors.includes('RouteAccessGuard'))).toHaveLength(1);
+    expect(shells.every(route => !route.ancestors.includes('GlobalAppShell'))).toBe(true);
     expect(appSource).not.toContain('<PageSwitcher');
     expect(appSource).toContain(
       '<Route index element={<Navigate to="/nantong-base" replace />} />',
@@ -323,7 +355,7 @@ describe('unified access frontend integration', () => {
       '!canAccessPage(nextSession.role, dialog.requiredPath)',
     );
     expect(providerSource).toContain('resetKey={dialog.requestKey}');
-    expect(providerSource).toContain('[open, resetKey]');
+    expect(providerSource).toContain('[open, resetKey, initialMethod]');
   });
 
   it('keeps a newer login dialog intact when an older login request settles', () => {
@@ -462,7 +494,7 @@ describe('unified access frontend integration', () => {
     }
   });
 
-  it('keeps the submitted login draft stable throughout the close animation', () => {
+  it('retains login drafts during submission and clears credentials only when the dialog context changes', () => {
     const providerSource = readSource('client/src/access/AccessProvider.tsx');
     const dialogStart = providerSource.indexOf('function AccessLoginDialog(');
     const dialogEnd = providerSource.indexOf(
@@ -471,17 +503,23 @@ describe('unified access frontend integration', () => {
     );
     const dialogSource = providerSource.slice(dialogStart, dialogEnd);
     const resetEffect = dialogSource.match(
-      /React\.useEffect\(\(\) => \{[\s\S]*?\}, \[open, resetKey\]\);/,
+      /React\.useEffect\(\(\) => \{[\s\S]*?\}, \[open, resetKey, initialMethod\]\);/,
     )?.[0];
 
     expect(dialogStart).toBeGreaterThan(-1);
     expect(dialogEnd).toBeGreaterThan(dialogStart);
     expect(resetEffect).toBeDefined();
-    expect(resetEffect).toContain('if (!open) return;');
     expect(resetEffect).toContain("setPassword('');");
+    expect(resetEffect).toContain("setEmployeeName('');");
+    expect(resetEffect).toContain('setShowPassword(false);');
+    expect(resetEffect).not.toContain('isSubmitting');
+    expect(resetEffect).not.toContain('error');
     expect(providerSource).toContain('key={dialog.requestKey}');
     expect(dialogSource).toContain("React.useState('')");
     expect(dialogSource).toContain('if (!open) return null;');
+    const submitSource = dialogSource.slice(dialogSource.indexOf('onSubmit={(event)'), dialogSource.indexOf('void onSubmit('));
+    expect(submitSource).toContain('event.preventDefault()');
+    expect(submitSource).not.toContain("setPassword('')");
   });
 
   it('invalidates the shared session after protected API authorization errors', () => {
@@ -531,8 +569,9 @@ describe('unified access frontend integration', () => {
     const guardSource = readSource('client/src/access/RouteAccessGuard.tsx');
 
     expect(guardSource).toContain(
-      'const allowed =\n    controlledScreenshotRequest || createOnlyAllowed || canAccessPage(role, location.pathname, pagePaths);',
+      'const allowed =\n    personalCenterAllowed || controlledScreenshotRequest || createOnlyAllowed || canAccessPage(role, location.pathname, pagePaths);',
     );
+    expect(guardSource).toContain("const personalCenterAllowed = authenticated && location.pathname.toLowerCase().replace(/\\/+$/, '') === '/personal-center';");
     expect(guardSource).toContain('const createOnlyAllowed = canAccessCreateOnlyPage(access, location.pathname);');
     expect(guardSource).toContain('if (allowed) {');
     expect(guardSource).toContain('isLoading ||');
@@ -579,7 +618,10 @@ describe('unified access frontend integration', () => {
 
     expect(requestStart).toBeGreaterThan(-1);
     expect(requestEnd).toBeGreaterThan(requestStart);
-    expect(requestSource).toContain('setDialog({');
+    expect(requestSource).toContain('const nextDialog: LoginDialogState = {');
+    expect(requestSource).toContain('loginDialogRef.current = nextDialog;');
+    expect(requestSource).toContain('setDialog(nextDialog);');
+    expect(requestSource.indexOf('loginDialogRef.current = nextDialog')).toBeLessThan(requestSource.indexOf('setDialog(nextDialog)'));
     expect(requestSource).toContain('open: true');
   });
 
@@ -649,8 +691,9 @@ describe('unified access frontend integration', () => {
     expect(appSource).not.toContain('fixed bottom-4 left-4');
     expect(navigationSource.match(/<GlobalUserControl/g)).toHaveLength(1);
     expect(navigationSource).toContain(
-      'hidden min-w-0 flex-1 items-center justify-center gap-0.5 xl:flex',
+      'hidden min-w-0 items-center justify-start gap-0.5 xl:ml-4 xl:flex',
     );
+    expect(navigationSource).toContain('ml-auto hidden shrink-0 items-center gap-2 xl:flex');
     expect(navigationSource).toContain('xl:hidden');
   });
 
@@ -808,7 +851,7 @@ describe('unified access frontend integration', () => {
     expect(providerSource).toContain('if (requiresFeishuIdentityRef.current) void retrySession();');
     expect(providerSource).toContain('else void refreshSession(true);');
     expect(guardSource.indexOf('if (isConfirmingIdentity || (')).toBeLessThan(guardSource.indexOf('if (allowed) return <Outlet'));
-    expect(guardSource).toContain('if (access.impersonation || isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;');
+    expect(guardSource).toContain('if (access.impersonation || access.isLoginDialogOpen || isConfirmingIdentity || sessionError || authenticated || dismissedLoginPath === location.pathname) return;');
     const errorStart = guardSource.indexOf('if (sessionError) {');
     expect(errorStart).toBeGreaterThan(-1);
     expect(errorStart).toBeLessThan(guardSource.indexOf('if (allowed) return <Outlet'));

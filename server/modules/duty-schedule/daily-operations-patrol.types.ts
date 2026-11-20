@@ -1,4 +1,4 @@
-import type { TodayOperationsKpiBuildingMetricHistoryPeriod } from '../../../shared/today-operations-kpi.interface';
+import type { TodayOperationsKpiBuilding, TodayOperationsKpiBuildingMetricHistoryPeriod } from '../../../shared/today-operations-kpi.interface';
 
 export type DailyOperationsPatrolCheckKey =
   | 'facility'
@@ -18,6 +18,13 @@ export interface DailyOperationsPatrolIssue {
   detail: string;
   date: string;
   severity: 'warning' | 'unavailable';
+  facilityBuilding?: TodayOperationsKpiBuilding;
+  pueCorrection?: {
+    building: TodayOperationsKpiBuilding;
+    rawValue: number;
+    resultNote?: string;
+    inspectionNote?: string;
+  };
 }
 export interface DailyOperationsPatrolCheckResult {
   key: DailyOperationsPatrolCheckKey;

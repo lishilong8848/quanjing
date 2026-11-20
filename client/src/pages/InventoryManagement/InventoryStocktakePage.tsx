@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  Download,
   Loader2,
   RefreshCw,
   ListRestart,
@@ -38,6 +39,7 @@ import {
   searchStocktakePeople,
   completeStocktake,
   getStocktakeOverview,
+  getStocktakeExport,
   getStocktakeSheet,
   generateStocktake,
   getStocktakeSync,
@@ -102,6 +104,14 @@ export default function InventoryStocktakePage({
     'loading' | 'ready' | 'submitting' | 'error'
   >('loading');
   const [error, setError] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState<{ error: boolean; text: string } | null>(null);
+  const exportLock = useRef(false);
+  const exportMounted = useRef(true);
+  useEffect(() => {
+    exportMounted.current = true;
+    return () => { exportMounted.current = false; };
+  }, []);
   const [generation, setGeneration] = useState<StocktakeGeneration | null>(
     null,
   );
@@ -149,6 +159,7 @@ export default function InventoryStocktakePage({
   const syncSelection = useRef('');
   const cacheKey = `${scope}:${month}:${building}`;
   syncSelection.current = cacheKey;
+  useEffect(() => setExportFeedback(null), [cacheKey]);
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -496,6 +507,35 @@ export default function InventoryStocktakePage({
     busy.size > 0 ||
     phase === 'submitting' ||
     generationRequest === 'submitting';
+  const canExport = Boolean(
+    sheet && sheet.month === month && sheet.building === building && sheet.scope === scope &&
+    sheet.lines.length && allowedBuildings.includes(building) &&
+    canUseStocktakeLines(principal, 'read', sheet.lines) &&
+    canUseStocktakeLines(principal, 'export', sheet.lines),
+  );
+  async function exportSheet() {
+    if (!canExport || !sheet || exportLock.current || navigationDisabled || phase === 'loading') return;
+    exportLock.current = true;
+    setExporting(true);
+    setExportFeedback(null);
+    const selectedKey = cacheKey;
+    try {
+      const [snapshot, { downloadStocktakeExport }] = await Promise.all([
+        getStocktakeExport(month, building, scope), import('./inventory-stocktake.export'),
+      ]);
+      if (!exportMounted.current || syncSelection.current !== selectedKey) return;
+      if (!snapshot || snapshot.month !== month || snapshot.building !== building || snapshot.scope !== scope)
+        throw new Error('导出清单与所选月份或楼栋不一致，请刷新后重试');
+      const count = downloadStocktakeExport(snapshot);
+      setExportFeedback({ error: false, text: `已生成 ${building}${scopeLabel}表格，共 ${count} 条记录` });
+    } catch (caught) {
+      if (exportMounted.current && syncSelection.current === selectedKey)
+        setExportFeedback({ error: true, text: `导出失败：${stocktakeError(caught)}` });
+    } finally {
+      exportLock.current = false;
+      if (exportMounted.current) setExporting(false);
+    }
+  }
   const generating =
     generation?.month === month &&
     (generation.status === 'queued' || generation.status === 'running');
@@ -579,6 +619,16 @@ export default function InventoryStocktakePage({
                 )}
               </div>
               <div className="stocktake-command-actions">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!canExport || exporting || navigationDisabled || phase === 'loading'}
+                  onClick={() => void exportSheet()}
+                  title="导出当前楼栋全部已保存记录，不受筛选和分页影响"
+                >
+                  {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {exporting ? '导出中…' : `导出${building}全部记录`}
+                </Button>
                 <StocktakeMonthPicker
                   label="盘点月份"
                   month={month}
@@ -706,6 +756,11 @@ export default function InventoryStocktakePage({
                   查看进度
                 </Button>
               )}
+            </div>
+          )}
+          {exportFeedback && (
+            <div className={exportFeedback.error ? 'stocktake-error' : 'stocktake-generation'} role={exportFeedback.error ? 'alert' : 'status'}>
+              {exportFeedback.text}
             </div>
           )}
           {error && (

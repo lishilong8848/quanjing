@@ -9,7 +9,7 @@ import hvac from '../../shared/hvac-thresholds.seed.json';
 import weakCurrent from '../../shared/weak-current-thresholds.seed.json';
 import { buildThresholdComparisonGroups } from '../../client/src/pages/ThresholdManagement/comparison-groups';
 
-test('弱电先按告警类型，再按收敛名称合并展示各档真实条件与等级', () => {
+test('弱电先按收敛名称，再按告警类型合并展示各档真实条件与等级', () => {
   const all = weakCurrent.records as ThresholdRecord[];
   const flattened = [...new Set(all.map((r) => r.device))].flatMap((device) => {
     const groups = buildThresholdComparisonGroups(all.filter((r) => r.device === device));
@@ -51,10 +51,35 @@ test('弱电按数据自动发现任意告警类型，缺少类型另列待核�
     { ...original, id: 'new-b', source: null, section: '状态不一致', parameter: '开关状态' },
     { ...original, id: 'new-c', source: null, section: '通信异常', parameter: '模块离线' },
   ]);
-  expect(rows.map((r) => [matrixSectionLabel(r), r.parameter])).toEqual([
-    ['通信异常', '控制器离线'], ['通信异常', '模块离线'], ['状态不一致', '开关状态'],
-    ['不正常值', original.parameter], ['待核对', '电源状态'],
+  expect(rows.map((r) => [matrixSectionLabel(r), r.section])).toEqual([
+    ['控制器离线', '通信异常'], ['电源状态', '待核对'], ['开关状态', '状态不一致'],
+    ['模块离线', '通信异常'], [original.parameter, '不正常值'],
   ]);
+});
+
+test('同一收敛名称的过高、过低及其它类型相邻，各类型的多档等级仍逐条保留', () => {
+  const original = (weakCurrent.records as ThresholdRecord[]).find((r) => r.device === 'ATS')!;
+  const record = (id: string, parameter: string, section: string, level: string): ThresholdRecord => ({
+    ...original, id, parameter, section, source: null, note: `告警等级：${level}`, value: id,
+  });
+  const source = [
+    record('voltage-high', 'ATS_线电压', '过高报警', '严重'),
+    record('current-high', 'ATS_线电流', '过高报警', '重要'),
+    record('voltage-low', 'ATS_线电压', '过低报警', '预警'),
+    record('voltage-high-minor', 'ATS_线电压', '过高报警', '次要'),
+    record('current-abnormal', 'ATS_线电流', '不正常值', '紧急'),
+    record('voltage-unknown', 'ATS_线电压', '', '等级待核对'),
+  ];
+  const { rows } = buildThresholdMatrix(source);
+  expect(rows.map((row) => [matrixSectionLabel(row), row.section, weakCurrentAlarmLevel(Object.values(row.cells)[0])])).toEqual([
+    ['ATS_线电压', '过高告警', '严重'],
+    ['ATS_线电压', '过高告警', '次要'],
+    ['ATS_线电压', '过低告警', '预警'],
+    ['ATS_线电压', '待核对', '等级待核对'],
+    ['ATS_线电流', '过高告警', '重要'],
+    ['ATS_线电流', '不正常值', '紧急'],
+  ]);
+  expect(rows.flatMap((row) => Object.values(row.cells)).map((row) => row.id).sort()).toEqual(source.map((row) => row.id).sort());
 });
 
 test('变频器清单显示共同设备类型，保留五栋楼和全部设定值', () => {

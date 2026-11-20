@@ -42,6 +42,7 @@ import { IMPERSONATION_ACTOR_COOKIE, IMPERSONATION_ACTOR_HOST_COOKIE } from './a
 
 import { AccessLoginNamesService } from './access-login-names.service';
 import type { AccessLoginNamesResponse } from '../../../shared/access-login-names.interface';
+import type { AccessSessionActivityRequest } from '../../../shared/access-session-activity.interface';
 
 const LEGACY_PURCHASE_COOKIE_NAME = 'purchase_application_user_session';
 const FEISHU_STATE_COOKIE_NAME = 'vnet_feishu_oauth_state';
@@ -180,6 +181,39 @@ export class UnifiedAccessController {
   private clearImpersonationOwner(response: Response, request: Request): void {
     if (!readStrictCookie(request.headers.cookie, IMPERSONATION_ACTOR_COOKIE).present && !readStrictCookie(request.headers.cookie, IMPERSONATION_ACTOR_HOST_COOKIE).present) return;
     clearAccessCookie(response, request, IMPERSONATION_ACTOR_COOKIE, IMPERSONATION_ACTOR_HOST_COOKIE);
+  }
+  @PublicAccess()
+  @Post('session/renew')
+  renewSession(
+    @Body() body: AccessSessionActivityRequest,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): AccessSessionResponse {
+    response.setHeader('Cache-Control', 'private, no-store');
+    this.assertIdentityOrigin(request);
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).length !== 1 || !Object.hasOwn(body, 'principalFingerprint') ||
+      typeof body.principalFingerprint !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.principalFingerprint)) {
+      throw new BadRequestException('登录续期请求格式不正确');
+    }
+    const now = Date.now();
+    const cookie = readAccessCookie(request.headers.cookie, this.access, now);
+    const current = this.access.readSessionIdentity(cookie.value, now);
+    if (!current.expiresAt || current.expiresAt <= now || !current.principalFingerprint ||
+      !current.principal.accountId || !secureStringEquals(current.principalFingerprint, body.principalFingerprint)) {
+      throw new UnauthorizedException('登录状态已变化，请重新确认身份');
+    }
+    if (current.principal.impersonation || current.principal.requiresPasswordChange) {
+      throw new ForbiddenException('当前登录状态不支持续期');
+    }
+    const renewed = this.access.renew(cookie.value, now);
+    if (!renewed || !secureStringEquals(renewed.principalFingerprint, current.principalFingerprint) ||
+      renewed.principal.accountId !== current.principal.accountId || renewed.principal.impersonation) {
+      throw new UnauthorizedException('登录状态已变化，请重新确认身份');
+    }
+    const result = this.toSessionResponse(renewed.principal, renewed.expiresAt, renewed.principalFingerprint);
+    writeAccessCookie(response, request, this.access.cookieName, renewed, now);
+    return result;
   }
   @PublicAccess()
   @Get('session')

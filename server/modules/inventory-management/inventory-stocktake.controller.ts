@@ -84,6 +84,15 @@ export class InventoryStocktakeController {
     return this.service.get(month, building, identity(req).principal, scope);
   }
   @ProfessionalScoped()
+  @Get('export') exportSheet(
+    @Req() req: StocktakeRequest,
+    @Query('month') month: string,
+    @Query('building') building: WarehouseBuilding,
+    @Query('scope') scope?: StocktakeScope,
+  ) {
+    return this.service.get(month, building, identity(req).principal, scope);
+  }
+  @ProfessionalScoped()
   @Post('start') start(
     @Req() req: StocktakeRequest,
     @Body() body: StocktakeWriteRequest,

@@ -1,4 +1,5 @@
 import { StocktakeDraftJournal, stocktakeDraftJournalIdentity } from './stocktake-draft-journal';
+import { InventoryLedgerDeleteAction } from './InventoryLedgerDeleteAction';
 import { InventoryItemPhotoPreview, InventoryItemPhotoThumbnail, type InventoryItemPhotoGallery } from './InventoryItemPhotos';
 import { businessBuildingsForAction, hasBusinessPermissionSomewhere, isProfessionalBusinessPrincipal } from '@shared/business-permissions';
 import { accessBuildings } from '@shared/building-access';
@@ -614,6 +615,21 @@ export default function InventoryManagementPage() {
             onReset={resetFilters}
             onPageChange={setPage}
             onRetry={() => void loadItems(false, true)}
+            onDeleted={(id) => {
+              itemsRequestRef.current++;
+              inventoryItemReads.invalidate();
+              inventoryDashboardReads.invalidate();
+              setItemsLoading(false); setItemsRefreshing(false);
+              setItemsResult(previous => {
+                const value = previous.value;
+                if (!value?.items.some(item => item.recordId === id)) return previous;
+                const total = Math.max(0, value.total - 1);
+                return { ...previous, value: { ...value, total,
+                  items: value.items.filter(item => item.recordId !== id),
+                  totalPages: Math.max(1, Math.ceil(total / (value.pageSize || 50))),
+                } };
+              });
+            }}
           />
         )}
 
@@ -895,6 +911,7 @@ interface InventoryLedgerProps {
   onReset: () => void;
   onPageChange: (page: number) => void;
   onRetry: () => void;
+  onDeleted: (id: string) => void;
 }
 
 function InventoryLedger(props: InventoryLedgerProps) {
@@ -1025,7 +1042,7 @@ function InventoryLedger(props: InventoryLedgerProps) {
             正在查询库存台账
           </div>
         ) : props.items.items.length ? (
-          <InventoryTable items={props.items.items} />
+          <InventoryTable items={props.items.items} onDeleted={props.onDeleted} />
         ) : props.error && !props.hasResult ? null : (
           <EmptyState
             title="暂无匹配的库存记录"
@@ -1069,8 +1086,14 @@ function InventoryLedger(props: InventoryLedgerProps) {
   );
 }
 
-function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
+function InventoryTable({ items, onDeleted: notifyDeleted }: { items: InventoryManagementItem[]; onDeleted: (id: string) => void }) {
   const [gallery, setGallery] = useState<InventoryItemPhotoGallery | null>(null);
+  const [deleted, setDeleted] = useState<Set<string>>(new Set());
+  const visibleItems = items.filter(item => !deleted.has(item.recordId));
+  const onDeleted = useCallback((id: string) => {
+    setDeleted(previous => new Set([...previous, id]));
+    notifyDeleted(id);
+  }, [notifyDeleted]);
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -1085,10 +1108,11 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
               <th className="px-4 py-3 text-right">年度频次</th>
               <th className="px-4 py-3 text-right">库存价值</th>
               <th className="px-5 py-3">状态</th>
+              <th scope="col" className="px-4 py-3">删除</th>
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
+            {visibleItems.map((item) => (
               <tr
                 key={item.recordId}
                 className="border-t border-slate-100 transition hover:bg-blue-50/40"
@@ -1141,13 +1165,14 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
                 <td className="px-5 py-3.5">
                   <InventoryRiskBadges item={item} />
                 </td>
+                <td className="px-4 py-3.5 whitespace-nowrap"><InventoryLedgerDeleteAction item={item} onDeleted={onDeleted} /></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div className="grid gap-3 p-4 md:hidden">
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <article
             key={item.recordId}
             className="min-w-0 rounded-xl border border-[#d8e5f7] bg-white p-4"
@@ -1179,6 +1204,7 @@ function InventoryTable({ items }: { items: InventoryManagementItem[] }) {
                 {item.building} · {item.location || '库位待配置'}
               </span>
               <InventoryRiskBadges item={item} />
+              <InventoryLedgerDeleteAction item={item} onDeleted={onDeleted} />
             </div>
           </article>
         ))}
