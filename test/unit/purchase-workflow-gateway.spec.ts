@@ -464,7 +464,9 @@ describe('PurchaseWorkflowGateway', () => {
     ).toThrow('采购申请人字段冲突');
   });
 
-  it('maps and sanitizes up to three online purchase links', () => {
+  it('keeps long online links for ordering and preserves the legacy approval context', () => {
+    const prefix = 'https://item.example.com/1?sku=17&signature=';
+    const longLink = prefix.padEnd(608, 'a');
     const mapped = mapExecutionRecord({
       record_id: 'rec_execution_links',
       fields: {
@@ -478,7 +480,7 @@ describe('PurchaseWorkflowGateway', () => {
           { url: 'https://detail.tmall.com/item.htm?id=123456' },
           { url: 'https://item.jd.com/100000000001.html' },
         ],
-        线上链接3: 'http://example.com/not-allowed',
+        线上链接3: ['http://example.com/not-allowed', 'https:/malformed', { link: longLink }],
       },
     });
 
@@ -486,6 +488,7 @@ describe('PurchaseWorkflowGateway', () => {
       'https://item.jd.com/100000000001.html',
       'https://detail.tmall.com/item.htm?id=123456',
     ]);
+    expect(mapped.purchaseOrderLinks).toEqual([...mapped.purchaseLinks!, longLink]);
   });
 
   it('falls back to program completion fields and the H-building legacy field', () => {

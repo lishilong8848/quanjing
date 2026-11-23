@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
+import type { PurchaseMethod } from '../../../shared/purchase-application.interface';
 import { normalizePurchaseComparisonBatchEvidence, normalizePurchaseComparisonCardEvidence, withPurchaseComparisonCardEvidence, type PurchaseComparisonCardEvidence } from './purchase-comparison-card-evidence';
-import { isBuildingSelfPurchaseAllowed } from './purchase-procurement-method-policy';
+import { isBuildingSelfPurchaseAllowed, normalizeRequestedPurchaseMethod } from './purchase-procurement-method-policy';
 
 const BATCH_ID_PATTERN = /^[A-Za-z0-9_-]{8,160}$/u;
 const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/u;
@@ -119,12 +120,17 @@ export interface PurchaseManagerBatchApprovalResolution {
   processedAt: string | number | Date | null;
 }
 
+type PurchaseManagerBatchApprovalCardView = PurchaseManagerBatchApprovalCardInput & {
+  // Display-only metadata from the batch, separate from its serialized callback context.
+  requestedPurchaseMethod?: PurchaseMethod;
+};
+
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
 const DISPLAY_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const DISPLAY_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/u;
 
 export function buildPurchaseManagerBatchApprovalCard(
-  inputValue: PurchaseManagerBatchApprovalCardInput,
+  inputValue: PurchaseManagerBatchApprovalCardView,
   options: { errorMessage?: string } = {},
 ): Record<string, unknown> {
   const input = canonicalizeCardInput(inputValue);
@@ -165,7 +171,7 @@ export function buildPurchaseManagerBatchApprovalCard(
 }
 
 export function buildPurchaseManagerBatchRejectEditorCard(
-  inputValue: PurchaseManagerBatchApprovalCardInput,
+  inputValue: PurchaseManagerBatchApprovalCardView,
   selectedRecordIdValue: string,
   options: { rejectionReason?: string; errorMessage?: string } = {},
 ): Record<string, unknown> {
@@ -236,7 +242,7 @@ export function buildPurchaseManagerBatchRejectEditorCard(
 }
 
 export function buildPurchaseManagerBatchPendingCard(
-  inputValue: PurchaseManagerBatchApprovalCardInput,
+  inputValue: PurchaseManagerBatchApprovalCardView,
 ): Record<string, unknown> {
   const input = canonicalizeCardInput(inputValue);
   return cardShell('yellow', '采购审批同步中', '同步中', 'yellow', [
@@ -249,7 +255,7 @@ export function buildPurchaseManagerBatchPendingCard(
   ], input);
 }
 
-export function buildPurchaseManagerBatchHandoverCard(inputValue: PurchaseManagerBatchApprovalCardInput): Record<string, unknown> {
+export function buildPurchaseManagerBatchHandoverCard(inputValue: PurchaseManagerBatchApprovalCardView): Record<string, unknown> {
   const input = canonicalizeCardInput(inputValue);
   return cardShell('orange', '采购审批已转交', '已转交', 'orange', [
     summaryBlock(input), statusSummary('未办结事项已转交，本卡不再办理'),
@@ -258,7 +264,7 @@ export function buildPurchaseManagerBatchHandoverCard(inputValue: PurchaseManage
 }
 
 export function buildResolvedPurchaseManagerBatchApprovalCard(
-  inputValue: PurchaseManagerBatchApprovalCardInput,
+  inputValue: PurchaseManagerBatchApprovalCardView,
   resolution: PurchaseManagerBatchApprovalResolution,
 ): Record<string, unknown> {
   const input = canonicalizeCardInput(inputValue);
@@ -374,7 +380,7 @@ function shanghaiDateParts(
 }
 
 export function buildPurchaseManagerBatchManualReconciliationCard(
-  inputValue: PurchaseManagerBatchApprovalCardInput,
+  inputValue: PurchaseManagerBatchApprovalCardView,
   message = '部分物品状态无法自动确认，请联系管理员核对。',
 ): Record<string, unknown> {
   const input = canonicalizeCardInput(inputValue);
@@ -488,10 +494,11 @@ function expandComparisonEvidence(value: unknown): PurchaseComparisonCardEvidenc
   });
 }
 
-function canonicalizeCardInput(value: PurchaseManagerBatchApprovalCardInput): PurchaseManagerBatchApprovalCardInput {
-  return value?.comparisonEvidence !== undefined
+function canonicalizeCardInput(value: PurchaseManagerBatchApprovalCardView): PurchaseManagerBatchApprovalCardView {
+  const input = value?.comparisonEvidence !== undefined
     ? parsePurchaseManagerBatchApprovalCardContext(serializePurchaseManagerBatchApprovalCardContext(value))
     : canonicalizeInput(value);
+  return { ...input, requestedPurchaseMethod: normalizeRequestedPurchaseMethod(value.requestedPurchaseMethod) };
 }
 
 function canonicalizeInput(
@@ -624,11 +631,14 @@ function cardShell(
 }
 
 function summaryBlock(
-  input: PurchaseManagerBatchApprovalCardInput,
+  input: PurchaseManagerBatchApprovalCardView,
 ): Record<string, unknown> {
   return resultBlock([
     ['申请人', input.requesterName, BUSINESS_TEXT_LIMIT],
     ['楼栋', input.building, 40],
+    ...(input.requestedPurchaseMethod
+      ? [['申请采购类别', input.requestedPurchaseMethod, 40] as const]
+      : []),
     [
       '申请采购方式',
       [...new Set(input.items.map((item) => item.procurementForm || '未填写'))].join(' / '),

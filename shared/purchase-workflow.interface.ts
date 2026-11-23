@@ -61,6 +61,7 @@ export interface PurchaseWorkflowRecord {
   procurementForm?: '三方比价' | '单一采购';
   singleReason?: string;
   purchaseLinks?: string[];
+  purchaseOrderLinks?: string[];
   rejectionReason?: string;
   requestedQuantity: number;
   unit?: string;

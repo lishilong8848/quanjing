@@ -1,3 +1,4 @@
+import { normalizePurchaseCardLink } from './purchase-card-links';
 import {
   parsePurchaseBatchFulfillmentCommandContext,
   serializePurchaseBatchFulfillmentCommandContext,
@@ -51,7 +52,8 @@ import {
   type PurchaseManagerBatchItemStatus,
 } from './purchase-manager-batch-approval-card';
 import { PURCHASE_MANAGER_LEGACY_INVALID_CARD_POLICY_VERSION } from './purchase-manager-approval.fields';
-import { isBuildingSelfPurchaseAllowed } from './purchase-procurement-method-policy';
+import type { PurchaseMethod } from '../../../shared/purchase-application.interface';
+import { isBuildingSelfPurchaseAllowed, normalizeRequestedPurchaseMethod } from './purchase-procurement-method-policy';
 import { normalizeWarehouseInboundHandovers, normalizeWarehouseInboundHandoverInput, resolveWarehouseInboundRecipient, warehouseInboundHandoverFingerprint,
   type WarehouseInboundHandover, type WarehouseInboundHandoverInput } from './purchase-warehouse-handover';
 import { singleManagerCardVersion, singleManagerReceiptVersion, singleManagerAcceptedVersion, validSingleManagerHandover, type PurchaseSingleManagerHandover, type PurchaseSingleManagerHandoverInput } from './purchase-single-handover';
@@ -345,6 +347,7 @@ export type PurchaseManagerApprovalBatchState =
   | 'manual_reconciliation';
 
 export interface PurchaseManagerApprovalBatchItemEntry {
+  purchaseOrderLinks?: string[];
   decisionSource?: 'platform';
   executorHandover?: PurchaseExecutorHandover;
   authorityTarget?: PurchaseAuthorityTarget;
@@ -390,6 +393,7 @@ export interface PurchaseManagerApprovalBatchEntry {
   approvalBatchId: string;
   recipientOpenId: string;
   requesterOpenId: string;
+  requestedPurchaseMethod?: PurchaseMethod;
   recordIds: string[];
   items: PurchaseManagerApprovalBatchItemEntry[];
   state: PurchaseManagerApprovalBatchState;
@@ -511,6 +515,7 @@ export interface PurchaseManagerApprovalBatchRegistrationInput {
   approvalBatchId: string;
   recipientOpenId: string;
   requesterOpenId: string;
+  requestedPurchaseMethod?: PurchaseMethod;
   recordIds: string[];
   managers?: Array<{ openId: string; name: string }>;
 }
@@ -3500,10 +3505,12 @@ export class PurchaseWorkflowStore {
     claimToken: string,
     cardContext: string,
     now: Date | number = new Date(),
+    inferredRequestedPurchaseMethod?: PurchaseMethod,
+    purchaseOrderLinks?: ReadonlyMap<string, string[]>,
   ): Promise<PurchaseWorkflowNotificationEntry | null> {
     const canonicalContext = canonicalManagerBatchCardContext(cardContext);
     const claimCheckStarted = Date.now(), claimCheckNow = resolveNow(now).getTime();
-    return this.updateNotification(key, claimToken, (entry) => {
+    return this.updateNotification(key, claimToken, (entry, ledger) => {
       if (!Number.isFinite(Date.parse(entry.leaseUntil)) || Date.parse(entry.leaseUntil) <= claimCheckNow + Date.now() - claimCheckStarted) throw new ConflictException('采购批次审批发卡租约已过期，请重试原通知任务');
       if (
         entry.kind !== 'manager_batch_approval_requested' &&
@@ -3519,6 +3526,29 @@ export class PurchaseWorkflowStore {
       }
       if (entry.cardContext && entry.cardContext !== canonicalContext) {
         throw new ConflictException('采购批次审批卡上下文与首次发送不一致');
+      }
+      if (inferredRequestedPurchaseMethod && entry.kind === 'manager_batch_approval_requested') {
+        const context = parsePurchaseManagerBatchApprovalCardContext(canonicalContext);
+        const batch = ledger.managerApprovalBatches.find(row => row.approvalBatchId === context.approvalBatchId);
+        if (!batch || batch.requesterOpenId !== context.requesterOpenId ||
+            !sameStringArray(batch.recordIds, context.items.map(item => item.executionRecordId)) ||
+            !managerBatchDeliveries(batch).some(delivery => delivery.sourceNotificationKey === entry.key && !delivery.messageId) ||
+            (batch.requestedPurchaseMethod && batch.requestedPurchaseMethod !== inferredRequestedPurchaseMethod) ||
+            (!batch.requestedPurchaseMethod && batch.state !== 'awaiting_delivery')) {
+          throw new ConflictException('采购申请类别已变化，请重试原通知任务');
+        }
+        batch.requestedPurchaseMethod ??= inferredRequestedPurchaseMethod;
+      }
+      if (entry.kind === 'manager_batch_purchase_assigned' && purchaseOrderLinks?.size) {
+        const context = parsePurchaseManagerBatchApprovalCardContext(canonicalContext);
+        const batch = ledger.managerApprovalBatches.find(row => row.approvalBatchId === context.approvalBatchId);
+        for (const [recordId, links] of purchaseOrderLinks) {
+          const item = batch?.items.find(row => row.executionRecordId === recordId);
+          if (item?.status !== 'approved' || item.purchaserOpenId !== entry.recipientOpenId) {
+            throw new ConflictException('采购任务接收人已变化，请重试原通知任务');
+          }
+          item.purchaseOrderLinks = sanitizePurchaseOrderLinks(links);
+        }
       }
       const startedAt =
         entry.firstSendAttemptAt || resolveNow(now).toISOString();
@@ -8834,7 +8864,10 @@ function normalizeManagerApprovalBatchRegistration(
     throw new Error('Invalid manager approval recipients');
   }
   if (value.flowVersion !== undefined && value.flowVersion !== 'legacy' && value.flowVersion !== 'lifecycle_v1') throw new Error('Invalid manager approval flow version');
-  return { approvalBatchId, recipientOpenId, requesterOpenId, recordIds, ...(managers ? { managers } : {}), ...(value.flowVersion === undefined ? {} : { flowVersion: value.flowVersion }) };
+  const requestedPurchaseMethod = normalizeRequestedPurchaseMethod(value.requestedPurchaseMethod);
+  return { approvalBatchId, recipientOpenId, requesterOpenId, recordIds,
+    ...(requestedPurchaseMethod ? { requestedPurchaseMethod } : {}),
+    ...(managers ? { managers } : {}), ...(value.flowVersion === undefined ? {} : { flowVersion: value.flowVersion }) };
 }
 
 function normalizeLifecycleInitialRegistration(input: PurchaseManagerApprovalBatchRegistrationInput, value?: PurchaseLifecycleInitialRegistration): { appId: string; recipients: Array<{ openId: string; fullView: boolean }>; authorityTargets: Array<{ recordId: string; target: PurchaseAuthorityTarget }> } | null {
@@ -9527,6 +9560,12 @@ function sanitizeVersionedManagerApprovalBatch(value: unknown): PurchaseManagerA
   return batch;
 }
 
+function sanitizePurchaseOrderLinks(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const links = value.slice(0, 3).map(normalizePurchaseCardLink);
+  return [...new Set(links.filter((link): link is string => link !== null))];
+}
+
 function sanitizeManagerApprovalBatch(
   value: unknown,
 ): PurchaseManagerApprovalBatchEntry | null {
@@ -9537,6 +9576,7 @@ function sanitizeManagerApprovalBatch(
       approvalBatchId: String(value.approvalBatchId || ''),
       recipientOpenId: String(value.recipientOpenId || ''),
       requesterOpenId: String(value.requesterOpenId || ''),
+      requestedPurchaseMethod: normalizeRequestedPurchaseMethod(value.requestedPurchaseMethod),
       ...(value.flowVersion === undefined ? {} : { flowVersion: value.flowVersion as PurchaseManagerApprovalBatchRegistrationInput['flowVersion'] }),
       recordIds: Array.isArray(value.recordIds)
         ? value.recordIds.map((entry) => String(entry))
@@ -9584,6 +9624,9 @@ function sanitizeManagerApprovalBatch(
     }
     items.push({
       executionRecordId,
+      ...(rawItem.purchaseOrderLinks === undefined
+        ? {}
+        : { purchaseOrderLinks: sanitizePurchaseOrderLinks(rawItem.purchaseOrderLinks) }),
       ...(decisionSource === 'platform' ? { decisionSource: 'platform' as const } : {}),
       ...(rawItem.executorHandover === undefined ? {} : { executorHandover: normalizePurchaseExecutorHandover(rawItem.executorHandover) }),
       ...(rawItem.authorityTarget===undefined?{}:{authorityTarget:normalizePurchaseAuthorityTarget(rawItem.authorityTarget)}),

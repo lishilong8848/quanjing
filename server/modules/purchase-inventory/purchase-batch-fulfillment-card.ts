@@ -6,6 +6,7 @@ import {
   constants as zlibConstants,
 } from 'node:zlib';
 import { receiptMaterialRequirement } from './purchase-receipt-material-policy';
+import { normalizePurchaseCardLink } from './purchase-card-links';
 
 const OPEN_ID_PATTERN = /^ou_[A-Za-z0-9_-]{1,128}$/u;
 const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/u;
@@ -74,7 +75,7 @@ export function buildPurchaseBatchPurchaserCard(
   ).length;
   const processing = input.items.filter(item => item.orderState === 'processing').length;
   const manual = input.items.filter(item => item.orderState === 'manual_reconciliation').length;
-  return {
+  const buildCard = (compact: boolean) => ({
     schema: '2.0',
     config: { update_multi: true, enable_forward: false },
     header: {
@@ -125,16 +126,26 @@ export function buildPurchaseBatchPurchaserCard(
           ]
         : [
             summary(input),
-            ...input.items.flatMap((item, index) => [
+            ...input.items.flatMap((item, index) => {
+              const title = compact ? compactText(item.title, 40) : item.title;
+              const specification = compact ? compactText(item.specification, 40) : item.specification;
+              const quantity = compact ? compactText(item.quantity, 16) : item.quantity;
+              const unit = compact ? compactText(item.unit, 8) : item.unit;
+              const amount = compact && item.amount ? compactText(item.amount, 24) : item.amount;
+              return [
               { tag: 'hr' },
               markdown(
-                `**${index + 1}. ${escapeMarkdown(item.title)}**\n规格：${escapeMarkdown(item.specification)}\n申请数量：${escapeMarkdown(item.quantity)} ${escapeMarkdown(item.unit)}${
-                  item.amount
-                    ? `\n申请金额：¥${escapeMarkdown(item.amount)}`
+                `**${index + 1}. ${escapeMarkdown(title)}**\n规格：${escapeMarkdown(specification)}\n申请数量：${escapeMarkdown(quantity)} ${escapeMarkdown(unit)}${
+                  amount
+                    ? `\n申请金额：¥${escapeMarkdown(amount)}`
                     : ''
                 }`,
               ),
-              ...purchaseLinkButtons(item.purchaseLinks || []),
+              ...(compact
+                ? item.orderState === 'waiting' && item.purchaseLinks?.length
+                  ? [markdown('打开下单明细查看采购链接')]
+                  : []
+                : purchaseLinkButtons(item.purchaseLinks || [])),
               item.orderState === 'waiting'
                 ? callbackButton('填写下单结果', {
                     version: 4,
@@ -144,11 +155,17 @@ export function buildPurchaseBatchPurchaserCard(
                     approvalBatchId: input.approvalBatchId,
                     executionRecordId: item.executionRecordId,
                   })
-                : markdown(orderStateText(item)),
-            ]),
+                : markdown(orderStateText(item, unit)),
+              ];
+            }),
           ],
     },
-  };
+  });
+  const card = buildCard(false);
+  if (cardWithinLimits(card)) return card;
+  const compact = buildCard(true);
+  if (cardWithinLimits(compact)) return compact;
+  throw new BadRequestException('采购下单卡片内容超过飞书限制');
 }
 
 export function buildPurchaseBatchTransferredCard(input: { building: string; requestCode: string }): Record<string, unknown> {
@@ -488,14 +505,14 @@ export function buildPurchaseBatchReceiptCard(
     },
   };
   if (selected) {
-    if (receiptCardWithinLimits(card)) return card;
+    if (cardWithinLimits(card)) return card;
     throw new BadRequestException('采购签收卡片内容超出飞书限制');
   }
 
   const titleLimits = [TEXT_LIMIT, 160, 120, 80, 48, 24, 12, 1, 0];
   for (const titleLimit of titleLimits) {
     const compactCard = buildReceiptIndexCard(card, input, titleLimit);
-    if (receiptCardWithinLimits(compactCard)) return compactCard;
+    if (cardWithinLimits(compactCard)) return compactCard;
   }
   throw new BadRequestException('采购签收卡片内容超出飞书限制');
 }
@@ -531,7 +548,7 @@ function buildReceiptIndexCard(
   };
 }
 
-function receiptCardWithinLimits(card: Record<string, unknown>): boolean {
+function cardWithinLimits(card: Record<string, unknown>): boolean {
   const body = card.body as { elements?: unknown } | undefined;
   return (
     countCardElements(body?.elements) <= CARD_ELEMENT_LIMIT &&
@@ -696,12 +713,11 @@ function receiptIndexTitle(
   titleLimit = TEXT_LIMIT,
 ): Record<string, unknown> {
   return markdown(
-    `**${index}. ${escapeMarkdown(compactReceiptIndexTitle(item.title, titleLimit))}**`,
+    `**${index}. ${escapeMarkdown(titleLimit <= 0 ? '查看物品详情' : compactText(item.title, titleLimit))}**`,
   );
 }
 
-function compactReceiptIndexTitle(value: string, limit: number): string {
-  if (limit <= 0) return '查看物品详情';
+function compactText(value: string, limit: number): string {
   const codePoints = Array.from(value);
   if (codePoints.length <= limit) return value;
   if (limit === 1) return '…';
@@ -933,19 +949,8 @@ function canonicalPurchaseLinks(value: unknown): string[] {
   const links: string[] = [];
   const seen = new Set<string>();
   for (const candidate of value) {
-    if (typeof candidate !== 'string' || candidate.length > 600) {
-      throw new BadRequestException('采购链接无效');
-    }
-    let parsed: URL;
-    try {
-      parsed = new URL(candidate);
-    } catch {
-      throw new BadRequestException('采购链接无效');
-    }
-    if (parsed.protocol !== 'https:') {
-      throw new BadRequestException('采购链接必须使用 HTTPS');
-    }
-    const url = parsed.toString();
+    const url = normalizePurchaseCardLink(candidate);
+    if (!url) throw new BadRequestException('采购链接无效，需使用 HTTPS');
     if (seen.has(url)) continue;
     seen.add(url);
     links.push(url);
@@ -978,11 +983,11 @@ function markdown(content: string): Record<string, unknown> {
   return { tag: 'markdown', content };
 }
 
-function orderStateText(item: PurchaseBatchPurchaserCardItem): string {
+function orderStateText(item: PurchaseBatchPurchaserCardItem, unit: string): string {
   if (item.orderState === 'processing')
     return '<font color="grey">下单结果同步中</font>';
   if (item.orderState === 'completed') {
-    return `<font color="green">已下单 · ${item.actualQuantity ?? '-'} ${escapeMarkdown(item.unit)} · ¥${(item.actualAmount ?? 0).toFixed(2)}</font>`;
+    return `<font color="green">已下单 · ${item.actualQuantity ?? '-'} ${escapeMarkdown(unit)} · ¥${(item.actualAmount ?? 0).toFixed(2)}</font>`;
   }
   return '<font color="orange">同步结果需人工核对</font>';
 }

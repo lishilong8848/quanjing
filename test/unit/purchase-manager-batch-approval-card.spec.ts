@@ -84,6 +84,20 @@ function callbackValues(card: unknown): JsonObject[] {
 }
 
 describe('purchase manager batch approval Card 2.0', () => {
+  it.each(['综合采购', '需求自采（楼内）'] as const)('shows the applicant selection %s separately from the comparison form', (requestedPurchaseMethod) => {
+    const view = {
+      ...baseInput,
+      requestedPurchaseMethod,
+      items: baseInput.items.map(item => ({ ...item, procurementForm: '三方比价' as const, singleReason: null })),
+    };
+    const text = collectContents(buildPurchaseManagerBatchApprovalCard(view)).join('\n');
+    expect(text).toContain(`**申请采购类别**\n${requestedPurchaseMethod}`);
+    expect(text).toContain('**申请采购方式**\n三方比价');
+    const serialized = serializePurchaseManagerBatchApprovalCardContext(view);
+    expect(parsePurchaseManagerBatchApprovalCardContext(serialized)).not.toHaveProperty('requestedPurchaseMethod');
+    expect(collectContents(buildPurchaseManagerBatchApprovalCard(baseInput)).join('\n')).not.toContain('申请采购类别');
+  });
+
   it('retains a trusted platform rejection with no invented reason and preserves legacy validation', () => {
     const input = structuredClone(baseInput);
     input.items[0] = { ...input.items[0], status:'rejected', choice:'reject', rejectionReason:'', decisionSource:'platform' };

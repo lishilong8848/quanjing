@@ -12,7 +12,8 @@ import { createHash } from 'node:crypto';
 import { canPerformBusinessAction } from '../../../shared/business-permissions';
 import { additionalReadonlyCardTargets } from '../../common/feishu-card-copy/targets';
 import { purchaseLifecycleAuthorizationFingerprint } from './purchase-lifecycle-authorization-fingerprint';
-import { isBuildingSelfPurchaseAllowed } from './purchase-procurement-method-policy';
+import type { PurchaseMethod } from '../../../shared/purchase-application.interface';
+import { isBuildingSelfPurchaseAllowed, normalizeRequestedPurchaseMethod } from './purchase-procurement-method-policy';
 import { parsePurchaseLifecycleFormAction } from './purchase-lifecycle-form';
 import { readEnv } from '../../common/config/external-services.config';
 import { lifecyclePaymentUploadSourceFingerprint } from './purchase-lifecycle-payment-upload-gateway';
@@ -306,6 +307,7 @@ export class PurchaseManagerApprovalService {
   async enqueueApprovalBatch(input: {
     approvalBatchId: string;
     requesterOpenId: string;
+    requestedPurchaseMethod?: PurchaseMethod;
     recordIds: string[];
     flowVersion?: 'legacy' | 'lifecycle_v1';
   }): Promise<void> {
@@ -363,6 +365,7 @@ export class PurchaseManagerApprovalService {
       const managerIds = new Set(eligibleManagers.map(manager => manager.openId));
       const recipients = [...eligibleManagers.map(manager => ({ openId: manager.openId, fullView: false })), ...observers.map(observer => ({ openId: observer.openId, fullView: true }))];
       await this.store.registerManagerApprovalBatch({ approvalBatchId: input.approvalBatchId, requesterOpenId: input.requesterOpenId,
+        requestedPurchaseMethod: input.requestedPurchaseMethod,
         recipientOpenId: eligibleManagers[0]!.openId, managers: eligibleManagers, recordIds: input.recordIds, flowVersion: 'lifecycle_v1' }, new Date(), {
         appId, recipients, authorityTargets, authorize: recipient => {
           assertFeishuBusinessIdentity(configuration, recipient.openId);
@@ -381,6 +384,7 @@ export class PurchaseManagerApprovalService {
     await this.store.registerManagerApprovalBatch({
       approvalBatchId: input.approvalBatchId,
       requesterOpenId: input.requesterOpenId,
+      requestedPurchaseMethod: input.requestedPurchaseMethod,
       recipientOpenId: managers[0]!.openId,
       managers,
       recordIds: input.recordIds,
@@ -2504,17 +2508,25 @@ export class PurchaseManagerApprovalService {
         }
       }
       const context = serializePurchaseManagerBatchApprovalCardContext(input);
+      const pendingMethods = !savedContext && !batch.requestedPurchaseMethod
+        ? records.map(record => normalizeRequestedPurchaseMethod(record.purchaseMethod))
+        : [];
+      const inferredMethod = pendingMethods.every(method => method === pendingMethods[0])
+        ? pendingMethods[0] : undefined;
+      const cardBatch = { ...batch, cardContext: context,
+        requestedPurchaseMethod: batch.requestedPurchaseMethod ?? inferredMethod };
       const preparedCard = batch.stageCardTransition
-        ? this.renderScopedManagerApprovalBatch({ ...batch, cardContext: context }, notification.recipientOpenId)
-        : batch.state === 'awaiting_delivery'
-        ? buildPurchaseManagerBatchApprovalCard(parsePurchaseManagerBatchApprovalCardContext(context))
-        : renderManagerApprovalBatch({ ...batch, cardContext: context });
+        ? this.renderScopedManagerApprovalBatch(cardBatch, notification.recipientOpenId)
+        : renderManagerApprovalBatch(batch.state === 'awaiting_delivery'
+          ? { ...cardBatch, state: 'active' }
+          : cardBatch);
       serializeInteractiveCard(preparedCard);
       const anchored = await this.store.markManagerApprovalBatchSendStarted(
         notification.key,
         notification.claimToken,
         context,
         this.currentNotificationTime(notification, new Date(now.getTime() + Date.now() - preparationStarted)),
+        inferredMethod,
       );
       if (!anchored) {
         throw new ConflictException('采购批次审批发卡任务不存在');
@@ -3180,11 +3192,21 @@ export class PurchaseManagerApprovalService {
             buildReceiptDeliverySnapshotFields(notification, now),
           );
         }
+        const purchaseOrderLinks = new Map<string, string[]>();
+        if (isPurchaseCard) {
+          for (const item of batch.items) {
+            if (item.status !== 'approved' || item.purchaserOpenId !== notification.recipientOpenId) continue;
+            const links = item.purchaseOrderLinks ?? fulfillmentRecords.get(item.executionRecordId)?.purchaseOrderLinks;
+            if (links?.length) purchaseOrderLinks.set(item.executionRecordId, links);
+          }
+        }
         const anchored = await this.store.markManagerApprovalBatchSendStarted(
           notification.key,
           notification.claimToken,
           batch.cardContext,
           this.currentNotificationTime(notification, now),
+          undefined,
+          purchaseOrderLinks,
         );
         if (!anchored) throw new ConflictException('采购履约发卡任务不存在');
         outboundAnchored = true;
@@ -3922,7 +3944,10 @@ function unavailableManagerStageCard(): Record<string, unknown> {
 function renderManagerApprovalBatch(
   batch: PurchaseManagerApprovalBatchEntry,
 ): Record<string, unknown> {
-  const input = parsePurchaseManagerBatchApprovalCardContext(batch.cardContext);
+  const input = {
+    ...parsePurchaseManagerBatchApprovalCardContext(batch.cardContext),
+    requestedPurchaseMethod: batch.requestedPurchaseMethod,
+  };
   if (batch.state === 'active') {
     return buildPurchaseManagerBatchApprovalCard(input);
   }
@@ -4119,6 +4144,8 @@ function toPurchaseBatchPurchaserCardInput(
     )
     .map((item) => {
       const record = records.get(item.executionRecordId);
+      const orderLinks = stateByRecordId.get(item.executionRecordId)?.purchaseOrderLinks
+        ?? record?.purchaseOrderLinks;
       const command = commandStates.get(item.executionRecordId);
       const commandStatus = command?.status;
       const orderCommand =
@@ -4150,9 +4177,9 @@ function toPurchaseBatchPurchaserCardInput(
         unit: item.unit,
         amount: item.amount,
         purchaseLinks: [
-          ...(item.purchaseLinks?.length
-            ? item.purchaseLinks
-            : record?.purchaseLinks || []),
+          ...(orderLinks?.length
+            ? orderLinks
+            : item.purchaseLinks?.length ? item.purchaseLinks : record?.purchaseLinks || []),
         ],
         orderState,
         actualQuantity:

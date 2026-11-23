@@ -4,6 +4,7 @@ import {
   buildPurchaseBatchReceiptCard,
   parsePurchaseBatchFulfillmentSubmitName,
   purchaseBatchFulfillmentSubmitName,
+  type PurchaseBatchPurchaserCardInput,
 } from '../../server/modules/purchase-inventory/purchase-batch-fulfillment-card';
 
 describe('purchase batch fulfillment cards', () => {
@@ -491,6 +492,38 @@ describe('purchase batch fulfillment cards', () => {
     ).toBe(true);
   });
 
+  it('preserves complete 608 and 610-character purchase links on the list and order form', () => {
+    const links = [608, 610].map((length) => purchaseUrl(length, String(length)));
+    expect(links.map((link) => link.length)).toEqual([608, 610]);
+    const input = purchaserLinkTestInput([links]);
+
+    expect(purchaserLinks(buildPurchaseBatchPurchaserCard(input))).toEqual(links);
+    expect(purchaserLinks(buildPurchaseBatchPurchaserCard(input, {
+      selectedRecordId: 'rec-1',
+    }))).toEqual(links);
+  });
+
+  it('keeps all twenty order actions available when links exceed the list card size limit', () => {
+    const links = Array.from({ length: 20 }, (_, index) =>
+      [1, 2, 3].map((slot) => purchaseUrl(4096, `${index}-${slot}`)),
+    );
+    const input = purchaserLinkTestInput(links);
+    const list = buildPurchaseBatchPurchaserCard(input);
+    const listText = JSON.stringify(list);
+
+    expect(Buffer.byteLength(listText, 'utf8')).toBeLessThanOrEqual(30 * 1024);
+    expect(collectFulfillmentActions(list)).toEqual(Array(20).fill('open_order'));
+    for (const item of input.items) {
+      expect(listText).toContain(`"executionRecordId":"${item.executionRecordId}"`);
+    }
+    expect(purchaserLinks(list)).toEqual([]);
+    expect(listText).toContain('打开下单明细查看采购链接');
+
+    const selected = buildPurchaseBatchPurchaserCard(input, { selectedRecordId: 'rec-20' });
+    expect(Buffer.byteLength(JSON.stringify(selected), 'utf8')).toBeLessThanOrEqual(30 * 1024);
+    expect(purchaserLinks(selected)).toEqual(links[19]);
+  });
+
   it('preserves explicit retry values without inventing initial order defaults', () => {
     const card = buildPurchaseBatchPurchaserCard(
       {
@@ -658,6 +691,46 @@ describe('purchase batch fulfillment cards', () => {
     expect(collectFulfillmentActions(card)).not.toContain('prepare_invoice');
   });
 });
+
+function purchaseUrl(length: number, sku: string): string {
+  const prefix = `https://example.com/item?sku=${sku}&coupon=save%2B10%25&params=`;
+  return prefix.padEnd(length, 'a');
+}
+
+function purchaserLinkTestInput(links: string[][]): PurchaseBatchPurchaserCardInput {
+  return {
+    approvalBatchId: 'purchase-application-task-long-links',
+    purchaserOpenId: 'ou_purchase_admin',
+    purchaserName: '采购管理员',
+    requesterName: '申请人',
+    building: 'H楼',
+    requestCode: 'CG000000-001',
+    expectedDeliveryAt: null,
+    items: links.map((purchaseLinks, index) => ({
+      executionRecordId: `rec-${index + 1}`,
+      title: '示例物品',
+      specification: '标准规格',
+      quantity: '1',
+      unit: '件',
+      amount: '10.00',
+      orderState: 'waiting',
+      actualQuantity: null,
+      actualAmount: null,
+      orderNote: '',
+      orderedAt: null,
+      purchaseLinks,
+    })),
+  };
+}
+
+function purchaserLinks(card: Record<string, unknown>): string[] {
+  const { elements } = card.body as {
+    elements: Array<{ behaviors?: Array<{ type: string; default_url: string }> }>;
+  };
+  return elements.flatMap(({ behaviors }) => (behaviors || [])
+    .filter(({ type }) => type === 'open_url')
+    .map(({ default_url }) => default_url));
+}
 
 function collectFulfillmentActions(value: unknown): string[] {
   if (Array.isArray(value)) {

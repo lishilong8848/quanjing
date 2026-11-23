@@ -261,6 +261,45 @@ describe('purchase manager batch approval service', () => {
     expect(firstEvent).toBe('receipt-card-sent');
   });
 
+  it.each([
+    ['需求自采', '需求自采（楼内）', '需求自采（楼内）'],
+    ['综合采购', '需求自采', undefined],
+    ['综合采购', '', undefined],
+  ] as const)('preserves a consistent legacy selection (%s, %s) across card views', async (first, second, expected) => {
+    const id = 'purchase-queued-category';
+    const records = new Map([
+      ['rec-queued-1', { ...record('rec-queued-1', '标签纸'), building: 'C楼', purchaseMethod: first }],
+      ['rec-queued-2', { ...record('rec-queued-2', '门牌'), building: 'C楼', purchaseMethod: second }],
+    ]);
+    const gateway = {
+      getExecutionRecordAsApp: jest.fn(async (recordId: string) => ({ ...records.get(recordId)! })),
+      updateExecutionRecordAsApp: jest.fn(async () => undefined),
+      sendInteractiveCard: jest.fn().mockResolvedValue('om_queued_category'),
+    };
+    const service = new PurchaseManagerApprovalService(gateway as never, store);
+    await service.enqueueApprovalBatch({ approvalBatchId: id, requesterOpenId: 'ou_requester', recordIds: [...records.keys()] });
+    await service.runAcceptedTasks(20, new Date('2099-09-08T02:00:01.000Z'));
+
+    expect(gateway.sendInteractiveCard).toHaveBeenCalledTimes(1);
+    const delivered = JSON.stringify(gateway.sendInteractiveCard.mock.calls[0]?.[1]);
+    const batch = await store.findManagerApprovalBatch(id);
+    expect(batch?.requestedPurchaseMethod).toBe(expected);
+    const opened = await service.handleManagerBatchCardAction({
+      kind: 'manager_batch_action', eventId: 'evt-queued-open', operatorOpenId: 'ou_manager',
+      messageId: 'om_queued_category', action: 'open_item_reject', approvalBatchId: id, executionRecordId: 'rec-queued-1',
+    });
+    const reopened = await service.handleManagerBatchCardAction({
+      kind: 'manager_batch_action', eventId: 'evt-queued-cancel', operatorOpenId: 'ou_manager',
+      messageId: 'om_queued_category', action: 'cancel_item_reject',
+    });
+    for (const card of [delivered, JSON.stringify(opened), JSON.stringify(reopened)]) {
+      if (expected) expect(card).toContain(`**申请采购类别**\\n${expected}`);
+      else expect(card).not.toContain('申请采购类别');
+    }
+    expect(gateway.getExecutionRecordAsApp).toHaveBeenCalledTimes(2);
+    expect(gateway.sendInteractiveCard).toHaveBeenCalledTimes(1);
+  });
+
   it('writes an accepted decision before refreshing the syncing card', async () => {
     let current = record('rec-fast-approval', '标签纸');
     const events: string[] = [];
@@ -1326,6 +1365,9 @@ describe('purchase manager batch approval service', () => {
   });
 
   it('sends one manager card, supports one item reject, then approves the remainder', async () => {
+    const prefix = 'https://item.example.com/123?sku=17&signature=';
+    const longLink = prefix.padEnd(610, 'a');
+    const shortLink = 'https://item.jd.com/100000000001.html';
     const records = new Map<string, PurchaseWorkflowRecord>([
       [
         'rec-1',
@@ -1341,9 +1383,8 @@ describe('purchase manager batch approval service', () => {
     records.set('rec-2', {
       ...records.get('rec-2')!,
       purchaseMethod: '需求自采',
-      ...({
-        purchaseLinks: ['https://item.jd.com/100000000001.html'],
-      } as Record<string, unknown>),
+      purchaseLinks: [shortLink],
+      purchaseOrderLinks: [shortLink, longLink],
     });
     const gateway = {
       getExecutionRecordAsApp: jest.fn(async (recordId: string) => ({
@@ -1461,6 +1502,7 @@ describe('purchase manager batch approval service', () => {
     await service.enqueueApprovalBatch({
       approvalBatchId: 'purchase-application-task-1',
       requesterOpenId: 'ou_requester',
+      requestedPurchaseMethod: '需求自采（楼内）',
       recordIds: ['rec-1', 'rec-2'],
     });
     await service.runPendingTasks(20, new Date('2099-09-08T02:00:01.000Z'));
@@ -1470,6 +1512,7 @@ describe('purchase manager batch approval service', () => {
       gateway.sendInteractiveCard.mock.calls[0]?.[1],
     );
     expect(approvalCard).toContain('门牌&#45;SPEC');
+    expect(approvalCard).toContain('**申请采购类别**\\n需求自采（楼内）');
     expect(approvalCard).toContain('单一采购原因');
     expect(approvalCard).toContain('原系统配件兼容，只能向原厂采购');
     expect(approvalCard).toContain('2026&#45;09&#45;08 10&#58;00');
@@ -1505,6 +1548,10 @@ describe('purchase manager batch approval service', () => {
       approvalBatchId: 'purchase-application-task-1',
     });
     await service.runPendingTasks(20, new Date('2099-09-08T02:00:03.000Z'));
+
+    const decided = await store.findManagerApprovalBatch('purchase-application-task-1');
+    expect(decided).toMatchObject({ requestedPurchaseMethod: '需求自采（楼内）',
+      items: [expect.objectContaining({ choice: 'reject' }), expect.objectContaining({ choice: 'comprehensive' })] });
 
     expect(gateway.updateExecutionRecordAsApp).toHaveBeenCalledTimes(4);
     expect(gateway.updateExecutionRecordAsApp).toHaveBeenCalledWith(
@@ -1585,12 +1632,12 @@ describe('purchase manager batch approval service', () => {
     expect(JSON.stringify(openOrder.card)).toContain(
       'purchase_batch_order_submit:purchase-application-task-1:rec-2',
     );
+    expect(JSON.stringify(openOrder.card)).toContain(`"default_url":"${longLink}"`);
     expect(gateway.getExecutionRecordAsApp).toHaveBeenCalledTimes(
       readsBeforeOpenOrder,
     );
-    expect(purchaserAssignmentCard).toContain(
-      'https://item.jd.com/100000000001.html',
-    );
+    expect(purchaserAssignmentCard).toContain(`"default_url":"${shortLink}"`);
+    expect(purchaserAssignmentCard).toContain(`"default_url":"${longLink}"`);
 
     await store.stagePurchaseBatchAttachments({
       approvalBatchId: 'purchase-application-task-1',

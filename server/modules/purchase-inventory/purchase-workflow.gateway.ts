@@ -35,6 +35,7 @@ import { readConfiguredCardMembers } from '../../common/access/access-configurat
 import { purchaseAuthorityTarget } from './purchase-authority-target';
 import type { PurchaseExecutorHandover } from './purchase-executor-handover';
 import { resolvePurchaseStage, normalizeMethod } from './purchase-workflow.rules';
+import { normalizePurchaseCardLink } from './purchase-card-links';
 import { PurchaseComparisonCardAssetsStore } from './purchase-comparison-card-assets.store';
 import { preparePurchaseComparisonCardEvidence } from './purchase-comparison-card-media';
 import { resolveLifecycleAttachmentFromRecord, validateLifecycleAttachmentBytes } from './purchase-lifecycle-attachment-media';
@@ -1809,6 +1810,7 @@ export function mapExecutionRecord(
           : undefined,
     singleReason: freeText(fields, ['单一原因']),
     purchaseLinks: purchaseLinks(fields),
+    purchaseOrderLinks: purchaseLinks(fields, true),
     rejectionReason: rawFreeText(fields, ['驳回原因']),
     requestedQuantity: number(fields, ['申请数量', '采购申请数量']) || 0,
     unit: text(fields, ['计数单位']),
@@ -2171,7 +2173,7 @@ function attachmentTokens(value: unknown): string[] {
   return unique(tokens);
 }
 
-function purchaseLinks(fields: Record<string, unknown>): string[] {
+function purchaseLinks(fields: Record<string, unknown>, forOrderCard = false): string[] {
   const values = [
     fields['线上链接（仅线上需填写）'],
     fields['线上链接2'],
@@ -2181,14 +2183,14 @@ function purchaseLinks(fields: Record<string, unknown>): string[] {
   const seen = new Set<string>();
   for (const value of values) {
     for (const candidate of purchaseLinkCandidates(value)) {
-      const normalized = candidate.trim();
-      if (
-        !/^https:\/\//iu.test(normalized) ||
-        normalized.length > 600 ||
-        seen.has(normalized)
-      ) {
-        continue;
-      }
+      const raw = candidate.trim();
+      // Existing approval contexts and action fingerprints use the historical representation.
+      const normalized = forOrderCard
+        ? normalizePurchaseCardLink(raw)
+        : /^https:\/\//iu.test(raw) && raw.length <= 600
+          ? raw
+          : null;
+      if (!normalized || seen.has(normalized)) continue;
       seen.add(normalized);
       links.push(normalized);
       if (links.length === 3) return links;

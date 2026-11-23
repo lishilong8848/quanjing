@@ -1996,6 +1996,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     expect(managerApprovalService.enqueueApprovalBatch).toHaveBeenCalledWith({
       approvalBatchId: accepted.taskId,
       requesterOpenId: request.shared.applicantOpenId,
+      requestedPurchaseMethod: request.shared.purchaseMethod,
       recordIds: ['rec-batch-1', 'rec-batch-2'],
     });
     const createdRecordBodies = httpService.axiosRef.post.mock.calls
@@ -2034,6 +2035,7 @@ describe('PurchaseApplicationService catalog reads', () => {
     expect(manager.enqueueApprovalBatch).toHaveBeenCalledWith({
       approvalBatchId: accepted.taskId,
       requesterOpenId: request.shared.applicantOpenId,
+      requestedPurchaseMethod: request.shared.purchaseMethod,
       recordIds: ['rec-flow-1', 'rec-flow-2'],
       flowVersion: 'lifecycle_v1',
     });

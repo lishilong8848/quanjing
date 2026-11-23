@@ -827,6 +827,7 @@ export class PurchaseApplicationService {
           await this.purchaseManagerApprovalService.enqueueApprovalBatch({
             approvalBatchId: taskId,
             requesterOpenId: batchRequesterOpenId,
+            requestedPurchaseMethod: request.shared.purchaseMethod,
             ...(entry.flowVersion === 'lifecycle_v1' ? { flowVersion: entry.flowVersion } : {}),
             recordIds: entry.task.result.created.map(
               (item) => item.executionRecordId || item.recordId,
