@@ -10,6 +10,17 @@ function nodes(value: any): any[] {
 const field = (key: string) => `leave_shift_substitute_${Buffer.from(key).toString('base64url')}`;
 const backupField = (selection = fixture().selection) => `leave_shift_backfill_${Buffer.from(JSON.stringify([selection.shiftKey, selection.substitutePersonRecordId, selection.originalPostSignature])).toString('base64url')}`;
 const event = (name: string, formValue: object) => ({ event_type: 'card.action.trigger', operator: { open_id: 'ou_supervisor' }, context: { open_message_id: 'om_test_two_level' }, action: { tag: 'button', name, form_value: formValue } });
+function clickGeneratedButton(button: any, formValue?: object) {
+  return {
+    ...event(button.name || '', {}),
+    action: {
+      tag: 'button',
+      ...(button.name ? { name: button.name } : {}),
+      ...(button.behaviors?.[0]?.value ? { value: button.behaviors[0].value } : {}),
+      ...(formValue !== undefined ? { form_value: formValue } : {}),
+    },
+  };
+}
 
 describe('two-level leave approval card contract', () => {
   it.each(['approval', 'adjustment'] as const)('keeps review navigation outside the %s form', (mode) => {
@@ -38,7 +49,15 @@ describe('two-level leave approval card contract', () => {
     const card = mode === 'approval' ? buildLeaveApprovalCard(reviewed) : buildLeaveSubstituteAdjustmentCard(reviewed, 0);
     expect(JSON.stringify(card)).not.toContain('选择原岗补位人员');
     const primarySelect = nodes(card).find(row => row.tag === 'select_static' && row.name.startsWith('leave_shift_substitute_'));
-    expect(primarySelect).toMatchObject({ required: true, initial_option: primary.personRecordId });
+    if (mode === 'approval') {
+      const final = nodes(card).find(row => row.behaviors?.[0]?.value?.action === 'approve_reviewed_substitution');
+      expect(primarySelect).toBeUndefined();
+      expect(parseLeaveLongConnectionCardAction(clickGeneratedButton(final))).toMatchObject({
+        kind: 'approval', shiftSelections: [{ shiftKey: data.selection.shiftKey, substitutePersonRecordId: primary.personRecordId }],
+      });
+    } else {
+      expect(primarySelect).toMatchObject({ required: true, initial_option: primary.personRecordId });
+    }
   });
 
   it('labels an on-duty first choice with its actual building and shift', () => {
@@ -56,6 +75,49 @@ describe('two-level leave approval card contract', () => {
     const data = fixture();
     const result = parseLeaveLongConnectionCardAction(event(`leave_substitute_review_submit:${data.application.recordId}:supervisor:1:g1:r1`, { [field(data.selection.shiftKey)]: primary.personRecordId }));
     expect(result).toMatchObject({ kind: 'view', view: 'substitute_review', shiftSelections: [{ shiftKey: data.selection.shiftKey, substitutePersonRecordId: primary.personRecordId }] });
+  });
+  it('confirms a reviewed off-duty substitute without a Feishu form value', () => {
+    const data = fixture();
+    const first = nodes(buildLeaveApprovalCard(data.cardContext)).find(row => row.form_action_type === 'submit');
+    const review = parseLeaveLongConnectionCardAction(clickGeneratedButton(first, {
+      [field(data.selection.shiftKey)]: backup.personRecordId,
+    }));
+    expect(review).toMatchObject({ kind: 'view', view: 'substitute_review' });
+    if (review.kind !== 'view') throw Error('Expected a substitute review');
+    const card = buildLeaveApprovalCard({ ...data.cardContext, substitutionReview: review.shiftSelections });
+    const submit = nodes(card).find(row => row.behaviors?.[0]?.value?.action === 'approve_reviewed_substitution');
+    expect(nodes(card).find(row => row.tag === 'form')).toBeUndefined();
+    const click = clickGeneratedButton(submit);
+    expect(parseLeaveLongConnectionCardAction(click)).toMatchObject({
+      kind: 'approval', action: 'approve',
+      shiftSelections: [{ shiftKey: data.selection.shiftKey, substitutePersonRecordId: backup.personRecordId }],
+    });
+    const incomplete = { ...click, action: { ...click.action, value: { ...click.action.value, reviewedSubstitutes: {} } } };
+    expect(() => parseLeaveLongConnectionCardAction(incomplete)).toThrow();
+  });
+  it('collects explicit primary and backup choices on reviewed on-duty approvals', () => {
+    const data = fixture();
+    const first = nodes(buildLeaveApprovalCard(data.cardContext)).find(row => row.form_action_type === 'submit');
+    const review = parseLeaveLongConnectionCardAction(clickGeneratedButton(first, {
+      [field(data.selection.shiftKey)]: primary.personRecordId,
+    }));
+    expect(review).toMatchObject({ kind: 'view', view: 'substitute_review' });
+    if (review.kind !== 'view') throw Error('Expected a substitute review');
+    const card = buildLeaveApprovalCard({ ...data.cardContext, substitutionReview: [data.selection] });
+    const submit = nodes(card).find(row => row.form_action_type === 'submit');
+    const primarySelect = nodes(card).find(row => row.tag === 'select_static' && row.name === field(data.selection.shiftKey));
+    const selector = nodes(card).find(row => row.placeholder?.content === '选择原岗补位人员');
+    expect(primarySelect).toMatchObject({ required: true, options: [{ value: primary.personRecordId }] });
+    expect(selector).toMatchObject({ required: true });
+    expect(primarySelect.initial_option).toBeUndefined();
+    expect(selector.initial_option).toBeUndefined();
+    expect(submit.behaviors).toBeUndefined();
+    expect(parseLeaveLongConnectionCardAction(clickGeneratedButton(submit, {
+      [primarySelect.name]: primary.personRecordId, [selector.name]: backup.personRecordId,
+    }))).toMatchObject({ kind: 'approval', action: 'approve', shiftSelections: [data.selection] });
+    expect(() => parseLeaveLongConnectionCardAction(clickGeneratedButton(submit, {
+      [selector.name]: backup.personRecordId,
+    }))).toThrow();
   });
   it('shows the full original-post interval and a required free-person backup selector in review', () => {
     const data = fixture();

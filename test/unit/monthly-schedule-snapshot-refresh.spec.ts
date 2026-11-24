@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ScheduleSnapshotRevisionResponse } from '../../shared/api.interface';
+import type {
+  createScheduleSnapshotRefreshCoordinator as createCoordinator,
+  ScheduleSnapshotRefreshCoordinator,
+} from '../../client/src/pages/MonthlySchedule/schedule-snapshot-refresh';
 
 jest.mock(
   '@lark-apaas/client-toolkit/logger',
@@ -29,19 +33,6 @@ type ResolveSnapshotRevision = (input: {
   currentGeneration: number;
 }) => SnapshotRevisionTransition;
 
-type SnapshotRefreshCoordinator = {
-  check: () => Promise<boolean>;
-  stop: () => void;
-};
-
-type CreateSnapshotRefreshCoordinator = (dependencies: {
-  readRevision: (
-    signal: AbortSignal,
-  ) => Promise<ScheduleSnapshotRevisionResponse>;
-  revalidate: (signal: AbortSignal) => Promise<boolean>;
-  onError: (error: unknown) => void;
-}) => SnapshotRefreshCoordinator;
-
 function loadResolveSnapshotRevision(): ResolveSnapshotRevision {
   return (
     require('../../client/src/pages/MonthlySchedule/schedule-snapshot-refresh') as {
@@ -50,16 +41,12 @@ function loadResolveSnapshotRevision(): ResolveSnapshotRevision {
   ).resolveScheduleSnapshotRevision;
 }
 
-function createSnapshotRefreshCoordinator(dependencies: {
-  readRevision: (
-    signal: AbortSignal,
-  ) => Promise<ScheduleSnapshotRevisionResponse>;
-  revalidate: (signal: AbortSignal) => Promise<boolean>;
-  onError: (error: unknown) => void;
-}): SnapshotRefreshCoordinator {
+function createSnapshotRefreshCoordinator(
+  dependencies: Parameters<typeof createCoordinator>[0],
+): ScheduleSnapshotRefreshCoordinator {
   const factory = (
     require('../../client/src/pages/MonthlySchedule/schedule-snapshot-refresh') as {
-      createScheduleSnapshotRefreshCoordinator?: CreateSnapshotRefreshCoordinator;
+      createScheduleSnapshotRefreshCoordinator?: typeof createCoordinator;
     }
   ).createScheduleSnapshotRefreshCoordinator;
   expect(typeof factory).toBe('function');
@@ -210,6 +197,30 @@ describe('monthly schedule snapshot revision transition', () => {
 });
 
 describe('monthly schedule snapshot refresh coordinator', () => {
+  it('uses the already displayed revision and discards a read superseded by a completed sync', async () => {
+    const originalRead = deferred<ScheduleSnapshotRevisionResponse>();
+    const readRevision = jest.fn<Promise<ScheduleSnapshotRevisionResponse>, [AbortSignal]>()
+      .mockReturnValueOnce(originalRead.promise)
+      .mockResolvedValueOnce(revision('current'))
+      .mockResolvedValueOnce(revision('newer'));
+    const revalidate = jest.fn().mockResolvedValue(true);
+    const onTokenChange = jest.fn();
+    const coordinator = createSnapshotRefreshCoordinator({
+      readRevision, revalidate, onTokenChange, onError: jest.fn(), initialToken: 'older',
+    });
+
+    const superseded = coordinator.check();
+    coordinator.recordApplied('current');
+    expect(readRevision.mock.calls[0][0].aborted).toBe(true);
+    originalRead.resolve(revision('older'));
+    await expect(superseded).resolves.toBe(false);
+    await expect(coordinator.check()).resolves.toBe(true);
+    expect(revalidate).not.toHaveBeenCalled();
+    await expect(coordinator.check()).resolves.toBe(true);
+    expect(revalidate).toHaveBeenCalledTimes(1);
+    expect(onTokenChange.mock.calls).toEqual([['current'], ['newer']]);
+  });
+
   it('deduplicates concurrent checks with the same promise and commits a baseline without revalidation', async () => {
     const pendingRevision = deferred<ScheduleSnapshotRevisionResponse>();
     const readRevision = jest
@@ -547,7 +558,7 @@ describe('MonthlySchedule local snapshot auto-refresh integration', () => {
       movementStart,
     );
     const mainStart = pageSource.indexOf(
-      'const MonthlySchedulePage',
+      'function MonthlySchedulePageContent(',
       engineersStart,
     );
     const movementSource = pageSource.slice(movementStart, engineersStart);
@@ -563,21 +574,13 @@ describe('MonthlySchedule local snapshot auto-refresh integration', () => {
     ).toHaveLength(3);
     expect(movementSource).toContain('localSnapshotRefreshToken: number;');
     expect(movementSource).toContain(
-      '[localSnapshotRefreshToken, onLoadStateChange, refreshToken, todayStr]',
+      '[localSnapshotRefreshToken, onLoadStateChange, readTodayLeaveStaff, todayStr]',
     );
     expect(engineersSource).toContain('localSnapshotRefreshToken,');
-    expect(movementSource).toContain(
-      'const forceRefresh = refreshToken > lastSuccessfulRefreshTokenRef.current;',
-    );
-    expect(engineersSource).toContain(
-      'const forceRefresh = canRefresh && refreshToken > lastSuccessfulRefreshTokenRef.current;',
-    );
-    expect(movementSource).not.toContain(
-      'const forceRefresh = localSnapshotRefreshToken',
-    );
-    expect(engineersSource).not.toContain(
-      'const forceRefresh = localSnapshotRefreshToken',
-    );
+    expect(movementSource).toContain('readTodayLeaveStaff(todayStr)');
+    expect(engineersSource).toContain('getLongWhiteDutyStaff(dateStr)');
+    expect(movementSource).not.toContain('forceRefresh');
+    expect(engineersSource).not.toContain('forceRefresh');
   });
 
   it('stops the coordinator so unmounted requests cannot refresh the page', () => {

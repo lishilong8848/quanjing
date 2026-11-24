@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { ForbiddenException } from '@nestjs/common';
+import { isTransientFeishuError } from '../../common/feishu/bitable-direct-read';
 import { LeaveApprovalCacheError } from '../../common/feishu/leave-approval-source';
 import type { DutyLocalSyncResult, DutyLocalSyncTaskResponse } from '../../../shared/duty-local-sync.interface';
 
@@ -22,8 +24,20 @@ export function describeDutyLocalSyncFailure(error: unknown): { kind: string; re
   if (message === '排班及审批快照尚未完整保存') {
     return { kind: 'approval_snapshot_unavailable', retryable: false, message: '排班或请休假数据尚未完整就绪，现有数据已保留，请稍后重试。' };
   }
-  if (message === '本地数据缓存保存失败，请稍后重试' || message === '排班本地快照核对失败') {
+  if (message === '本地数据缓存保存失败，请稍后重试' || message === '排班本地快照核对失败' ||
+    message === 'LOCAL_SYNC_SNAPSHOT_INVALID' || message === 'LOCAL_SYNC_SNAPSHOT_TOO_LARGE' ||
+    ['EACCES', 'EPERM', 'ENOSPC', 'EROFS'].includes((error as NodeJS.ErrnoException | undefined)?.code || '')) {
     return { kind: 'snapshot_unavailable', retryable: true, message: '本地排班数据保存或核对未完成，现有数据已保留，请稍后重试。' };
+  }
+  if (message === 'LOCAL_SYNC_RANGE_INVALID' || message.startsWith('同步来源分页')) {
+    return { kind: 'source_incomplete', retryable: true, message: '飞书返回的排班数据不完整或超出同步月份，已保留上次数据，请稍后重试。' };
+  }
+  const status = (error as { response?: { status?: number } } | undefined)?.response?.status;
+  if (error instanceof ForbiddenException || status === 401 || status === 403) {
+    return { kind: 'source_access_denied', retryable: false, message: '飞书排班数据读取权限暂不可用，已保留上次数据，请联系管理员核对。' };
+  }
+  if (isTransientFeishuError(error)) {
+    return { kind: 'source_unavailable', retryable: true, message: '读取飞书数据超时或暂时受限，已保留上次排班，请稍后重试。' };
   }
   return { kind: 'unknown', retryable: false, message: '数据同步未完成，现有数据已保留，请稍后重试。' };
 }

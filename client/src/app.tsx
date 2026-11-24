@@ -62,6 +62,7 @@ const OperationsKnowledgeBasePage = React.lazy(
 const MeetingManagementPage = React.lazy(
   () => import('./pages/MeetingManagement'),
 );
+const FilePublicationPage = React.lazy(() => import('./pages/FilePublication'));
 const PurchaseInventoryManagementPage = React.lazy(
   () => import('./pages/PurchaseInventoryManagement'),
 );
@@ -343,6 +344,7 @@ const RoutesComponent = () => {
                   path="/operations-kb/records/:recordId"
                   element={<OperationsKnowledgeBasePage />}
                 />
+                <Route path="/file-publication" element={<FilePublicationPage />} />
                 {/* 组织架构页面 */}
                 <Route path="/organization" element={<OrganizationPage />} />
                 {/* 值班人员修正页面 */}

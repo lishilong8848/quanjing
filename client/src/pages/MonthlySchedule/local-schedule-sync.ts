@@ -30,6 +30,7 @@ export function createLocalScheduleSyncController(ports: LocalSyncPorts) {
   const now = ports.now || Date.now;
   let state = { ...EMPTY_LOCAL_SYNC_STATE }, recovery: Recovery | undefined;
   let disposed = false, inFlight = false, timer: ReturnType<typeof setTimeout> | undefined, failures = 0;
+  let authorizationRequired = false;
   const controller = new AbortController();
   try {
     const value = JSON.parse(ports.storage?.getItem(key) || 'null') as Recovery | null;
@@ -43,10 +44,13 @@ export function createLocalScheduleSyncController(ports: LocalSyncPorts) {
   const clearTimer = () => { if (timer !== undefined) clearTimeout(timer); timer = undefined; };
   const schedule = () => {
     clearTimer();
-    if (disposed || failures >= 3 || !['running', 'unknown'].includes(state.phase)) return;
+    if (disposed || !recovery || authorizationRequired || ports.hidden?.() || !['running', 'unknown'].includes(state.phase)) return;
     const age = now() - Date.parse(recovery?.startedAt || '');
-    const delay = ports.hidden?.() ? 15_000 : failures || age > 60_000 ? 5_000 : 2_000;
-    timer = setTimeout(() => { timer = undefined; void checkStatus(); }, delay);
+    const delay = failures >= 3 ? 30_000 : failures || age > 60_000 ? 5_000 : 2_000;
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (!ports.hidden?.()) void checkStatus();
+    }, delay);
   };
   const refreshPage = async (invalidate: boolean) => {
     try {
@@ -71,7 +75,7 @@ export function createLocalScheduleSyncController(ports: LocalSyncPorts) {
       expected.requestId && task.requestId !== expected.requestId || expected.taskId && task.taskId !== expected.taskId) throw new Error('TASK_IDENTITY_MISMATCH');
     recovery = { version: 1, requestId: recovery?.requestId || task.requestId, taskId: task.taskId,
       startedAt: task.startedAt, ...(recovery?.appliedTaskId ? { appliedTaskId: recovery.appliedTaskId } : {}) };
-    persist(); failures = 0;
+    persist(); failures = 0; authorizationRequired = false;
     if (task.status === 'running') {
       update({ phase: 'running', task, refreshWarning: false, message: `后台同步中：${phaseLabels[task.phase] || '处理中'}。历史排班保留，可继续使用页面。` });
       return;
@@ -96,13 +100,14 @@ export function createLocalScheduleSyncController(ports: LocalSyncPorts) {
       update(discovering && !recovery ? { ...EMPTY_LOCAL_SYNC_STATE, busy: true } : { phase: 'missing', message: '原同步任务已无法查询，可能已过期或服务已重启。可使用原请求重新同步近三个月，历史数据保留。' });
     } else {
       failures++;
-      if (status === 401 || status === 403) failures = 3;
+      authorizationRequired = status === 401 || status === 403;
       const response = (error as { response?: { data?: { message?: unknown } | string } })?.response?.data;
       const csrf = status === 403 && /csrf/i.test(typeof response === 'string' ? response : String(response?.message || ''));
       update({ phase: 'unknown', message: status === 401 ? '登录状态已过期，请重新登录后查询同步进度。'
         : csrf ? '页面安全状态已过期，请刷新页面后查询同步进度。'
         : status === 403 ? '当前账号无法查询或发起同步，请确认权限。'
-          : '暂时无法确认同步进度，任务可能仍在后台执行。请继续查询，不会重复发起同步。' });
+          : recovery ? '暂时无法确认同步进度，任务可能仍在后台执行。页面会继续尝试核对原任务。'
+            : '暂时无法查询后台同步状态，可点击继续查询。' });
     }
   };
   const exclusive = async (operation: () => Promise<void>) => {
@@ -132,6 +137,7 @@ export function createLocalScheduleSyncController(ports: LocalSyncPorts) {
   }
   return {
     trigger, check: checkStatus, resume: checkStatus,
+    checkActive: () => recovery && !authorizationRequired && (state.phase === 'running' || state.phase === 'unknown') ? checkStatus() : undefined,
     refreshView: () => exclusive(async () => { if (state.phase === 'succeeded') await refreshPage(false); }),
     dispose: () => { disposed = true; clearTimer(); controller.abort(); },
   };

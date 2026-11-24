@@ -142,6 +142,24 @@ export class DutyLocalMonthSnapshots {
     return monthly && (!historical || monthly.sourceStartedAt >= (historical.sourceStartedAt ?? historical.fetchedAt)) ? monthly : historical;
   }
 
+  async readDisplayMonthRevisions(appToken: string, tableId: string, months: readonly string[], full: PersistedBitableRecordSnapshot | null, revision: string | null) {
+    const { months: snapshots } = await this.read(appToken, tableId);
+    const now = Date.now();
+    return months.map(month => {
+      const local = snapshots[month];
+      const preferred = preferDutyMonthSnapshot(full, local, revision);
+      const source = preferred || local;
+      if (!source) throw new Error('排班本地缓存暂不可用');
+      return {
+        month,
+        sourceStartedAt: source.sourceStartedAt ?? source.fetchedAt,
+        fetchedAt: source.fetchedAt,
+        revision,
+        stale: !preferred || source.expiresAt <= now,
+      };
+    });
+  }
+
   private async readHistory(appToken: string, tableId: string): Promise<PersistedBitableRecordSnapshot | null> {
     const file = this.file(appToken, tableId) + '.history.json';
     try {
@@ -210,8 +228,8 @@ export class DutyLocalMonthSnapshots {
     return preferred;
   }
   async publish(appToken: string, tableId: string, range: DutySyncRange, records: BitableRecordItem[], sourceStartedAt: number, invalidationToken: string | null, dateOf: (record: BitableRecordItem) => string | null, assertCurrent?: () => Promise<void>): Promise<number> {
-    const file = this.file(appToken, tableId), previous = this.writes.get(file) || Promise.resolve();
-    const operation = previous.catch(() => undefined).then(async () => {
+    const file = this.file(appToken, tableId);
+    return this.queueWrite(file, async () => {
       await assertCurrent?.();
       const current = await this.read(appToken, tableId);
       const state = { ...current, months: { ...current.months } };
@@ -235,24 +253,88 @@ export class DutyLocalMonthSnapshots {
         if (state.months[month]?.sourceStartedAt > sourceStartedAt) throw new Error('LOCAL_SYNC_NEWER_SNAPSHOT_EXISTS');
         state.months[month] = { records: rows, sourceStartedAt, invalidationToken, fetchedAt, expiresAt: fetchedAt + 4 * 60 * 60_000 };
       }
-      const bytes = JSON.stringify(state);
-      if (Buffer.byteLength(bytes) > MAX_BYTES) throw new Error('LOCAL_SYNC_SNAPSHOT_TOO_LARGE');
-      await mkdir(this.directory, { recursive: true });
-      const temporary = file + '.' + randomUUID() + '.tmp';
-      try {
-        const handle = await open(temporary, 'wx', 0o600);
-        try { await handle.writeFile(bytes, 'utf8'); await handle.sync(); }
-        finally { await handle.close(); }
-        await assertCurrent?.();
-        await rename(temporary, file);
-        if (this.cachedStore?.file === file) this.cachedStore = undefined;
-      }
-      finally { await rm(temporary, { force: true }); }
-      if (await readFile(file, 'utf8') !== bytes) throw new Error('LOCAL_SYNC_SNAPSHOT_NOT_PERSISTED');
+      await this.write(file, state, assertCurrent);
       return fetchedAt;
     });
+  }
+
+  /** A verified change to existing records does not renew the coverage or age of any month. */
+  async patchVerifiedRecords(
+    appToken: string,
+    tableId: string,
+    records: readonly BitableRecordItem[],
+    previousRevision: string | null,
+    nextRevision: string | null,
+    dateOf: (record: BitableRecordItem) => string | null,
+    assertCurrent: () => Promise<void>,
+  ): Promise<boolean> {
+    if (records.length === 0 || !nextRevision || previousRevision === nextRevision) return false;
+    const replacements = new Map<string, { record: BitableRecordItem; date: string }>();
+    for (const record of records) {
+      const id = record.record_id || record.id;
+      const date = dateOf(record);
+      if (!id || replacements.has(id) || !date || !/^\d{4}-\d{2}-\d{2}$/u.test(date)) return false;
+      replacements.set(id, { record, date });
+    }
+
+    const file = this.file(appToken, tableId);
+    return this.queueWrite(file, async () => {
+      await assertCurrent();
+      const current = await this.read(appToken, tableId);
+      const months = { ...current.months };
+      const replaced = new Set<string>();
+      const now = Date.now();
+      for (const [month, snapshot] of Object.entries(current.months)) {
+        if (snapshot.invalidationToken !== previousRevision || snapshot.expiresAt <= now) continue;
+        const rows: BitableRecordItem[] = [];
+        for (const existing of snapshot.records) {
+          const id = existing.record_id || existing.id || '';
+          const replacement = replacements.get(id);
+          if (!replacement) {
+            rows.push(existing);
+            continue;
+          }
+          const position = Object.hasOwn(current.positions, id) ? current.positions[id] : undefined;
+          if (replaced.has(id) || replacement.date.slice(0, 7) !== month || dateOf(existing) !== replacement.date ||
+              position?.month !== month || position.sourceStartedAt !== snapshot.sourceStartedAt ||
+              position.invalidationToken !== previousRevision) return false;
+          replaced.add(id);
+          rows.push(replacement.record);
+        }
+        months[month] = { ...snapshot, records: rows, invalidationToken: nextRevision };
+      }
+      if (replaced.size !== replacements.size) return false;
+      const positions = Object.fromEntries(Object.entries(current.positions).map(([id, position]) => [
+        id,
+        position.invalidationToken === previousRevision ? { ...position, invalidationToken: nextRevision } : position,
+      ]));
+      await this.write(file, { ...current, months, positions }, assertCurrent);
+      return true;
+    });
+  }
+
+  private async queueWrite<T>(file: string, write: () => Promise<T>): Promise<T> {
+    const previous = this.writes.get(file) || Promise.resolve();
+    const operation = previous.catch(() => undefined).then(write);
     this.writes.set(file, operation);
     try { return await operation; } finally { if (this.writes.get(file) === operation) this.writes.delete(file); }
+  }
+
+  private async write(file: string, state: Store, assertCurrent?: () => Promise<void>): Promise<void> {
+    const bytes = JSON.stringify(state);
+    if (Buffer.byteLength(bytes) > MAX_BYTES) throw new Error('LOCAL_SYNC_SNAPSHOT_TOO_LARGE');
+    await mkdir(this.directory, { recursive: true });
+    const temporary = file + '.' + randomUUID() + '.tmp';
+    try {
+      const handle = await open(temporary, 'wx', 0o600);
+      try { await handle.writeFile(bytes, 'utf8'); await handle.sync(); }
+      finally { await handle.close(); }
+      await assertCurrent?.();
+      await rename(temporary, file);
+      if (this.cachedStore?.file === file) this.cachedStore = undefined;
+    }
+    finally { await rm(temporary, { force: true }); }
+    if (await readFile(file, 'utf8') !== bytes) throw new Error('LOCAL_SYNC_SNAPSHOT_NOT_PERSISTED');
   }
 }
 

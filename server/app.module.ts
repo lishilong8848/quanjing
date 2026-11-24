@@ -6,6 +6,7 @@ import { GlobalExceptionFilter } from './common/filters/exception.filter';
 import { DutyScheduleModule } from './modules/duty-schedule/duty-schedule.module';
 import { BitableSyncModule } from './modules/bitable-sync/bitable-sync.module';
 import { OperationsKbModule } from './modules/operations-kb/operations-kb.module';
+import { FilePublicationModule } from './modules/file-publication/file-publication.module';
 import { AliMonthlyReportModule } from './modules/ali-monthly-report/ali-monthly-report.module';
 import { PurchaseInventoryModule } from './modules/purchase-inventory/purchase-inventory.module';
 import { InventoryManagementModule } from './modules/inventory-management/inventory-management.module';
@@ -37,6 +38,7 @@ import { MeetingManagementModule } from './modules/meeting-management/meeting.mo
     DutyScheduleModule,
     BitableSyncModule,
     OperationsKbModule,
+    FilePublicationModule,
     AliMonthlyReportModule,
     PurchaseInventoryModule,
     InventoryManagementModule,

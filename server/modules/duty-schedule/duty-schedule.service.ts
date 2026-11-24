@@ -24,6 +24,7 @@ import {
 } from '@lark-apaas/fullstack-nestjs-core';
 import { HttpService } from '@nestjs/axios';
 import { spawn } from 'child_process';
+import { isDeepStrictEqual } from 'node:util';
 import * as crypto from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import {
@@ -876,6 +877,12 @@ interface DutyProgramModifiedRefreshRecordsResult {
   finalValues: Map<string, string>;
 }
 
+interface VerifiedDutyScheduleRead {
+  records: BitableRecordItem[];
+  receipt: { sourceStartedAt: number; invalidationToken: string | null };
+  approval: LeaveApprovalSnapshot;
+}
+
 const CONSTRUCTION_FOLLOWUP_OPTIONAL_MISSING_FIELD_NAMES = [
   '是否完成',
   '是否缴纳保证金',
@@ -1540,6 +1547,8 @@ const SEALING_SOURCE_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const SEALING_SOURCE_RETRY_INTERVAL_MS = 30 * 1000;
 const SEALING_SOURCE_READ_TIMEOUT_MS = 8000;
 
+type SealingSourceSnapshot = PersistedBitableRecordSnapshot & { stale: boolean };
+
 @Injectable()
 export class DutyScheduleService {
   private readonly logger = new Logger(DutyScheduleService.name);
@@ -1557,16 +1566,8 @@ export class DutyScheduleService {
       schedules: MonthlySchedule[];
     }
   >();
-  private sealingSourceSnapshot:
-    | {
-        records: BitableRecordItem[];
-        expiresAt: number;
-        fetchedAt: number;
-        stale: boolean;
-      }
-    | undefined;
-  private sealingSourceRefreshRequest: Promise<BitableRecordItem[]> | null =
-    null;
+  private sealingSourceSnapshot?: SealingSourceSnapshot;
+  private sealingSourceRefreshRequest: Promise<SealingSourceSnapshot> | null = null;
   private readonly queuedConstructionFollowupSubmitTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -2215,7 +2216,7 @@ export class DutyScheduleService {
 
   private async fetchFeishuSealingRecords(
     forceRefresh = false,
-  ): Promise<BitableRecordItem[]> {
+  ): Promise<SealingSourceSnapshot> {
     if (!this.sealingSourceSnapshot) {
       try {
         const persisted = await readLatestPersistedBitableRecordSnapshot({
@@ -2245,13 +2246,17 @@ export class DutyScheduleService {
       this.sealingSourceSnapshot &&
       this.sealingSourceSnapshot.expiresAt > now
     ) {
-      return this.sealingSourceSnapshot.records;
+      return this.sealingSourceSnapshot;
     }
-    if (this.sealingSourceRefreshRequest) {
-      return this.waitForSealingSourceRefresh(this.sealingSourceRefreshRequest);
+    const request = this.sealingSourceRefreshRequest ?? this.refreshSealingSource();
+    if (!forceRefresh && this.sealingSourceSnapshot) {
+      return { ...this.sealingSourceSnapshot, stale: true };
     }
+    return this.waitForSealingSourceRefresh(request);
+  }
 
-    let request!: Promise<BitableRecordItem[]>;
+  private refreshSealingSource(): Promise<SealingSourceSnapshot> {
+    let request!: Promise<SealingSourceSnapshot>;
     request = (async () => {
       try {
         const appToken = await resolveBitableAppToken(
@@ -2268,22 +2273,21 @@ export class DutyScheduleService {
           strict: true,
           allowStale: false,
         });
-        this.sealingSourceSnapshot = {
+        const fetchedAt = Date.now();
+        return this.sealingSourceSnapshot = {
           records,
-          expiresAt: Date.now() + SEALING_SOURCE_SYNC_INTERVAL_MS,
-          fetchedAt: Date.now(),
+          expiresAt: fetchedAt + SEALING_SOURCE_SYNC_INTERVAL_MS,
+          fetchedAt,
           stale: false,
         };
-        return records;
       } catch (error) {
         if (this.sealingSourceSnapshot) {
           this.logger.warn('封网信息刷新失败，继续保留最近有效数据');
-          this.sealingSourceSnapshot = {
+          return this.sealingSourceSnapshot = {
             ...this.sealingSourceSnapshot,
             expiresAt: Date.now() + SEALING_SOURCE_RETRY_INTERVAL_MS,
             stale: true,
           };
-          return this.sealingSourceSnapshot.records;
         }
         throw error;
       }
@@ -2293,12 +2297,12 @@ export class DutyScheduleService {
       }
     });
     this.sealingSourceRefreshRequest = request;
-    return this.waitForSealingSourceRefresh(request);
+    return request;
   }
 
   private async waitForSealingSourceRefresh(
-    request: Promise<BitableRecordItem[]>,
-  ): Promise<BitableRecordItem[]> {
+    request: Promise<SealingSourceSnapshot>,
+  ): Promise<SealingSourceSnapshot> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -2315,12 +2319,11 @@ export class DutyScheduleService {
       ]);
     } catch (error) {
       if (!this.sealingSourceSnapshot) throw error;
-      this.sealingSourceSnapshot = {
+      return this.sealingSourceSnapshot = {
         ...this.sealingSourceSnapshot,
         stale: true,
         expiresAt: Date.now() + SEALING_SOURCE_RETRY_INTERVAL_MS,
       };
-      return this.sealingSourceSnapshot.records;
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -5692,20 +5695,37 @@ export class DutyScheduleService {
       throw new Error('endDate 不能早于 startDate');
     }
 
-    const rollingRange = source === 'auto-4h' || source === 'startup' ? dutyThreeMonthRange() : undefined;
-    const records = await this.fetchFeishuScheduleRecords(true, true, undefined, rollingRange);
+    const now = new Date();
+    const rollingRange = source === 'auto-4h' || source === 'startup' ? dutyThreeMonthRange(now) : undefined;
+    let receipt: VerifiedDutyScheduleRead['receipt'] | undefined;
+    const approvalRead = rollingRange ? refreshVerifiedLeaveApprovalSnapshot(this.httpService) : undefined;
+    const records = await this.fetchFeishuScheduleRecords(true, true, approvalRead, rollingRange, rollingRange ? {
+      requirePersisted: true,
+      onPersisted: snapshot => { receipt = snapshot; },
+    } : undefined);
+    const approval = await approvalRead;
+    const beforeRules = receipt;
     let result: DutyProgramModifiedRefreshRecordsResult;
     try {
-      result = await this.refreshProgramModifiedDutyStaffRecords(records, { startDate, endDate });
+      result = await this.refreshProgramModifiedDutyStaffRecords(records, { startDate, endDate }, beforeRules && approval
+        ? () => this.assertScheduleInputsCurrent(approval, beforeRules.invalidationToken)
+        : undefined);
     } catch (error) {
       // A partly completed rule write can invalidate the entire source. Re-read,
       // never re-label an older snapshot with the new invalidation token.
-      if (rollingRange) await this.syncDutyScheduleToLocalFast().catch(() => {
+      if (rollingRange) await this.syncDutyScheduleToLocalFast(now).catch(() => {
         this.logger.warn('规则写入后的三个月排班核源尚未完成，保留历史展示并阻止未核验业务操作');
       });
       throw error;
     }
-    if (rollingRange) await this.syncDutyScheduleToLocalFast();
+    if (rollingRange) {
+      // A rule write can change formula outputs even when only one input field was written.
+      if (receipt && approval?.verified && result.finalValues.size === 0 && result.failed === 0) {
+        await this.syncThreeMonthScheduleSnapshots(() => undefined, now, { records, receipt, approval });
+      } else {
+        await this.syncDutyScheduleToLocalFast(now);
+      }
+    }
     if (!isDatabaseDisabled()) {
       await this.replaceLocalScheduleRecords(records, result.finalValues, rollingRange);
     }
@@ -5728,6 +5748,7 @@ export class DutyScheduleService {
   private async refreshProgramModifiedDutyStaffRecords(
     records: BitableRecordItem[],
     window: DutyStaffActualRefreshWindow,
+    assertCurrent?: () => Promise<void>,
   ): Promise<DutyProgramModifiedRefreshRecordsResult> {
     const fieldMetas = await this.fetchScheduleFieldMetasWithFallback(records);
     const sourceField = this.findBitableField(
@@ -5739,7 +5760,6 @@ export class DutyScheduleService {
       throw new Error('未找到「人员（文本）」字段，无法重置程序修改人员');
     }
     const programField = this.resolveDutyStaffActualField(fieldMetas);
-    const tenantAccessToken = await this.getFeishuTenantAccessToken();
     const plan = this.buildProgramModifiedDutyStaffPlan(records, window, [
       sourceField.field_id,
       sourceField.field_name,
@@ -5749,66 +5769,44 @@ export class DutyScheduleService {
       '人员',
     ]);
     const fieldKey = programField.field_name || programField.field_id;
-    const resetResult = await this.batchUpdateScheduleTextField(
-      plan.map((item) => ({
-        record_id: item.recordId,
-        fields: { [fieldKey]: item.resetText },
-      })),
-      this.scheduleAppToken,
-      this.scheduleTableId,
-      tenantAccessToken,
-    );
-    const resetIds = new Set(resetResult.updatedIds);
+    const stored = new Map(records.map((record) => [getRecordId(record), extractDisplayText(
+      pickField(record.fields || {}, [programField.field_id, programField.field_name]),
+    )]));
+    const changed = plan.filter((item) => stored.get(item.recordId) !== item.finalText);
     const finalValues = new Map<string, string>();
-    plan.forEach((item) => {
-      if (resetIds.has(item.recordId)) {
-        finalValues.set(item.recordId, item.resetText);
-      }
-    });
+    if (changed.length === 0) return { total: plan.length, reset: 0, ruleUpdated: 0, failed: 0, failures: [], finalValues };
 
-    const finalPlan = plan.filter(
-      (item) =>
-        resetIds.has(item.recordId) && item.finalText !== item.resetText,
-    );
-    const ruleResult = await this.batchUpdateScheduleTextField(
-      finalPlan.map((item) => ({
-        record_id: item.recordId,
-        fields: { [fieldKey]: item.finalText },
-      })),
-      this.scheduleAppToken,
-      this.scheduleTableId,
-      tenantAccessToken,
-    );
-    const ruleUpdatedIds = new Set(ruleResult.updatedIds);
-    finalPlan.forEach((item) => {
-      if (ruleUpdatedIds.has(item.recordId)) {
-        finalValues.set(item.recordId, item.finalText);
-      }
-    });
-
-    if (resetResult.updatedIds.length > 0 || ruleResult.updatedIds.length > 0) {
+    const tenantAccessToken = await this.getFeishuTenantAccessToken();
+    await assertCurrent?.();
+    let writeResult: Awaited<ReturnType<DutyScheduleService['batchUpdateScheduleTextField']>>;
+    try {
+      writeResult = await this.batchUpdateScheduleTextField(
+        changed.map((item) => ({ record_id: item.recordId, fields: { [fieldKey]: item.finalText } })),
+        this.scheduleAppToken,
+        this.scheduleTableId,
+        tenantAccessToken,
+      );
+    } finally {
+      // A timeout can hide a completed Feishu write.
       invalidateBitableRecordCache({
         appToken: this.scheduleAppToken,
         tableId: this.scheduleTableId,
         deletePersisted: true,
       });
     }
-
-    const failuresByRecordId = new Map<string, string>();
-    [...resetResult.failures, ...ruleResult.failures].forEach((failure) => {
-      failuresByRecordId.set(failure.recordId, failure.error);
-    });
-    const failures = Array.from(failuresByRecordId, ([recordId, error]) => ({
-      recordId,
-      error,
-    }));
-
+    const updatedIds = new Set(writeResult.updatedIds);
+    let reset = 0;
+    for (const item of changed) {
+      if (!updatedIds.has(item.recordId)) continue;
+      finalValues.set(item.recordId, item.finalText);
+      if (item.resetText === item.finalText) reset++;
+    }
     return {
       total: plan.length,
-      reset: resetResult.updatedIds.length,
-      ruleUpdated: ruleResult.updatedIds.length,
-      failed: failures.length,
-      failures,
+      reset,
+      ruleUpdated: finalValues.size - reset,
+      failed: writeResult.failures.length,
+      failures: writeResult.failures,
       finalValues,
     };
   }
@@ -6013,33 +6011,36 @@ export class DutyScheduleService {
     return task;
   }
 
-  private syncThreeMonthScheduleSnapshots(phase: (value: string) => void, now = new Date()): Promise<DutyLocalSyncResult> {
+  private syncThreeMonthScheduleSnapshots(phase: (value: string) => void, now = new Date(), prepared?: VerifiedDutyScheduleRead): Promise<DutyLocalSyncResult> {
     let approvalSnapshot: LeaveApprovalSnapshot | undefined;
     return synchronizeRollingSchedule({
       appToken: this.scheduleAppToken, tableId: this.scheduleTableId, tableName: '值班排班', now,
       store: this.localMonthSnapshots, phase,
       dateOf: record => this.extractScheduleDateFromFields(record.fields || {}),
       load: (range, persistence) => {
+        if (prepared) {
+          const { records, receipt, approval } = prepared;
+          prepared = undefined;
+          approvalSnapshot = approval;
+          persistence.onPersisted(receipt);
+          return Promise.resolve(records);
+        }
         const approval = refreshVerifiedLeaveApprovalSnapshot(this.httpService).then(snapshot => {
           approvalSnapshot = snapshot;
           return snapshot;
         });
-        return Promise.allSettled([
-          this.fetchFeishuScheduleRecords(true, true, approval, range, persistence),
-          approval,
-        ]).then(([scheduleResult, approvalResult]) => {
-          if (scheduleResult.status === 'rejected') throw scheduleResult.reason;
-          if (approvalResult.status === 'rejected') throw approvalResult.reason;
-          return scheduleResult.value;
-        });
+        return this.fetchFeishuScheduleRecords(true, true, approval, range, persistence);
       },
       approvalReady: async () => approvalSnapshot?.verified === true,
-      assertDependenciesCurrent: async () => {
-        if (await readCachedLeaveApprovalSnapshot() !== approvalSnapshot) {
-          throw new ConflictException('排班来源已变化，请重新同步');
-        }
-      },
+      assertDependenciesCurrent: () => this.assertScheduleInputsCurrent(approvalSnapshot),
     });
+  }
+
+  private async assertScheduleInputsCurrent(approval: LeaveApprovalSnapshot | undefined, sourceRevision?: string | null): Promise<void> {
+    if ((sourceRevision !== undefined && await readBitableCacheScopeRevision(this.scheduleAppToken, this.scheduleTableId) !== sourceRevision) ||
+        !isDeepStrictEqual(await readCachedLeaveApprovalSnapshot(), approval)) {
+      throw new ConflictException('排班来源已变化，请重新同步');
+    }
   }
 
   async updateVacancySubstitutes(
@@ -21643,8 +21644,8 @@ export class DutyScheduleService {
   ): Promise<YearlySealingInfoResponse> {
     const startOfYear = new Date(year, 0, 1).getTime();
     const startOfNextYear = new Date(year + 1, 0, 1).getTime();
-    const records = await this.fetchFeishuSealingRecords(forceRefresh);
-    const sealings = records
+    const snapshot = await this.fetchFeishuSealingRecords(forceRefresh);
+    const sealings = snapshot.records
       .map((record) => this.mapFeishuSealingRecord(record))
       .filter(
         (sealing): sealing is YearlySealingInfoResponse['sealings'][number] => {
@@ -21665,10 +21666,8 @@ export class DutyScheduleService {
     return {
       sealings,
       total: sealings.length,
-      sourceStatus: this.sealingSourceSnapshot?.stale ? 'stale' : 'fresh',
-      syncedAt: this.sealingSourceSnapshot
-        ? new Date(this.sealingSourceSnapshot.fetchedAt).toISOString()
-        : undefined,
+      sourceStatus: snapshot.stale ? 'stale' : 'fresh',
+      syncedAt: new Date(snapshot.fetchedAt).toISOString(),
     };
   }
 

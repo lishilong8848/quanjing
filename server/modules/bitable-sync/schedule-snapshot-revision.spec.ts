@@ -1,13 +1,14 @@
 jest.mock('../../common/feishu/bitable-direct-read', () => ({
   ...jest.requireActual('../../common/feishu/bitable-direct-read'),
   readLatestPersistedBitableRecordSnapshot: jest.fn(),
+  readBitableCacheScopeRevision: jest.fn().mockResolvedValue(null),
 }));
 jest.mock('../../common/feishu/leave-approval-source', () => ({
   ...jest.requireActual('../../common/feishu/leave-approval-source'),
   readCachedLeaveApprovalSnapshotState: jest.fn(),
 }));
 
-import { readLatestPersistedBitableRecordSnapshot } from '../../common/feishu/bitable-direct-read';
+import { readLatestPersistedBitableRecordSnapshot, type BitableRecordItem } from '../../common/feishu/bitable-direct-read';
 import { readCachedLeaveApprovalSnapshotState } from '../../common/feishu/leave-approval-source';
 import { BitableSyncService } from './bitable-sync.service';
 import { dutyThreeMonthRange } from '../duty-schedule/duty-local-sync.snapshot';
@@ -25,7 +26,9 @@ interface ScheduleSnapshotRevisionReader {
 
 function persistedSnapshot(fetchedAt: number) {
   return {
-    records: [],
+    get records(): BitableRecordItem[] {
+      throw new Error('schedule revision needs snapshot metadata, not roster records');
+    },
     fetchedAt,
     expiresAt: Date.now() + 60_000,
   };
@@ -83,11 +86,12 @@ describe('BitableSyncService schedule snapshot revision', () => {
     });
   });
 
-  it('combines schedule and leave projection timestamps into one revision token without HTTP', async () => {
+  it('combines schedule and leave projection timestamps without inspecting roster records or calling HTTP', async () => {
     jest
       .mocked(readLatestPersistedBitableRecordSnapshot)
-      .mockResolvedValueOnce(persistedSnapshot(1_725_000_000_100))
-      .mockResolvedValueOnce(persistedSnapshot(1_725_000_000_900));
+      .mockImplementation(async ({ tableId }) => persistedSnapshot(
+        tableId === 'non-duty-table-id' ? 1_725_000_000_100 : 1_725_000_000_900,
+      ));
     const {
       axiosRef,
       fetchFeishuNonDutyRecords,
@@ -107,16 +111,14 @@ describe('BitableSyncService schedule snapshot revision', () => {
       dutyThreeMonthRange().months.map(month => [month, 1725000000900, 1725000000900, null, false]),
       1725000001100, 1725000001200,
     ]);
-    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenNthCalledWith(
-      1,
+    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledWith(
       {
         appToken: 'non-duty-app-token',
         tableId: 'non-duty-table-id',
         tableName: '长白班排班',
       },
     );
-    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenNthCalledWith(
-      2,
+    expect(readLatestPersistedBitableRecordSnapshot).toHaveBeenCalledWith(
       {
         appToken: 'schedule-app-token',
         tableId: 'schedule-table-id',
@@ -160,8 +162,7 @@ describe('BitableSyncService schedule snapshot revision', () => {
     async ({ nonDutySnapshot, scheduleSnapshot, expected }) => {
       jest
         .mocked(readLatestPersistedBitableRecordSnapshot)
-        .mockResolvedValueOnce(nonDutySnapshot)
-        .mockResolvedValueOnce(scheduleSnapshot);
+        .mockImplementation(async ({ tableId }) => tableId === 'non-duty-table-id' ? nonDutySnapshot : scheduleSnapshot);
       const { service } = createServiceHarness();
 
       await expect(readRevision(service)).resolves.toEqual(expected);

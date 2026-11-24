@@ -19,10 +19,34 @@ describe('two-level leave navigation through the real callback router', () => {
     const data = fixture();
     const result = await router.handle({ event_type: 'card.action.trigger', operator: { open_id: 'ou_supervisor' }, context: { open_message_id: 'om_test_two_level' }, action: { tag: 'button', name: `leave_substitute_review_submit:${data.application.recordId}:supervisor:1:g1:r1`, form_value: { [`leave_shift_substitute_${Buffer.from(data.selection.shiftKey).toString('base64url')}`]: primary.personRecordId } } });
     expect(result.toast.type).toBe('info');
-    expect(result.toast.content).toBe('正在更新替班核对结果');
+    expect(result.toast.content).toBe('核对卡片已更新，请查看当前状态');
     expect(result).not.toHaveProperty('card');
     expect(leave.renderApprovalCardView).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'om_test_two_level', view: 'substitute_review' }));
     expect(leave.patchApprovalCardView).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'om_test_two_level' }), card);
+    expect(leave.acceptApprovalAction).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed review update without treating it as an approval', async () => {
+    const leave = {
+      isEnabled: () => true,
+      renderApprovalCardView: jest.fn().mockResolvedValue(card),
+      patchApprovalCardView: jest.fn().mockRejectedValue(new Error('Feishu PATCH failed')),
+      acceptApprovalAction: jest.fn(),
+    };
+    const unused = { isEnabled: () => false } as never;
+    const router = new Router(unused, leave as never, unused, {} as never, unused, unused, unused);
+    const data = fixture();
+    const result = await router.handle({
+      event_type: 'card.action.trigger',
+      operator: { open_id: 'ou_supervisor' },
+      context: { open_message_id: 'om_test_two_level' },
+      action: {
+        tag: 'button',
+        name: `leave_substitute_review_submit:${data.application.recordId}:supervisor:1:g1:r1`,
+        form_value: { [`leave_shift_substitute_${Buffer.from(data.selection.shiftKey).toString('base64url')}`]: primary.personRecordId },
+      },
+    });
+    expect(result.toast).toEqual({ type: 'error', content: '核对卡片更新失败，请重试核对' });
     expect(leave.acceptApprovalAction).not.toHaveBeenCalled();
   });
 });

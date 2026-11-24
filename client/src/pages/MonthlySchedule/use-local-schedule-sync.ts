@@ -19,7 +19,7 @@ export function useLocalScheduleSync(principal: string | null, enabled: boolean,
       hidden: () => document.visibilityState === 'hidden', changed: state => { if (identity.current.principal === principal && identity.current.enabled) setView({ principal, state }); } });
     runtime.current = controller;
     void controller.resume();
-    const visible = () => { if (document.visibilityState === 'visible') void controller.check(); };
+    const visible = () => { if (document.visibilityState === 'visible') void controller.checkActive(); };
     document.addEventListener('visibilitychange', visible);
     return () => { document.removeEventListener('visibilitychange', visible); controller.dispose(); if (runtime.current === controller) runtime.current = null; };
   }, [principal, enabled]);

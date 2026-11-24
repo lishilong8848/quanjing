@@ -52,8 +52,7 @@ export function synchronizeRollingSchedule(options: Source & {
         await assertCurrent();
         phase('publishing_snapshot');
         await options.store.publish(options.appToken, options.tableId, range, records, sourceStartedAt, revision, options.dateOf, assertCurrent);
-        const published = await Promise.all(range.months.map(month => options.store.readMonth(options.appToken, options.tableId, month)));
-        if (published.some(snapshot => !snapshot || snapshot.sourceStartedAt !== sourceStartedAt) || published.reduce((sum, snapshot) => sum + snapshot!.records.length, 0) !== records.length) throw new ServiceUnavailableException('排班本地快照核对失败');
+        // publish has already validated the month ranges and read back the exact committed bytes.
         await assertCurrent();
         phase('completed');
         return { success: true, total: records.length, reset: 0, ruleUpdated: 0, localSynced: records.length, failed: 0, failures: [], durationMs: Date.now() - startedAt,
@@ -70,12 +69,23 @@ export function synchronizeRollingSchedule(options: Source & {
   return operation;
 }
 
-export async function readRollingScheduleRange(source: Source, startDate: string, endDate: string, options: { historical?: boolean; display?: boolean; now?: Date } = {}) {
-  const revision = await readBitableCacheScopeRevision(source.appToken, source.tableId);
-  const full = await readLatestPersistedBitableRecordSnapshot(source);
+function rollingScheduleReader(source: Source): DutyLocalMonthSnapshots {
   const readerKey = JSON.stringify([resolve(process.env.FEISHU_LOCAL_CACHE_DIR || 'data/feishu-bitable-cache'), source.appToken, source.tableId]);
   let store = readers.get(readerKey);
   if (!store) { store = new DutyLocalMonthSnapshots(); readers.set(readerKey, store); if (readers.size > 32) readers.delete(readers.keys().next().value!); }
+  return store;
+}
+
+export async function readRollingScheduleDisplayRevisions(source: Source, months: readonly string[]) {
+  const revision = await readBitableCacheScopeRevision(source.appToken, source.tableId);
+  const full = await readLatestPersistedBitableRecordSnapshot(source);
+  return rollingScheduleReader(source).readDisplayMonthRevisions(source.appToken, source.tableId, months, full, revision);
+}
+
+export async function readRollingScheduleRange(source: Source, startDate: string, endDate: string, options: { historical?: boolean; display?: boolean; now?: Date } = {}) {
+  const revision = await readBitableCacheScopeRevision(source.appToken, source.tableId);
+  const full = await readLatestPersistedBitableRecordSnapshot(source);
+  const store = rollingScheduleReader(source);
   const current = dutyThreeMonthRange(options.now);
   const snapshots = [];
   const cursor = new Date(`${startDate.slice(0, 7)}-01T00:00:00Z`), end = new Date(`${endDate.slice(0, 7)}-01T00:00:00Z`);

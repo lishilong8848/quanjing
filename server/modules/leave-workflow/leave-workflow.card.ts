@@ -50,7 +50,7 @@ export function buildLeaveApprovalCard(
       ...summary(context),
       ...approvalEvidence(context),
       ...(substituteDecision === true
-        ? [substituteApprovalForm(context)]
+        ? substituteApprovalElements(context)
         : substituteDecision === false
           ? [fullWidthAction('确认审批', 'primary_filled', 'approve', context)]
           : [substituteDecisionForm(context)]),
@@ -61,7 +61,7 @@ export function buildLeaveApprovalCard(
     card = buildCard('blue', titleForStage(context), [
       ...summary(context),
       ...approvalEvidence(context),
-      substituteApprovalForm(context),
+      ...substituteApprovalElements(context),
       ...substituteReviewNavigation(context, 'approval'),
       fullWidthViewAction('驳回', 'danger', 'open_rejection', context),
     ]);
@@ -110,6 +110,36 @@ function substituteDecisionForm(
       },
     ],
   };
+}
+
+function substituteApprovalElements(context: LeaveCardContext): Record<string, unknown>[] {
+  if (!context.substitutionReview?.length || !context.shiftGroups?.length) {
+    return [substituteApprovalForm(context)];
+  }
+
+  const reviewed = new Map(context.substitutionReview.map(selection => [selection.shiftKey, selection]));
+  const reviewedSubstitutes: Record<string, string> = {};
+  const details: Record<string, unknown>[] = [];
+  for (const group of context.shiftGroups) {
+    const selection = reviewed.get(group.shiftKey);
+    const choice = context.candidateSets?.find(set => set.shiftKey === group.shiftKey)
+      ?.twoLevelCandidates?.find(choice => choice.person.personRecordId === selection?.substitutePersonRecordId);
+    if (!choice || requiredOriginalPostGroups(choice.originalGroups).length > 0) {
+      return [
+        { tag: 'markdown', content: '请确认每班的替班人员并选择所需的原岗补位人员，再提交审批。' },
+        substituteApprovalForm(context),
+      ];
+    }
+    reviewedSubstitutes[shiftSubstituteFieldName(group.shiftKey)] = choice.person.personRecordId;
+    details.push(shiftSubstituteDetail(group), {
+      tag: 'markdown',
+      content: `替班人员：${escape(choice.person.name)}`,
+    });
+  }
+  return [
+    ...details,
+    fullWidthAction('确认审批', 'primary_filled', 'approve', context, reviewedSubstitutes),
+  ];
 }
 
 function substituteApprovalForm(
@@ -217,9 +247,11 @@ function multiShiftSubstituteForm(
             width: 'fill',
             placeholder: {
               tag: 'plain_text',
-              content: current ? '不修改则沿用当前人员' : '选择该班次替班人员',
+              content: reviewing && mode === 'approval'
+                ? '确认该班次替班人员'
+                : current ? '不修改则沿用当前人员' : '选择该班次替班人员',
             },
-            ...(reviewing ? { initial_option: selected!.substitutePersonRecordId } : {}),
+            ...(reviewing && mode === 'adjustment' ? { initial_option: selected!.substitutePersonRecordId } : {}),
             options: (candidatesByShiftKey.get(group.shiftKey) || []).filter((person) => !reviewing || person.personRecordId === selected!.substitutePersonRecordId).map(
               (person) => ({
                 text: { tag: 'plain_text', content: `${person.name}${choices.find((choice) => choice.person.personRecordId === person.personRecordId)?.originalGroups.map((original) => ` · ${original.buildings.join('/')} ${original.shift}`).join('') || ''}` },
@@ -239,7 +271,7 @@ function multiShiftSubstituteForm(
               width: 'fill',
               placeholder: { tag: 'plain_text', content: '选择原岗补位人员' },
               options: selectedChoice.backfillCandidates.map((person) => ({ text: { tag: 'plain_text', content: person.name }, value: person.personRecordId })),
-              ...(selected?.backfillPersonRecordId ? { initial_option: selected.backfillPersonRecordId } : {}),
+              ...(mode === 'adjustment' && selected?.backfillPersonRecordId ? { initial_option: selected.backfillPersonRecordId } : {}),
             },
           ] : []),
         ];
@@ -285,7 +317,7 @@ function multiShiftSubstituteForm(
               ? '提交替班调整'
               : hasOnDutyChoices && !reviewing
               ? '核对替班安排'
-              : context.substituteDecisionRequired
+              : reviewing || context.substituteDecisionRequired
                 ? '确认审批'
                 : '同意并确认全部替班',
         },
@@ -780,6 +812,7 @@ function actionColumn(
   type: 'primary_filled' | 'danger',
   action: 'approve' | 'reject',
   context: LeaveCardContext,
+  reviewedSubstitutes?: Record<string, string>,
 ): Record<string, unknown> {
   return {
     tag: 'column',
@@ -797,12 +830,14 @@ function actionColumn(
             value: {
               version: 1,
               workflowType: 'leave',
-              action,
+              action: reviewedSubstitutes ? 'approve_reviewed_substitution' : action,
               recordId: context.recordId,
               applicationKey: context.applicationKey,
               stageKey: context.stageKey,
               stageVersion: context.stageVersion,
-              ...(context.substituteRequiredChoice === false
+              ...(reviewedSubstitutes
+                ? { reviewedSubstitutes, ...(context.substituteDecisionRequired ? { substituteRequired: true } : {}) }
+                : context.substituteRequiredChoice === false
                 ? { substituteRequired: false }
                 : {}),
             },
@@ -818,8 +853,9 @@ function fullWidthAction(
   type: 'primary_filled' | 'danger',
   action: 'approve',
   context: LeaveCardContext,
+  reviewedSubstitutes?: Record<string, string>,
 ): Record<string, unknown> {
-  return actionColumn(label, type, action, context).elements[0] as Record<
+  return actionColumn(label, type, action, context, reviewedSubstitutes).elements[0] as Record<
     string,
     unknown
   >;

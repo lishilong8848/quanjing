@@ -13,7 +13,8 @@ import {
   type PostgresJsDatabase,
 } from '@lark-apaas/fullstack-nestjs-core';
 import { HttpService } from '@nestjs/axios';
-import { synchronizeRollingSchedule, readRollingScheduleRange } from '../duty-schedule/rolling-schedule-sync';
+import { isDeepStrictEqual } from 'node:util';
+import { synchronizeRollingSchedule, readRollingScheduleRange, readRollingScheduleDisplayRevisions } from '../duty-schedule/rolling-schedule-sync';
 import { DutyLocalMonthSnapshots, dutyThreeMonthRange } from '../duty-schedule/duty-local-sync.snapshot';
 import {
   appBitableSyncRecords,
@@ -43,13 +44,17 @@ import {
   extractDisplayValues,
   extractNumberValue as extractFeishuNumberValue,
   fetchBitableRecords,
+  fetchBitableRecordsByIds,
+  getBitableRecordCacheGeneration,
   getRecordId,
+  getTenantAccessToken,
   invalidateBitableRecordCache,
   normalizeBuildingForFrontend,
   normalizeBuildingLabel,
   normalizeTeamForFrontend,
   observePersistedBitableCacheInvalidation,
   pickField,
+  readBitableCacheScopeRevision,
   readLatestPersistedBitableRecordSnapshot,
   resolveBitableAppToken,
   warmLatestPersistedBitableRecordSnapshotIndex,
@@ -67,6 +72,7 @@ import {
   SYSTEM_APPROVED_LEAVE_STAFF_FIELD,
   SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD,
   SYSTEM_APPROVED_POST_REPLACEMENTS_FIELD,
+  SYSTEM_LEAVE_APPROVAL_VERIFIED_FIELD,
 } from '@server/common/feishu/leave-approval-source';
 import {
   inferActualSubstituteStaff,
@@ -116,9 +122,8 @@ import {
 } from './person-profile-source';
 import { listEligibleChangeRequestSubmitterNames } from './change-request-submitter-directory';
 import {
-  buildActivePersonnelDirectory,
-  DEFAULT_ACTIVE_PERSONNEL_TABLE_ID,
-  DEFAULT_ACTIVE_PERSONNEL_VIEW_ID,
+  activePersonnelSource,
+  readCachedActivePersonnel,
   type ActivePersonnelDirectory,
 } from './active-personnel-directory';
 import {
@@ -215,6 +220,10 @@ export interface ApprovedLeaveScheduleSyncScope {
   releasedOriginalPosts?: Array<{ scheduleRecordIds: string[]; previousPrimaryName: string; previousBackupName: string }>;
 }
 
+type LeaveRosterKind = 'non-duty' | 'schedule';
+type LeaveRosterRange = { startDate: string; endDate: string };
+type LeaveRosterRevision = { generation: number; token: string | null };
+
 interface CachedEmployeePhoto {
   contentType: string;
   buffer: Buffer;
@@ -286,15 +295,10 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly SEALING_VIEW_ID = readEnv('FEISHU_SEALING_VIEW_ID');
 
   // 飞书多维表配置 - 组织架构/在职人员表
-  private readonly ORG_APP_TOKEN = readEnv('FEISHU_ORG_APP_TOKEN', [
-    'FEISHU_ORGANIZATION_APP_TOKEN',
-  ]);
-  private readonly ORG_TABLE_ID =
-    readEnv('FEISHU_ORG_TABLE_ID', ['FEISHU_ORGANIZATION_TABLE_ID']) ||
-    DEFAULT_ACTIVE_PERSONNEL_TABLE_ID;
-  private readonly ORG_VIEW_ID =
-    readEnv('FEISHU_ORG_VIEW_ID', ['FEISHU_ORGANIZATION_VIEW_ID']) ||
-    DEFAULT_ACTIVE_PERSONNEL_VIEW_ID;
+  private readonly activePersonnelSource = activePersonnelSource();
+  private readonly ORG_APP_TOKEN = this.activePersonnelSource.appToken;
+  private readonly ORG_TABLE_ID = this.activePersonnelSource.tableId;
+  private readonly ORG_VIEW_ID = this.activePersonnelSource.viewId;
   private readonly ORG_PROFILE_VIEW_ID =
     readEnv('FEISHU_ORG_PROFILE_VIEW_ID', [
       'FEISHU_ORGANIZATION_PROFILE_VIEW_ID',
@@ -381,20 +385,21 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async getScheduleSnapshotRevision(): Promise<ScheduleSnapshotRevisionResponse> {
-    const range = dutyThreeMonthRange();
+    const { months } = dutyThreeMonthRange();
     const [nonDuty, duty, leaveApprovalState] = await Promise.all([
-      readRollingScheduleRange(this.scheduleSource('non-duty'), range.startDate, range.endDate, { display: true }).catch(() => null),
-      readRollingScheduleRange(this.scheduleSource('schedule'), range.startDate, range.endDate, { display: true }).catch(() => null),
+      readRollingScheduleDisplayRevisions(this.scheduleSource('non-duty'), months).catch(() => null),
+      readRollingScheduleDisplayRevisions(this.scheduleSource('schedule'), months).catch(() => null),
       readCachedLeaveApprovalSnapshotState(),
     ]);
-    const nonDutyFetchedAt = nonDuty ? Math.max(...nonDuty.map(row => row.snapshot.fetchedAt)) : null;
-    const scheduleFetchedAt = duty ? Math.max(...duty.map(row => row.snapshot.fetchedAt)) : null;
+    const nonDutyFetchedAt = nonDuty ? Math.max(...nonDuty.map(row => row.fetchedAt)) : null;
+    const scheduleFetchedAt = duty ? Math.max(...duty.map(row => row.fetchedAt)) : null;
     const available = nonDuty !== null && duty !== null;
+    const tokenOf = (rows: NonNullable<typeof duty>) => rows.map(row => [row.month, row.sourceStartedAt, row.fetchedAt, row.revision, row.stale]);
 
     return {
       available,
       token: available
-        ? JSON.stringify([nonDuty!.map(row => [row.month, row.snapshot.sourceStartedAt ?? row.snapshot.fetchedAt, row.snapshot.fetchedAt, row.revision, row.stale]), duty!.map(row => [row.month, row.snapshot.sourceStartedAt ?? row.snapshot.fetchedAt, row.snapshot.fetchedAt, row.revision, row.stale]), leaveApprovalState.approvalFetchedAt, leaveApprovalState.shiftDetailFetchedAt])
+        ? JSON.stringify([tokenOf(nonDuty), tokenOf(duty), leaveApprovalState.approvalFetchedAt, leaveApprovalState.shiftDetailFetchedAt])
         : null,
       nonDutyFetchedAt,
       scheduleFetchedAt,
@@ -636,7 +641,7 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       ...source, store: new DutyLocalMonthSnapshots(), dateOf: record => this.scheduleRecordDate(record),
       approvalReady: async () => approvalSnapshot?.verified === true,
       assertDependenciesCurrent: async () => {
-        if (await readCachedLeaveApprovalSnapshot() !== approvalSnapshot) {
+        if (!isDeepStrictEqual(await readCachedLeaveApprovalSnapshot(), approvalSnapshot)) {
           throw new ConflictException('排班来源已变化，请重新同步');
         }
       },
@@ -689,31 +694,6 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         appToken: this.NON_DUTY_APP_TOKEN,
         tableId: this.NON_DUTY_TABLE_ID,
         tableName: '长白班排班',
-        forceRefresh,
-        allowStale: !strict,
-        strict,
-      }),
-      fetchLeaveApprovalSnapshot(this.httpService, {
-        forceRefresh,
-        strict,
-      }),
-    ]);
-    return enrichScheduleRecordsWithLeaveApproval(records, approvalSnapshot);
-  }
-
-  private async fetchFeishuScheduleRecords(
-    forceRefresh = false,
-    strict = false,
-  ): Promise<BitableRecordItem[]> {
-    if (!forceRefresh) {
-      const range = dutyThreeMonthRange();
-      return enrichScheduleRecordsWithLeaveApproval(await this.readRollingScheduleRecords('schedule', range.startDate, range.endDate, false, true), await readCachedLeaveApprovalSnapshot());
-    }
-    const [records, approvalSnapshot] = await Promise.all([
-      fetchBitableRecords(this.httpService, {
-        appToken: this.SCHEDULE_APP_TOKEN,
-        tableId: this.SCHEDULE_TABLE_ID,
-        tableName: '值班排班',
         forceRefresh,
         allowStale: !strict,
         strict,
@@ -3514,19 +3494,16 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
    * 读取后台同步到本地的在职人员快照，业务请求不直连飞书多维表。
    */
   async getCachedActivePersonnelDirectory(): Promise<ActivePersonnelDirectory> {
-    const snapshot = await readLatestPersistedBitableRecordSnapshot({
-      appToken: this.ORG_APP_TOKEN || undefined,
-      tableId: this.ORG_TABLE_ID,
-      viewId: this.ORG_VIEW_ID || undefined,
-      tableName: '在职人员',
+    const directory = await readCachedActivePersonnel({
+      appToken: this.ORG_APP_TOKEN, tableId: this.ORG_TABLE_ID, viewId: this.ORG_VIEW_ID,
     });
-    if (!snapshot) {
+    if (!directory) {
       this.logger.warn('在职人员本地缓存尚未就绪');
       throw new ServiceUnavailableException(
         '在职人员本地缓存暂不可用，请等待后台同步',
       );
     }
-    return buildActivePersonnelDirectory(snapshot);
+    return directory;
   }
 
   async syncApprovedLeaveScheduleSnapshot(
@@ -3605,17 +3582,28 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const [nonDutyRecords, scheduleRecords] = await Promise.all([
-      this.fetchFeishuNonDutyRecords(true, true),
-      this.fetchFeishuScheduleRecords(true, true),
-    ]);
+    const kinds = ['non-duty', 'schedule'] as const;
+    const revisions = await Promise.all(kinds.map((kind) => this.readLeaveRosterRevision(kind)));
+    const requestedIds = [...expectedByRecordId.keys()];
+    const [nonDutyRecords, scheduleRecords] = await this.fetchApprovedLeaveScheduleRows(
+      requestedIds, requestedIds, requestedIds.length ? undefined : { startDate, endDate },
+    );
+    const loadedRecords = new Map<string, BitableRecordItem>();
+    for (const record of [...nonDutyRecords, ...scheduleRecords]) {
+      const id = getRecordId(record);
+      if (!id || loadedRecords.has(id)) throw new ServiceUnavailableException('请休假审批后排班记录来源不唯一');
+      loadedRecords.set(id, record);
+    }
+    if (requestedIds.some((id) => !loadedRecords.has(id))) {
+      throw new ServiceUnavailableException('请休假审批后排班记录缺失 (readback mismatch)');
+    }
     for (const [recordId, expected] of originalPostExpected) {
-      const record = [...nonDutyRecords, ...scheduleRecords].find((row) => getRecordId(row) === recordId);
+      const record = loadedRecords.get(recordId);
       const replacements = record?.fields?.[SYSTEM_APPROVED_POST_REPLACEMENTS_FIELD];
       if (!record || !Array.isArray(replacements) || !replacements.some((row: { removedStaff?: string; addedStaff?: string }) => row.removedStaff === expected.primary && row.addedStaff === expected.backup)) throw new ServiceUnavailableException(`原岗补位明细未生效，暂不写回排班: ${recordId}`);
     }
     for (const [recordId, expected] of releasedExpected) {
-      const record = [...nonDutyRecords, ...scheduleRecords].find((row) => getRecordId(row) === recordId);
+      const record = loadedRecords.get(recordId);
       const planned = new Set(extractDisplayValues(pickField(record?.fields || {}, ['fldJi5bxBG', '人员（文本）', '人员文本', '人员', '长白班'])).flatMap((name) => this.splitStaffNames(name)));
       if (!record || [...expected].some((name) => !planned.has(name))) throw new ServiceUnavailableException(`原岗计划已变化，暂不恢复排班: ${recordId}`);
     }
@@ -3653,98 +3641,200 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         nonDutyRecords,
         scheduleRecords,
         affectedRecordIds,
+        revisions: { 'non-duty': revisions[0], schedule: revisions[1] },
       });
-    const [verifiedNonDutyRecords, verifiedScheduleRecords] =
-      expectedActualStaffByRecordId.updated
-        ? await Promise.all([
-            this.fetchFeishuNonDutyRecords(true, true),
-            this.fetchFeishuScheduleRecords(true, true),
-          ])
-        : [nonDutyRecords, scheduleRecords];
-    const refreshedRecords = new Map<string, BitableRecordItem>();
-    for (const record of [
-      ...verifiedNonDutyRecords,
-      ...verifiedScheduleRecords,
-    ]) {
-      const recordId = getRecordId(record);
-      if (recordId) refreshedRecords.set(recordId, record);
-    }
-
-    for (const [recordId, expectedNames] of expectedByRecordId) {
-      const record = refreshedRecords.get(recordId);
-      const actualLeaveStaff = new Set(
-        extractDisplayValues(
-          pickField(record?.fields || {}, [SYSTEM_APPROVED_LEAVE_STAFF_FIELD]),
-        ).flatMap((name) => this.splitStaffNames(name)),
-      );
-      const actualNames = new Set(
-        extractDisplayValues(
-          pickField(record?.fields || {}, [
-            SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD,
-          ]),
-        ).flatMap((name) => this.splitStaffNames(name)),
-      );
-      if (originalPostExpected.has(recordId)) {
-        const replacements = record?.fields?.[SYSTEM_APPROVED_POST_REPLACEMENTS_FIELD];
-        if (Array.isArray(replacements)) for (const row of replacements) if (typeof row?.addedStaff === 'string') actualNames.add(row.addedStaff);
+    try {
+      const affectedIds = (rows: BitableRecordItem[]) => rows.map(getRecordId).filter((id) => affectedRecordIds.has(id));
+      const nonDutyIds = affectedIds(nonDutyRecords);
+      const scheduleIds = affectedIds(scheduleRecords);
+      const [verifiedNonDutyRecords, verifiedScheduleRecords] =
+        expectedActualStaffByRecordId.updated
+          ? await this.fetchApprovedLeaveScheduleRows(nonDutyIds, scheduleIds)
+          : [nonDutyRecords, scheduleRecords];
+      if (expectedActualStaffByRecordId.updated &&
+          (verifiedNonDutyRecords.length !== nonDutyIds.length || verifiedScheduleRecords.length !== scheduleIds.length)) {
+        throw new ServiceUnavailableException('请休假审批后排班回读缺少记录 (readback mismatch)');
       }
-      const actualDutyStaff = new Set(
-        extractDisplayValues(
-          pickDutyStaffActualField(record?.fields || {}),
-        ).flatMap((name) => this.splitStaffNames(name)),
-      );
-      const expectedActualStaff =
-        expectedActualStaffByRecordId.names.get(recordId);
-      if (
-        !record ||
-        Array.from(expectedNames).some((name) => releasedExpected.has(recordId) ? !actualDutyStaff.has(name) : !actualNames.has(name)) ||
-        (hasValidApprovalScope && !originalPostExpected.has(recordId) && !releasedExpected.has(recordId) && !actualLeaveStaff.has(applicantName)) ||
-        (expectedActualStaff &&
-          !sameStringSet(actualDutyStaff, expectedActualStaff))
-      ) {
-        throw new ServiceUnavailableException(
-          `请休假审批后排班回读不一致 (readback mismatch): ${recordId}`,
-        );
-      }
-    }
-
-    if (expectedByRecordId.size === 0) {
-      const scopedRecords = [
+      const refreshedRecords = new Map<string, BitableRecordItem>();
+      for (const record of [
         ...verifiedNonDutyRecords,
         ...verifiedScheduleRecords,
-      ].filter(isInApprovalScope);
-      if (
-        scopedRecords.length === 0 ||
-        (Boolean(substituteName) &&
-          scopedRecords.some((record) => {
-            const substitutes = extractDisplayValues(
-              pickField(record.fields || {}, [
-                SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD,
-              ]),
-            ).flatMap((name) => this.splitStaffNames(name));
-            return !substitutes.includes(substituteName);
-          }))
-      ) {
-        throw new ServiceUnavailableException(
-          '请休假审批后排班回读不一致 (readback mismatch): approval scope',
-        );
+      ]) {
+        const recordId = getRecordId(record);
+        if (recordId) refreshedRecords.set(recordId, record);
       }
-    }
 
-    return {
-      nonDutyRecords: verifiedNonDutyRecords.length,
-      scheduleRecords: verifiedScheduleRecords.length,
+      for (const [recordId, expected] of expectedActualStaffByRecordId.names) {
+        const record = refreshedRecords.get(recordId);
+        const actualStaff = extractDisplayValues(pickDutyStaffActualField(record?.fields || {}))
+          .flatMap((name) => this.splitStaffNames(name));
+        if (!record || record.fields?.[SYSTEM_LEAVE_APPROVAL_VERIFIED_FIELD] === false ||
+            !sameStringSet(new Set(actualStaff), expected)) {
+          throw new ServiceUnavailableException(`请休假审批后实际排班回读不一致 (readback mismatch): ${recordId}`);
+        }
+      }
+      for (const [recordId, expectedNames] of expectedByRecordId) {
+        const record = refreshedRecords.get(recordId);
+        const actualLeaveStaff = new Set(
+          extractDisplayValues(
+            pickField(record?.fields || {}, [SYSTEM_APPROVED_LEAVE_STAFF_FIELD]),
+          ).flatMap((name) => this.splitStaffNames(name)),
+        );
+        const actualNames = new Set(
+          extractDisplayValues(
+            pickField(record?.fields || {}, [
+              SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD,
+            ]),
+          ).flatMap((name) => this.splitStaffNames(name)),
+        );
+        const originalPost = originalPostExpected.get(recordId);
+        if (originalPost) {
+          const replacements = record?.fields?.[SYSTEM_APPROVED_POST_REPLACEMENTS_FIELD];
+          if (!Array.isArray(replacements) || !replacements.some(
+            (row) => row?.removedStaff === originalPost.primary && row?.addedStaff === originalPost.backup,
+          )) {
+            throw new ServiceUnavailableException(`请休假审批后原岗补位回读不一致 (readback mismatch): ${recordId}`);
+          }
+          actualNames.add(originalPost.backup);
+        }
+        const actualDutyStaff = new Set(
+          extractDisplayValues(
+            pickDutyStaffActualField(record?.fields || {}),
+          ).flatMap((name) => this.splitStaffNames(name)),
+        );
+        if (
+          !record ||
+          Array.from(expectedNames).some((name) => releasedExpected.has(recordId) ? !actualDutyStaff.has(name) : !actualNames.has(name)) ||
+          (hasValidApprovalScope && !originalPost && !releasedExpected.has(recordId) && !actualLeaveStaff.has(applicantName))
+        ) {
+          throw new ServiceUnavailableException(
+            `请休假审批后排班回读不一致 (readback mismatch): ${recordId}`,
+          );
+        }
+      }
+
+      if (expectedByRecordId.size === 0) {
+        const scopedRecords = [
+          ...verifiedNonDutyRecords,
+          ...verifiedScheduleRecords,
+        ].filter(isInApprovalScope);
+        if (
+          scopedRecords.length === 0 || scopedRecords.length !== affectedRecordIds.size ||
+          (Boolean(substituteName) &&
+            scopedRecords.some((record) => {
+              const substitutes = extractDisplayValues(
+                pickField(record.fields || {}, [
+                  SYSTEM_APPROVED_SUBSTITUTE_STAFF_FIELD,
+                ]),
+              ).flatMap((name) => this.splitStaffNames(name));
+              return !substitutes.includes(substituteName);
+            }))
+        ) {
+          throw new ServiceUnavailableException(
+            '请休假审批后排班回读不一致 (readback mismatch): approval scope',
+          );
+        }
+      }
+
+      await Promise.all((expectedActualStaffByRecordId.writes || []).map((write) =>
+        this.patchVerifiedLeaveRoster(write, write.kind === 'non-duty' ? verifiedNonDutyRecords : verifiedScheduleRecords),
+      ));
+      return {
+        nonDutyRecords: verifiedNonDutyRecords.length,
+        scheduleRecords: verifiedScheduleRecords.length,
+      };
+    } catch (error) {
+      expectedActualStaffByRecordId.writes?.forEach(({ kind }) => this.recoverLeaveRoster(kind));
+      throw error;
+    }
+  }
+
+  private fetchLeaveRosterRange(kind: LeaveRosterKind, { startDate, endDate }: LeaveRosterRange): Promise<BitableRecordItem[]> {
+    const start = Date.parse(`${startDate}T00:00:00+08:00`);
+    const end = Date.parse(`${endDate}T00:00:00+08:00`);
+    return fetchBitableRecords(this.httpService, {
+      ...this.scheduleSource(kind),
+      forceRefresh: true,
+      strict: true,
+      allowStale: false,
+      filter: { conjunction: 'and', conditions: [
+        { field_name: '排班日期', operator: 'isGreater', value: ['ExactDate', String(start - 86400000)] },
+        { field_name: '排班日期', operator: 'isLess', value: ['ExactDate', String(end + 86400000)] },
+      ] },
+      validateRecords: (records) => {
+        const ids = new Set<string>();
+        for (const record of records) {
+          const id = getRecordId(record), date = this.scheduleRecordDate(record);
+          if (!date || date < startDate || date > endDate || !id || ids.has(id)) {
+            throw new ServiceUnavailableException('请休假排班区间回执无效');
+          }
+          ids.add(id);
+        }
+      },
+    });
+  }
+
+  private async fetchApprovedLeaveScheduleRows(
+    nonDutyIds: string[], scheduleIds: string[], range?: LeaveRosterRange,
+  ): Promise<[BitableRecordItem[], BitableRecordItem[]]> {
+    const read = (kind: LeaveRosterKind, ids: string[]) => range
+      ? this.fetchLeaveRosterRange(kind, range)
+      : fetchBitableRecordsByIds(this.httpService, this.scheduleSource(kind), ids);
+    const [nonDuty, schedule, approval] = await Promise.all([
+      read('non-duty', nonDutyIds),
+      read('schedule', scheduleIds),
+      refreshVerifiedLeaveApprovalSnapshot(this.httpService),
+    ]);
+    const records = enrichScheduleRecordsWithLeaveApproval([...nonDuty, ...schedule], approval);
+    return [records.slice(0, nonDuty.length), records.slice(nonDuty.length)];
+  }
+
+  private async readLeaveRosterRevision(kind: LeaveRosterKind): Promise<LeaveRosterRevision> {
+    const { appToken, tableId } = this.scheduleSource(kind);
+    return { generation: getBitableRecordCacheGeneration(appToken, tableId), token: await readBitableCacheScopeRevision(appToken, tableId) };
+  }
+
+  private async patchVerifiedLeaveRoster(
+    write: { kind: LeaveRosterKind; ids: Set<string>; before: LeaveRosterRevision; after: LeaveRosterRevision },
+    records: BitableRecordItem[],
+  ): Promise<void> {
+    const { appToken, tableId } = this.scheduleSource(write.kind);
+    const assertCurrent = async () => {
+      const current = await this.readLeaveRosterRevision(write.kind);
+      if (current.generation !== write.after.generation || current.token !== write.after.token) {
+        throw new ConflictException('排班来源已变化，请重新读取');
+      }
     };
+    try {
+      if (write.after.generation === write.before.generation + 1 &&
+          await new DutyLocalMonthSnapshots().patchVerifiedRecords(
+            appToken, tableId, records.filter((record) => write.ids.has(getRecordId(record))),
+            write.before.token, write.after.token, (record) => this.scheduleRecordDate(record), assertCurrent,
+          )) return;
+    } catch {
+      this.logger.warn('定点排班快照更新待后台核验');
+    }
+    this.recoverLeaveRoster(write.kind);
+  }
+
+  private recoverLeaveRoster(kind: LeaveRosterKind): void {
+    void this.refreshRollingScheduleCache(kind).catch(() => {
+      this.logger.warn('受影响排班的后台快照恢复失败');
+    });
   }
 
   private async syncApprovedLeaveActualStaff(input: {
     nonDutyRecords: BitableRecordItem[];
     scheduleRecords: BitableRecordItem[];
     affectedRecordIds: Set<string>;
-  }): Promise<{ updated: boolean; names: Map<string, Set<string>> }> {
+    revisions: Record<LeaveRosterKind, LeaveRosterRevision>;
+  }): Promise<{ updated: boolean; names: Map<string, Set<string>>; writes: Array<{
+    kind: LeaveRosterKind; ids: Set<string>; before: LeaveRosterRevision; after: LeaveRosterRevision;
+  }> }> {
     const names = new Map<string, Set<string>>();
     const planSource = (
       records: BitableRecordItem[],
+      kind: LeaveRosterKind,
       appToken: string,
       tableId: string,
     ) => {
@@ -3756,6 +3846,9 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
         const recordId = getRecordId(record);
         if (!recordId || !input.affectedRecordIds.has(recordId)) continue;
         const fields = record.fields || {};
+        if (fields[SYSTEM_LEAVE_APPROVAL_VERIFIED_FIELD] === false) {
+          throw new ServiceUnavailableException(`请休假审批后排班记录尚未核验: ${recordId}`);
+        }
         const plannedStaff = extractDisplayValues(
           pickField(fields, [
             'fldJi5bxBG',
@@ -3813,25 +3906,28 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
           fields: { [fieldName]: finalText },
         });
       }
-      return { appToken, tableId, updates };
+      return { kind, appToken, tableId, updates };
     };
 
     const sources = [
       planSource(
         input.nonDutyRecords,
+        'non-duty',
         this.NON_DUTY_APP_TOKEN,
         this.NON_DUTY_TABLE_ID,
       ),
       planSource(
         input.scheduleRecords,
+        'schedule',
         this.SCHEDULE_APP_TOKEN,
         this.SCHEDULE_TABLE_ID,
       ),
     ].filter((source) => source.updates.length > 0);
-    if (sources.length === 0) return { updated: false, names };
+    if (sources.length === 0) return { updated: false, names, writes: [] };
 
-    const tenantAccessToken = await this.getTenantAccessToken();
-    await Promise.all(
+    const tenantAccessToken = await getTenantAccessToken(this.httpService);
+    const attemptedSources = new Set<LeaveRosterKind>();
+    const settled = await Promise.allSettled(
       sources.map(async (source) => {
         assertBitableTableConfig(
           '请休假审批后排班同步',
@@ -3839,29 +3935,45 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
           source.tableId,
         );
         const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${source.appToken}/tables/${source.tableId}/records/batch_update`;
-        for (const records of chunkBitableRecordUpdates(source.updates)) {
-          const response = await this.httpService.axiosRef.post(
-            url,
-            { records },
-            {
-              headers: { Authorization: `Bearer ${tenantAccessToken}` },
-              timeout: 30000,
-            },
-          );
-          if (response.data?.code !== 0) {
-            throw new ServiceUnavailableException(
-              `请休假审批后更新实际排班失败: ${String(response.data?.msg || response.data?.code || 'unknown')}`,
-            );
-          }
+        const previous = input.revisions[source.kind];
+        const current = await this.readLeaveRosterRevision(source.kind);
+        if (previous.generation !== current.generation || previous.token !== current.token) {
+          throw new ConflictException('排班来源已变化，请重新读取');
         }
-        invalidateBitableRecordCache({
-          appToken: source.appToken,
-          tableId: source.tableId,
-          deletePersisted: true,
-        });
+        attemptedSources.add(source.kind);
+        try {
+          for (const records of chunkBitableRecordUpdates(source.updates)) {
+            const response = await this.httpService.axiosRef.post(
+              url,
+              { records },
+              {
+                headers: { Authorization: `Bearer ${tenantAccessToken}` },
+                timeout: 30000,
+              },
+            );
+            if (response.data?.code !== 0) {
+              throw new ServiceUnavailableException(
+                `请休假审批后更新实际排班失败: ${String(response.data?.msg || response.data?.code || 'unknown')}`,
+              );
+            }
+          }
+        } finally {
+          invalidateBitableRecordCache({ appToken: source.appToken, tableId: source.tableId, deletePersisted: true });
+        }
+        const after = await this.readLeaveRosterRevision(source.kind);
+        return { kind: source.kind, ids: new Set(source.updates.map((row) => row.record_id)), before: current, after };
       }),
     );
-    return { updated: true, names };
+    const failed = settled.find((result) => result.status === 'rejected');
+    if (failed) {
+      attemptedSources.forEach((kind) => this.recoverLeaveRoster(kind));
+      throw failed.reason;
+    }
+    const writes = settled.map((result) => {
+      if (result.status === 'rejected') throw result.reason;
+      return result.value;
+    });
+    return { updated: true, names, writes };
   }
 
   /**
@@ -3879,9 +3991,15 @@ export class BitableSyncService implements OnModuleInit, OnModuleDestroy {
     ) {
       throw new ServiceUnavailableException('请休假替班排班日期范围无效');
     }
+    const readRoster = (kind: LeaveRosterKind) =>
+      this.readRollingScheduleRecords(kind, startDate, endDate).catch((error: unknown) => {
+        // Overtime reads the original shifts and must also work before a full snapshot is repaired.
+        if (!options.originalOnly || !(error instanceof ServiceUnavailableException)) throw error;
+        return this.fetchLeaveRosterRange(kind, { startDate, endDate });
+      });
     const readSources = () => Promise.all([
-      this.readRollingScheduleRecords('non-duty', startDate, endDate),
-      this.readRollingScheduleRecords('schedule', startDate, endDate),
+      readRoster('non-duty'),
+      readRoster('schedule'),
       options.originalOnly ? null : readCachedLeaveApprovalSnapshotState(),
     ]);
     let [nonDutyRows, scheduleRows, approvalState] = await readSources();

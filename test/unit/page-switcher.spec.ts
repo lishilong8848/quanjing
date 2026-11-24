@@ -44,6 +44,7 @@ const EXPECTED_ADMIN_PATHS = [
   '/operations-tools-management',
   '/contract-management',
   '/operations-kb',
+  '/file-publication',
   '/meeting-management',
   '/system-monthly-report',
   '/ali-monthly-report',
@@ -90,7 +91,7 @@ describe('global page navigation directory', () => {
       EXPECTED_DOMAIN_LABELS,
     );
     expect(groupedPages.map((domain) => domain.pages.length)).toEqual([
-      2, 3, 3, 4, 4, 4, 4,
+      2, 3, 3, 4, 4, 4, 5,
     ]);
     expect(
       groupedPages.flatMap((domain) => domain.pages.map((page) => page.path)),

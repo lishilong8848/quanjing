@@ -1,3 +1,7 @@
+jest.mock('../../server/common/feishu/bitable-direct-read', () => ({
+  ...jest.requireActual('../../server/common/feishu/bitable-direct-read'),
+  getTenantAccessToken: jest.fn().mockResolvedValue('synthetic-restore-token'),
+}));
 import { BitableSyncService } from '../../server/modules/bitable-sync/bitable-sync.service';
 import { enrichScheduleRecordsWithLeaveApproval } from '../../server/common/feishu/leave-approval-source';
 import { applicant, backup, fixture, group, primary, replacement } from './fixtures/leave-two-level';
@@ -11,9 +15,12 @@ function runtime() {
   const writes: string[] = [];
   Object.assign(service, {
     NON_DUTY_APP_TOKEN: 'app_synthetic_restore_nonduty', NON_DUTY_TABLE_ID: 'tbl_synthetic_restore_nonduty', SCHEDULE_APP_TOKEN: 'app_synthetic_restore_schedule', SCHEDULE_TABLE_ID: 'tbl_synthetic_restore_schedule',
-    fetchFeishuNonDutyRecords: jest.fn(async () => enrichScheduleRecordsWithLeaveApproval([structuredClone(original)], snapshot)),
-    fetchFeishuScheduleRecords: jest.fn(async () => enrichScheduleRecordsWithLeaveApproval([structuredClone(target)], snapshot)),
-    getTenantAccessToken: jest.fn(async () => 'synthetic-restore-token'),
+    patchVerifiedLeaveRoster: jest.fn().mockResolvedValue(undefined),
+    recoverLeaveRoster: jest.fn().mockResolvedValue(undefined),
+    fetchApprovedLeaveScheduleRows: jest.fn(async (nonDutyIds: string[], scheduleIds: string[]) => [
+      enrichScheduleRecordsWithLeaveApproval([original].filter(row => nonDutyIds.includes(row.record_id)).map(row => structuredClone(row)), snapshot),
+      enrichScheduleRecordsWithLeaveApproval([target].filter(row => scheduleIds.includes(row.record_id)).map(row => structuredClone(row)), snapshot),
+    ]),
     httpService: { axiosRef: { post: jest.fn(async (_url: string, body: any) => {
       for (const update of body.records) { const row = [target, original].find(item => item.record_id === update.record_id); if (!row) throw Error('Unknown synthetic restoration'); writes.push(update.record_id); Object.assign(row.fields, update.fields); }
       return { data: { code: 0 } };

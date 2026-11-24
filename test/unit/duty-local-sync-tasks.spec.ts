@@ -34,6 +34,18 @@ describe('process-local schedule sync task recovery', () => {
     expect(tasks.current(id)?.error?.message).toContain('同步期间排班数据发生变化');
     expect(tasks.current(id)?.error).toMatchObject({ kind: 'source_changed', failedPhase: 'publishing_snapshot' });
   });
+  it.each<[Error, string, string]>([
+    [Object.assign(new Error('Bearer synthetic-credential'), { code: 'ETIMEDOUT' }), 'source_unavailable', '读取飞书数据超时'],
+    [Object.assign(new Error('Bear er synthetic-credential'), { response: { status: 403 } }), 'source_access_denied', '读取权限暂不可用'],
+    [new Error('同步来源分页未完整返回'), 'source_incomplete', '排班数据不完整'],
+    [Object.assign(new Error('synthetic-credential'), { code: 'ENOSPC' }), 'snapshot_unavailable', '本地排班数据保存或核对未完成'],
+  ])('distinguishes a failed source or persistence response without exposing upstream error text', async (cause, kind, message) => {
+    const tasks = new DutyLocalSyncTasks(), id = randomUUID();
+    tasks.start(id, async () => { throw cause; });
+    await settle();
+    expect(tasks.current(id)?.error).toMatchObject({ kind, failedPhase: 'fetching_sources', message: expect.stringContaining(message) });
+    expect(JSON.stringify(tasks.current(id))).not.toContain('synthetic-credential');
+  });
   it('expires only terminal tasks and reports restarted or missing tasks as unknown', async () => {
     let now = 1_000; const tasks = new DutyLocalSyncTasks(() => now, 100), id = randomUUID();
     const task = tasks.start(id, async () => result); await settle(); now += 101;

@@ -29,6 +29,10 @@ describe('LeaveWorkflowDetailGateway', () => {
 
     expect(api.rows).toHaveLength(2);
     expect(api.createCalls).toHaveLength(2);
+    expect(api.searches).toEqual([
+      expect.objectContaining({ conjunction: 'or', size: 2 }),
+      expect.objectContaining({ conjunction: 'or', size: 2 }),
+    ]);
     expect(invalidateBitableRecordCache).toHaveBeenCalledTimes(2);
     expect(invalidateBitableRecordCache).toHaveBeenCalledWith({
       appToken: 'leave-base-token', tableId: 'tbl_leave_shift_detail', deletePersisted: true,
@@ -46,7 +50,7 @@ describe('LeaveWorkflowDetailGateway', () => {
   });
 
   it('updates only a stale assignment version and semantically rereads it', async () => {
-    const api = fakeApi();
+    const api = fakeApi({ richSearchText: true });
     const gateway = new LeaveWorkflowDetailGateway(api.httpService);
     await gateway.ensurePendingRows('rec_leave_1', groups());
     const assignments = groups().map((group, index) =>
@@ -94,6 +98,60 @@ describe('LeaveWorkflowDetailGateway', () => {
         assignment(groups()[1], 'li'),
       ]),
     ).rejects.toThrow('排班记录集合');
+  });
+
+  it('batches more than 20 shifts and reads every page before deciding what to write', async () => {
+    const api = fakeApi({ pageSize: 7 });
+    const gateway = new LeaveWorkflowDetailGateway(api.httpService);
+    const seed = groups()[0];
+    const shifts = Array.from({ length: 21 }, (_, index) => {
+      const date = `2026-08-${String(index + 1).padStart(2, '0')}`;
+      return { ...seed, scheduleDate: date, startAt: `${date}T09:00`, endAt: `${date}T18:00`,
+        shiftKey: `${date}T09:00__${date}T18:00`, scheduleRecordIds: [`rec_schedule_${index}`] };
+    });
+    await gateway.ensurePendingRows('rec_leave_1', shifts);
+    expect(api.searches.map(({ size }) => size)).toEqual([20, 1]);
+    api.searches.length = 0;
+
+    await gateway.ensurePendingRows('rec_leave_1', shifts);
+
+    expect(api.searches).toEqual([
+      { conjunction: 'or', size: 20, pageToken: '' },
+      { conjunction: 'or', size: 20, pageToken: '7' },
+      { conjunction: 'or', size: 20, pageToken: '14' },
+      { conjunction: 'and', size: 1, pageToken: '' },
+    ]);
+    expect(api.createCalls).toHaveLength(21);
+  });
+
+  it.each(['duplicate', 'wrong binding', 'newer version'] as const)('blocks prefix writes when a later row has %s', async (problem) => {
+    const api = fakeApi();
+    const gateway = new LeaveWorkflowDetailGateway(api.httpService);
+    await gateway.ensurePendingRows('rec_leave_1', groups());
+    if (problem === 'duplicate') api.rows.push({ ...api.rows[1], record_id: 'rec_duplicate' });
+    if (problem === 'wrong binding') api.rows[1].fields['请假记录ID'] = 'rec_other_leave';
+    if (problem === 'newer version') {
+      api.rows[1].fields['状态'] = 'active';
+      api.rows[1].fields['替班安排版本'] = 2;
+    }
+
+    await expect(gateway.upsertCurrentAssignments('rec_leave_1', 1, groups().map((group) => assignment(group, 'zhang'))))
+      .rejects.toThrow(/不唯一|不匹配|版本已更新/);
+    expect(api.createCalls).toHaveLength(2);
+    expect(api.updateCalls).toHaveLength(0);
+  });
+
+  it.each([
+    { items: [], has_more: false, total: 1 },
+    { items: [], has_more: true },
+    { items: [], has_more: 'false' },
+    { items: [], page_token: 'continuation' },
+    { items: [{ record_id: 'rec_other_detail', fields: { 明细唯一ID: 'outside' } }], has_more: false },
+  ])('rejects an incomplete or out-of-scope batch receipt before writes (%#)', async (malformedPage) => {
+    const api = fakeApi({ malformedPage });
+    const gateway = new LeaveWorkflowDetailGateway(api.httpService);
+    await expect(gateway.ensurePendingRows('rec_leave_1', groups())).rejects.toThrow(/分页|超出查询/);
+    expect(api.createCalls).toHaveLength(0);
   });
 
   it('discovers and caches the uniquely named detail table when config is absent', async () => {
@@ -161,8 +219,9 @@ function assignment(
   };
 }
 
-function fakeApi() {
+function fakeApi(options: { pageSize?: number; richSearchText?: boolean; malformedPage?: object } = {}) {
   const rows: Array<{ record_id: string; fields: Record<string, any> }> = [];
+  const searches: Array<{ conjunction: string; size: number; pageToken: string }> = [];
   const createCalls: Array<{
     clientToken: string;
     fields: Record<string, any>;
@@ -176,18 +235,25 @@ function fakeApi() {
       return { data: { code: 0, tenant_access_token: 'tenant-token' } };
     }
     if (url.endsWith('/records/search')) {
-      const condition = body?.filter?.conditions?.[0];
-      const expected = String(condition?.value?.[0] || '');
-      const fieldName = String(condition?.field_name || '');
+      const { conditions, conjunction } = body.filter;
+      const pageToken = String(config?.params?.page_token || '');
+      searches.push({ conjunction, size: conditions.length, pageToken });
+      const matches = rows.filter((row) => conditions.some(({ field_name, value }: any) => row.fields[field_name] === value[0]));
+      const start = Number(pageToken || 0);
+      const end = start + (options.pageSize || 200);
+      const hasMore = end < matches.length;
+      const items = matches.slice(start, end).map((row) => options.richSearchText ? { ...row, fields:
+        Object.fromEntries(Object.entries(row.fields).map(([key, value]) => [key,
+          typeof value === 'string' && key !== '状态'
+            ? key === '楼栋' || key === '班组' ? value.split('、') : [{ type: 'text', text: value.slice(0, 4) }, { type: 'text', text: value.slice(4) }]
+            : value,
+        ])),
+      } : row);
       return {
         data: {
           code: 0,
-          data: {
-            items: rows.filter(
-              (row) => String(row.fields[fieldName] || '') === expected,
-            ),
-            has_more: false,
-          },
+          data: options.malformedPage || { items, has_more: hasMore, total: matches.length,
+            page_token: hasMore ? String(end) : 'terminal-token' },
         },
       };
     }
@@ -242,6 +308,7 @@ function fakeApi() {
   });
   const api = {
     rows,
+    searches,
     createCalls,
     updateCalls,
     get tableListCalls() {

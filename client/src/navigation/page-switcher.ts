@@ -7,6 +7,7 @@ import {
   BellRing,
   FileBarChart2,
   FileText,
+  FileUp,
   Gauge,
   HardHat,
   History,
@@ -274,6 +275,14 @@ export const PAGE_REGISTRY: readonly SwitcherPage[] = [
     icon: BookOpen,
     domainKey: 'knowledge',
     description: '检索运维资料、案例与标准',
+  },
+  {
+    key: 'file-publication',
+    label: '文件发布',
+    path: '/file-publication',
+    icon: FileUp,
+    domainKey: 'knowledge',
+    description: '批量发布文件、审批与下载',
   },
   {
     key: 'meeting-management',

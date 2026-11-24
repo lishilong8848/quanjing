@@ -13,7 +13,7 @@ import { canUsePageAction } from '../business-action-access';
 import { readSelfServiceSchedules } from './self-service-schedule-reader';
 import type { SelfServiceScheduleResponse } from '@shared/self-service-schedule.interface';
 import type { SelfServiceApplicant } from '@shared/self-service-applicant';
-import { createScheduleReadCache } from './schedule-read-cache';
+import { createScheduleReadCache, readScheduleOnce } from './schedule-read-cache';
 import { hasAuthenticatedAccessIdentity } from '@/access/access-policy';
 import { resolveLeaveRequestApplicant } from '@shared/leave-request-applicant';
 import { canSelectWorkforcePerson } from '@shared/workforce-request-applicant';
@@ -285,6 +285,7 @@ import {
   createScheduleSnapshotRefreshCoordinator,
   getScheduleSnapshotRevalidationDateKeys,
   shouldPreserveLocalSnapshotData,
+  type ScheduleSnapshotRefreshCoordinator,
 } from './schedule-snapshot-refresh';
 import { getShanghaiBusinessDateKey } from './business-date';
 import {
@@ -651,15 +652,16 @@ const PERSONNEL_MOVEMENT_TYPES: PersonnelMovementType[] = [
 const selectMonthlyScheduleReadScope = createScheduleReadCache(getMonthlySchedules);
 const selectSelfServiceScheduleReadScope = createScheduleReadCache(readSelfServiceSchedules);
 
-const yearlySealingCache = new Map<
+type TodayLeaveReader = (dateKey: string) => ReturnType<typeof getTodayLeaveStaff>;
+type YearlySealingCache = Map<
   number,
   { sealings: SealingInfo[]; fetchedAt: number }
->();
-const yearlyChangeCache = new Map<
+>;
+type YearlyChangeCache = Map<
   number,
   { changes: ChangeInfo[]; fetchedAt: number }
->();
-const longWhiteScheduleCache = new Map<
+>;
+type LongWhiteScheduleCache = Map<
   string,
   {
     longWhiteDutyBuildings: LongWhiteDutyStaffByBuilding[];
@@ -667,7 +669,27 @@ const longWhiteScheduleCache = new Map<
     leaveStaffData: TodayLeaveStaffByBuilding[];
     fetchedAt: number;
   }
+>;
+
+const scheduleOverviewCaches = new WeakMap<
+  ReturnType<typeof selectMonthlyScheduleReadScope>,
+  {
+    yearlySealingCache: YearlySealingCache;
+    yearlyChangeCache: YearlyChangeCache;
+    longWhiteScheduleCache: LongWhiteScheduleCache;
+    sealingReads: Map<string, ReturnType<typeof getYearlySealingInfo>>;
+  }
 >();
+
+function getScheduleOverviewCache(scope: ReturnType<typeof selectMonthlyScheduleReadScope>) {
+  let cache = scheduleOverviewCaches.get(scope);
+  if (!cache) {
+    cache = { yearlySealingCache: new Map(), yearlyChangeCache: new Map(),
+      longWhiteScheduleCache: new Map(), sealingReads: new Map() };
+    scheduleOverviewCaches.set(scope, cache);
+  }
+  return cache;
+}
 
 function formatDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -718,6 +740,7 @@ function cloneChangeRequestDraft(
 }
 
 function updateCachedChanges(
+  yearlyChangeCache: YearlyChangeCache,
   year: number,
   updater: (changes: ChangeInfo[]) => ChangeInfo[],
 ): void {
@@ -2694,7 +2717,7 @@ interface TodayAndNearbySchedulesProps {
   BUILDING_ORDER: string[];
   BUILDING_MAP: Record<string, string>;
   personProfileMap: StaffProfileMap;
-  refreshToken: number;
+  readTodayLeaveStaff: TodayLeaveReader;
   localSnapshotRefreshToken: number;
   onPersonnelMovementsLoadStateChange: (
     state: DutyOverviewScreenshotLoadState,
@@ -2712,7 +2735,7 @@ function TodayAndNearbySchedules({
   BUILDING_ORDER,
   BUILDING_MAP,
   personProfileMap,
-  refreshToken,
+  readTodayLeaveStaff,
   localSnapshotRefreshToken,
   onPersonnelMovementsLoadStateChange,
 }: TodayAndNearbySchedulesProps) {
@@ -3062,7 +3085,7 @@ function TodayAndNearbySchedules({
         selectedDate={selectedDate}
         schedules={schedules}
         personProfileMap={personProfileMap}
-        refreshToken={refreshToken}
+        readTodayLeaveStaff={readTodayLeaveStaff}
         localSnapshotRefreshToken={localSnapshotRefreshToken}
         onLoadStateChange={onPersonnelMovementsLoadStateChange}
       />
@@ -3075,14 +3098,14 @@ function TodayPersonnelMovementCard({
   selectedDate,
   schedules,
   personProfileMap,
-  refreshToken,
+  readTodayLeaveStaff,
   localSnapshotRefreshToken,
   onLoadStateChange,
 }: {
   selectedDate: Date;
   schedules: MonthlySchedule[];
   personProfileMap: StaffProfileMap;
-  refreshToken: number;
+  readTodayLeaveStaff: TodayLeaveReader;
   localSnapshotRefreshToken: number;
   onLoadStateChange: (state: DutyOverviewScreenshotLoadState) => void;
 }) {
@@ -3093,7 +3116,6 @@ function TodayPersonnelMovementCard({
   const [leaveData, setLeaveData] = useState<TodayLeaveStaffByBuilding[]>([]);
   const [travelData, setTravelData] = useState<TravelStaffDetail[]>([]);
   const [loading, setLoading] = useState(true);
-  const lastSuccessfulRefreshTokenRef = useRef(0);
   const lastObservedLocalSnapshotRefreshTokenRef = useRef(
     localSnapshotRefreshToken,
   );
@@ -3108,27 +3130,22 @@ function TodayPersonnelMovementCard({
       localSnapshotRefreshToken;
 
     const fetchTodayPersonnelMovements = async () => {
-      const forceRefresh = refreshToken > lastSuccessfulRefreshTokenRef.current;
       const preserveExistingOnError = shouldPreserveLocalSnapshotData(
         localSnapshotRefresh,
-        forceRefresh,
+        false,
       );
       onLoadStateChange('loading');
       try {
         if (!preserveExistingOnError) setLoading(true);
         const [leaveResponse, travelResponse] = await Promise.all([
-          getTodayLeaveStaff(todayStr, forceRefresh),
+          readTodayLeaveStaff(todayStr),
           getTravelStaffDetails({
             startDate: todayStr,
             endDate: todayStr,
-            refresh: forceRefresh,
           }),
         ]);
         if (!active) {
           return;
-        }
-        if (forceRefresh) {
-          lastSuccessfulRefreshTokenRef.current = refreshToken;
         }
         setLeaveData(leaveResponse.buildings || []);
         setTravelData(travelResponse.details || []);
@@ -3153,7 +3170,7 @@ function TodayPersonnelMovementCard({
     return () => {
       active = false;
     };
-  }, [localSnapshotRefreshToken, onLoadStateChange, refreshToken, todayStr]);
+  }, [localSnapshotRefreshToken, onLoadStateChange, readTodayLeaveStaff, todayStr]);
 
   const movementData = useMemo(
     () =>
@@ -3464,21 +3481,19 @@ function TodayPersonnelMovementCard({
 interface TodayEngineersOnDutyProps {
   selectedDate: Date;
   personProfileMap: StaffProfileMap;
-  refreshToken: number;
+  readTodayLeaveStaff?: TodayLeaveReader;
   localSnapshotRefreshToken: number;
   workCalendarRevision: number;
-  canRefresh?: boolean;
-  canRefreshRelated?: boolean;
+  longWhiteScheduleCache: LongWhiteScheduleCache;
 }
 
 function TodayEngineersOnDuty({
   selectedDate,
   personProfileMap,
-  refreshToken,
+  readTodayLeaveStaff,
   localSnapshotRefreshToken,
   workCalendarRevision,
-  canRefresh = false,
-  canRefreshRelated = false,
+  longWhiteScheduleCache,
 }: TodayEngineersOnDutyProps) {
   const [longWhiteDutyBuildings, setLongWhiteDutyBuildings] = useState<
     LongWhiteDutyStaffByBuilding[]
@@ -3491,7 +3506,6 @@ function TodayEngineersOnDuty({
   >([]);
   const [loading, setLoading] = useState(true);
   const loadSeqRef = useRef(0);
-  const lastSuccessfulRefreshTokenRef = useRef(0);
   const lastObservedLocalSnapshotRefreshTokenRef = useRef(
     localSnapshotRefreshToken,
   );
@@ -3518,7 +3532,6 @@ function TodayEngineersOnDuty({
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const requestId = loadSeqRef.current + 1;
     loadSeqRef.current = requestId;
-    const forceRefresh = canRefresh && refreshToken > lastSuccessfulRefreshTokenRef.current;
     const localSnapshotRefresh =
       localSnapshotRefreshToken >
       lastObservedLocalSnapshotRefreshTokenRef.current;
@@ -3526,13 +3539,13 @@ function TodayEngineersOnDuty({
       localSnapshotRefreshToken;
     const preserveExistingOnError = shouldPreserveLocalSnapshotData(
       localSnapshotRefresh,
-      forceRefresh,
+      false,
     );
-    const cacheKey = `${dateStr}|calendar:${workCalendarRevision}`;
+    const cacheKey = `${dateStr}|workday:${isLongWhiteWorkday}`;
     const cached = longWhiteScheduleCache.get(cacheKey);
     const now = Date.now();
 
-    if (!forceRefresh && cached) {
+    if (cached) {
       setLongWhiteDutyBuildings(cached.longWhiteDutyBuildings);
       setFestivalSchedules(cached.festivalSchedules);
       setLeaveStaffData(cached.leaveStaffData);
@@ -3585,8 +3598,8 @@ function TodayEngineersOnDuty({
       // 同时获取排班数据和请假数据
       const [dutyData, leaveData, festivalSchedulesForDate] = await Promise.all(
         [
-          getLongWhiteDutyStaff(dateStr, forceRefresh),
-          getTodayLeaveStaff(dateStr, forceRefresh && canRefreshRelated),
+          getLongWhiteDutyStaff(dateStr),
+          readTodayLeaveStaff?.(dateStr),
           fetchFestivalSchedulesForDate(),
         ],
       );
@@ -3595,13 +3608,10 @@ function TodayEngineersOnDuty({
       }
 
       const buildings = dutyData.buildings || [];
-      const leaveStaffDataForDate = leaveData.buildings || [];
+      const leaveStaffDataForDate = leaveData?.buildings || [];
 
       if (requestId !== loadSeqRef.current) {
         return;
-      }
-      if (forceRefresh) {
-        lastSuccessfulRefreshTokenRef.current = refreshToken;
       }
 
       longWhiteScheduleCache.set(cacheKey, {
@@ -3627,19 +3637,17 @@ function TodayEngineersOnDuty({
       }
     }
   }, [
-    canRefresh,
-    canRefreshRelated,
-    holidayInfo.isHoliday,
     isLongWhiteWorkday,
     localSnapshotRefreshToken,
-    refreshToken,
+    longWhiteScheduleCache,
+    readTodayLeaveStaff,
     selectedDate,
-    workCalendarRevision,
   ]);
 
   // 加载本地长白班数据
   useEffect(() => {
-    loadLongWhiteDutyStaff();
+    void loadLongWhiteDutyStaff();
+    return () => { loadSeqRef.current += 1; };
   }, [loadLongWhiteDutyStaff]);
 
   const longWhiteStaffByBuilding = useMemo(() => {
@@ -3890,6 +3898,8 @@ function MonthlySchedulePageContent() {
     inFlight: monthlyScheduleReadInFlight,
     read: getMonthlySchedulesWithInFlightDeduplication,
   } = scheduleReadScope;
+  const { yearlySealingCache, yearlyChangeCache, longWhiteScheduleCache, sealingReads } =
+    getScheduleOverviewCache(scheduleReadScope);
   const activeScheduleReadScopeRef = useRef(scheduleReadScope);
   activeScheduleReadScopeRef.current = scheduleReadScope;
   const selfServiceIdentityReady = selfServiceIdentity?.scope === scheduleReadScope.identity && selfServiceIdentity.status === 'ready';
@@ -3990,7 +4000,6 @@ function MonthlySchedulePageContent() {
   const canManageMonthlySchedule = canUsePageAction(access, 'schedule_assignments', 'update', capabilities.canEdit);
   const canViewScheduleDetails = canUsePageAction(access, 'monthly_schedule', 'read', role !== 'guest');
   const canReadPersonnelSchedule = canUsePageAction(access, 'personnel_schedule', 'read', role !== 'guest');
-  const canRefreshPersonnelSchedule = canUsePageAction(access, 'personnel_schedule', 'refresh', capabilities.canForceRefresh);
   const canReadAssignments = canUsePageAction(access, 'schedule_assignments', 'read', true);
   const canCreateMonthlySchedule = canUsePageAction(access, 'schedule_assignments', 'create', capabilities.canEdit);
   const canRefreshMonthlySchedule = canUsePageAction(access, 'monthly_schedule', 'refresh', capabilities.canForceRefresh);
@@ -4021,6 +4030,7 @@ function MonthlySchedulePageContent() {
     getInitialSelectedDate(),
   );
   const selectedDateKey = formatDateKey(selectedDate);
+  const selectedYear = selectedDate.getFullYear();
   const [businessDateKey, setBusinessDateKey] = useState(() =>
     getShanghaiBusinessDateKey(),
   );
@@ -4040,6 +4050,8 @@ function MonthlySchedulePageContent() {
       document.removeEventListener('visibilitychange', refreshBusinessClock);
     };
   }, [refreshBusinessClock]);
+  const scheduleWindowKey = getScheduleWindowMonths(selectedDate, businessDateKey)
+    .map(({ key }) => key).join('|');
   const [schedules, setSchedules] = useState<MonthlySchedule[]>(() =>
     canReadMonthlySchedule && !access.isLoading
       ? getScheduleWindowMonths(selectedDate, businessDateKey).flatMap(
@@ -4369,19 +4381,19 @@ function MonthlySchedulePageContent() {
   const [exceptionFollowUpSubmitting, setExceptionFollowUpSubmitting] =
     useState(false);
   const [calendarFollowUpMonth, setCalendarFollowUpMonth] = useState(selectedDate);
-  const [dataRefreshToken, setDataRefreshToken] = useState(0);
   const [localSnapshotRefreshToken, setLocalSnapshotRefreshToken] = useState(0);
   const [workCalendarRevision, setWorkCalendarRevision] = useState(0);
-  const effectiveDataRefreshToken = canRefreshMonthlySchedule
-    ? dataRefreshToken
-    : 0;
+  const readTodayLeaveStaff = useMemo<TodayLeaveReader>(() => {
+    const inFlight = new Map<string, ReturnType<typeof getTodayLeaveStaff>>();
+    return (dateKey) => readScheduleOnce(inFlight, dateKey, () => getTodayLeaveStaff(dateKey));
+  }, [scheduleReadScope, localSnapshotRefreshToken]);
   const fetchCalendarFollowUps = useCallback(
     (range: {start:string;end:string}, force: boolean) =>
-      canReadExceptions ? getExceptionFollowUps(range.start, force && canRefreshException, range.end) : Promise.resolve({ date: range.start, range, items: [], total: 0 }),
-    [canRefreshException, canReadExceptions],
+      !access.isLoading && canReadExceptions ? getExceptionFollowUps(range.start, force && canRefreshException, range.end) : Promise.resolve({ date: range.start, range, items: [], total: 0 }),
+    [access.isLoading, canRefreshException, canReadExceptions],
   );
   const calendarFollowUps = useCalendarFollowUps(
-    calendarFollowUpRange(calendarFollowUpMonth), fetchCalendarFollowUps, effectiveDataRefreshToken,
+    calendarFollowUpRange(calendarFollowUpMonth), fetchCalendarFollowUps,
   );
   const exceptionFollowUpsByKey = calendarFollowUps.index;
   const setExceptionFollowUpsByKey = calendarFollowUps.setIndex;
@@ -4389,6 +4401,8 @@ function MonthlySchedulePageContent() {
   useEffect(() => {setCalendarFollowUpMonth(selectedDate);}, [selectedDate]);
   const isScreenshotMode = getIsScreenshotMode();
   const scheduleLoadSeqRef = useRef(0);
+  const snapshotRefreshCoordinatorRef = useRef<ScheduleSnapshotRefreshCoordinator | null>(null);
+  const manualLocalReadPendingRef = useRef(false);
   const emergencyDutyLoadSeqRef = useRef(0);
   const emergencyDutyOptionsLoadSeqRef = useRef(0);
   const emergencyDutyLoadAbortRef = useRef<AbortController | null>(null);
@@ -4643,7 +4657,7 @@ function MonthlySchedulePageContent() {
 
   const loadEmergencyDutySchedules = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
-      if (!canReadMonthlySchedule) return;
+      if (!canReadMonthlySchedule || access.isLoading) return;
       const startDate = addDaysToDateKey(selectedDateKey, -5);
       const endDate = addDaysToDateKey(selectedDateKey, 5);
       if (!startDate || !endDate) {
@@ -4714,7 +4728,7 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [canReadMonthlySchedule, selectedDateKey, setScreenshotSectionState],
+    [access.isLoading, canReadMonthlySchedule, selectedDateKey, setScreenshotSectionState],
   );
 
   const loadEmergencyDutyOptions = useCallback(
@@ -4962,6 +4976,7 @@ function MonthlySchedulePageContent() {
 
   const revalidateLocalScheduleSnapshot = useCallback(
     async (signal: AbortSignal): Promise<boolean> => {
+      if (manualLocalReadPendingRef.current) return false;
       const scheduleSnapshotDateKeys = getScheduleSnapshotRevalidationDateKeys(
         schedulesRef.current,
       );
@@ -4978,7 +4993,7 @@ function MonthlySchedulePageContent() {
       setLocalSnapshotRefreshToken((token) => token + 1);
       return true;
     },
-    [invalidateScheduleLoads, monthlyScheduleCache],
+    [invalidateScheduleLoads, longWhiteScheduleCache, monthlyScheduleCache],
   );
 
   useEffect(() => {
@@ -4986,6 +5001,8 @@ function MonthlySchedulePageContent() {
 
     const snapshotRefreshCoordinator = createScheduleSnapshotRefreshCoordinator(
       {
+        initialToken: scheduleReadScope.snapshotRevision,
+        onTokenChange: (token) => { scheduleReadScope.snapshotRevision = token; },
         readRevision: (signal) => getScheduleSnapshotRevision(signal),
         revalidate: revalidateLocalScheduleSnapshot,
         onError: (error) => {
@@ -4993,8 +5010,10 @@ function MonthlySchedulePageContent() {
         },
       },
     );
+    snapshotRefreshCoordinatorRef.current = snapshotRefreshCoordinator;
     const checkScheduleSnapshotRevision = (): Promise<void> => {
       if (document.visibilityState === 'hidden') return Promise.resolve();
+      if (manualLocalReadPendingRef.current) return Promise.resolve();
       return snapshotRefreshCoordinator.check().then(() => undefined);
     };
 
@@ -5015,6 +5034,9 @@ function MonthlySchedulePageContent() {
 
     return () => {
       snapshotRefreshCoordinator.stop();
+      if (snapshotRefreshCoordinatorRef.current === snapshotRefreshCoordinator) {
+        snapshotRefreshCoordinatorRef.current = null;
+      }
       // Leave ordinary reads available to the next mount of this same scope.
       invalidateScheduleLoads(false);
       window.clearInterval(refreshInterval);
@@ -5030,6 +5052,7 @@ function MonthlySchedulePageContent() {
     invalidateScheduleLoads,
     isScreenshotMode,
     revalidateLocalScheduleSnapshot,
+    scheduleReadScope,
   ]);
 
   const loadSchedulesForDate = useCallback(
@@ -5205,9 +5228,9 @@ function MonthlySchedulePageContent() {
   // 加载封网信息
   const loadSealingInfo = useCallback(
     async (forceRefresh = false): Promise<boolean> => {
-      if (!canReadMonthlySchedule) return false;
+      if (!canReadMonthlySchedule || access.isLoading) return false;
       forceRefresh = forceRefresh && canRefreshMonthlySchedule;
-      const year = selectedDate.getFullYear();
+      const year = selectedYear;
       const requestId = sealingLoadSeqRef.current + 1;
       sealingLoadSeqRef.current = requestId;
       const cached = yearlySealingCache.get(year);
@@ -5224,19 +5247,24 @@ function MonthlySchedulePageContent() {
       setScreenshotSectionState('sealings', 'loading');
 
       try {
-        const data = await getYearlySealingInfo(year, forceRefresh);
+        const data = await readScheduleOnce(
+          sealingReads, `${year}:${forceRefresh}`, () => getYearlySealingInfo(year, forceRefresh),
+        );
         const validSealings = data.sealings
           .filter((s) => s.sealingName && s.sealingName.trim() !== '')
           .sort(
             (a, b) =>
               new Date(a.startDate).getTime() - new Date(b.startDate).getTime(),
           );
-        if (requestId !== sealingLoadSeqRef.current) {
+        if (requestId !== sealingLoadSeqRef.current || activeScheduleReadScopeRef.current !== scheduleReadScope) {
           return false;
         }
         yearlySealingCache.set(year, {
           sealings: validSealings,
-          fetchedAt: Date.now(),
+          // The server is refreshing a stale snapshot in the background.
+          fetchedAt: data.sourceStatus === 'stale'
+            ? Date.now() - SEALING_INFO_CACHE_TTL_MS + SEALING_INFO_REVALIDATE_INTERVAL_MS
+            : Date.now(),
         });
         setSealings(validSealings);
         setScreenshotSectionState('sealings', 'ready');
@@ -5249,7 +5277,7 @@ function MonthlySchedulePageContent() {
         return false;
       }
     },
-    [canReadMonthlySchedule, canRefreshMonthlySchedule, selectedDate, setScreenshotSectionState],
+    [access.isLoading, canReadMonthlySchedule, canRefreshMonthlySchedule, scheduleReadScope, sealingReads, selectedYear, setScreenshotSectionState, yearlySealingCache],
   );
 
   const loadChangeInfo = useCallback(
@@ -5262,7 +5290,7 @@ function MonthlySchedulePageContent() {
       forceRefresh = forceRefresh && canRefreshChange;
       const controller = beginLatestDutyOverviewRequest(changeLoadAbortRef);
       setScreenshotSectionState('changes', 'loading');
-      const year = selectedDate.getFullYear();
+      const year = selectedYear;
       const requestStartedAtOverlayGeneration =
         changeRequestOverlayGenerationRef.current;
       const mergeLocalOverlay = (
@@ -5353,7 +5381,7 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [canReadChanges, canRefreshChange, deleteChangeRequestOverlay, selectedDate, setScreenshotSectionState],
+    [canReadChanges, canRefreshChange, deleteChangeRequestOverlay, selectedYear, setScreenshotSectionState, yearlyChangeCache],
   );
 
   const loadPersonProfiles = useCallback(
@@ -6224,7 +6252,7 @@ function MonthlySchedulePageContent() {
   );
 
   useEffect(() => {
-    if (!canReadMonthlySchedule && !selfServiceOnly) return;
+    if (access.isLoading || (!canReadMonthlySchedule && !selfServiceOnly)) return;
     let active = true;
     void getChinaWorkCalendar()
       .then((response) => {
@@ -6238,16 +6266,24 @@ function MonthlySchedulePageContent() {
     return () => {
       active = false;
     };
-  }, [canReadMonthlySchedule, selfServiceOnly]);
+  }, [access.isLoading, canReadMonthlySchedule, selfServiceOnly]);
+
+  useEffect(() => {
+    if (access.isLoading || !canReadMonthlySchedule) return;
+    const controller = new AbortController();
+    void loadSchedulesRef.current({ signal: controller.signal });
+    return () => controller.abort();
+  }, [access.isLoading, canReadMonthlySchedule, scheduleReadScope, scheduleWindowKey]);
+
+  useEffect(() => {
+    if (!access.isLoading) void loadSealingInfo();
+  }, [access.isLoading, loadSealingInfo]);
 
   useEffect(() => {
     if (access.isLoading) return;
-    const controller = new AbortController();
-    void loadSchedules({ signal: controller.signal });
-    loadSealingInfo();
-    loadChangeInfo();
-    return () => { controller.abort(); changeLoadAbortRef.current?.abort(); };
-  }, [access.isLoading, loadSchedules, loadSealingInfo, loadChangeInfo]);
+    void loadChangeInfo();
+    return () => changeLoadAbortRef.current?.abort();
+  }, [access.isLoading, loadChangeInfo]);
 
   useEffect(() => {
     void loadEmergencyDutySchedules();
@@ -6283,9 +6319,10 @@ function MonthlySchedulePageContent() {
   useEffect(() => () => emergencyDutyOptionsAbortRef.current?.abort(), []);
 
   useEffect(() => {
-    loadPersonProfiles();
+    if (access.isLoading) return;
+    void loadPersonProfiles();
     return () => personProfileLoadAbortRef.current?.abort();
-  }, [loadPersonProfiles]);
+  }, [access.isLoading, loadPersonProfiles]);
 
   useEffect(() => {
     const refreshSealingInfo = () => {
@@ -6700,20 +6737,34 @@ function MonthlySchedulePageContent() {
   };
 
   const refreshAfterLocalSync = useCallback(async (invalidate: boolean, signal: AbortSignal) => {
-    if (signal.aborted || activeScheduleReadScopeRef.current !== scheduleReadScope) return { schedules: false, sealings: false, cancelled: true };
-    if (invalidate) {
-      invalidateScheduleLoads();
-      monthlyScheduleCache.clear();
-      longWhiteScheduleCache.clear();
-      yearlySealingCache.clear();
-      setDataRefreshToken((token) => token + 1);
+    const cancelled = () => signal.aborted || activeScheduleReadScopeRef.current !== scheduleReadScope;
+    if (cancelled()) return { schedules: false, sealings: false, cancelled: true };
+    manualLocalReadPendingRef.current = true;
+    try {
+      const revision = invalidate ? await getScheduleSnapshotRevision(signal).catch(() => null) : null;
+      if (cancelled()) return { schedules: false, sealings: false, cancelled: true };
+      if (invalidate) {
+        invalidateScheduleLoads();
+        getAdjacentScheduleMonthDateKeys(businessDateKey).forEach((dateKey) => {
+          const key = getScheduleMonthKey(dateKey);
+          if (key) monthlyScheduleCache.delete(key);
+        });
+        longWhiteScheduleCache.clear();
+      }
+      const [scheduleLoaded, sealingInfoLoaded] = await Promise.all([
+        loadSchedulesRef.current({ preserveExistingOnError: true, silent: true, signal }),
+        loadSealingInfo(),
+      ]);
+      if (cancelled()) return { schedules: false, sealings: false, cancelled: true };
+      if (scheduleLoaded) {
+        if (revision?.available && revision.token) snapshotRefreshCoordinatorRef.current?.recordApplied(revision.token);
+        setLocalSnapshotRefreshToken((token) => token + 1);
+      }
+      return { schedules: scheduleLoaded, sealings: sealingInfoLoaded };
+    } finally {
+      manualLocalReadPendingRef.current = false;
     }
-    const [scheduleLoaded, sealingInfoLoaded] = await Promise.all([
-      loadSchedules({ preserveExistingOnError: true, silent: true, signal }),
-      loadSealingInfo(true),
-    ]);
-    return { schedules: scheduleLoaded, sealings: sealingInfoLoaded };
-  }, [scheduleReadScope, monthlyScheduleCache, invalidateScheduleLoads, loadSchedules, loadSealingInfo]);
+  }, [businessDateKey, scheduleReadScope, monthlyScheduleCache, longWhiteScheduleCache, invalidateScheduleLoads, loadSealingInfo]);
   const localSync = useLocalScheduleSync(principalFingerprint, canRefreshMonthlySchedule && !access.isLoading, refreshAfterLocalSync);
   const manualSyncing = localSync.state.busy;
   const handleManualSync = useCallback(() => {
@@ -8128,7 +8179,7 @@ function MonthlySchedulePageContent() {
             : [pendingChange, ...current],
         );
       }
-      updateCachedChanges(changeYear, (current) =>
+      updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
         partialRecordAtSubmit
           ? reconcilePendingChange(current, temporaryId, pendingChange)
           : [pendingChange, ...current],
@@ -8162,7 +8213,7 @@ function MonthlySchedulePageContent() {
             reconcilePendingChange(current, temporaryId, acceptedRecord),
           );
         }
-        updateCachedChanges(changeYear, (current) =>
+        updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
           reconcilePendingChange(current, temporaryId, acceptedRecord),
         );
         if (result.pendingSync && result.taskId) {
@@ -8199,7 +8250,7 @@ function MonthlySchedulePageContent() {
                     ),
                   );
                 }
-                updateCachedChanges(changeYear, (current) =>
+                updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
                   reconcilePendingChange(
                     current,
                     acceptedRecord.id,
@@ -8240,7 +8291,7 @@ function MonthlySchedulePageContent() {
                   ),
                 );
               }
-              updateCachedChanges(changeYear, (current) =>
+              updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
                 reconcilePendingChange(
                   current,
                   acceptedRecord.id,
@@ -8281,7 +8332,7 @@ function MonthlySchedulePageContent() {
                   ),
                 );
               }
-              updateCachedChanges(changeYear, (current) =>
+              updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
                 reconcilePendingChange(
                   current,
                   acceptedRecord.id,
@@ -8339,7 +8390,7 @@ function MonthlySchedulePageContent() {
               reconcilePendingChange(current, temporaryId, partialRecord),
             );
           }
-          updateCachedChanges(changeYear, (current) =>
+          updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
             reconcilePendingChange(current, temporaryId, partialRecord),
           );
           setChangeRequestDraft(submittedDraft);
@@ -8366,7 +8417,7 @@ function MonthlySchedulePageContent() {
               reconcilePendingChange(current, temporaryId, partialRecord),
             );
           }
-          updateCachedChanges(changeYear, (current) =>
+          updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
             reconcilePendingChange(current, temporaryId, partialRecord),
           );
           const message = getBackendErrorMessage(
@@ -8402,7 +8453,7 @@ function MonthlySchedulePageContent() {
               ),
             );
           }
-          updateCachedChanges(changeYear, (current) =>
+          updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
             reconcilePendingChange(current, temporaryId, partialRecordAtSubmit),
           );
         } else {
@@ -8411,7 +8462,7 @@ function MonthlySchedulePageContent() {
               rollbackPendingChange(current, temporaryId),
             );
           }
-          updateCachedChanges(changeYear, (current) =>
+          updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
             rollbackPendingChange(current, temporaryId),
           );
         }
@@ -8441,6 +8492,7 @@ function MonthlySchedulePageContent() {
       changeRequestSubmitting,
       deleteChangeRequestOverlay,
       setChangeRequestOverlay,
+      yearlyChangeCache,
     ],
   );
 
@@ -8490,7 +8542,7 @@ function MonthlySchedulePageContent() {
       setChanges((current) =>
         reconcilePendingChange(current, original.id, pending),
       );
-      updateCachedChanges(changeYear, (current) =>
+      updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
         reconcilePendingChange(current, original.id, pending),
       );
       toast.loading('变更调整正在后台同步…', { id: toastId });
@@ -8505,7 +8557,7 @@ function MonthlySchedulePageContent() {
         setChanges((current) =>
           reconcilePendingChange(current, original.id, result.record),
         );
-        updateCachedChanges(changeYear, (current) =>
+        updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
           reconcilePendingChange(current, original.id, result.record),
         );
         const nextMutationId = createChangeAdjustmentMutationId();
@@ -8532,7 +8584,7 @@ function MonthlySchedulePageContent() {
         setChanges((current) =>
           reconcilePendingChange(current, original.id, restored),
         );
-        updateCachedChanges(changeYear, (current) =>
+        updateCachedChanges(yearlyChangeCache, changeYear, (current) =>
           reconcilePendingChange(current, original.id, restored),
         );
         const message = getBackendErrorMessage(
@@ -8554,7 +8606,7 @@ function MonthlySchedulePageContent() {
         }
       }
     },
-    [canUpdateChange, changeAdjustmentRequestSubmitting],
+    [canUpdateChange, changeAdjustmentRequestSubmitting, yearlyChangeCache],
   );
 
   const handleSubmitChangeDrillReport = useCallback(
@@ -8720,7 +8772,7 @@ function MonthlySchedulePageContent() {
         setChanges((current) => markCompleted(current));
         const cacheYear = Number(binding.original.startDate.slice(0, 4));
         if (Number.isInteger(cacheYear)) {
-          updateCachedChanges(cacheYear, markCompleted);
+          updateCachedChanges(yearlyChangeCache, cacheYear, markCompleted);
         }
         const recoveryRemoved = removeChangeSummaryReportRecovery(
           clientMutationId,
@@ -8802,6 +8854,7 @@ function MonthlySchedulePageContent() {
       principalFingerprint,
       removeChangeSummaryReportBinding,
       upsertChangeSummaryReportBinding,
+      yearlyChangeCache,
     ],
   );
 
@@ -9719,6 +9772,7 @@ function MonthlySchedulePageContent() {
     changeAdjustmentTarget,
     loadChangeInfo,
     selectedDate,
+    yearlyChangeCache,
   ]);
 
   const handleClearChangeAdjustment = useCallback(
@@ -9804,6 +9858,7 @@ function MonthlySchedulePageContent() {
       changeAdjustmentSubmitting,
       loadChangeInfo,
       selectedDate,
+      yearlyChangeCache,
     ],
   );
 
@@ -11195,7 +11250,7 @@ function MonthlySchedulePageContent() {
           )}
 
           {/* 今日前后日期值班信息 - 磨玻璃效果展示区 */}
-          {canReadMonthlySchedule && <TodayAndNearbySchedules
+          {canReadMonthlySchedule && !access.isLoading && <TodayAndNearbySchedules
             selectedDate={selectedDate}
             schedules={schedules}
             getScheduleByDateAndBuilding={getScheduleByDateAndBuilding}
@@ -11206,7 +11261,7 @@ function MonthlySchedulePageContent() {
             BUILDING_ORDER={BUILDING_ORDER}
             BUILDING_MAP={BUILDING_MAP}
             personProfileMap={personProfileMap}
-            refreshToken={effectiveDataRefreshToken}
+            readTodayLeaveStaff={readTodayLeaveStaff}
             localSnapshotRefreshToken={localSnapshotRefreshToken}
             onPersonnelMovementsLoadStateChange={
               handlePersonnelMovementsLoadStateChange
@@ -11224,16 +11279,15 @@ function MonthlySchedulePageContent() {
           </>}
 
           {/* 今日长白班在岗一览 */}
-          {canReadPersonnelSchedule && (
+          {canReadPersonnelSchedule && !access.isLoading && (
           <div data-screenshot-extra="true">
             <TodayEngineersOnDuty
               selectedDate={selectedDate}
               personProfileMap={personProfileMap}
-              refreshToken={effectiveDataRefreshToken}
+              readTodayLeaveStaff={canReadMonthlySchedule ? readTodayLeaveStaff : undefined}
               localSnapshotRefreshToken={localSnapshotRefreshToken}
               workCalendarRevision={workCalendarRevision}
-              canRefresh={canRefreshPersonnelSchedule}
-              canRefreshRelated={canRefreshMonthlySchedule}
+              longWhiteScheduleCache={longWhiteScheduleCache}
             />
           </div>
           )}

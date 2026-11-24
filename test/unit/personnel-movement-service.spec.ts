@@ -436,18 +436,8 @@ describe('personnel movement handling', () => {
       skipped: 0,
       failed: 0,
     });
-    expect(service.batchUpdateScheduleTextField).toHaveBeenNthCalledWith(
-      1,
-      [{
-        record_id: 'target-row',
-        fields: { '值班人员（实际）程序修改': '张三 李四' },
-      }],
-      'scheduleApp',
-      'scheduleTable',
-      'tenant-token',
-    );
-    expect(service.batchUpdateScheduleTextField).toHaveBeenNthCalledWith(
-      2,
+    expect(service.batchUpdateScheduleTextField).toHaveBeenCalledTimes(1);
+    expect(service.batchUpdateScheduleTextField).toHaveBeenCalledWith(
       [{
         record_id: 'target-row',
         fields: { '值班人员（实际）程序修改': '王五' },
@@ -488,8 +478,8 @@ describe('personnel movement handling', () => {
       skipped: 0,
       failed: 0,
     });
-    expect(service.batchUpdateScheduleTextField).toHaveBeenNthCalledWith(
-      2,
+    expect(service.batchUpdateScheduleTextField).toHaveBeenCalledTimes(1);
+    expect(service.batchUpdateScheduleTextField).toHaveBeenCalledWith(
       [{
         record_id: 'leave-without-substitute',
         fields: { '值班人员（实际）程序修改': '李四' },
@@ -500,7 +490,7 @@ describe('personnel movement handling', () => {
     );
   });
 
-  it('resets a manual program value from planned staff before applying rules', async () => {
+  it('restores the original shift when an earlier program override is no longer needed', async () => {
     const service = createService();
     service.syncLocalDutyStaffActual = jest.fn(async () => undefined);
     service.fetchFeishuScheduleRecords = jest.fn(async () => [
@@ -537,5 +527,44 @@ describe('personnel movement handling', () => {
       'scheduleTable',
       'tenant-token',
     );
+  });
+
+  it('leaves an already-correct rule result in Feishu untouched', async () => {
+    const service = createService();
+    jest.mocked(invalidateBitableRecordCache).mockClear();
+    service.fetchFeishuScheduleRecords = jest.fn(async () => [{
+      record_id: 'unchanged', fields: {
+        fldZSaDbGf: '2026-07-14', fldJi5bxBG: '张三 李四',
+        fld4xMPICY: '张三', fldZnstUS3: '王五',
+        __systemLeaveApprovalVerified: true, __systemApprovedLeaveStaff: ['张三'],
+        __systemApprovedSubstituteStaff: ['王五'],
+        '值班人员（实际）程序修改': '王五 李四',
+      },
+    }]);
+    await expect(service.refreshProgramModifiedDutyStaffFromRules({
+      source: 'manual-sync', startDate: '2026-07-14', endDate: '2026-07-17',
+    })).resolves.toMatchObject({ success: true, total: 1, updated: 0, skipped: 1 });
+    expect(service.batchUpdateScheduleTextField).not.toHaveBeenCalled();
+    expect(service.getFeishuTenantAccessToken).not.toHaveBeenCalled();
+    expect(invalidateBitableRecordCache).not.toHaveBeenCalled();
+  });
+
+  it('checks the source before writing and invalidates after an uncertain Feishu write', async () => {
+    const service = createService();
+    jest.mocked(invalidateBitableRecordCache).mockClear();
+    const records = [{ record_id: 'changed', fields: {
+      fldZSaDbGf: '2026-07-14', fldJi5bxBG: '张三', '值班人员（实际）程序修改': '旧值',
+    } }];
+    const window = { startDate: '2026-07-14', endDate: '2026-07-17' };
+    await expect(service.refreshProgramModifiedDutyStaffRecords(records, window, async () => {
+      throw Error('排班来源已变化');
+    })).rejects.toThrow('排班来源已变化');
+    expect(service.batchUpdateScheduleTextField).not.toHaveBeenCalled();
+    expect(invalidateBitableRecordCache).not.toHaveBeenCalled();
+
+    service.batchUpdateScheduleTextField.mockRejectedValueOnce(Error('Feishu timeout'));
+    await expect(service.refreshProgramModifiedDutyStaffRecords(records, window)).rejects.toThrow('Feishu timeout');
+    expect(service.batchUpdateScheduleTextField).toHaveBeenCalledTimes(1);
+    expect(invalidateBitableRecordCache).toHaveBeenCalledWith({ appToken: 'scheduleApp', tableId: 'scheduleTable', deletePersisted: true });
   });
 });

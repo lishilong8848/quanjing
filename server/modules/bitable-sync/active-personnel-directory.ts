@@ -3,12 +3,30 @@ import {
   extractDisplayValues,
   getRecordId,
   pickField,
+  readLatestPersistedBitableRecordSnapshot,
   type BitableRecordItem,
   type PersistedBitableRecordSnapshot,
 } from '@server/common/feishu/bitable-direct-read';
+import { readEnv } from '@server/common/config/external-services.config';
 
 export const DEFAULT_ACTIVE_PERSONNEL_TABLE_ID = 'tblOu75UtJTDNHIM';
 export const DEFAULT_ACTIVE_PERSONNEL_VIEW_ID = 'vewrQcypV4';
+
+export function activePersonnelSource() {
+  return {
+    appToken: readEnv('FEISHU_ORG_APP_TOKEN', ['FEISHU_ORGANIZATION_APP_TOKEN']),
+    tableId: readEnv('FEISHU_ORG_TABLE_ID', ['FEISHU_ORGANIZATION_TABLE_ID']) || DEFAULT_ACTIVE_PERSONNEL_TABLE_ID,
+    viewId: readEnv('FEISHU_ORG_VIEW_ID', ['FEISHU_ORGANIZATION_VIEW_ID']) || DEFAULT_ACTIVE_PERSONNEL_VIEW_ID,
+  };
+}
+
+export async function readCachedActivePersonnel(source = activePersonnelSource()): Promise<ActivePersonnelDirectory | null> {
+  const snapshot = await readLatestPersistedBitableRecordSnapshot({
+    appToken: source.appToken || undefined, tableId: source.tableId, viewId: source.viewId || undefined,
+    tableName: '在职人员',
+  });
+  return snapshot ? buildActivePersonnelDirectory(snapshot) : null;
+}
 
 export const ACTIVE_PERSONNEL_BUILDINGS = [
   'A',

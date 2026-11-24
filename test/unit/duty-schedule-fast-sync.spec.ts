@@ -46,6 +46,7 @@ jest.mock(
     ),
     extractNumberValue: jest.fn(() => null),
     fetchBitableRecords: jest.fn(),
+    isTransientFeishuError: jest.fn(() => false),
     getRecordId: jest.fn(
       (record: { record_id?: string; id?: string }) =>
         record.record_id || record.id || '',

@@ -138,8 +138,9 @@ export function parseLeaveLongConnectionCardAction(
     if (value.version !== 1 || !isRecordId(value.recordId) || !Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 0) throw new BadRequestException('替班调整导航无效');
     return finishParsedAction(event, { kind: 'adjustment_view' as const, view: 'selection' as const, recordId: value.recordId, expectedRevision: value.expectedRevision });
   }
+  const isReviewedApproval = value.action === 'approve_reviewed_substitution';
   const isApprovalAction =
-    value.action === 'approve' || value.action === 'reject';
+    value.action === 'approve' || value.action === 'reject' || isReviewedApproval;
   const isViewAction =
     value.action === 'open_rejection' || value.action === 'return_to_approval';
   const hasSubstituteRequired = Object.prototype.hasOwnProperty.call(
@@ -155,7 +156,7 @@ export function parseLeaveLongConnectionCardAction(
     !Number.isSafeInteger(value.stageVersion) ||
     Number(value.stageVersion) < 1 ||
     (hasSubstituteRequired &&
-      (value.action !== 'approve' ||
+      ((value.action !== 'approve' && !isReviewedApproval) ||
         typeof value.substituteRequired !== 'boolean'))
   ) {
     throw new BadRequestException('请休假审批卡片动作值无效');
@@ -173,13 +174,27 @@ export function parseLeaveLongConnectionCardAction(
       stageVersion: value.stageVersion,
     });
   }
+  let shiftSelections: LeaveShiftAssignmentSelection[] | undefined;
+  if (isReviewedApproval) {
+    const reviewed = requireObject(value.reviewedSubstitutes, '替班核对结果无效，请重新核对');
+    const entries = Object.entries(reviewed);
+    const hasUnexpectedForm = action.form_value !== undefined &&
+      (!isPlainObject(action.form_value) || Object.keys(action.form_value).length > 0);
+    if (!isRecordId(value.recordId) || value.applicationKey !== `leave:${value.recordId}` ||
+      value.substituteRequired === false || hasUnexpectedForm ||
+      entries.some(([name, person]) => !name.startsWith(LEAVE_SHIFT_FIELD_PREFIX) || !isRecordId(person))) {
+      throw new BadRequestException('替班核对结果无效，请重新核对');
+    }
+    shiftSelections = parseShiftSelections(reviewed, { expectedCount: entries.length, required: true });
+  }
   return finishParsedAction(event, {
     kind: 'approval' as const,
-    action: value.action as 'approve' | 'reject',
+    action: value.action === 'reject' ? 'reject' as const : 'approve' as const,
     recordId: value.recordId,
     applicationKey: value.applicationKey,
     stageKey: value.stageKey,
     stageVersion: value.stageVersion,
+    ...(shiftSelections ? { shiftSelections } : {}),
     ...(hasSubstituteRequired
       ? { substituteRequired: value.substituteRequired }
       : {}),

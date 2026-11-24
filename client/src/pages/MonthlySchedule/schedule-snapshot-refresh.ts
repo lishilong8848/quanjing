@@ -38,6 +38,7 @@ export function resolveScheduleSnapshotRevision({
 
 export interface ScheduleSnapshotRefreshCoordinator {
   check: () => Promise<boolean>;
+  recordApplied: (token: string) => void;
   stop: () => void;
 }
 
@@ -66,19 +67,29 @@ export function createScheduleSnapshotRefreshCoordinator({
   readRevision,
   revalidate,
   onError,
+  initialToken = null,
+  onTokenChange,
 }: {
   readRevision: (
     signal: AbortSignal,
   ) => Promise<ScheduleSnapshotRevisionResponse>;
   revalidate: (signal: AbortSignal) => Promise<boolean>;
   onError: (error: unknown) => void;
+  initialToken?: string | null;
+  onTokenChange?: (token: string | null) => void;
 }): ScheduleSnapshotRefreshCoordinator {
-  let currentToken: string | null = null;
+  let currentToken = initialToken;
   let currentGeneration = 0;
   let currentRequest: Promise<boolean> | null = null;
   let currentRevalidationController: AbortController | null = null;
   let stopped = false;
   let failureReported = false;
+
+  const commit = (token: string | null) => {
+    if (token !== currentToken) onTokenChange?.(token);
+    currentToken = token;
+    failureReported = false;
+  };
 
   const reportFailure = (error: unknown) => {
     if (failureReported) return;
@@ -112,8 +123,7 @@ export function createScheduleSnapshotRefreshCoordinator({
         if (stopped || transition.ignored) return false;
 
         if (!transition.shouldRevalidate) {
-          currentToken = transition.token;
-          failureReported = false;
+          commit(transition.token);
           return true;
         }
 
@@ -130,8 +140,7 @@ export function createScheduleSnapshotRefreshCoordinator({
           return false;
         }
 
-        currentToken = transition.token;
-        failureReported = false;
+        commit(transition.token);
         return true;
       })
       .catch((error) => {
@@ -159,6 +168,13 @@ export function createScheduleSnapshotRefreshCoordinator({
 
   return {
     check,
+    recordApplied: (token) => {
+      if (stopped || !token.trim()) return;
+      currentGeneration += 1;
+      currentRevalidationController?.abort();
+      currentRequest = null;
+      commit(token.trim());
+    },
     stop: () => {
       stopped = true;
       currentGeneration += 1;

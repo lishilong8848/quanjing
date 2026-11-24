@@ -14,6 +14,8 @@ const reading = ['read', 'export', 'refresh'] as const;
 const editing = ['read', 'create', 'update', 'delete', 'export', 'refresh'] as const;
 export const BUSINESS_PERMISSION_CATALOG = [
   { id: 'knowledge', label: '运维知识库', page: '/operations-kb', scoped: false, actions: editing },
+  { id: 'file_publication', label: '文件发布', page: '/file-publication', scoped: false, actions: ['read', 'create', 'approve', 'export'] },
+  { id: 'file_publication_table', label: '文件发布 · 多维表记录', page: '/file-publication', scoped: false, actions: ['read', 'create', 'update', 'delete'] },
   { id: 'meetings', label: '议事航迹', page: '/meeting-management', scoped: false, actions: [...editing,'notify'] },
   { id: 'system_reports', label: '体系月报', page: '/system-monthly-report', scoped: false, actions: [...editing, 'approve'] },
   { id: 'monthly_reports', label: '月度报告', page: '/ali-monthly-report', scoped: false, actions: [...editing,'notify'] },
@@ -153,6 +155,10 @@ function denyCouldMatch(rule:PersonalPermissionRule,target:BusinessPermissionTar
 }
 function roleDefault(principal: PolicyPrincipal, target: BusinessPermissionTarget): boolean {
   if (principal.role === 'admin') return true;
+  if (target.module === 'file_publication_table') return false;
+  if (target.module === 'file_publication') {
+    return target.action !== 'approve' && ['editor', 'professional_admin', 'professional_engineer'].includes(principal.role);
+  }
   if (target.module === 'organization_profile') return principal.role === 'editor';
   if (target.module === 'personnel_time_insights') return false;
   if (target.module === 'personnel_profile') return ['editor','duty_editor'].includes(principal.role);
@@ -268,6 +274,7 @@ export function validEffectiveAuthorization(value: EffectiveAuthorization, admin
 }
 function pageReadInScope(base: AuthorizationBasePolicy, principal: PolicyPrincipal, point: BusinessPermissionTarget): boolean {
   const definition = businessModuleDefinition(point.module);
+  if (point.module === 'file_publication_table') return false;
   if (['organization_profile','personnel_profile','personnel_time_insights','attendance','schedule_assignments','personnel_schedule','non_duty_schedule','schedule_diagnostics','change_documents'].includes(point.module)) return base.nativeRole!==null && roleDefault({...principal,role:base.nativeRole},point);
   if (!definition.scoped || point.module === 'exhaust_valves') return true;
   if (base.nativeRole === null) return false;

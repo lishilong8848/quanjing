@@ -1,5 +1,6 @@
 const ACTIONS = new Set([
   'approve', 'reject', 'complete', 'return', 'open_reject', 'submit_reject',
+  'approve_reviewed_substitution',
   'open_order', 'submit_order', 'open_receipt', 'submit_receipt',
   'return_purchase_list', 'return_receipt_list', 'prepare_receipt_photo', 'prepare_invoice',
   'choose_comprehensive', 'choose_building_self', 'approve_pending_comprehensive',

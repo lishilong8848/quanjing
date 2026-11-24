@@ -61,6 +61,32 @@ function fixture() {
 }
 
 describe('leave substitution generates pending overtime applications', () => {
+  it('overlaps reads and verifies the source again before creating overtime', async () => {
+    const { service, bitable, leave, overtime } = fixture();
+    let notifyOvertimeRead!: () => void;
+    let resolveOvertimeRead!: (rows: OvertimeBitableRecord[]) => void;
+    const overtimeStarted = new Promise<void>((resolve) => { notifyOvertimeRead = resolve; });
+    const overtimePending = new Promise<OvertimeBitableRecord[]>((resolve) => { resolveOvertimeRead = resolve; });
+    overtime.readSubstitutionOvertimeRecords.mockImplementationOnce(() => {
+      notifyOvertimeRead();
+      return overtimePending;
+    });
+
+    const sync = service.sync(application(), 1);
+    await overtimeStarted;
+    try {
+      expect(bitable.readSubstituteOvertimePersonnel).toHaveBeenCalledTimes(1);
+      expect(bitable.getCachedLeaveRequestImpactSchedules).toHaveBeenCalledTimes(1);
+      expect(leave.readLeaveRecordIfExists).toHaveBeenCalledTimes(1);
+      expect(overtime.createSubstitutionOvertimeRecord).not.toHaveBeenCalled();
+    } finally {
+      resolveOvertimeRead([]);
+      await sync;
+    }
+    expect(leave.readLeaveRecordIfExists).toHaveBeenCalledTimes(2);
+    expect(overtime.createSubstitutionOvertimeRecord).toHaveBeenCalledTimes(1);
+  });
+
   it('creates a separate pending application for each independently assigned substitute', async () => {
     const { service, rows, workflow } = fixture();
     const leave = application();
@@ -103,6 +129,22 @@ describe('leave substitution generates pending overtime applications', () => {
     leave.readLeaveRecordIfExists.mockResolvedValueOnce(null);
     await service.reconcileChangedSources([application(2, 'ou_next')], async () => application(2, 'ou_next'));
     expect(workflow.retireSubstitutionApplication).toHaveBeenLastCalledWith(rows[1].recordId, rows[1].fields.请求唯一ID);
+  });
+
+  it('reconciles an explicitly withdrawn leave without recreating its overtime on retry', async () => {
+    const { service, overtime, workflow, rows, leave } = fixture();
+    const approved = application();
+    await service.sync(approved, 1);
+    rows.push({ recordId: 'recManual', fields: { 请求唯一ID: 'overtime-manual-fixture', 加班工作流状态: '待路由' } });
+    leave.readLeaveRecordIfExists.mockResolvedValue({
+      fields: { 请假工作流状态: '已撤销', 休假开始时间: at(9), 休假结束时间: at(21) },
+    });
+    await service.reconcileChangedSources([approved], async () => approved);
+    await service.reconcileChangedSources([approved], async () => approved);
+    expect(workflow.retireSubstitutionApplication).toHaveBeenCalledTimes(1);
+    expect(workflow.retireSubstitutionApplication).toHaveBeenCalledWith(rows[0].recordId, rows[0].fields.请求唯一ID);
+    expect(overtime.createSubstitutionOvertimeRecord).toHaveBeenCalledTimes(1);
+    expect(rows[1].fields.加班工作流状态).toBe('待路由');
   });
 
   it('fails closed on incomplete original schedules and never treats a source outage as withdrawal', async () => {

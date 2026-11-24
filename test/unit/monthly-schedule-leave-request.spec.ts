@@ -1090,11 +1090,9 @@ describe('Monthly schedule leave request tool', () => {
     expect(helperStart).toBeGreaterThan(-1);
     expect(helper).toContain('if (forceRefresh)');
     expect(helper).toMatch(/return getMonthlySchedules\(year, month, true\)/);
-    expect(helper).toContain('monthlyScheduleReadInFlight.get(monthKey)');
     expect(helper).toContain(
-      'monthlyScheduleReadInFlight.set(monthKey, request)',
+      'readScheduleOnce(monthlyScheduleReadInFlight, monthKey, () => getMonthlySchedules(year, month))',
     );
-    expect(helper).toContain('monthlyScheduleReadInFlight.delete(monthKey)');
     expect(pageLoader).toContain(
       'getMonthlySchedulesWithInFlightDeduplication(',
     );
@@ -1109,7 +1107,7 @@ describe('Monthly schedule leave request tool', () => {
       'utf8',
     );
     const pageDataEffectStart = source.indexOf(
-      'useEffect(() => {\n    if (access.isLoading) return;\n    const controller = new AbortController();\n    void loadSchedules(',
+      'useEffect(() => {\n    if (access.isLoading || !canReadMonthlySchedule) return;\n    const controller = new AbortController();\n    void loadSchedulesRef.current(',
     );
     const pageDataEffectEnd = source.indexOf(
       '\n\n  useEffect(() => {',
@@ -1120,7 +1118,7 @@ describe('Monthly schedule leave request tool', () => {
     expect(pageDataEffectStart).toBeGreaterThan(-1);
     expect(pageDataEffect).not.toContain('loadPersonProfiles()');
     expect(source).toMatch(
-      /useEffect\(\(\) => \{\s*loadPersonProfiles\(\);\s*return \(\) => personProfileLoadAbortRef\.current\?\.abort\(\);\s*\}, \[loadPersonProfiles\]\);/,
+      /useEffect\(\(\) => \{\s*if \(access\.isLoading\) return;\s*void loadPersonProfiles\(\);\s*return \(\) => personProfileLoadAbortRef\.current\?\.abort\(\);\s*\}, \[access\.isLoading, loadPersonProfiles\]\);/,
     );
   });
 

@@ -9,16 +9,15 @@ describe('monthly schedule unified access UI', () => {
   const apiSource = readSource('client/src/api/index.ts');
   const sharedSource = readSource('shared/api.interface.ts');
 
-  it('uses the global capabilities for edit and destructive actions', () => {
+  it('requires the corresponding module action for edit and destructive operations', () => {
     expect(pageSource).toContain(
       "import { useAccess } from '@/access/AccessProvider';",
     );
-    expect(pageSource).toContain('const { capabilities, role } = useAccess();');
     expect(pageSource).toContain(
-      'const canManageMonthlySchedule = capabilities.canEdit;',
+      "const canManageMonthlySchedule = canUsePageAction(access, 'schedule_assignments', 'update', capabilities.canEdit);",
     );
     expect(pageSource).toContain(
-      'const canDeleteMonthlySchedule = capabilities.canDelete;',
+      "const canDeleteMonthlySchedule = canUsePageAction(access, 'schedule_assignments', 'delete', capabilities.canDelete);",
     );
 
     const revokeSource = pageSource.slice(
@@ -38,13 +37,13 @@ describe('monthly schedule unified access UI', () => {
       pageSource.indexOf('const currentMonthLabel'),
     );
 
-    for (const destructiveSource of [
-      revokeSource,
-      confirmRevokeSource,
-      exceptionDeleteSource,
-      adjustmentRevokeSource,
+    for (const [destructiveSource, permission] of [
+      [revokeSource, 'canDeleteMonthlySchedule'],
+      [confirmRevokeSource, 'canDeleteMonthlySchedule'],
+      [exceptionDeleteSource, 'canDeleteException'],
+      [adjustmentRevokeSource, 'canDeleteChange'],
     ]) {
-      expect(destructiveSource).toContain('canDeleteMonthlySchedule');
+      expect(destructiveSource).toContain(`if (!${permission})`);
       expect(destructiveSource).not.toContain('if (!canManageMonthlySchedule)');
     }
   });
@@ -92,20 +91,17 @@ describe('monthly schedule unified access UI', () => {
     const detailRefreshSource = pageSource.slice(pageSource.indexOf('const fetchCalendarFollowUps'), pageSource.indexOf('const exceptionFollowUpsByKey'));
 
     expect(detailRefreshSource).toMatch(
-      /getExceptionFollowUps\(range\.start, force && capabilities\.canForceRefresh, range\.end\)/,
+      /getExceptionFollowUps\(range\.start, force && canRefreshException, range\.end\)/,
     );
     expect(detailRefreshSource).not.toContain(
       'loadExceptionFollowUpsForDate(calendarDetailDateKey, true)',
     );
   });
 
-  it('downgrades a persisted refresh token after losing refresh capability', () => {
-    expect(pageSource).toMatch(
-      /const effectiveDataRefreshToken\s*=\s*capabilities\.canForceRefresh\s*\?\s*dataRefreshToken\s*:\s*0;/,
-    );
+  it('keeps schedule snapshot updates separate from forced Feishu refreshes', () => {
+    expect(pageSource).not.toContain('dataRefreshToken');
     expect(
-      pageSource.match(/refreshToken=\{effectiveDataRefreshToken\}/g),
-    ).toHaveLength(2);
-    expect(pageSource).not.toContain('refreshToken={dataRefreshToken}');
+      pageSource.match(/localSnapshotRefreshToken=\{localSnapshotRefreshToken\}/g),
+    ).toHaveLength(3);
   });
 });

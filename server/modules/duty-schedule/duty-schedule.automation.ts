@@ -51,6 +51,7 @@ export class DutyScheduleAutomationService implements OnApplicationBootstrap {
   private startupProgramModifiedRefreshScheduled = false;
   private startupProgramModifiedRefreshTimer?: ReturnType<typeof setTimeout>;
   private startupProgramModifiedRefreshWork?: Promise<void>;
+  private localSyncInFlight?: ReturnType<DutyScheduleAutomationService['runLocalTableSync']>;
   private programModifiedDutyStaffRefreshInFlight?: ReturnType<
     DutyScheduleService['refreshProgramModifiedDutyStaffFromRules']
   >;
@@ -370,6 +371,15 @@ export class DutyScheduleAutomationService implements OnApplicationBootstrap {
   }
 
   async syncAllLocalTables(source: LocalSyncSource = 'manual') {
+    if (!this.localSyncInFlight) {
+      this.localSyncInFlight = this.runLocalTableSync(source).finally(() => {
+        this.localSyncInFlight = undefined;
+      });
+    }
+    return { ...await this.localSyncInFlight, source };
+  }
+
+  private async runLocalTableSync(source: LocalSyncSource) {
     const tasks: Array<{
       key: string;
       name: string;
@@ -407,7 +417,7 @@ export class DutyScheduleAutomationService implements OnApplicationBootstrap {
     );
 
     const settledResults = await Promise.allSettled(
-      tasks.map((task) => task.run()),
+      tasks.map((task) => Promise.resolve().then(task.run)),
     );
     const results: Record<string, unknown> = {};
     const failed: Array<{ key: string; name: string; message: string }> = [];

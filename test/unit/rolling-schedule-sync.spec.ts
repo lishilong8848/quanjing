@@ -190,27 +190,46 @@ describe('rolling local schedule synchronization', () => {
     expect(fetchBitableRecords).toHaveBeenCalledTimes(1);
   });
 
-  it('routes the four-hour automation through rolling sync rather than full-table database replacement', async () => {
+  it('shares a single rolling sync across concurrent automatic and manual requests', async () => {
     const rollingDuty = jest.fn(async () => ({ success: true })), rollingWhite = jest.fn(async () => ({ success: true }));
+    const ancillary = jest.fn(async () => ({ success: true }));
     const forbidden = jest.fn(() => { throw Error('full schedule fetch forbidden'); });
     const automation = new DutyScheduleAutomationService({ syncDutyScheduleToLocalFast: rollingDuty, syncFromFeishuBase: forbidden } as never,
-      { syncNonDutyScheduleToLocalFast: rollingWhite, syncNonDutySchedule: forbidden, syncFromBitable: async () => ({ success: true }), syncOrganization: async () => ({ success: true }), syncFestivalImportantSchedule: async () => ({ success: true }) } as never, {} as never, {} as never);
-    await expect(automation.syncAllLocalTables('auto-4h')).resolves.toMatchObject({ success: true });
+      { syncNonDutyScheduleToLocalFast: rollingWhite, syncNonDutySchedule: forbidden, syncFromBitable: ancillary, syncOrganization: ancillary, syncFestivalImportantSchedule: ancillary } as never, {} as never, {} as never);
+    const results = await Promise.all([automation.syncAllLocalTables('auto-4h'), automation.syncAllLocalTables('manual')]);
+    expect(results).toEqual([expect.objectContaining({ success: true, source: 'auto-4h' }), expect.objectContaining({ success: true, source: 'manual' })]);
+    expect(ancillary).toHaveBeenCalledTimes(3);
     expect(rollingDuty).toHaveBeenCalledTimes(1); expect(rollingWhite).toHaveBeenCalledTimes(1); expect(forbidden).not.toHaveBeenCalled();
   });
 
-  it('re-reads and republishes the changed source after automatic rule writes', async () => {
+  it('reuses the verified first read when automatic rules have no changes and approvals are equivalent', async () => {
+    const service = Object.assign(new DutyScheduleService({} as never, {} as never), { scheduleAppToken: 'synthetic', scheduleTableId: 'schedule' }) as any;
+    service.replaceLocalScheduleRecords = jest.fn(async () => 0);
+    service.refreshProgramModifiedDutyStaffRecords = jest.fn(async () => ({ finalValues: new Map(), total: 0, reset: 0, ruleUpdated: 0, failed: 0, failures: [] }));
+    jest.mocked(readCachedLeaveApprovalSnapshot).mockImplementation(async () => ({ verified: true, requests: [] }));
+    jest.mocked(fetchBitableRecords).mockImplementation(async (_http, options) => {
+      expect(options.filter?.conditions).toHaveLength(2);
+      options.onPersisted?.({ sourceStartedAt: Date.now(), fetchedAt: Date.now(), invalidationToken: null }); return [];
+    });
+    await expect(service.refreshProgramModifiedDutyStaffFromRules({ source: 'auto-4h' })).resolves.toMatchObject({ success: true });
+    expect(fetchBitableRecords).toHaveBeenCalledTimes(1);
+    expect(refreshVerifiedLeaveApprovalSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])('re-reads and republishes the changed source after automatic rule writes (uncertain=%s)', async uncertain => {
     const service = Object.assign(new DutyScheduleService({} as never, {} as never), { scheduleAppToken: 'synthetic', scheduleTableId: 'schedule' }) as any;
     service.replaceLocalScheduleRecords = jest.fn(async () => 0);
     service.refreshProgramModifiedDutyStaffRecords = jest.fn(async () => {
       jest.mocked(readBitableCacheScopeRevision).mockResolvedValue('after-write');
-      return { finalValues: new Map(), total: 0, reset: 0, ruleUpdated: 0, failed: 0, failures: [] };
+      return uncertain
+        ? { finalValues: new Map(), total: 1, reset: 0, ruleUpdated: 0, failed: 1, failures: [{ recordId: 'row', error: '网络超时' }] }
+        : { finalValues: new Map([['row', '新排班']]), total: 1, reset: 0, ruleUpdated: 1, failed: 0, failures: [] };
     });
     jest.mocked(fetchBitableRecords).mockImplementation(async (_http, options) => {
       expect(options.filter?.conditions).toHaveLength(2);
       options.onPersisted?.({ sourceStartedAt: Date.now(), fetchedAt: Date.now(), invalidationToken: 'after-write' }); return [];
     });
-    await expect(service.refreshProgramModifiedDutyStaffFromRules({ source: 'auto-4h' })).resolves.toMatchObject({ success: true });
+    await expect(service.refreshProgramModifiedDutyStaffFromRules({ source: 'auto-4h' })).resolves.toMatchObject({ success: !uncertain });
     expect(fetchBitableRecords).toHaveBeenCalledTimes(2);
     const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date());
     expect((await new DutyLocalMonthSnapshots().readMonth('synthetic', 'schedule', month))?.invalidationToken).toBe('after-write');

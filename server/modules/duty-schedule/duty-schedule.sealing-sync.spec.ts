@@ -64,7 +64,7 @@ describe('DutyScheduleService sealing source synchronization', () => {
     jest.restoreAllMocks();
   });
 
-  it('synchronously refreshes once per five-minute window and exposes the next snapshot immediately', async () => {
+  it('uses one source read in a fresh window and updates the snapshot in the background when it expires', async () => {
     mockedFetchBitableRecords
       .mockResolvedValueOnce([
         sealingRecord(
@@ -103,7 +103,13 @@ describe('DutyScheduleService sealing source synchronization', () => {
 
     now += 5 * 60 * 1000 + 1;
     await expect(service.getYearlySealingInfo(2026)).resolves.toMatchObject({
+      total: 1,
+      sourceStatus: 'stale',
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await expect(service.getYearlySealingInfo(2026)).resolves.toMatchObject({
       total: 2,
+      sourceStatus: 'fresh',
     });
     expect(mockedFetchBitableRecords).toHaveBeenCalledTimes(2);
   });
@@ -161,8 +167,9 @@ describe('DutyScheduleService sealing source synchronization', () => {
       total: 1,
     });
     now += 5 * 60 * 1000 + 1;
-    await expect(service.getYearlySealingInfo(2026)).resolves.toMatchObject({
+    await expect(service.getYearlySealingInfo(2026, true)).resolves.toMatchObject({
       total: 1,
+      sourceStatus: 'stale',
     });
     expect(mockedFetchBitableRecords).toHaveBeenCalledTimes(2);
 
@@ -173,8 +180,15 @@ describe('DutyScheduleService sealing source synchronization', () => {
     expect(mockedFetchBitableRecords).toHaveBeenCalledTimes(2);
 
     now += 1001;
+    const refreshed = service.getYearlySealingInfo(2026);
+    await expect(refreshed).resolves.toMatchObject({
+      total: 1,
+      sourceStatus: 'stale',
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
     await expect(service.getYearlySealingInfo(2026)).resolves.toMatchObject({
       total: 2,
+      sourceStatus: 'fresh',
     });
     expect(mockedFetchBitableRecords).toHaveBeenCalledTimes(3);
   });
@@ -230,7 +244,7 @@ describe('DutyScheduleService sealing source synchronization', () => {
     expect(mockedResolveBitableAppToken).not.toHaveBeenCalled();
   });
 
-  it('bounds a hung sealing refresh and retains the cached list until the in-flight read recovers', async () => {
+  it('returns stale data immediately to passive readers while bounding a forced refresh', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(now);
     mockedPersisted.mockResolvedValue({
@@ -246,7 +260,16 @@ describe('DutyScheduleService sealing source synchronization', () => {
         resolveRecords = resolve;
       }),
     );
-    const result = service.getYearlySealingInfo(2026);
+    const cached = await Promise.all([
+      service.getYearlySealingInfo(2026),
+      service.getYearlySealingInfo(2026),
+    ]);
+    expect(cached).toMatchObject([
+      { sourceStatus: 'stale', total: 1 },
+      { sourceStatus: 'stale', total: 1 },
+    ]);
+    expect(mockedFetchBitableRecords).toHaveBeenCalledTimes(1);
+    const result = service.getYearlySealingInfo(2026, true);
     await jest.advanceTimersByTimeAsync(8001);
     await expect(result).resolves.toMatchObject({
       total: 1,

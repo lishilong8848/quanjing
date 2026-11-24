@@ -9,14 +9,11 @@ import {
 } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeftRight,
   ClipboardCheck,
   ClipboardList,
   ExternalLink,
   LayoutGrid,
   Search,
-  ShieldAlert,
-  Trash2,
   Wrench,
   X,
 } from 'lucide-react';
@@ -65,12 +62,6 @@ type Selection =
 const SECTIONS = [
   ['overview', '总览', '工具态势', LayoutGrid],
   ['ledger', '工具台账', '台账明细', ClipboardList],
-  ['quality', '不合格工具', '暂不可用', ShieldAlert],
-  ['maintenance', '维护管理', '暂不可用', Wrench],
-  ['repair', '检修管理', '暂不可用', Wrench],
-  ['scrap', '报废管理', '暂不可用', Trash2],
-  ['borrow', '借用管理', '暂不可用', ArrowLeftRight],
-  ['inspection', '送检管理', '暂不可用', ClipboardCheck],
 ] as const;
 
 const METRICS = [
@@ -315,37 +306,23 @@ export default function OperationsToolsManagementPage() {
         refreshing={manualRefresh || Boolean(snapshot?.refreshing)}
         onRefresh={() => void refresh()}
         showSearch={false}
-        actions={
-          <>
-            <Button variant="outline" className="tools-header-button" disabled>
-              流程说明
-            </Button>
-            <Button className="tools-apply-button" disabled>
-              ＋ 新建申请
-            </Button>
-          </>
-        }
       />
       <main className="tools-content">
         <nav className="tools-nav" aria-label="运维工具管理视图">
-          {SECTIONS.map(([key, label, description, Icon]) => {
-            const active = key === 'overview' || key === 'ledger';
-            return (
-              <button
-                key={key}
-                type="button"
-                disabled={!active}
-                aria-current={section === key ? 'page' : undefined}
-                onClick={active ? () => setSection(key) : undefined}
-              >
-                <Icon aria-hidden="true" />
-                <span>
-                  <strong>{label}</strong>
-                  <small>{description}</small>
-                </span>
-              </button>
-            );
-          })}
+          {SECTIONS.map(([key, label, description, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              aria-current={section === key ? 'page' : undefined}
+              onClick={() => setSection(key)}
+            >
+              <Icon aria-hidden="true" />
+              <span>
+                <strong>{label}</strong>
+                <small>{description}</small>
+              </span>
+            </button>
+          ))}
         </nav>
         <div className="tools-filters">
           {section === 'overview' && (

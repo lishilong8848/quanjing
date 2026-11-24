@@ -27,10 +27,15 @@ describe('monthly schedule fast sync', () => {
 
     expect(handlerSource).toContain('useLocalScheduleSync(');
     expect(handlerSource).toContain('longWhiteScheduleCache.clear()');
-    expect(handlerSource).toContain('yearlySealingCache.clear()');
+    expect(handlerSource).toContain('getAdjacentScheduleMonthDateKeys(businessDateKey)');
+    expect(handlerSource).toContain('monthlyScheduleCache.delete(key)');
+    expect(handlerSource).not.toContain('monthlyScheduleCache.clear()');
+    expect(handlerSource).not.toContain('yearlySealingCache.clear()');
     expect(handlerSource).toContain('preserveExistingOnError: true');
     expect(handlerSource).toContain('schedules: scheduleLoaded, sealings: sealingInfoLoaded');
-    expect(handlerSource).toContain('loadSealingInfo(true)');
+    expect(handlerSource).toContain('loadSealingInfo()');
+    expect(handlerSource).not.toContain('loadSealingInfo(true)');
+    expect(handlerSource).not.toContain('setDataRefreshToken');
     expect(handlerSource).not.toContain('syncAllFromFeishu');
     expect(handlerSource).not.toContain('loadChangeInfo');
     expect(handlerSource).not.toContain('loadPersonProfiles');

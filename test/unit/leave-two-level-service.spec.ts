@@ -256,6 +256,61 @@ describe('two-level leave service flow', () => {
   it('rejects navigation from a message not delivered to that approver', async () => {
     await expect(service.renderApprovalCardView({ ...viewInput(), messageId: 'om_unrelated' } as any)).rejects.toThrow(/卡片|消息/);
   });
+  it('approves the reviewed off-duty substitute without form values and writes the decision once', async () => {
+    const recordId = data().application.recordId;
+    for (const _task of await store.listTasks()) {
+      const initial = await store.takeNextTask();
+      await store.completeTask(initial!.key, initial!.claimToken);
+    }
+    const activation = currentHotfixActivation();
+    activation.completeBootstrap();
+    await activation.refresh();
+    const unused = { isEnabled: () => false } as never;
+    const router = new FeishuCardActionRouter(unused, service, unused, unused, unused, unused, unused, undefined, { canUseFeishuBusinessIdentity: () => true } as never);
+    const wake = jest.spyOn(service, 'runPendingTasks').mockResolvedValue({ processed: 0, failed: 0 });
+    const event = {
+      event_type: 'card.action.trigger',
+      operator: { open_id: 'ou_supervisor' },
+      context: { open_message_id: 'om_test_two_level' },
+    };
+    const primaryField = `leave_shift_substitute_${Buffer.from(data().selection.shiftKey).toString('base64url')}`;
+    const review = await router.handle({
+      ...event,
+      action: {
+        tag: 'button',
+        name: `leave_substitute_review_submit:${recordId}:supervisor:1:g1:r1`,
+        form_value: { [primaryField]: backup.personRecordId },
+      },
+    });
+    expect(review.toast.type).toBe('info');
+    expect(await store.getStageAction(recordId, 'supervisor', 1)).toBeNull();
+    const patched = gateway.patchInteractiveCard.mock.calls[0][1];
+    const confirm = patched.body.elements.find((element: { text?: { content: string } }) => element.text?.content === '确认审批');
+    const final = { ...event, action: { tag: 'button', value: confirm.behaviors[0].value } };
+    const wrongCard = await router.handle({ ...final, context: { open_message_id: 'om_unrelated' } });
+    expect(wrongCard.toast.type).toBe('error');
+    expect(await store.getStageAction(recordId, 'supervisor', 1)).toBeNull();
+    expect((await router.handle({ ...final, event_id: 'test-reviewed-final' })).toast.type).toBe('info');
+    expect((await router.handle({ ...final, event_id: 'test-reviewed-final-retry' })).toast).toEqual({
+      type: 'warning',
+      content: '该申请已处理或正在处理',
+    });
+    expect(await store.getStageAction(recordId, 'supervisor', 1)).toMatchObject({
+      action: 'approve',
+      shiftAssignments: [expect.objectContaining({ substitutePersonRecordId: backup.personRecordId })],
+    });
+    expect((await store.listTasks()).filter(task => task.kind === 'apply_stage_action')).toHaveLength(1);
+
+    const fields: Record<string, unknown> = {};
+    const updateLeaveRecord = jest.fn(async (_id: string, patch: Record<string, unknown>) => { Object.assign(fields, patch); });
+    Object.assign(gateway, { updateLeaveRecord, readLeaveRecord: jest.fn(async () => ({ recordId, fields })) });
+    wake.mockRestore();
+    expect(await service.runPendingTasks(new Date(), 2)).toEqual({ processed: 2, failed: 0 });
+    expect(updateLeaveRecord).toHaveBeenCalledTimes(1);
+    expect(fields).toMatchObject({ 请假工作流状态: '已审批', 请假审批时间: expect.any(Number) });
+    expect((await store.getApplication(recordId))?.status).toBe('approved');
+    expect((await store.listTasks()).filter(task => task.kind === 'sync_approved_leave_schedule')).toHaveLength(1);
+  });
   it('accepts the complete chain through the real service and forwards both posts to schedule synchronization', async () => {
     const result = await service.acceptApprovalAction({ ...viewInput(), eventId: 'test-service-two-level', stageKey: 'supervisor', action: 'approve', shiftSelections: [data().selection] });
     expect(result.claimed).toBe(true);

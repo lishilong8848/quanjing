@@ -1,0 +1,67 @@
+.file-publication__history-dates {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .5rem;
+}
+
+.file-publication__history-dates label {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  color: var(--fp-muted);
+  font-size: .82rem;
+}
+
+.file-publication__history-dates input { min-width: 0; }
+
+.file-publication__delivery-panel {
+  border: 1px solid #e0e7f1;
+  border-radius: .6rem;
+  padding: .65rem .8rem;
+  color: #14263f;
+  font-size: .85rem;
+}
+
+.file-publication__delivery-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .7rem;
+}
+
+.file-publication__delivery-header h3 { font-weight: 650; }
+.file-publication__delivery-list { margin: .45rem 0 0; padding: 0; list-style: none; }
+.file-publication__delivery-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: .4rem;
+  align-items: center;
+  padding: .45rem 0;
+}
+
+.file-publication__delivery-list li + li { border-top: 1px solid #edf1f7; }
+.file-publication__delivery-list strong,
+.file-publication__delivery-list small { display: block; overflow-wrap: anywhere; }
+.file-publication__delivery-list small { color: #52637b; }
+
+.file-publication__delivery-state {
+  border-radius: .4rem;
+  padding: .2rem .45rem;
+  background: #edf3ff;
+  color: #264e9d;
+  font-size: .8rem;
+}
+
+.file-publication__delivery-state[data-state="sent"] { background: #eaf8ef; color: #196548; }
+.file-publication__delivery-state[data-state="failed"] { background: #fff0f0; color: #96323c; }
+.file-publication__delivery-state[data-state="uncertain"] { background: #fff4e0; color: #8b4b11; }
+.file-publication__delivery-state[data-state="not_applicable"] { background: #f3f6fb; color: #52637b; }
+
+@media (max-width: 390px) {
+  .file-publication__history-dates { grid-template-columns: 1fr; }
+  .file-publication__delivery-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .file-publication__delivery-list li > div { grid-column: 1 / -1; }
+  .file-publication__delivery-state { justify-self: start; }
+}

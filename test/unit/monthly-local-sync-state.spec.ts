@@ -75,10 +75,27 @@ describe('monthly local sync: recoverable single submission', () => {
     const x = setup(); await x.controller.trigger(); await jest.advanceTimersByTimeAsync(181_000);
     expect(x.state().phase).toBe('running'); expect(x.ports.create).toHaveBeenCalledTimes(1); expect(x.ports.get.mock.calls.length).toBeGreaterThan(1);
   });
-  it('stops automatic polling after repeated read failures but retains recovery for manual checking', async () => {
+  it('slows down after repeated read failures and resumes the original task automatically', async () => {
     const x = setup(); await x.controller.trigger(); x.ports.get.mockRejectedValue({ code: 'ERR_NETWORK' });
     await jest.advanceTimersByTimeAsync(30_000); expect(x.ports.get).toHaveBeenCalledTimes(3); expect(x.state()).toMatchObject({ phase: 'unknown', busy: false });
-    x.ports.get.mockResolvedValueOnce(task('succeeded')); await x.controller.check(); expect(x.state().phase).toBe('succeeded'); expect(x.ports.create).toHaveBeenCalledTimes(1);
+    x.ports.get.mockResolvedValueOnce(task('succeeded')); await jest.advanceTimersByTimeAsync(15_000);
+    expect(x.ports.get).toHaveBeenCalledTimes(4); expect(x.state().phase).toBe('succeeded'); expect(x.ports.create).toHaveBeenCalledTimes(1);
+    await x.controller.checkActive(); expect(x.ports.get).toHaveBeenCalledTimes(4);
+  });
+  it('pauses status reads in a hidden tab and resumes without another POST', async () => {
+    let hidden = false;
+    const changes: LocalSyncState[] = [], data = new Map<string, string>();
+    const get = jest.fn(async () => task('succeeded')), create = jest.fn(async () => task());
+    const runtime = createLocalScheduleSyncController({ principal: 'hidden-user',
+      storage: { getItem: key => data.get(key) || null, setItem: (key, value) => { data.set(key, value); } },
+      createId: () => requestId, create, get, current: get, refresh: async () => ({ schedules: true, sealings: true }),
+      changed: state => changes.push(state), hidden: () => hidden });
+    instances.push(runtime);
+    await runtime.trigger(); hidden = true;
+    await jest.advanceTimersByTimeAsync(60_000); expect(get).not.toHaveBeenCalled();
+    hidden = false; await runtime.checkActive();
+    expect(get).toHaveBeenCalledTimes(1); expect(create).toHaveBeenCalledTimes(1);
+    expect(changes.at(-1)?.phase).toBe('succeeded');
   });
   it.each([{ schedules: false, sealings: true }, { schedules: true, sealings: false }])('does not report complete page refresh when a reader returns false: %j', async loaded => {
     const x = setup(); x.ports.create.mockResolvedValue(task('succeeded')); x.ports.get.mockResolvedValue(task('succeeded')); x.ports.refresh.mockResolvedValueOnce(loaded);

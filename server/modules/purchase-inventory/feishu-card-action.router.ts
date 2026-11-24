@@ -227,6 +227,15 @@ export class FeishuCardActionRouter {
         ...(result.substituteRequired !== undefined ? { substituteRequired: result.substituteRequired } : {}),
       };
       const card = await (this.leaveWorkflowService.renderApprovalCardView(viewInput));
+      if (result.view === 'substitute_review') {
+        try {
+          await this.leaveWorkflowService.patchApprovalCardView(viewInput, card);
+        } catch (error) {
+          this.logger.error(`请休假替班核对视图更新失败：${safeErrorMessage(error)}`);
+          return { toast: { type: 'error', content: '核对卡片更新失败，请重试核对' } };
+        }
+        return { toast: { type: 'info', content: '核对卡片已更新，请查看当前状态' } };
+      }
       void this.leaveWorkflowService.patchApprovalCardView(viewInput, card).catch((error) => this.logger.error(`请休假审批视图更新失败，可从原卡片重试：${safeErrorMessage(error)}`));
       return {
         toast: {
@@ -238,9 +247,7 @@ export class FeishuCardActionRouter {
                 ? '请完成替班安排'
                 : result.view === 'substitute_not_required'
                   ? '已选择无需替班'
-                  : result.view === 'substitute_review'
-                    ? '正在更新替班核对结果'
-                    : '已返回审批',
+                  : '已返回审批',
         },
       };
     }
@@ -601,7 +608,11 @@ function classifyCardAction(payload: unknown): CardActionKind {
     throw new Error('飞书卡片回调事件类型无效');
   }
   const action = requireObject(event.action);
-  if(action.value&&typeof action.value==='object'&&!Array.isArray(action.value)&&(action.value as Record<string,unknown>).workflowType==='profile_change')return 'profile_change';
+  if (action.value && typeof action.value === 'object' && !Array.isArray(action.value)) {
+    const value = action.value as Record<string, unknown>;
+    if (value.workflowType === 'profile_change') return 'profile_change';
+    if (value.workflowType === 'leave' && value.action === 'approve_reviewed_substitution') return 'leave';
+  }
   if (typeof action.name === 'string' && action.name.startsWith('today_followup_submit:')) return 'today_operations_followup';
   if (
     typeof action.name === 'string' &&

@@ -746,6 +746,58 @@ async function resolveSharedBitableRecordRequest(
   return records;
 }
 
+/** Uncached exact reads. Only an explicit absent ID may be omitted from the result. */
+export async function fetchBitableRecordsByIds(
+  httpService: HttpService,
+  source: Pick<FetchBitableRecordsOptions, 'appToken' | 'tableId' | 'tableName' | 'auth'>,
+  recordIds: readonly string[],
+): Promise<BitableRecordItem[]> {
+  const ids = [...new Set(recordIds)];
+  if (ids.length === 0) return [];
+  assertBitableTableConfig(source.tableName, source.appToken, source.tableId);
+  if (ids.some(id => typeof id !== 'string' || !id || id.trim() !== id)) {
+    throw new Error(`${source.tableName}排班记录标识无效`);
+  }
+
+  const assertCurrent = captureBitableRecordReadGuard(source.appToken, source.tableId);
+  const token = await getTenantAccessToken(httpService, source.auth);
+  const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${encodeURIComponent(source.appToken)}/tables/${encodeURIComponent(source.tableId)}/records/batch_get`;
+  const records: BitableRecordItem[] = [];
+  // The lookup can legitimately miss rows belonging to the other roster table.
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const batch = ids.slice(offset, offset + 100);
+    const data = await withFeishuRequestRetry(() => runSerializedBitableAppRequest(source.appToken, async () => {
+      assertCurrent();
+      const response = await httpService.axiosRef.post(url, { record_ids: batch, automatic_fields: true }, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 30000,
+        maxRedirects: 0,
+      });
+      const payload = asPlainObject(response.data);
+      if (payload?.code !== 0) throw createFeishuApiError('Bitable', Number(payload?.code ?? -1), payload?.msg, response.status);
+      return asPlainObject(payload.data);
+    }), source.tableName);
+    const items = data?.records === undefined ? [] : data.records;
+    const absent = data?.absent_record_ids === undefined ? [] : data.absent_record_ids;
+    const forbidden = data?.forbidden_record_ids === undefined ? [] : data.forbidden_record_ids;
+    if (!Array.isArray(forbidden) || forbidden.length) throw new ForbiddenException(`飞书应用无权读取「${source.tableName}」的目标排班记录`);
+    const pending = new Set(batch);
+    if (!data || !Array.isArray(items) || !Array.isArray(absent) ||
+        absent.some(id => typeof id !== 'string' || !pending.delete(id))) {
+      throw new Error(`${source.tableName}排班记录精确读取回执无效`);
+    }
+    for (const item of items) {
+      if (!asPlainObject(item) || !asPlainObject(item.fields) || !pending.delete(getRecordId(item))) {
+        throw new Error(`${source.tableName}排班记录精确读取回执无效`);
+      }
+      records.push(item);
+    }
+    if (pending.size) throw new Error(`${source.tableName}排班记录精确读取回执不完整`);
+  }
+  assertCurrent();
+  return records;
+}
+
 async function requestBitableRecordPage(
   httpService: HttpService,
   options: FetchBitableRecordsOptions,
@@ -1040,7 +1092,7 @@ function asPlainObject(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function isTransientFeishuError(error: unknown): boolean {
+export function isTransientFeishuError(error: unknown): boolean {
   if (error instanceof ForbiddenException) {
     return false;
   }

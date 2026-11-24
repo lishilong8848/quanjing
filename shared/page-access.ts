@@ -119,6 +119,11 @@ export const PAGE_ACCESS_CATALOG = [
     "group": "knowledge"
   },
   {
+    "path": "/file-publication",
+    "label": "文件发布",
+    "group": "knowledge"
+  },
+  {
     "path": "/meeting-management",
     "label": "议事航迹",
     "group": "knowledge"
@@ -152,7 +157,7 @@ export function validRolePageRules(value: unknown): value is RolePageRules {
 function normalizePagePath(path: string): string { return String(path || '/').split(/[?#]/, 1)[0].toLowerCase().replace(/\/+$/, '') || '/'; }
 const PURCHASE_INVENTORY_MANAGEMENT_PATH = '/purchase-inventory-management';
 function isPurchaseApplicationDirectPath(path: string): boolean { return path === '/purchase-inventory-management/apply/new'; }
-const PROFESSIONAL_PAGES = new Set(['/operations-kb', '/meeting-management', '/system-monthly-report', '/ali-monthly-report', '/risk-inspection-dashboard', '/quality-assessment', '/monthly-alarm-overview', '/equipment-lifecycle-dashboard', '/equipment-ledger-management', '/threshold-management', '/equipment-patrol-dashboard', '/exhaust-valve-map', '/purchase-inventory-management', '/inventory-management', '/operations-tools-management', '/contract-management']);
+const PROFESSIONAL_PAGES = new Set(['/operations-kb', '/file-publication', '/meeting-management', '/system-monthly-report', '/ali-monthly-report', '/risk-inspection-dashboard', '/quality-assessment', '/monthly-alarm-overview', '/equipment-lifecycle-dashboard', '/equipment-ledger-management', '/threshold-management', '/equipment-patrol-dashboard', '/exhaust-valve-map', '/purchase-inventory-management', '/inventory-management', '/operations-tools-management', '/contract-management']);
 const GUEST_PAGES = new Set([
   '/monthly-schedule',
   '/mbti-assessment',
@@ -276,6 +281,8 @@ const API_PAGES: readonly [RegExp, readonly string[], boolean][] = [
   [/^\/api\/meeting-management(?:\/|$)/, ['/meeting-management'], false],
   [/^\/api\/operations-kb\/(?:stats|search|documents\/[^/]+)$/, ['/operations-kb'], true],
   [/^\/api\/operations-kb(?:\/|$)/, ['/operations-kb'], false],
+  [/^\/api\/file-publication\/(?:options|batches(?:\/[^/]+(?:\/files\/[^/]+)?)?)$/, ['/file-publication'], true],
+  [/^\/api\/file-publication(?:\/|$)/, ['/file-publication'], false],
   [/^\/api\/system-monthly-report\/(?:dashboard|archives\/[^/]+\/(?:download-url|preview))$/, ['/system-monthly-report'], true],
   [/^\/api\/system-monthly-report(?:\/|$)/, ['/system-monthly-report'], false],
   [/^\/api\/ali-monthly-report\/config$/, ['/ali-monthly-report'], true],

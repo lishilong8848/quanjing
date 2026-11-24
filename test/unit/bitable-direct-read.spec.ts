@@ -29,6 +29,7 @@ const {
   extractDateTimeIso,
   extractDateValue,
   fetchBitableRecords,
+  fetchBitableRecordsByIds,
   getBitableRecordCacheGeneration,
   invalidateFeishuTenantAccessTokenCache,
   invalidateBitableRecordCache,
@@ -39,6 +40,53 @@ const {
   resolveBitableTableIdByName,
   warmLatestPersistedBitableRecordSnapshotIndex,
 } = bitableDirectRead;
+
+describe('uncached Bitable record ID reads', () => {
+  const source = { appToken: 'app_exact_lookup', tableId: 'tbl_exact_lookup', tableName: '排班精确读取' };
+  const row = (record_id: string) => ({ record_id, fields: { 排班日期: '2026-11-30' } });
+
+  function http(response: (ids: string[]) => object) {
+    const batches: string[][] = [];
+    const post = jest.fn(async (url: string, request: { record_ids: string[] }) => {
+      if (url.includes('/auth/v3/tenant_access_token/')) {
+        return { data: { code: 0, tenant_access_token: 'synthetic-token' } };
+      }
+      expect(url).toContain('/records/batch_get');
+      batches.push(request.record_ids);
+      return { data: { code: 0, data: response(request.record_ids) } };
+    });
+    return { service: { axiosRef: { post } } as never, batches };
+  }
+
+  it('uses bounded ID batches and leaves the full snapshot untouched', async () => {
+    const ids = Array.from({ length: 102 }, (_, index) => `rec${index}`);
+    const fake = http((batch) => ({
+      records: batch.filter((id) => id !== 'rec101').map(row),
+      absent_record_ids: batch.filter((id) => id === 'rec101'),
+    }));
+    await expect(fetchBitableRecordsByIds(fake.service, source, ids)).resolves.toHaveLength(101);
+    expect(fake.batches.map((batch) => batch.length)).toEqual([100, 2]);
+    await expect(readLatestPersistedBitableRecordSnapshot(source)).resolves.toBeNull();
+  });
+
+  it.each([
+    [{ records: [] }, '不完整'],
+    [{ records: [row('rec1'), row('rec1')] }, '无效'],
+    [{ records: [row('recExtra')] }, '无效'],
+    [{ records: [row('rec1')], absent_record_ids: ['rec1'] }, '无效'],
+    [{ absent_record_ids: ['recOther'] }, '无效'],
+    [{ records: null, absent_record_ids: ['rec1'] }, '无效'],
+    [{ forbidden_record_ids: ['rec1'] }, '无权'],
+  ])('rejects an ambiguous or unauthorized receipt %#', async (receipt, message) => {
+    await expect(fetchBitableRecordsByIds(http(() => receipt).service, source, ['rec1'])).rejects.toThrow(message);
+  });
+
+  it('treats only an explicitly absent ID as belonging to neither row set', async () => {
+    await expect(fetchBitableRecordsByIds(
+      http(() => ({ absent_record_ids: ['rec1'] })).service, source, ['rec1'],
+    )).resolves.toEqual([]);
+  });
+});
 
 afterAll(async () => {
   await rm(localCacheDir, { force: true, recursive: true });

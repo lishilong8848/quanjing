@@ -74,6 +74,7 @@ jest.mock(
         record.record_id || record.id || '',
     ),
     invalidateBitableRecordCache: jest.fn(),
+    isTransientFeishuError: jest.requireActual('@server/common/feishu/bitable-direct-read').isTransientFeishuError,
     readLatestPersistedBitableRecordSnapshot: jest.fn(),
     readBitableCacheScopeRevision: jest.fn(async () => null),
     normalizeBuildingForFrontend: jest.fn((value: string) =>
@@ -5408,6 +5409,7 @@ describe('DutyScheduleService construction crew ledger views', () => {
         请求唯一ID: request.clientMutationId, 请求指纹: fingerprint,
       } }],
     });
+    getInvalidateBitableRecordCacheMock().mockClear();
     await expect(service.createLeaveRequest({ ...request, workflowRecoveryOnly: true })).resolves.toMatchObject({
       created: 0, recordIds: ['recOriginal'],
     });

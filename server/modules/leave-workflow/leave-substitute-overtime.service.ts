@@ -124,10 +124,8 @@ export class LeaveSubstituteOvertimeService {
       // Legacy approved records are not precise enough to create extra hours.
       throw new ServiceUnavailableException('请先核对逐班替班安排，再生成加班申请');
     }
-    const recorded = await this.gateway.readSubstitutionOvertimeRecords();
-    const owned = this.ownedRows(prefix, recorded);
     if (!shifts.size) {
-      await this.retireOwned(prefix, owned);
+      await this.retireOwned(prefix, await this.gateway.readSubstitutionOvertimeRecords());
       return;
     }
     const periods = [...shifts.values()].flat();
@@ -136,10 +134,12 @@ export class LeaveSubstituteOvertimeService {
     const through = Math.max(...periods.map(row => row.endMs - 1));
     const startDate = date(from);
     const endDate = date(through);
-    const [people, schedules] = await Promise.all([
+    const [recorded, people, schedules] = await Promise.all([
+      this.gateway.readSubstitutionOvertimeRecords(),
       this.bitable.readSubstituteOvertimePersonnel(),
       this.bitable.getCachedLeaveRequestImpactSchedules(startDate, endDate, { originalOnly: true }),
     ]);
+    const owned = this.ownedRows(prefix, recorded);
     const coveredDays = new Set(schedules.map(row => row.scheduleDate));
     for (let day = Date.parse(startDate); day <= Date.parse(endDate); day += DAY) {
       if (!coveredDays.has(new Date(day).toISOString().slice(0, 10))) throw new ServiceUnavailableException('原始排班未覆盖替班加班核对范围');

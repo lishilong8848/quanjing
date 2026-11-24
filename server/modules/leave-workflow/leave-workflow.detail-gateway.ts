@@ -16,6 +16,7 @@ import type { LeaveShiftSubstituteAssignment } from './leave-workflow.types';
 const OPENAPI_BASE_URL = 'https://open.feishu.cn/open-apis';
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_SEARCH_PAGES = 100;
+const DETAIL_SEARCH_BATCH_SIZE = 20;
 const SHIFT_DETAIL_TABLE_NAME = '请假替班班次明细';
 
 export interface LeaveShiftDetailRow {
@@ -45,10 +46,10 @@ export class LeaveWorkflowDetailGateway {
     groups: LeaveRequestShiftGroup[],
   ): Promise<void> {
     requireRecordId(recordId);
+    const existing = await this.readExistingDetails(recordId, groups);
     for (const group of groups) {
       const detailId = stableDetailId(recordId, group.shiftKey);
-      const existing = await this.searchOne('明细唯一ID', detailId);
-      if (existing) continue;
+      if (existing.has(detailId)) continue;
       const fields = pendingFields(recordId, detailId, group);
       const created = await this.createRecord(
         fields,
@@ -76,6 +77,10 @@ export class LeaveWorkflowDetailGateway {
     if (!Number.isSafeInteger(revision) || revision < 0) {
       throw new BadRequestException('替班安排版本无效');
     }
+    const existingDetails = await this.readExistingDetails(recordId, assignments);
+    if ([...existingDetails.values()].some((record) =>
+      record.fields['状态'] === 'active' && Number(record.fields['替班安排版本']) > revision,
+    )) throw new BadGatewayException('请假替班班次明细版本已更新，请刷新后重试');
     for (const assignment of assignments) {
       const detailId = stableDetailId(recordId, assignment.shiftKey);
       const expected: LeaveShiftDetailRow = {
@@ -87,7 +92,7 @@ export class LeaveWorkflowDetailGateway {
         revision,
         status: 'active',
       };
-      const existing = await this.searchOne('明细唯一ID', detailId);
+      const existing = existingDetails.get(detailId);
       if (existing && detailRowsEqual(parseDetailRecord(existing), expected)) {
         continue;
       }
@@ -106,11 +111,10 @@ export class LeaveWorkflowDetailGateway {
     recordIds: string[],
   ): Promise<LeaveShiftDetailRow[]> {
     const rows = new Map<string, LeaveShiftDetailRow>();
-    for (const recordId of [...new Set(recordIds.map(requireRecordId))]) {
-      for (const record of await this.searchRecords('请假记录ID', recordId)) {
-        const row = parseDetailRecord(record);
-        if (row.leaveRecordId === recordId) rows.set(row.detailId, row);
-      }
+    for (const record of await this.searchRecords('请假记录ID', recordIds.map(requireRecordId))) {
+      const row = parseDetailRecord(record);
+      if (!row.detailId || rows.has(row.detailId)) throw new BadGatewayException('请假替班班次明细“明细唯一ID”不唯一');
+      rows.set(row.detailId, row);
     }
     return [...rows.values()].sort(
       (left, right) =>
@@ -129,7 +133,7 @@ export class LeaveWorkflowDetailGateway {
     );
     assertFeishuSuccess(response.data, '回读请假替班班次明细失败');
     const record = response.data?.data?.record as FeishuRecord | undefined;
-    if (!record) throw new BadGatewayException('回读请假替班班次明细缺少记录');
+    if (!record || record.record_id !== recordId) throw new BadGatewayException('回读请假替班班次明细记录不匹配');
     const actual = parseDetailRecord(record);
     if (!sameTextSet(actual.scheduleRecordIds, expected.scheduleRecordIds)) {
       throw new BadGatewayException('请假替班班次明细排班记录集合回读不一致');
@@ -139,33 +143,60 @@ export class LeaveWorkflowDetailGateway {
     }
   }
 
-  private async searchOne(
-    fieldName: string,
-    value: string,
-  ): Promise<FeishuRecord | null> {
-    const records = await this.searchRecords(fieldName, value);
-    if (records.length > 1) {
-      throw new BadGatewayException(`请假替班班次明细“${fieldName}”不唯一`);
+  private async readExistingDetails(
+    recordId: string,
+    shifts: readonly { shiftKey: string }[],
+  ): Promise<Map<string, FeishuRecord>> {
+    const expected = new Map(shifts.map(({ shiftKey }) => [stableDetailId(recordId, shiftKey), shiftKey]));
+    if (expected.size !== shifts.length) throw new BadRequestException('待同步的请假班次重复');
+    const existing = new Map<string, FeishuRecord>();
+    for (const record of await this.searchRecords('明细唯一ID', [...expected.keys()])) {
+      const detailId = detailText(record.fields['明细唯一ID']);
+      if (existing.has(detailId)) throw new BadGatewayException('请假替班班次明细“明细唯一ID”不唯一');
+      if (detailText(record.fields['请假记录ID']) !== recordId ||
+          detailText(record.fields['班次键']) !== expected.get(detailId)) {
+        throw new BadGatewayException('请假替班班次明细关联的申请或班次不匹配');
+      }
+      existing.set(detailId, record);
     }
-    return records[0] || null;
+    return existing;
   }
 
   private async searchRecords(
     fieldName: string,
-    value: string,
+    values: string[],
   ): Promise<FeishuRecord[]> {
+    const uniqueValues = [...new Set(values)];
     const records: FeishuRecord[] = [];
+    const seenRecordIds = new Set<string>();
+    for (let start = 0; start < uniqueValues.length; start += DETAIL_SEARCH_BATCH_SIZE) {
+      const batch = uniqueValues.slice(start, start + DETAIL_SEARCH_BATCH_SIZE);
+      for (const record of await this.searchRecordBatch(fieldName, batch)) {
+        if (seenRecordIds.has(record.record_id)) throw new BadGatewayException('请假替班班次明细返回了重复记录');
+        seenRecordIds.add(record.record_id);
+        records.push(record);
+      }
+    }
+    return records;
+  }
+
+  private async searchRecordBatch(
+    fieldName: string,
+    values: string[],
+  ): Promise<FeishuRecord[]> {
+    const expected = new Set(values);
+    const records: FeishuRecord[] = [];
+    const url = `${await this.recordsUrl()}/search`;
     let pageToken = '';
+    let total: number | undefined;
     const seenTokens = new Set<string>();
     for (let page = 0; page < MAX_SEARCH_PAGES; page += 1) {
       const response = await this.httpService.axiosRef.post(
-        `${await this.recordsUrl()}/search`,
+        url,
         {
           filter: {
-            conjunction: 'and',
-            conditions: [
-              { field_name: fieldName, operator: 'is', value: [value] },
-            ],
+            conjunction: values.length === 1 ? 'and' : 'or',
+            conditions: values.map((value) => ({ field_name: fieldName, operator: 'is', value: [value] })),
           },
         },
         {
@@ -178,9 +209,33 @@ export class LeaveWorkflowDetailGateway {
       );
       assertFeishuSuccess(response.data, '查询请假替班班次明细失败');
       const data = response.data?.data;
-      if (Array.isArray(data?.items)) records.push(...data.items);
-      if (!data?.has_more) return records;
-      const next = String(data?.page_token || '').trim();
+      const explicitEmpty = page === 0 && data && !Object.hasOwn(data, 'items') &&
+        data.total === 0 && data.has_more === false && (data.page_token === undefined || data.page_token === '');
+      const items = explicitEmpty ? [] : data?.items;
+      if (response.data?.code !== 0 || !Array.isArray(items) ||
+          (data.has_more !== undefined && typeof data.has_more !== 'boolean') ||
+          (data.has_more === undefined && data.total === undefined) ||
+          (data.page_token !== undefined && typeof data.page_token !== 'string') ||
+          (data.total !== undefined && (!Number.isSafeInteger(data.total) || data.total < 0 ||
+            (total !== undefined && total !== data.total)))) {
+        throw new BadGatewayException('请假替班班次明细分页回执无效');
+      }
+      total ??= data.total;
+      for (const record of items) {
+        if (!record || typeof record.record_id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/u.test(record.record_id) ||
+            !record.fields || typeof record.fields !== 'object' || Array.isArray(record.fields) ||
+            !expected.has(detailText(record.fields[fieldName]))) {
+          throw new BadGatewayException('请假替班班次明细回执超出查询范围或记录无效');
+        }
+        records.push(record);
+      }
+      if (!data.has_more) {
+        if ((data.has_more !== false && data.page_token?.trim()) || (total !== undefined && total !== records.length)) {
+          throw new BadGatewayException('请假替班班次明细分页回执不完整');
+        }
+        return records;
+      }
+      const next = data.page_token?.trim();
       if (!next || seenTokens.has(next)) {
         throw new BadGatewayException('请假替班班次明细分页标识无效');
       }
@@ -383,32 +438,31 @@ function activeFields(
 
 function parseDetailRecord(record: FeishuRecord): LeaveShiftDetailRow {
   const fields = record.fields || {};
+  const text = (name: string) => detailText(fields[name]);
   const status = fields['状态'] === 'active' ? 'active' : 'pending';
   const assignment =
-    status === 'active' && String(fields['替班人员记录ID'] || '').trim()
+    status === 'active' && text('替班人员记录ID')
       ? {
-          shiftKey: String(fields['班次键'] || '').trim(),
+          shiftKey: text('班次键'),
           scheduleRecordIds: readStringArray(fields['排班记录IDs']),
           scheduleDate: formatShanghaiDate(fields['班次日期']),
           startAt: formatShanghaiMinute(fields['开始时间']),
           endAt: formatShanghaiMinute(fields['结束时间']),
-          shift: String(fields['班次'] || '').trim(),
-          buildings: splitText(fields['楼栋']),
-          teams: splitText(fields['班组']),
-          substitutePersonRecordId: String(
-            fields['替班人员记录ID'] || '',
-          ).trim(),
-          substituteName: String(fields['替班人员姓名'] || '').trim(),
-          substituteOpenId: String(fields['替班人员OpenID'] || '').trim(),
-          updatedByOpenId: String(fields['调整人OpenID'] || '').trim(),
-          updatedByName: String(fields['调整人姓名'] || '').trim(),
+          shift: text('班次'),
+          buildings: splitText(text('楼栋')),
+          teams: splitText(text('班组')),
+          substitutePersonRecordId: text('替班人员记录ID'),
+          substituteName: text('替班人员姓名'),
+          substituteOpenId: text('替班人员OpenID'),
+          updatedByOpenId: text('调整人OpenID'),
+          updatedByName: text('调整人姓名'),
           updatedAt: new Date(Number(fields['调整时间'] || 0)).toISOString(),
         }
       : null;
   return {
-    detailId: String(fields['明细唯一ID'] || '').trim(),
-    leaveRecordId: String(fields['请假记录ID'] || '').trim(),
-    shiftKey: String(fields['班次键'] || '').trim(),
+    detailId: text('明细唯一ID'),
+    leaveRecordId: text('请假记录ID'),
+    shiftKey: text('班次键'),
     scheduleRecordIds: readStringArray(fields['排班记录IDs']),
     assignment,
     revision: Number(fields['替班安排版本'] || 0),
@@ -442,13 +496,22 @@ function assignmentSemanticKey(assignment: LeaveShiftSubstituteAssignment | null
 }
 
 function readStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) return uniqueText(value);
+  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) return uniqueText(value);
   try {
-    const parsed = JSON.parse(String(value || '[]'));
+    const parsed = JSON.parse(detailText(value) || '[]');
     return Array.isArray(parsed) ? uniqueText(parsed) : [];
   } catch {
     return [];
   }
+}
+
+function detailText(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value) && value.every((part) => typeof part === 'string')) return value.join(',').trim();
+  if (Array.isArray(value) && value.every((part) => typeof part?.text === 'string')) {
+    return value.map((part) => part.text).join('').trim();
+  }
+  return '';
 }
 
 function splitText(value: unknown): string[] {

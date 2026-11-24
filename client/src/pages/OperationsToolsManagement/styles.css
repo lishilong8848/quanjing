@@ -7,17 +7,6 @@
   margin-inline: auto;
   padding: 1.25rem 2rem 6rem;
 }
-.tools-header-button {
-  height: 2.75rem;
-  border-color: hsl(210 100% 95% / 30%);
-  background: hsl(210 100% 95% / 8%);
-  color: inherit;
-}
-.tools-apply-button {
-  height: 2.75rem;
-  background: var(--tools-surface);
-  color: var(--tools-blue);
-}
 .tools-nav {
   display: flex;
   overflow-x: auto;
@@ -45,11 +34,6 @@
   background: var(--tools-blue);
   color: hsl(220 60% 99%);
   box-shadow: 0 0.125rem 0.375rem hsl(217 75% 35% / 18%);
-}
-.tools-nav button:disabled {
-  background: hsl(218 23% 96%);
-  color: hsl(218 10% 55%);
-  cursor: not-allowed;
 }
 .tools-nav button svg {
   width: 1rem;

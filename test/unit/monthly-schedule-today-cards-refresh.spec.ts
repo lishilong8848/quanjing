@@ -1,5 +1,6 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readScheduleOnce } from '../../client/src/pages/MonthlySchedule/schedule-read-cache';
 
 describe('MonthlySchedule latest today cards', () => {
   const pageSource = readFileSync(
@@ -7,35 +8,36 @@ describe('MonthlySchedule latest today cards', () => {
     'utf8',
   );
 
-  it('forces fresh leave and travel reads for personnel movements after manual sync', () => {
+  it('uses the shared ordinary leave reader and ordinary travel reads', () => {
     const start = pageSource.indexOf('function TodayPersonnelMovementCard');
     const end = pageSource.indexOf('function TodayEngineersOnDuty', start);
     const componentSource = pageSource.slice(start, end);
 
-    expect(componentSource).toContain(
-      'const forceRefresh = refreshToken > lastSuccessfulRefreshTokenRef.current',
-    );
-    expect(componentSource).toContain(
-      'getTodayLeaveStaff(todayStr, forceRefresh)',
-    );
-    expect(componentSource).toContain('refresh: forceRefresh');
+    expect(componentSource).toContain('readTodayLeaveStaff(todayStr)');
+    expect(componentSource).toContain('localSnapshotRefreshToken');
+    expect(componentSource).not.toContain('forceRefresh');
   });
 
-  it('bypasses the long-white client cache and refreshes leave data after manual sync', () => {
+  it('uses the same ordinary leave reader for long-white duty', () => {
     const start = pageSource.indexOf('function TodayEngineersOnDuty');
-    const end = pageSource.indexOf('const MonthlySchedulePage', start);
+    const end = pageSource.indexOf('function MonthlySchedulePageContent(', start);
     const componentSource = pageSource.slice(start, end);
 
-    expect(componentSource).toContain(
-      'const forceRefresh = refreshToken > lastSuccessfulRefreshTokenRef.current',
-    );
-    expect(componentSource).toContain('if (!forceRefresh && cached)');
-    expect(componentSource).toContain(
-      'getLongWhiteDutyStaff(dateStr, forceRefresh)',
-    );
-    expect(componentSource).toContain(
-      'getTodayLeaveStaff(dateStr, forceRefresh)',
-    );
+    expect(componentSource).toContain('if (cached)');
+    expect(componentSource).toContain('getLongWhiteDutyStaff(dateStr)');
+    expect(componentSource).toContain('readTodayLeaveStaff?.(dateStr)');
+    expect(componentSource).not.toContain('forceRefresh');
+  });
+
+  it('coalesces the two card reads for one date without retaining completed or failed lookups', async () => {
+    const calls = new Map<string, Promise<string>>();
+    const read = jest.fn<Promise<string>, []>().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('ready');
+    const first = readScheduleOnce(calls, '2026-11-24', read);
+    expect(readScheduleOnce(calls, '2026-11-24', read)).toBe(first);
+    await expect(first).rejects.toThrow('offline');
+    await expect(readScheduleOnce(calls, '2026-11-24', read)).resolves.toBe('ready');
+    await expect(readScheduleOnce(calls, '2026-11-24', read)).resolves.toBe('ready');
+    expect(read).toHaveBeenCalledTimes(3);
   });
 
   it('keeps the screenshot gate closed until every visible async section reports ready', () => {

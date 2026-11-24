@@ -1,3 +1,7 @@
+jest.mock('../../server/common/feishu/bitable-direct-read', () => ({
+  ...jest.requireActual('../../server/common/feishu/bitable-direct-read'),
+  getTenantAccessToken: jest.fn().mockResolvedValue('synthetic-only-token'),
+}));
 import { BitableSyncService } from '../../server/modules/bitable-sync/bitable-sync.service';
 import { enrichScheduleRecordsWithLeaveApproval } from '../../server/common/feishu/leave-approval-source';
 import { applicant, backup, fixture, group, primary } from './fixtures/leave-two-level';
@@ -12,9 +16,12 @@ function setup() {
   const service: any = Object.create(BitableSyncService.prototype);
   Object.assign(service, {
     NON_DUTY_APP_TOKEN: 'app_synthetic_nonduty', NON_DUTY_TABLE_ID: 'tbl_synthetic_nonduty', SCHEDULE_APP_TOKEN: 'app_synthetic_schedule', SCHEDULE_TABLE_ID: 'tbl_synthetic_schedule',
-    fetchFeishuNonDutyRecords: jest.fn(async () => enrichScheduleRecordsWithLeaveApproval([structuredClone(originalRow)], snapshot)),
-    fetchFeishuScheduleRecords: jest.fn(async () => enrichScheduleRecordsWithLeaveApproval([structuredClone(primaryRow)], snapshot)),
-    getTenantAccessToken: jest.fn(async () => 'synthetic-only-token'),
+    patchVerifiedLeaveRoster: jest.fn().mockResolvedValue(undefined),
+    recoverLeaveRoster: jest.fn().mockResolvedValue(undefined),
+    fetchApprovedLeaveScheduleRows: jest.fn(async (nonDutyIds: string[], scheduleIds: string[]) => [
+      enrichScheduleRecordsWithLeaveApproval([originalRow].filter(row => nonDutyIds.includes(row.record_id)).map(row => structuredClone(row)), snapshot),
+      enrichScheduleRecordsWithLeaveApproval([primaryRow].filter(row => scheduleIds.includes(row.record_id)).map(row => structuredClone(row)), snapshot),
+    ]),
     httpService: { axiosRef: { post: jest.fn(async (_url: string, body: any) => {
       for (const update of body.records) {
         writes.push(update.record_id);
@@ -27,7 +34,7 @@ function setup() {
     }) } },
   });
   const sync = () => service.syncApprovedLeaveScheduleSnapshot(data.assignments, { applicantName: applicant.name, startAt: data.application.snapshot.startAt, endAt: data.application.snapshot.endAt });
-  return { sync, writes, primaryRow, originalRow, fail: (value: boolean) => { failOriginal = value; } };
+  return { sync, writes, primaryRow, originalRow, reads: service.fetchApprovedLeaveScheduleRows, fail: (value: boolean) => { failOriginal = value; } };
 }
 
 describe('two-level actual schedule writeback and recovery', () => {
@@ -38,6 +45,10 @@ describe('two-level actual schedule writeback and recovery', () => {
     expect(state.originalRow.fields['值班人员（实际）程序修改']).not.toContain(primary.name);
     expect(state.originalRow.fields).not.toHaveProperty('请假人员');
     expect(new Set(state.writes)).toEqual(new Set(['rec_schedule_c', 'rec_schedule_d']));
+    expect(state.reads.mock.calls).toEqual([
+      [['rec_schedule_d', 'rec_schedule_c'], ['rec_schedule_d', 'rec_schedule_c'], undefined],
+      [['rec_schedule_c'], ['rec_schedule_d']],
+    ]);
   });
   it('retries only the failed post after partial success and never duplicates the successful write', async () => {
     const state = setup(); state.fail(true);

@@ -215,6 +215,75 @@ describe('three-month publication with complete historical retention', () => {
     expect(preferDutyMonthSnapshot(newerFull, month, 'current')).toBe(newerFull);
     expect(preferDutyMonthSnapshot(olderFull, month, 'invalidated')).toBe(olderFull);
   });
+
+  it('applies verified cross-month changes without renewing or replacing whole-month coverage', async () => {
+    const range = dutyThreeMonthRange(new Date('2026-10-10'));
+    const night = row('night', '2026-10-31');
+    const november = row('november', '2026-11-01');
+    const untouched = row('untouched', '2026-11-02');
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+    await store.publish('app', 'table', range, [night, november, untouched], 900, 'previous', dateOf);
+    const oldSnapshot = await store.readMonth('app', 'table', '2026-11');
+    const replacement = (record: BitableRecordItem) => ({ ...record, fields: { ...record.fields, actual: 'new staff' } });
+    const assertCurrent = jest.fn().mockResolvedValue(undefined);
+    clock.mockReturnValue(2_000);
+
+    await expect(store.patchVerifiedRecords('app', 'table', [replacement(night), replacement(november)], 'previous', 'next', dateOf, assertCurrent)).resolves.toBe(true);
+    const reader = new DutyLocalMonthSnapshots(folder);
+    expect((await reader.readPreferredMonth('app', 'table', '2026-10', null, 'next'))?.records).toEqual([replacement(night)]);
+    expect(await reader.readPreferredMonth('app', 'table', '2026-11', null, 'next')).toEqual({
+      ...oldSnapshot, invalidationToken: 'next', records: [replacement(november), untouched],
+    });
+    expect((await reader.readPreferredMonth('app', 'table', '2026-09', null, 'next'))?.records).toEqual([]);
+    expect(assertCurrent).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['unknown record', row('missing', '2026-10-01'), 'previous', 'next', false],
+    ['same-month date move', row('night', '2026-10-02'), 'previous', 'next', false],
+    ['cross-month date move', row('night', '2026-11-01'), 'previous', 'next', false],
+    ['unverified previous revision', row('night', '2026-10-01'), 'other', 'next', false],
+    ['missing next revision', row('night', '2026-10-01'), 'previous', null, false],
+    ['expired baseline', row('night', '2026-10-01'), 'previous', 'next', true],
+  ] as const)('keeps the previous snapshot for %s', async (_reason, replacement, revision, nextRevision, expired) => {
+    const original = row('night', '2026-10-01');
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+    await store.publish('app', 'table', dutyThreeMonthRange(new Date('2026-10-10')), [original], 900, 'previous', dateOf);
+    if (expired) clock.mockReturnValue(1_000 + 4 * 60 * 60_000);
+
+    await expect(store.patchVerifiedRecords('app', 'table', [replacement], revision, nextRevision, dateOf, async () => {})).resolves.toBe(false);
+    expect((await store.readMonth('app', 'table', '2026-10'))?.records).toEqual([original]);
+    expect(await store.readPreferredMonth('app', 'table', '2026-10', null, 'next')).toBeNull();
+  });
+
+  it('keeps a queued full publication when the scoped change loses its revision before commit', async () => {
+    const range = dutyThreeMonthRange(new Date('2026-10-10'));
+    const original = row('night', '2026-10-01');
+    await store.publish('app', 'table', range, [original], 100, 'previous', dateOf);
+    let revision = 'next';
+    let reachedGuard!: () => void, continueGuard!: () => void;
+    const waiting = new Promise<void>(resolve => { reachedGuard = resolve; });
+    const resume = new Promise<void>(resolve => { continueGuard = resolve; });
+    const guard = jest.fn(async () => {
+      if (guard.mock.calls.length === 2) {
+        reachedGuard();
+        await resume;
+      }
+      if (revision !== 'next') throw new Error('source revision changed');
+    });
+    const change = store.patchVerifiedRecords('app', 'table', [row('night', '2026-10-01')], 'previous', 'next', dateOf, guard);
+    const rejected = expect(change).rejects.toThrow('source revision changed');
+    await waiting;
+    revision = 'newer';
+    const writer = new DutyLocalMonthSnapshots(folder);
+    const newer = row('newer', '2026-10-02');
+    const published = writer.publish('app', 'table', range, [newer], 300, revision, dateOf);
+    continueGuard();
+    await rejected;
+    await published;
+    expect((await store.readPreferredMonth('app', 'table', '2026-10', null, 'newer'))?.records).toEqual([newer]);
+  });
+
   it('keeps cached future months outside the refreshed range readable through the unchanged full snapshot', async () => {
     const december = row('future-december', '2026-12-15'), january = row('future-january', '2027-01-15');
     const full = { records: [row('past', '2026-08-15'), december, january], sourceStartedAt: 100, fetchedAt: 150, expiresAt: 400 };

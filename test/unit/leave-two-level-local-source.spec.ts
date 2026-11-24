@@ -1,6 +1,7 @@
 jest.mock('../../server/common/feishu/bitable-direct-read', () => ({
   ...jest.requireActual('../../server/common/feishu/bitable-direct-read'),
   fetchBitableRecords: jest.fn(),
+  getTenantAccessToken: jest.fn().mockResolvedValue('synthetic-local-sync-token'),
   getBitableRecordCacheGeneration: jest.fn(),
   resolveBitableAppToken: jest.fn().mockResolvedValue('app_local_only_test'),
   resolveBitableTableIdByName: jest.fn(),
@@ -206,9 +207,15 @@ describe('local-authoritative two-level approval source', () => {
     const snapshot = () => fetchLeaveApprovalSnapshot({} as never, { strict: true, forceRefresh: true });
     Object.assign(sync, {
       NON_DUTY_APP_TOKEN: 'app_synthetic_local_nonduty', NON_DUTY_TABLE_ID: 'tbl_synthetic_local_nonduty', SCHEDULE_APP_TOKEN: 'app_synthetic_local_schedule', SCHEDULE_TABLE_ID: 'tbl_synthetic_local_schedule',
-      fetchFeishuNonDutyRecords: jest.fn(async () => enrichScheduleRecordsWithLeaveApproval([structuredClone(original)], await snapshot())),
-      fetchFeishuScheduleRecords: jest.fn(async () => enrichScheduleRecordsWithLeaveApproval([structuredClone(target)], await snapshot())),
-      getTenantAccessToken: jest.fn().mockResolvedValue('synthetic-local-sync-token'),
+      patchVerifiedLeaveRoster: jest.fn().mockResolvedValue(undefined),
+      recoverLeaveRoster: jest.fn().mockResolvedValue(undefined),
+      fetchApprovedLeaveScheduleRows: jest.fn(async (nonDutyIds: string[], scheduleIds: string[]) => {
+        const approved = await snapshot();
+        return [
+          enrichScheduleRecordsWithLeaveApproval([original].filter(row => nonDutyIds.includes(row.record_id)).map(row => structuredClone(row)), approved),
+          enrichScheduleRecordsWithLeaveApproval([target].filter(row => scheduleIds.includes(row.record_id)).map(row => structuredClone(row)), approved),
+        ];
+      }),
       httpService: { axiosRef: { post: jest.fn(async (_url: string, body: any) => {
         for (const update of body.records) {
           expect(Object.keys(update.fields)).toEqual(['值班人员（实际）程序修改']);

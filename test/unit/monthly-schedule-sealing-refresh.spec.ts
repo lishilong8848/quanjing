@@ -19,7 +19,7 @@ describe('MonthlySchedule sealing refresh', () => {
   );
   const sealingApiSource = apiSource.slice(sealingApiStart, sealingApiEnd);
 
-  it('forces sealing info refresh after manual local sync', () => {
+  it('retains forced sealing info refresh for sealing edits', () => {
     expect(sealingApiSource).toContain('refresh = false');
     expect(sealingApiSource).toContain(
       "params: { refresh: refresh ? '1' : undefined }",
@@ -32,7 +32,7 @@ describe('MonthlySchedule sealing refresh', () => {
     );
     expect(pageSource).toContain('if (!forceRefresh && cached)');
     expect(pageSource).toContain(
-      'await getYearlySealingInfo(year, forceRefresh)',
+      '() => getYearlySealingInfo(year, forceRefresh)',
     );
     expect(pageSource).toContain('loadSealingInfo(true)');
   });
@@ -73,9 +73,16 @@ describe('MonthlySchedule sealing refresh', () => {
     expect(pageSource).toContain(
       "document.addEventListener('visibilitychange', refreshSealingInfo)",
     );
-    expect(manualSyncSource).toContain('yearlySealingCache.clear();');
-    expect(manualSyncSource).toContain('loadSealingInfo(true)');
+    expect(manualSyncSource).not.toContain('yearlySealingCache.clear();');
+    expect(manualSyncSource).toContain('loadSealingInfo()');
+    expect(manualSyncSource).not.toContain('loadSealingInfo(true)');
     expect(manualSyncSource).toContain('sealingInfoLoaded');
+  });
+
+  it('shares concurrent passive reads and rechecks a stale snapshot at the next minute', () => {
+    expect(pageSource).toContain('sealingReads, `${year}:${forceRefresh}`');
+    expect(pageSource).toContain("data.sourceStatus === 'stale'");
+    expect(pageSource).toContain('Date.now() - SEALING_INFO_CACHE_TTL_MS + SEALING_INFO_REVALIDATE_INTERVAL_MS');
   });
 
   it('revalidates guest-readable sealing reads without using the restricted refresh parameter', () => {
